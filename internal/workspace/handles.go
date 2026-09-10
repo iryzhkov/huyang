@@ -324,9 +324,6 @@ func (w *Workspace) resolveRange(record HandleRecord) (HandleResolution, error) 
 	if err != nil {
 		return HandleResolution{Status: ResolutionConflicted, Code: ConflictTargetDeleted, Handle: record.Handle, Original: original}, nil
 	}
-	if read.Snapshot.Disk.Device != original.Device || read.Snapshot.Disk.Inode != original.Inode {
-		return HandleResolution{Status: ResolutionConflicted, Code: ConflictTargetDeleted, Handle: record.Handle, Original: original}, nil
-	}
 	if read.Snapshot.Revision == original.DocumentRevision && locatorMatches(read.Content, original, original.ByteStart) {
 		current := original
 		return HandleResolution{Status: ResolutionExact, Handle: record.Handle, Original: original, Current: &current}, nil
@@ -336,7 +333,7 @@ func (w *Workspace) resolveRange(record HandleRecord) (HandleResolution, error) 
 		current := candidates[0].Locator
 		return HandleResolution{Status: ResolutionRelocated, Code: ConflictFormatOnlyRelocation, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
 	}
-	code := ConflictTargetDeleted
+	code := ConflictDocumentChanged
 	if len(candidates) > 1 {
 		code = ConflictSymbolAmbiguous
 	}

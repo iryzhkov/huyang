@@ -11,7 +11,6 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -385,14 +384,18 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 		},
 	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		started := time.Now()
+		client := modernClientName(request)
 		arguments, err := decodeArguments(request.Params.Arguments)
 		if err != nil {
+			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
 		if err := validateToolArguments(descriptor.InputSchema, arguments); err != nil {
+			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
 		if err := validateModernDebugArguments(descriptor.Name, arguments); err != nil {
+			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
 		envelope := direct.call(ctx, descriptor.Name, arguments)
@@ -400,6 +403,8 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 		logFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
 			map[string]any{
 				"isError": isError,
+				"outcome": fmt.Sprint(envelope["outcome"]),
+				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
 		pretty, renderErr := renderJSON(compactTextEnvelope(envelope))
@@ -412,6 +417,24 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			IsError:           isError,
 		}, nil
 	})
+}
+
+func modernClientName(request *mcp.CallToolRequest) string {
+	info := request.ClientInfo()
+	if info == nil {
+		return ""
+	}
+	if info.Version != "" {
+		return info.Name + "/" + info.Version
+	}
+	return info.Name
+}
+
+func logModernValidationFriction(name, root string, arguments map[string]any, err error, client string, started time.Time) {
+	logFriction(name, root, arguments, map[string]any{
+		"isError": true, "outcome": "failed", "client": client,
+		"content": []map[string]any{{"type": "text", "text": err.Error()}},
+	}, started)
 }
 
 func modernFrictionRoot(direct *directWorkspaces, tool string, arguments map[string]any) string {
@@ -431,11 +454,34 @@ func compactTextEnvelope(envelope map[string]any) map[string]any {
 	compact := map[string]any{
 		"api_version": envelope["api_version"], "request_id": envelope["request_id"],
 		"outcome": envelope["outcome"], "summary": envelope["summary"],
-		"evidence": envelope["evidence"], "warnings": envelope["warnings"], "next": envelope["next"],
+		"data": compactTextData(envelope["data"]), "evidence": envelope["evidence"],
+		"warnings": envelope["warnings"], "next": envelope["next"],
 	}
 	for _, key := range []string{"code", "workspace", "transaction", "idempotency", "idempotency_persisted"} {
 		if value, ok := envelope[key]; ok {
 			compact[key] = value
+		}
+	}
+	return compact
+}
+
+func compactTextData(value any) any {
+	data, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	compact := make(map[string]any, len(data))
+	for key, item := range data {
+		compact[key] = item
+	}
+	for _, key := range []string{"overview", "map"} {
+		orientation, ok := compact[key].(workspacecore.Orientation)
+		if !ok {
+			continue
+		}
+		compact[key] = map[string]any{
+			"workspace": orientation.Workspace, "coverage": orientation.Coverage,
+			"entry_count": len(orientation.Entries),
 		}
 	}
 	return compact
@@ -771,18 +817,23 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		if policyErr != nil {
 			return modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
 		}
-		if arguments["view"] == "map" {
+		view, _ := arguments["view"].(string)
+		if view == "" {
+			view = "status"
+		}
+		base := map[string]any{
+			"view": view, "revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+			"inspection": inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
+		}
+		if view == "overview" || view == "map" {
 			orientation, err := workspace.Orient()
 			if err != nil {
 				return modernFailure(requestID, workspace, "workspace_map_failed", err)
 			}
-			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), map[string]any{
-				"inspection": inspection, "overview": orientation, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
-			})
+			base["overview"] = orientation
+			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), base)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", map[string]any{
-			"inspection": inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
-		})
+		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", base)
 	case "search":
 		return d.search(requestID, workspace, arguments)
 	case "symbol_find":
@@ -1074,7 +1125,7 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
 		}
 		if resolution.Status == workspacecore.ResolutionConflicted {
-			return modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), "Handle no longer resolves uniquely", resolution)
+			return modernHandleConflict(requestID, workspace, resolution)
 		}
 		resolved, err := resolution.RangeHandle()
 		if err != nil {
@@ -1102,6 +1153,42 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 			path = directPath
 		} else if symbol, present := target["symbol_locator"].(map[string]any); present {
 			path, _ = symbol["path"].(string)
+			name, _ := symbol["name_path"].(string)
+			matches, coverage, findErr := workspace.FindSymbols(name)
+			if findErr != nil {
+				return modernFailure(requestID, workspace, "symbol_read_failed", findErr)
+			}
+			var exact []workspacecore.HandleRecord
+			for _, match := range matches {
+				if match.Locator.Path == path && match.Locator.NamePath == name {
+					exact = append(exact, match)
+				}
+			}
+			if len(exact) != 1 {
+				outcome, code, summary := "conflict", "symbol_not_found", "Symbol locator did not resolve uniquely"
+				if !coverage.Complete {
+					outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
+				}
+				result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
+				result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": name, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+				return result
+			}
+			resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
+			if resolveErr != nil || resolved.Current == nil {
+				if resolveErr != nil {
+					return modernFailure(requestID, workspace, "symbol_read_failed", resolveErr)
+				}
+				return modernHandleConflict(requestID, workspace, resolved)
+			}
+			read, readErr := workspace.Read(path)
+			if readErr != nil {
+				return modernFailure(requestID, workspace, "read_failed", readErr)
+			}
+			current := resolved.Current
+			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
+				"path": path, "content": string(read.Content[current.ByteStart:current.ByteEnd]), "snapshot": read.Snapshot,
+				"coverage": coverage, "resolution": resolved,
+			})
 		} else if fileRange, present := target["file_range"].(map[string]any); present {
 			path, _ = fileRange["path"].(string)
 		} else {
@@ -1163,6 +1250,27 @@ func boundedLines(content []byte, startLine, endLine int) ([]byte, int, int, err
 	return bytes.Join(lines[startLine-1:endLine], nil), startLine, endLine, nil
 }
 
+func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, resolution workspacecore.HandleResolution) map[string]any {
+	summary := "The revision-bound target changed and must be refreshed"
+	switch resolution.Code {
+	case workspacecore.ConflictTargetDeleted:
+		summary = "The revision-bound target no longer exists"
+	case workspacecore.ConflictSymbolAmbiguous:
+		summary = "The revision-bound target now resolves to multiple candidates"
+	case workspacecore.ConflictSymbolSignatureChanged:
+		summary = "The target symbol signature changed"
+	case workspacecore.ConflictDocumentChanged:
+		summary = "The target document changed since this handle was issued"
+	}
+	result := modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), summary, resolution)
+	path := resolution.Original.Path
+	result["next"] = []any{
+		map[string]any{"tool": "read", "action": "refresh_path", "path": path},
+		map[string]any{"tool": "search", "action": "relocate_target", "path": path, "query": resolution.Original.NamePath},
+	}
+	return result
+}
+
 func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operation, ok := arguments["operation"].(map[string]any)
 	if !ok || operation["kind"] != "replace_range" {
@@ -1179,7 +1287,7 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		}
 		resolution = &resolved
 		if resolved.Status == workspacecore.ResolutionConflicted {
-			return modernEnvelope(requestID, workspace, "conflict", string(resolved.Code), "Handle no longer resolves uniquely", resolved)
+			return modernHandleConflict(requestID, workspace, resolved)
 		}
 		handle, err = resolved.RangeHandle()
 	} else {
@@ -1204,7 +1312,11 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 	if err != nil {
 		var conflict *workspacecore.Conflict
 		if errors.As(err, &conflict) {
-			return modernEnvelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"target": handle})
+			result := modernEnvelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{
+				"target": handle, "current_revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+			})
+			result["next"] = []any{map[string]any{"tool": "read", "action": "refresh_path", "path": handle.Path}, map[string]any{"tool": "search", "action": "relocate_target", "path": handle.Path}}
+			return result
 		}
 		return modernFailure(requestID, workspace, "edit_failed", err)
 	}
@@ -1216,20 +1328,9 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 	}
 	evidenceIDs := make([]string, 0)
 	if !preview {
-		report, evidenceErr := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
-			Kind: workspacecore.EvidencePush, ProviderID: "native_text", Producer: "native_text_core",
-			Document: handle.Path, DocumentRevision: string(after.Revision), TimedOut: true, Selected: true,
-			Dimension: "edited_documents",
-		})
 		outcome = "provisional"
-		if evidenceErr != nil {
-			summary = "Guarded range edit applied; diagnostic evidence could not be persisted"
-			data["verification"] = map[string]any{"confidence": "unavailable", "error": evidenceErr.Error()}
-		} else {
-			summary = "Guarded range edit applied; semantic diagnostic coverage is provisional"
-			data["verification"] = report
-			evidenceIDs = report.EvidenceIDs
-		}
+		summary = "Guarded range edit applied; semantic diagnostics are unavailable until verification runs"
+		data["verification"] = map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
 		data["document_revision"] = after.Revision
 	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
@@ -1254,8 +1355,9 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		return modernEnvelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
 	}
 	type recordedDiff struct {
-		from, to uint64
-		diff     any
+		from, to                  uint64
+		path, beforeSHA, afterSHA string
+		diff                      any
 	}
 	d.replayMu.Lock()
 	var recorded []recordedDiff
@@ -1272,21 +1374,42 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		right, rightErr := workspaceRevisionSequence(editTo)
 		if leftErr == nil && rightErr == nil && left >= fromSeq && right <= toSeq {
 			change, _ := data["change"].(map[string]any)
-			if diff, ok := change["diff"]; ok {
-				recorded = append(recorded, recordedDiff{from: left, to: right, diff: diff})
+			if diff, ok := change["diff"].(map[string]any); ok {
+				recorded = append(recorded, recordedDiff{
+					from: left, to: right, diff: diff, path: fmt.Sprint(diff["path"]),
+					beforeSHA: fmt.Sprint(diff["before_sha256"]), afterSHA: fmt.Sprint(diff["after_sha256"]),
+				})
 			}
 		}
 	}
 	d.replayMu.Unlock()
 	sort.Slice(recorded, func(i, j int) bool { return recorded[i].from < recorded[j].from })
-	diffs := make([]any, 0, len(recorded))
+	covered := make([]recordedDiff, 0, len(recorded))
 	cursor := fromSeq
 	for _, item := range recorded {
 		if item.from != cursor {
 			continue
 		}
-		diffs = append(diffs, item.diff)
+		covered = append(covered, item)
 		cursor = item.to
+	}
+	type endpoints struct{ before, after string }
+	byPath := map[string]endpoints{}
+	for _, item := range covered {
+		ends, exists := byPath[item.path]
+		if !exists {
+			ends.before = item.beforeSHA
+		}
+		ends.after = item.afterSHA
+		byPath[item.path] = ends
+	}
+	diffs := make([]any, 0, len(covered))
+	for _, item := range covered {
+		ends := byPath[item.path]
+		if ends.before != "" && ends.before == ends.after {
+			continue
+		}
+		diffs = append(diffs, item.diff)
 	}
 	if cursor != toSeq {
 		result := modernEnvelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Native edit evidence does not cover the full requested revision range", map[string]any{
@@ -1296,8 +1419,16 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		result["next"] = []any{map[string]any{"tool": "read", "action": "inspect_current_files"}}
 		return result
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d native edit diffs between %s and %s", len(diffs), from, to), map[string]any{
+	netChangedPaths := 0
+	for _, ends := range byPath {
+		if ends.before == "" || ends.before != ends.after {
+			netChangedPaths++
+		}
+	}
+	summary := fmt.Sprintf("%d native edit events cover %d net-changed paths between %s and %s", len(diffs), netChangedPaths, from, to)
+	return modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{
 		"from_revision": from, "to_revision": to, "current_revision": current, "diffs": diffs,
+		"semantics": "net endpoint identity with ordered edit evidence",
 	})
 }
 
@@ -1543,25 +1674,34 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 		files, filesErr := sandbox.BaseStageFiles()
 		if filesErr == nil {
+			var changedPaths []string
+			changedPaths, provenanceErr := d.canonicalChangedPaths(identity.ID, identity.StateSeq)
+			if provenanceErr != nil && testScope != "affected" {
+				for _, file := range files {
+					changedPaths = append(changedPaths, file.Path)
+				}
+			} else {
+				filesErr = provenanceErr
+			}
+			if filesErr == nil {
+				changed := make(map[string]bool, len(changedPaths))
+				for _, path := range changedPaths {
+					changed[path] = true
+				}
+				filtered := files[:0]
+				for _, file := range files {
+					if changed[file.Path] {
+						filtered = append(filtered, file)
+					}
+				}
+				files = filtered
+			}
+		}
+		if filesErr == nil {
 			var policy workspacecore.PipelinePolicy
 			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
 			if filesErr == nil {
-				var diagnosticProvider provider.Provider
-				if slices.Contains(stages, "diagnostics") {
-					diagnosticProvider, filesErr = referenceProviders.Open(providerOpenConfig{
-						Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"), RuntimePath: shippedRuntimePath(),
-					})
-					if filesErr == nil {
-						defer diagnosticProvider.Close(context.Background())
-						request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, stageFiles []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-							report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, stageFiles, revision, "")
-							return diagnosticVerificationStage(revision, report), evidenceErr
-						}
-					}
-				}
-				if filesErr == nil {
-					result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
-				}
+				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
 			}
 		}
 		if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {
@@ -1587,6 +1727,58 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	return modernEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", map[string]any{
 		"verification": result, "cache": "revision_miss",
 	})
+}
+
+func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {
+	if target == 1 {
+		return []string{}, nil
+	}
+	type receipt struct {
+		from, to uint64
+		path     string
+	}
+	d.replayMu.Lock()
+	var receipts []receipt
+	for key, replay := range d.replays {
+		if !replay.complete || !strings.HasPrefix(key, string(workspaceID)+"\x00edit_apply\x00") {
+			continue
+		}
+		data, _ := replay.result["data"].(map[string]any)
+		if changed, _ := data["canonical_changed"].(bool); !changed {
+			continue
+		}
+		from, fromErr := workspaceRevisionSequence(fmt.Sprint(data["from_revision"]))
+		to, toErr := workspaceRevisionSequence(fmt.Sprint(data["revision"]))
+		change, _ := data["change"].(map[string]any)
+		diff, _ := change["diff"].(map[string]any)
+		path, _ := diff["path"].(string)
+		if fromErr == nil && toErr == nil && path != "" && to <= target {
+			receipts = append(receipts, receipt{from: from, to: to, path: path})
+		}
+	}
+	d.replayMu.Unlock()
+	sort.Slice(receipts, func(i, j int) bool { return receipts[i].from < receipts[j].from })
+	cursor := uint64(1)
+	paths := map[string]bool{}
+	for _, item := range receipts {
+		if item.from != cursor {
+			continue
+		}
+		paths[item.path] = true
+		cursor = item.to
+		if cursor == target {
+			break
+		}
+	}
+	if cursor != target {
+		return nil, fmt.Errorf("changed_file_evidence_incomplete: native receipts cover wsrev_%d through wsrev_%d", 1, cursor)
+	}
+	result := make([]string, 0, len(paths))
+	for path := range paths {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func uintArgument(value any) uint64 {

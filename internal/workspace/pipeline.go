@@ -551,8 +551,27 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 }
 
 func parserStage(root, revision string, files []string) VerificationStage {
-	stage := VerificationStage{Stage: "parser", Mode: "check", StartedRevision: revision, Exit: 0, Scope: append([]string(nil), files...), Status: VerificationPassed, Coverage: Coverage{Complete: true}}
+	stage := VerificationStage{
+		Stage: "parser", Mode: "check", StartedRevision: revision, Exit: 0,
+		Scope: append([]string(nil), files...), Status: VerificationPassed,
+		Coverage: Coverage{Complete: true, FilesConsidered: len(files)},
+	}
+	supported := 0
+	skipped := map[string]bool{}
 	for _, relative := range files {
+		extension := filepath.Ext(relative)
+		if extension != ".go" && extension != ".json" {
+			reason := "parser_unavailable:" + extension
+			if extension == "" {
+				reason = "parser_unavailable:no_extension"
+			}
+			if !skipped[reason] {
+				stage.Coverage.Skipped = append(stage.Coverage.Skipped, reason)
+				skipped[reason] = true
+			}
+			continue
+		}
+		supported++
 		content, err := os.ReadFile(filepath.Join(root, relative))
 		if err != nil {
 			stage.Status = VerificationFailed
@@ -560,13 +579,15 @@ func parserStage(root, revision string, files []string) VerificationStage {
 			stage.Output += err.Error() + "\n"
 			continue
 		}
+		stage.Coverage.FilesRead++
+		stage.Coverage.BytesRead += int64(len(content))
 		if !utf8.Valid(content) {
 			stage.Status = VerificationFailed
 			stage.Exit = 1
 			stage.Output += relative + ": invalid UTF-8\n"
 			continue
 		}
-		switch filepath.Ext(relative) {
+		switch extension {
 		case ".go":
 			if _, err := parser.ParseFile(token.NewFileSet(), relative, content, parser.AllErrors); err != nil {
 				stage.Status = VerificationFailed
@@ -580,6 +601,20 @@ func parserStage(root, revision string, files []string) VerificationStage {
 				stage.Exit = 1
 				stage.Output += relative + ": " + err.Error() + "\n"
 			}
+		}
+	}
+	if supported == 0 {
+		stage.Status = VerificationSkipped
+		stage.Exit = -1
+		stage.Coverage.Complete = false
+		if len(files) == 0 {
+			stage.Coverage.Skipped = []string{"no_files_to_parse"}
+		}
+	} else if supported != len(files) {
+		stage.Coverage.Complete = false
+		if stage.Status == VerificationPassed {
+			stage.Status = VerificationSkipped
+			stage.Exit = -1
 		}
 	}
 	return stage
@@ -638,7 +673,7 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 		case "parser":
 			stage := parserStage(sandbox.Tree, request.Revision, affected)
 			result.Stages = append(result.Stages, stage)
-			if stage.Status != VerificationPassed {
+			if stage.Status == VerificationFailed {
 				return result, errors.New("parser verification failed")
 			}
 		case "diagnostics":

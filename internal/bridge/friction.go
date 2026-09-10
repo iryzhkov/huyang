@@ -53,6 +53,7 @@ type frictionEvent struct {
 	Root    string   `json:"root,omitempty"`
 	Rev     string   `json:"rev,omitempty"`
 	Args    []string `json:"args,omitempty"`
+	Outcome string   `json:"outcome,omitempty"`
 	OK      bool     `json:"ok"`
 	Err     string   `json:"err,omitempty"`
 	Ms      int64    `json:"ms"`
@@ -309,6 +310,11 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 	}
 	frictionIdent()
 	isError, _ := res["isError"].(bool)
+	outcome, _ := res["outcome"].(string)
+	client, _ := res["client"].(string)
+	if client == "" {
+		client = frictionClient
+	}
 
 	frictionMu.Lock()
 	frictionSeq++
@@ -317,12 +323,13 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 		Host:    frictionHost,
 		Session: frictionSess,
 		Proc:    frictionProc,
-		Client:  frictionClient,
+		Client:  client,
 		Ver:     frictionVer,
 		Seq:     frictionSeq,
 		Tool:    name,
 		Args:    argKeys(args),
-		OK:      !isError,
+		Outcome: outcome,
+		OK:      frictionOutcomeOK(outcome, isError),
 		Ms:      time.Since(started).Milliseconds(),
 	}
 	frictionMu.Unlock()
@@ -333,10 +340,27 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 		ev.Root = filepath.Base(root)
 		ev.Rev = workspaceRev(root)
 	}
-	if isError {
+	if !ev.OK {
 		ev.Err = errClass(resultText(res))
 	}
 	writeFriction(ev)
+}
+
+// frictionOutcomeOK keeps MCP's tool-error bit separate from the usability
+// signal recorded in the spool. A partial or unavailable application result
+// can be a valid MCP response while still representing friction for the agent.
+// Legacy results do not carry an outcome, so they retain their isError
+// behavior. Unknown future outcomes do the same until their semantics are
+// deliberately classified here.
+func frictionOutcomeOK(outcome string, isError bool) bool {
+	switch outcome {
+	case "ok", "provisional":
+		return true
+	case "partial", "unavailable", "failed", "conflict":
+		return false
+	default:
+		return !isError
+	}
 }
 
 func writeFriction(ev frictionEvent) {

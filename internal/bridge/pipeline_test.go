@@ -137,7 +137,7 @@ required = true
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-canonical-verify",
 		"revision_or_transaction": canonicalRevision, "stages": []string{"parser", "check", "tests"}, "test_scope": "full",
 	})
-	if canonical["outcome"] != "ok" {
+	if canonical["outcome"] != "partial" {
 		t.Fatalf("canonical verify = %#v", canonical)
 	}
 	if got, err := os.ReadFile(file); err != nil || !bytes.Equal(got, []byte("alpha delta gamma\n")) {

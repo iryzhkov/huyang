@@ -191,6 +191,67 @@ func TestVerificationFormatGateCannotMutateAndParserSeesPreparedBytes(t *testing
 	}
 }
 
+func TestParserVerificationReportsActualCoverage(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"valid.go":   "package p\n",
+		"valid.json": "{\"ok\":true}\n",
+		"script.rb":  "puts 'ok'\n",
+		"README":     "plain text\n",
+		"broken.go":  "package p\nfunc broken( {\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name       string
+		files      []string
+		status     VerificationStatus
+		exit       int
+		complete   bool
+		considered int
+		read       int
+		skipped    string
+	}{
+		{name: "empty scope", status: VerificationSkipped, exit: -1, complete: false, skipped: "no_files_to_parse"},
+		{name: "unsupported only", files: []string{"script.rb"}, status: VerificationSkipped, exit: -1, complete: false, considered: 1, skipped: "parser_unavailable:.rb"},
+		{name: "all supported", files: []string{"valid.go", "valid.json"}, status: VerificationPassed, exit: 0, complete: true, considered: 2, read: 2},
+		{name: "mixed support", files: []string{"valid.go", "script.rb", "README"}, status: VerificationSkipped, exit: -1, complete: false, considered: 3, read: 1, skipped: "parser_unavailable:.rb"},
+		{name: "malformed supported", files: []string{"broken.go"}, status: VerificationFailed, exit: 1, complete: true, considered: 1, read: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stage := parserStage(root, "wsrev_2", test.files)
+			if stage.Status != test.status || stage.Exit != test.exit || stage.Coverage.Complete != test.complete ||
+				stage.Coverage.FilesConsidered != test.considered || stage.Coverage.FilesRead != test.read {
+				t.Fatalf("parser stage = %+v", stage)
+			}
+			if test.read > 0 && stage.Coverage.BytesRead == 0 {
+				t.Fatalf("parser did not account for read bytes: %+v", stage.Coverage)
+			}
+			if test.skipped != "" && !containsString(stage.Coverage.Skipped, test.skipped) {
+				t.Fatalf("parser skipped reasons = %v, want %q", stage.Coverage.Skipped, test.skipped)
+			}
+		})
+	}
+}
+
+func TestUnavailableParserCoverageDoesNotFailPipeline(t *testing.T) {
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"script.rb": "puts 'ok'\n"})
+	result, err := RunVerificationPipeline(context.Background(), sandbox, DefaultPipelinePolicy(), VerificationRequest{
+		Revision: "wsrev_2", Stages: []string{"parser"},
+	}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Stages) != 1 || result.Stages[0].Status != VerificationSkipped || result.Stages[0].Coverage.Complete {
+		t.Fatalf("parser result = %+v", result)
+	}
+}
+
 func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-specific")

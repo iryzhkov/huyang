@@ -225,6 +225,41 @@ func TestRangeHandleRelocationAndResultSetLineage(t *testing.T) {
 	}
 }
 
+func TestRangeHandleClassifiesAtomicReplacementByCurrentTargetState(t *testing.T) {
+	workspace, root := newHandleWorkspace(t, map[string]string{"a.txt": "alpha beta\n"})
+	searched, err := workspace.Search(SearchRequest{Query: "beta", Mode: SearchLiteral})
+	if err != nil || len(searched.Hits) != 1 || searched.Hits[0].MatchHandle == nil {
+		t.Fatalf("search = %+v, %v", searched, err)
+	}
+	handle := searched.Hits[0].MatchHandle.Handle
+
+	replacement := filepath.Join(root, "replacement")
+	writeFile(t, replacement, "prefix alpha beta\n")
+	if err := os.Rename(replacement, filepath.Join(root, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	relocated, err := workspace.ResolveHandle(handle)
+	if err != nil || relocated.Status != ResolutionRelocated || relocated.Current == nil {
+		t.Fatalf("uniquely relocated target after atomic replacement = %+v, %v", relocated, err)
+	}
+
+	workspace, root = newHandleWorkspace(t, map[string]string{"a.txt": "alpha beta\n"})
+	searched, err = workspace.Search(SearchRequest{Query: "beta", Mode: SearchLiteral})
+	if err != nil || len(searched.Hits) != 1 || searched.Hits[0].MatchHandle == nil {
+		t.Fatalf("search = %+v, %v", searched, err)
+	}
+	handle = searched.Hits[0].MatchHandle.Handle
+	replacement = filepath.Join(root, "replacement")
+	writeFile(t, replacement, "alpha gamma\n")
+	if err := os.Rename(replacement, filepath.Join(root, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := workspace.ResolveHandle(handle)
+	if err != nil || changed.Status != ResolutionConflicted || changed.Code != ConflictDocumentChanged {
+		t.Fatalf("changed target after atomic replacement = %+v, %v", changed, err)
+	}
+}
+
 func TestResultSetRejectsCapsNewFilesAndEpochChanges(t *testing.T) {
 	workspace, root := newHandleWorkspace(t, map[string]string{"a.txt": "alpha alpha\n"})
 	workspace.limits.MaxMatches = 1

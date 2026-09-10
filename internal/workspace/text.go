@@ -580,6 +580,10 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 			coverage.Capped = true
 			break
 		}
+		disk, _, inspectErr := inspectPath(name)
+		if inspectErr == nil && disk.Kind == ObjectBinary {
+			continue
+		}
 		read, readErr := w.Read(name)
 		if readErr != nil {
 			coverage.Complete = false

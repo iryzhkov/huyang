@@ -71,6 +71,33 @@ func TestArgKeysAreSortedNamesOnly(t *testing.T) {
 	}
 }
 
+func TestFrictionOutcomeClassification(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome string
+		isError bool
+		wantOK  bool
+	}{
+		{name: "modern ok", outcome: "ok", wantOK: true},
+		{name: "modern provisional", outcome: "provisional", wantOK: true},
+		{name: "modern partial", outcome: "partial", wantOK: false},
+		{name: "modern unavailable", outcome: "unavailable", wantOK: false},
+		{name: "modern failed", outcome: "failed", wantOK: false},
+		{name: "modern conflict", outcome: "conflict", wantOK: false},
+		{name: "legacy success", wantOK: true},
+		{name: "legacy error", isError: true, wantOK: false},
+		{name: "unknown success follows error bit", outcome: "future", wantOK: true},
+		{name: "unknown error follows error bit", outcome: "future", isError: true, wantOK: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := frictionOutcomeOK(test.outcome, test.isError); got != test.wantOK {
+				t.Fatalf("frictionOutcomeOK(%q, %t) = %t, want %t", test.outcome, test.isError, got, test.wantOK)
+			}
+		})
+	}
+}
+
 func TestLogFrictionWritesOneEvent(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HUYANG_FRICTION_DIR", dir)
@@ -116,6 +143,39 @@ func TestLogFrictionWritesOneEvent(t *testing.T) {
 	}
 	if scanner.Scan() {
 		t.Error("one call must spool exactly one line")
+	}
+}
+
+func TestLogFrictionRecordsModernOutcomeAndPerCallClient(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "1")
+
+	result := textResult("Semantic provider unavailable", false)
+	result["outcome"] = "unavailable"
+	result["client"] = "codex-mcp-client/1"
+	logFriction("navigate", "", map[string]any{"relation": "definition"}, result, time.Now())
+
+	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, frictionSource, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event frictionEvent
+	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
+		t.Fatalf("spool line is not JSON: %v", err)
+	}
+	if event.Outcome != "unavailable" || event.OK {
+		t.Fatalf("modern outcome was not classified as friction: %+v", event)
+	}
+	if event.Client != "codex-mcp-client/1" {
+		t.Fatalf("per-call client = %q, want codex-mcp-client/1", event.Client)
+	}
+	if event.Err != "Semantic provider unavailable" {
+		t.Fatalf("error class = %q, want modern result summary", event.Err)
 	}
 }
 

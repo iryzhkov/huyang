@@ -157,6 +157,22 @@ func TestNativeSearchLiteralRegexAndUnicodeCoordinates(t *testing.T) {
 	}
 }
 
+func TestNativeSearchIgnoresBinaryFilesWithoutLosingCoverage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "source.txt"), "needle\n")
+	if err := os.WriteFile(filepath.Join(root, "artifact.bin"), []byte{0, 1, 2, 3}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	result, err := ws.Search(SearchRequest{Query: "needle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || !result.Coverage.Complete || len(result.Coverage.Skipped) != 0 {
+		t.Fatalf("binary file degraded text search coverage: %+v", result)
+	}
+}
+
 func TestExactByteReadPreviewAndApply(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "bytes.txt")
