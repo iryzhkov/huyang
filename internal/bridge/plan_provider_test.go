@@ -96,6 +96,79 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	}
 }
 
+func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
+	previousFactory := referenceProviders
+	referenceProviders = configuredProviderFactory{backend: "embed"}
+	defer func() { referenceProviders = previousFactory }()
+	runtimeRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT99_RUNTIME_PATH", runtimeRoot)
+	t.Setenv("AGENT99_HEADLESS_INIT", filepath.Join(runtimeRoot, "tests", "minimal_init.lua"))
+	root, stateDir := t.TempDir(), t.TempDir()
+	file := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(file, []byte("alpha beta gamma\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	direct := newDirectWorkspaces(stateDir)
+	defer direct.closeProviders()
+	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	defer cleanup()
+	opened := callModern(t, session, "workspace_open", map[string]any{
+		"kind": "documents", "files": []string{file},
+	})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+	})
+	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
+	created := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "apply-create", "action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "replace-beta", "kind": "replace_range",
+			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA",
+		}},
+	})
+	plan := created["data"].(map[string]any)["plan"].(map[string]any)
+	planID, planRevision := plan["plan_id"].(string), plan["plan_revision"].(float64)
+	prepared := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "apply-prepare", "action": "prepare",
+		"plan_id": planID, "plan_revision": planRevision,
+	})
+	preparedPlan := prepared["data"].(map[string]any)["plan"].(map[string]any)
+	preparedRevision := preparedPlan["preparation"].(map[string]any)["prepared_revision"].(string)
+	applied := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "apply", "action": "apply",
+		"plan_id": planID, "plan_revision": planRevision, "prepared_revision": preparedRevision,
+	})
+	if applied["outcome"] != "ok" || applied["transaction"].(map[string]any)["state"] != "COMMITTED" {
+		t.Fatalf("apply = %#v", applied)
+	}
+	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
+		t.Fatalf("canonical apply = %q, %v", current, err)
+	}
+	backend := direct.providers[workspaceIDValue(workspaceID)]
+	status, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "status-after-commit", WorkspaceID: workspaceID},
+		Operation: "huyang_transaction_status", Arguments: map[string]any{"plan_id": planID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusValue := status.Value.(map[string]any)
+	if active, _ := statusValue["active"].(bool); active {
+		t.Fatalf("provider transaction remained active after commit: %#v", status.Value)
+	}
+	canonical, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "read-after-commit", WorkspaceID: workspaceID},
+		Operation: "buffer_lines", Arguments: map[string]any{"file": file},
+	})
+	if err != nil || firstProviderLine(canonical.Value) != "1: alpha DELTA gamma" {
+		t.Fatalf("provider was not resynced: %#v, %v", canonical.Value, err)
+	}
+}
+
 func workspaceIDValue(value string) workspacecore.ID {
 	return workspacecore.ID(value)
 }

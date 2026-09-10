@@ -12,8 +12,10 @@ type PlanStageFile struct {
 	Path         string `json:"path"`
 	Before       []byte `json:"before"`
 	After        []byte `json:"after"`
-	BeforeExists bool   `json:"before_exists"`
-	AfterExists  bool   `json:"after_exists"`
+	BeforeExists bool         `json:"before_exists"`
+	AfterExists  bool         `json:"after_exists"`
+	BeforeDisk   DiskSnapshot `json:"before_disk"`
+	AfterDisk    DiskSnapshot `json:"after_disk"`
 }
 
 // PlanStageRequest is the complete, already validated batch applied under a workspace lease.
@@ -27,16 +29,19 @@ type PlanStageRequest struct {
 // the perspective of callers: an error leaves no staged view behind.
 type PlanStager interface {
 	Stage(context.Context, PlanStageRequest) error
+	Commit(context.Context, string) error
 	Rollback(context.Context, string) error
 	Epoch() uint64
 }
 
-// PlanPreparation records the exact provider-backed result without claiming disk verification.
+// PlanPreparation records the provider-backed result and eventual canonical apply receipt.
 type PlanPreparation struct {
 	PreparedRevision    string   `json:"prepared_revision"`
 	ProviderEpoch       uint64   `json:"provider_epoch"`
 	AffectedFiles       []string `json:"affected_files"`
 	CanonicalChanged    bool     `json:"canonical_changed"`
+	CanonicalRevision   string   `json:"canonical_revision,omitempty"`
+	JournalID           string   `json:"journal_id,omitempty"`
 	Diagnostics         string   `json:"diagnostics"`
 	DiskChecks          string   `json:"disk_checks"`
 	IntermediateReports bool     `json:"intermediate_reports"`
@@ -104,33 +109,10 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if _, err := w.transitionPlan(planID, expected, PlanPreparing, "prepare_started", "pending", nil); err != nil {
 		return PlanRecord{}, err
 	}
-	afterExists := make(map[string]bool)
-	for _, diff := range plan.Preview.Diffs {
-		snapshot, snapshotErr := w.Refresh(diff.Path, ProviderLayer{})
-		if snapshotErr != nil {
-			return PlanRecord{}, snapshotErr
-		}
-		afterExists[diff.Path] = snapshot.Disk.Kind != ObjectMissing
-	}
-	ordered, _ := orderOperations(plan.Operations)
-	for _, operation := range ordered {
-		switch operation.Kind {
-		case OperationCreateFile:
-			afterExists[operation.Path] = true
-		case OperationDeleteFile:
-			afterExists[operation.Path] = false
-		case OperationMoveFile:
-			afterExists[operation.From] = false
-			afterExists[operation.To] = true
-		}
-	}
-	request := PlanStageRequest{PlanID: planID, PlanRevision: expected}
-	for _, diff := range plan.Preview.Diffs {
-		snapshot, _ := w.Refresh(diff.Path, ProviderLayer{})
-		request.Files = append(request.Files, PlanStageFile{
-			Path: diff.Path, Before: append([]byte(nil), diff.Before...), After: append([]byte(nil), diff.After...),
-			BeforeExists: snapshot.Disk.Kind != ObjectMissing, AfterExists: afterExists[diff.Path],
-		})
+	request, err := w.planStageRequest(plan)
+	if err != nil {
+		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
+		return PlanRecord{}, err
 	}
 	if err := stager.Stage(ctx, request); err != nil {
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

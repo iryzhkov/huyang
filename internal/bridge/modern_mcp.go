@@ -1118,9 +1118,17 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			return planResult("Plan discarded and provider preimages restored; canonical workspace unchanged", plan)
 		}
 	case "apply":
-		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
-			"apply belongs to S12 journaled commit; S11 only prepares unsaved provider buffers",
-			map[string]any{"action": action, "canonical_changed": false})
+		planID := fmt.Sprint(arguments["plan_id"])
+		revision := uintArgument(arguments["plan_revision"])
+		preparedRevision := fmt.Sprint(arguments["prepared_revision"])
+		var stager workspacecore.PlanStager
+		stager, err = d.planStager(workspace)
+		if err == nil {
+			plan, err = workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager)
+		}
+		if err == nil {
+			return planResult("Prepared plan applied through the durable commit journal; canonical provider resynced", plan)
+		}
 	default:
 		err = fmt.Errorf("unknown change_plan action %q", action)
 	}
@@ -1134,10 +1142,21 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			code, outcome = "workspace_busy", "conflict"
 		case strings.Contains(err.Error(), "plan_validation_conflicts"):
 			code, outcome = "plan_validation_conflicts", "conflict"
+		case strings.Contains(err.Error(), "commit_precondition_changed"), strings.Contains(err.Error(), "prepared_revision_changed"):
+			code, outcome = "commit_precondition_changed", "conflict"
+		case strings.Contains(err.Error(), "recovery"), plan.State == workspacecore.PlanRecoveryRequired:
+			code = "commit_recovery_required"
 		case strings.Contains(err.Error(), "provider"):
 			code = "provider_prepare_failed"
 		}
-		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), map[string]any{"action": action, "canonical_changed": false})
+		data := map[string]any{"action": action, "canonical_changed": false}
+		if plan.PlanID != "" {
+			data["plan"] = plan
+			if plan.Preparation != nil {
+				data["canonical_changed"] = plan.Preparation.CanonicalChanged
+			}
+		}
+		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
 	}
 	panic("unreachable")
 }

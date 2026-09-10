@@ -1219,6 +1219,9 @@ local dispatch_table = {
     huyang_rollback = function(args)
         return require("agent99.transaction").rollback(args)
     end,
+    huyang_commit = function(args)
+        return require("agent99.transaction").commit(args)
+    end,
     huyang_transaction_status = function(args)
         return require("agent99.transaction").status(args)
     end,

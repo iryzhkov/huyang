@@ -172,6 +172,27 @@ function M.rollback(args)
     return { ok = true, restored = count }
 end
 
+function M.commit(args)
+    if not active then return { ok = true, resynced = 0 } end
+    if active.plan_id ~= args.plan_id then
+        err("workspace_busy: transaction %s holds the provider lease", active.plan_id)
+    end
+    local count = 0
+    for _, pre in ipairs(active.preimages) do
+        if vim.api.nvim_buf_is_valid(pre.buf) then
+            if vim.b[pre.buf].huyang_deleted then
+                vim.api.nvim_buf_delete(pre.buf, { force = true })
+            else
+                vim.b[pre.buf].huyang_deleted = nil
+                vim.bo[pre.buf].modified = false
+            end
+            count = count + 1
+        end
+    end
+    active = nil
+    return { ok = true, resynced = count }
+end
+
 function M.status(args)
     if not active then return { active = false } end
     if args and args.plan_id and args.plan_id ~= active.plan_id then

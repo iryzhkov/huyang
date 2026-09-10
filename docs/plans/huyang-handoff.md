@@ -12,20 +12,21 @@
 
 ## Current checkpoint
 
-- Completed stage: S11 — Exclusive provider prepare.
-- Starting commit: d7c55b2cd010456a5e7bbad1a74c96007bfa2b0c.
+- Completed stage: S12 — Journaled commit.
+- Starting commit: d1417ac5ca33f940a47f690e1234659d5c19ec6f.
 - Reconciliation fetched origin and confirmed a clean feature/huyang branch, the reviewed
-  base in branch history, S10 committed with its focused tests/artifact, and S11 as exactly
+  base in branch history, S11 committed with its focused tests/artifact, and S12 as exactly
   the first incomplete checklist stage.
-- S11 exit gates are satisfied: one transaction lease protects each workspace; complete
-  validated plans stage in unsaved canonical provider buffers; non-owner provider calls are
-  refused; internal prepare results suppress intermediate diagnostic carry; cancellation,
-  apply/state-transition failure, provider death, discard, shutdown, and restart leave no
-  stale staged view; exact provider preimages are restored when the provider survives; and
-  canonical disk bytes never change.
-- Disk-dependent checks are explicitly unavailable in this buffer-backed stage.
-- Only S11 is newly marked complete in the committed checklist.
-- Exact next stage: S12 — Journaled commit.
+- The S11 predecessor race gate passed before S12 editing.
+- S12 exit gates are satisfied: the entire prepared canonical write set is revalidated;
+  exact preimages, postimages, modes, symlink targets, and per-path progress are durably
+  journaled and synced before writes; normal create/replace/move/delete applies through
+  same-directory temporary writes, file sync, rename, and directory sync; the provider is
+  resynced after success; and ordinary injected failures persist RECOVERY_REQUIRED state.
+- The implementation retains the cooperative journal guarantee and does not claim
+  filesystem-wide atomicity. Startup recovery and compensating undo remain S13.
+- Only S12 is newly marked complete in the committed checklist.
+- Exact next stage: S13 — Crash recovery and compensating undo.
 
 ## Predecessor and stage artifacts
 
@@ -44,73 +45,73 @@ These tracked artifacts were read completely before implementation:
 - docs/plans/huyang-s09-semantic-handles.md
 - docs/plans/huyang-s09h-git-provenance.md
 - docs/plans/huyang-s10-transaction-intent.md
+- docs/plans/huyang-s11-exclusive-prepare.md
 - docs/plans/fixtures/huyang-v1alpha1/contract-schema.json
 - docs/plans/fixtures/huyang-v1alpha1/golden-results.json
 - docs/plans/fixtures/huyang-v1alpha1/multi-provider.json
 
-S11 adds:
+S12 adds:
 
-- docs/plans/huyang-s11-exclusive-prepare.md
+- docs/plans/huyang-s12-journaled-commit.md
 
-## S11 changes
+## S12 changes
 
-- Added PREPARING, FAILED, PROVISIONAL, READY, ROLLING_BACK, and ROLLED_BACK plan states,
-  durable preparation metadata, prepared revision IDs, and restart reconciliation.
-- Added an exclusive workspace transaction lease plus owner-labelled provider access checks.
-  Concurrent prepare of another plan and non-owner provider-backed calls return workspace_busy.
-- Added a provider staging adapter and lazy provider lifecycle to the modern service. Initial
-  modern workspace epoch 1 matches the first provider generation; unhealthy replacement
-  advances the logical workspace epoch.
-- Added internal Lua prepare/rollback/status operations. They validate every preimage first,
-  capture exact buffer state, stage one complete batch unsaved, suppress ordinary diagnostic
-  carry, and restore or discard buffers atomically on failure/rollback.
-- Implemented existing-plan and inline change_plan prepare. Discard rolls prepared state back;
-  apply remains the explicit S12 unavailable outcome.
-- Service shutdown closes its owned providers. Restart invalidates ephemeral prepared states
-  and does not replay a durable READY receipt after the provider buffers have vanished.
-- Added focused coordinator, embedded-provider, official-SDK, cancellation, provider-death,
-  replay, transition-failure, lease, rollback, and disk-nonmutation tests.
+- Added COMMITTING, COMMITTED, and RECOVERY_REQUIRED plan states plus canonical revision and
+  journal identity on successful preparation records.
+- Added a versioned write-ahead commit journal with exact pre/post bytes, filesystem kind,
+  permissions, symlink target, deterministic write ordering, and durable per-path progress.
+- Added whole-write-set revalidation immediately before mutation. A stale revision, content,
+  inode, mode, object kind, or symlink target refuses apply before the first path changes.
+- Added same-directory temp-write/file-sync/rename/directory-sync regular and binary writes,
+  same-directory temporary symlink rename, and synced deletes. Moves preserve the source
+  object's bytes, kind, mode, and symlink target.
+- Added explicit provider commit/resync after canonical writes. Provider buffers retain the
+  prepared postimages, become clean canonical buffers, deleted buffers close, and the provider
+  transaction is released.
+- Wired the frozen modern apply branch to require plan revision plus prepared revision and
+  return COMMITTED through the official SDK path.
+- Added focused race-tested core and embedded-provider coverage for normal filesystem commits,
+  exact journal records, durable failure state, pre-write stale refusal, and provider resync.
 
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- go test -race ./internal/workspace ./internal/provider/embed ./internal/bridge -count=1
-  — exit 0: all three packages passed.
-- The focused race run covers two-file READY preparation/rollback, first/second partial apply
-  failure, cancellation, real embedded-provider death and clean restart, durable PREPARING and
-  READY transition failures, prepared-state restart invalidation, replay invalidation,
-  non-owner refusal, owner-labelled inspection, and exact disk nonmutation.
-- make smoke — exit 0 after the final Lua provider-death path; built both binaries and ended
-  unit_edit, unit_testrun, unit_check, unit_index, headless, multi-workspace, debug, and smoke
-  with OK.
-- go test ./... — exit 0 before the final handoff update; rerun after this update and before
-  commit.
-- go vet ./... — exit 0 before the final handoff update; rerun after this update and before
-  commit.
-- git diff --check — exit 0 before the final handoff update; rerun after this update and
-  before commit.
+- `go test -race ./internal/workspace ./internal/bridge -run
+  'TestJournaledCommit|TestOfficialClientAppliesJournaled|TestOfficialClientPreparesExclusive'
+  -count=1 -v` — exit 0: journal, stale refusal, recovery record, prepare/discard, and real
+  embedded-provider apply/resync cases passed.
+- `go test -race ./internal/workspace ./internal/provider/embed ./internal/bridge -count=1`
+  — exit 0 after the final implementation: all three packages passed.
+- `make smoke` — exit 0: built both binaries and ended unit_edit, unit_testrun,
+  unit_check, unit_index, headless, multi-workspace, debug, and smoke with OK.
+- `go test ./...` — exit 0 after the final implementation; all Go packages passed.
+- `go vet ./...` — exit 0 with no output after the final implementation.
+- `git diff --check` — exit 0 after the final implementation, artifact, checklist, and
+  handoff updates.
 
 ## Decisions and risks
 
-- The lease belongs to the durable plan ID, not an MCP connection or actor label.
-- Initial modern workspaces start at logical provider epoch 1 so lazy first-provider startup
-  does not invalidate revision-bound intent. Replacing an unhealthy provider advances the
-  logical workspace epoch and invalidates stale targets.
-- A successful prepare keeps the lease until discard or the future S12 apply. Retried prepared
-  calls return the current READY/PROVISIONAL record; distinct concurrent preparation is refused.
-- Prepared revisions bind the predicted revision to the logical provider epoch.
-- Provider-backed receipt replay is intentionally invalidated across service restart because
-  unsaved buffers are ephemeral. Durable preview receipts remain replayable.
-- Disk-based formatter/check/test execution remains unavailable and is not run against old
-  canonical bytes. Repository verification and authoritative diagnostic evidence remain S16
-  and S17.
-- Neovim cannot represent every arbitrary mixed-newline byte stream. Provider preimage mismatch
-  fails closed rather than normalizing bytes.
-- Provider-native rename, move-symbol, frozen-match, and code-action intent still reports the
-  S10 later-stage conflict; S11 does not absorb their resolvers.
-- Existing unrelated Python language-server diagnostics remain pre-existing; all Go build,
-  race, test, vet, smoke, and diff gates pass.
-- No journaled apply, canonical mutation, install, deployment, installed-plugin update, live
-  MCP restart, live configuration/state mutation, push, or pull request occurred.
-- Exact next stage: S12 — Journaled commit.
+- Journals are retained after COMMITTED for later garbage collection rather than deleted at
+  the success boundary. S13 can therefore exercise and audit the same durable format used by
+  ordinary commits.
+- Write ordering creates/replaces destinations before deleting sources. This narrows the
+  ordinary move failure mode to a recoverable duplicate rather than premature source loss.
+- Exact preconditions include object kind and the complete observed disk snapshot, not content
+  hash alone. Symlinks are copied as links and never followed for mutation.
+- The provider does not stage non-text filesystem objects. Their exact state is owned by the Go
+  journal; regular text buffers still provide the coherent prepared semantic view.
+- A post-write error does not pretend the workspace rolled back. The journal and plan remain
+  RECOVERY_REQUIRED with exact pre/post state and progress; S13 implements startup recovery,
+  kill-step coverage, third-party race protection, and compensating undo.
+- A COMMITTING record found during plan load is conservatively changed to RECOVERY_REQUIRED,
+  but no automatic filesystem recovery is performed ahead of S13.
+- Commit success advances the workspace state sequence exactly once and invalidates cached
+  canonical document observations before returning the new canonical revision.
+- Disk-based formatters/checks/tests remain unavailable in exclusive buffer-backed prepare.
+  Repository verification and authoritative diagnostic evidence remain S16 and S17.
+- Existing unrelated Python language-server diagnostics remain pre-existing; all Go race,
+  test, vet, smoke, and diff gates pass.
+- No install, deployment, installed-plugin update, live MCP restart, live configuration/state
+  mutation, push, or pull request occurred.
+- Exact next stage: S13 — Crash recovery and compensating undo.

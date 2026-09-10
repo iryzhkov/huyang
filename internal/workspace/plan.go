@@ -35,15 +35,18 @@ const (
 type PlanState string
 
 const (
-	PlanOpen        PlanState = "OPEN"
-	PlanPreviewed   PlanState = "PREVIEWED"
-	PlanPreparing   PlanState = "PREPARING"
-	PlanFailed      PlanState = "FAILED"
-	PlanProvisional PlanState = "PROVISIONAL"
-	PlanReady       PlanState = "READY"
-	PlanRollingBack PlanState = "ROLLING_BACK"
-	PlanRolledBack  PlanState = "ROLLED_BACK"
-	PlanDiscarded   PlanState = "DISCARDED"
+	PlanOpen             PlanState = "OPEN"
+	PlanPreviewed        PlanState = "PREVIEWED"
+	PlanPreparing        PlanState = "PREPARING"
+	PlanFailed           PlanState = "FAILED"
+	PlanProvisional      PlanState = "PROVISIONAL"
+	PlanReady            PlanState = "READY"
+	PlanCommitting       PlanState = "COMMITTING"
+	PlanCommitted        PlanState = "COMMITTED"
+	PlanRecoveryRequired PlanState = "RECOVERY_REQUIRED"
+	PlanRollingBack      PlanState = "ROLLING_BACK"
+	PlanRolledBack       PlanState = "ROLLED_BACK"
+	PlanDiscarded        PlanState = "DISCARDED"
 )
 
 type PlanTarget struct {
@@ -164,6 +167,14 @@ func (w *Workspace) loadPlans() error {
 			plan.Events = append(plan.Events, PlanEvent{
 				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
 				Outcome: "provider_buffers_discarded", At: plan.UpdatedAt,
+			})
+			recovered = true
+		case PlanCommitting:
+			plan.State = PlanRecoveryRequired
+			plan.UpdatedAt = time.Now().UTC()
+			plan.Events = append(plan.Events, PlanEvent{
+				Action: "commit_restart_detected", PlanRevision: plan.PlanRevision,
+				Outcome: "recovery_required", At: plan.UpdatedAt,
 			})
 			recovered = true
 		}
@@ -628,6 +639,11 @@ func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 			if snapshotErr == nil && snapshot.Disk.Kind == ObjectMissing {
 				contents[path], before[path], exists[path] = nil, nil, false
 				return nil, false, nil
+			}
+			if snapshotErr == nil && snapshot.Disk.Kind == ObjectSymlink {
+				content := []byte(snapshot.Disk.SymlinkTarget)
+				contents[path], before[path], exists[path] = content, append([]byte(nil), content...), true
+				return content, true, nil
 			}
 			return nil, false, err
 		}

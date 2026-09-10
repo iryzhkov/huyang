@@ -17,6 +17,7 @@ type fakePlanStager struct {
 	failAfter  int
 	cancel     bool
 	rollbacks  int
+	commits    int
 	afterStage func()
 }
 
@@ -45,6 +46,11 @@ func (f *fakePlanStager) Stage(ctx context.Context, request PlanStageRequest) er
 	if f.afterStage != nil {
 		f.afterStage()
 	}
+	return nil
+}
+
+func (f *fakePlanStager) Commit(_ context.Context, _ string) error {
+	f.commits++
 	return nil
 }
 

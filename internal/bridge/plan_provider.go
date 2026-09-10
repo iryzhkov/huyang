@@ -25,6 +25,9 @@ func (s *providerPlanStager) Epoch() uint64 {
 func (s *providerPlanStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
 	files := make([]map[string]any, 0, len(request.Files))
 	for _, file := range request.Files {
+		if file.BeforeDisk.Kind != workspacecore.ObjectRegularText && file.AfterDisk.Kind != workspacecore.ObjectRegularText {
+			continue
+		}
 		files = append(files, map[string]any{
 			"path": file.Path, "before_b64": base64.StdEncoding.EncodeToString(file.Before),
 			"after_b64":     base64.StdEncoding.EncodeToString(file.After),
@@ -34,6 +37,11 @@ func (s *providerPlanStager) Stage(ctx context.Context, request workspacecore.Pl
 	_, err := s.call(ctx, "huyang_prepare", request.PlanID, map[string]any{
 		"plan_id": request.PlanID, "plan_revision": request.PlanRevision, "files": files,
 	})
+	return err
+}
+
+func (s *providerPlanStager) Commit(ctx context.Context, planID string) error {
+	_, err := s.call(ctx, "huyang_commit", planID, map[string]any{"plan_id": planID})
 	return err
 }
 

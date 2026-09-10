@@ -135,8 +135,9 @@ type Workspace struct {
 	plansMu sync.Mutex
 	plans   map[string]PlanRecord
 
-	prepareMu  sync.Mutex
-	activePlan string
+	prepareMu   sync.Mutex
+	activePlan  string
+	commitFault func(point, path string) error
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {
