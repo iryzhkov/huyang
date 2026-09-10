@@ -121,3 +121,49 @@ func TestReapSandboxesRemovesOnlyOwnedUnreferencedDirectories(t *testing.T) {
 		t.Fatalf("foreign directory removed: %v", err)
 	}
 }
+
+func TestSandboxPreparedChangesCaptureExactLegacyDelta(t *testing.T) {
+	source, base := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "replace.txt"), []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "delete.txt"), []byte("delete\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	sandbox, err := MaterializeSandbox(context.Background(), source, base, ID("ws_0123456789abcdef0123456789abcdef"), "legacy_fixture", 1, "wsrev_1", DefaultSandboxLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sandbox.Cleanup() })
+	if err := os.WriteFile(filepath.Join(sandbox.Tree, "replace.txt"), []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(sandbox.Tree, "delete.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sandbox.Tree, "create.txt"), []byte("create\n"), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := sandbox.PreparedChanges(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 3 || changes[0].Path != "create.txt" || changes[1].Path != "delete.txt" || changes[2].Path != "replace.txt" {
+		t.Fatalf("prepared paths = %+v", changes)
+	}
+	if changes[0].BeforeExists || !changes[0].AfterExists || !bytes.Equal(changes[0].After, []byte("create\n")) {
+		t.Fatalf("create delta = %+v", changes[0])
+	}
+	if !changes[1].BeforeExists || changes[1].AfterExists || !bytes.Equal(changes[1].Before, []byte("delete\n")) {
+		t.Fatalf("delete delta = %+v", changes[1])
+	}
+	if !bytes.Equal(changes[2].Before, []byte("before\n")) || !bytes.Equal(changes[2].After, []byte("after\n")) {
+		t.Fatalf("replace delta = %+v", changes[2])
+	}
+	if err := os.WriteFile(filepath.Join(source, "replace.txt"), []byte("drift\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sandbox.PreparedChanges(context.Background()); err == nil {
+		t.Fatal("canonical drift was accepted")
+	}
+}

@@ -275,7 +275,15 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 		_ = backend.Close(context.Background())
 		return nil, err
 	}
-	core, err := workspacecore.New(workspacecore.KindProject, abs, backend.Descriptor().Epoch)
+	stateDir, err := legacyWorkspaceStateDir(abs)
+	if err != nil {
+		_ = backend.Close(context.Background())
+		return nil, err
+	}
+	core, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: abs, ProviderEpoch: backend.Descriptor().Epoch,
+		StateDir: stateDir,
+	})
 	if err != nil {
 		_ = backend.Close(context.Background())
 		return nil, err
@@ -341,6 +349,7 @@ func closeAllWorkspaces() []string {
 // stopWorkspace ends one instance. The caller has already taken it out of
 // the map.
 func stopWorkspace(ws *headlessWorkspace) {
+	cleanupLegacyWorkspace(ws.session())
 	_ = ws.Provider.Close(context.Background())
 }
 

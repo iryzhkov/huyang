@@ -250,3 +250,42 @@ func TestJournaledCommitRevalidatesEntireWriteSetBeforeMutation(t *testing.T) {
 		t.Fatalf("journal created before stale preview refusal: %v", err)
 	}
 }
+
+func TestCommitPreparedTransactionJournalsSingleLegacyOperation(t *testing.T) {
+	root, stateDir := t.TempDir(), t.TempDir()
+	path := filepath.Join(root, "legacy.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := openCommitWorkspace(t, root, stateDir)
+	snapshot, err := ws.Refresh("legacy.txt", ProviderLayer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startSeq := ws.Identity().StateSeq
+	finalized := false
+	identity, err := ws.CommitPreparedTransaction(context.Background(), "legacy_fixture", "op_replace_symbol_body", []PlanStageFile{{
+		Path: "legacy.txt", Before: []byte("before\n"), After: []byte("after\n"),
+		BeforeExists: true, AfterExists: true, BeforeDisk: snapshot.Disk,
+		AfterDisk: DiskSnapshot{Kind: ObjectRegularText, Size: 6, Mode: 0o600},
+	}}, func(context.Context) error {
+		finalized = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !finalized || identity.StateSeq != startSeq+1 {
+		t.Fatalf("finalized=%v identity=%+v", finalized, identity)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, []byte("after\n")) {
+		t.Fatalf("canonical bytes = %q, %v", got, err)
+	}
+	journal, err := ws.loadCommitJournal("legacy_fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.State != CommitJournalCommitted || journal.PreparedRevision != "legacy:op_replace_symbol_body" || len(journal.Entries) != 1 {
+		t.Fatalf("journal = %+v", journal)
+	}
+}

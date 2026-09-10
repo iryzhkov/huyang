@@ -12,19 +12,13 @@
 
 ## Current checkpoint
 
-- Completed stage: S18 — Impact graph, targeted tests and variants.
-- Starting commit: `60e38abc1a310f954e6879f7c7c299999cf2a1e8`.
-- Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
-  base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read the complete plan,
-  frozen tool contract, handoff, and every predecessor/stage artifact named below, and verified
-  S18 was exactly the first incomplete checklist stage.
-- S18 exit gates are satisfied: bounded language-adapter dependency edges disclose provenance,
-  confidence, completeness and caps; exact-revision test history drives advisory selection;
-  selected/executed tests and reasons are explicit; build/configuration variants are reported;
-  reflection, dynamic loading, generated/config files, graph caps, and omitted variants retain
-  uncertainty; targeted success is independent from and never implies a full-gate pass.
-- Only S18 is newly marked complete in the committed checklist.
-- Exact next stage: S19 — First legacy wrapper families.
+- Completed stage: S19 — First legacy wrapper families.
+- Starting commit: `3edeaef629cbbfa4a70fd7fefb200849693abfdd`.
+- S19 migrates symbol/range and create/move/delete wrappers through isolated prepared deltas
+  and one-operation commit journals while preserving the legacy schemas and response text.
+- The reviewed base remains in branch history. Only S19 is checked complete.
+- Exact next stage: S19D — Compact modern debugger facade.
+- S19D and S20 work were not started.
 
 ## Predecessor and stage artifacts
 
@@ -123,36 +117,38 @@ S18 adds:
 - Added no S19 legacy-wrapper migration, S19D debugger facade, S20 release work, deployment,
   installation, live configuration/state mutation, push, or pull request.
 
+## S19 changes
+
+- Added exact sandbox-to-canonical delta discovery and a journaled prepared-transaction commit API.
+- Symbol/range edits keep the canonical provider for parser, import, diagnostic, token, async, and
+  per-client compatibility, then capture exact dirty buffers into a sandbox before journal commit.
+- File create/move/delete run in isolated trees and commit exact create/replace/delete deltas.
+- Retained per-client receipts preserve legacy file-operation undo, stale refusal, and skip behavior.
+- Added global/per-tool direct escape flags; dry runs and wait=false preserve their old direct paths.
+- Added exact snapshot, journal, escape, sandbox-delta, drift, and state-sequence regression tests.
+- Detailed evidence and scope: docs/plans/huyang-s19-legacy-wrappers.md.
+
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test -race ./internal/workspace ./internal/bridge -run 'Impact|Affected|Pipeline' -count=1`
-  — exit 0; bounded graphs, uncertainty, variants, selection, revision history, verdict separation,
-  and official MCP prepared-sandbox coverage passed.
-- `make smoke` — exit 0; both binaries built and unit_edit, unit_testrun, unit_check, unit_index,
-  MCP, headless, multi-workspace, and debug suites reported OK.
+- `go test ./internal/workspace ./internal/bridge` — exit 0.
+- `tests/smoke.sh headless:edit headless:verdict headless:files headless:clients` — exit 0.
+- `make smoke` — exit 0; unit, MCP, headless, multi-workspace, and debugger suites passed.
 - `go test ./...` — exit 0; every Go package passed.
 - `go vet ./...` — exit 0 with no output.
-- `git diff --check` — exit 0 after implementation and before final handoff/checklist updates;
-  repeated after final documents below.
+- `git diff --check` — exit 0 before final document updates; repeated before commit.
 
 ## Decisions and risks
 
-- Impact traversal is bounded and revision-keyed. Every dependency edge names the built-in language
-  adapter and confidence; caps and unresolved imports make coverage incomplete.
-- Affected-test selection is advisory. Configuration associations, colocated affected tests,
-  required suites, selected variants, and prior failures are reasons, not a completeness proof.
-- Test history is durable per workspace and exact revision, atomically replaced and bounded to the
-  latest 1,000 entries.
-- Targeted and full verdicts are structurally separate. `affected_tests_passed` never populates
-  `full_test_gate`; only an explicit full run can report `full_tests_passed`.
-- Static adapters intentionally disclose reflection/dynamic loading, generated files,
-  configuration/schema effects, unresolved dependencies, graph caps, untested nodes, and omitted
-  variants. These risks recommend a broader full gate.
-- Built-in local import resolution is deliberately conservative. Alias-heavy package graphs,
-  runtime loaders, generators, build systems, and configuration can require future adapter
-  precision without weakening the current uncertainty disclosure.
-- No deployment, installation, live-service/configuration mutation, installed-plugin update,
-  push, or pull request occurred.
-- Exact next stage: S19 — First legacy wrapper families.
+- Synchronous symbol/range calls use canonical provider buffers for exact semantic behavior, capture
+  those bytes into isolation, then accept the journaled disk image without losing provider state.
+- File lifecycle sandboxes remain until their per-client undo receipt is consumed or the workspace
+  closes. State lives under the configured Huyang state root, mode 0700.
+- `wait=false` remains direct because consuming its deferred verdict during synchronous commit would
+  break the frozen response/timing contract.
+- Undo overlap merging is strict for ordinary calls; only `all=true` may overwrite an overlapping
+  older wrapper delta after the provider has accepted the complete legacy undo.
+- No deployment, installation, live-service/configuration mutation, installed-plugin update, push,
+  or pull request occurred.
+- Exact next stage: S19D — Compact modern debugger facade.

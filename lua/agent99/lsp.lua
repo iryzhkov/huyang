@@ -1228,6 +1228,36 @@ local dispatch_table = {
     huyang_transaction_status = function(args)
         return require("agent99.transaction").status(args)
     end,
+    huyang_capture_files = function(args)
+        local files = {}
+        for _, path in ipairs(args.files or {}) do
+            local bufnr = load_buf(path)
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            local content = table.concat(lines, "\n")
+            if vim.bo[bufnr].eol then content = content .. "\n" end
+            files[#files + 1] = { path = path, content = content }
+        end
+        return { files = files }
+    end,
+    huyang_workspace_resync = function()
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            local path = vim.api.nvim_buf_get_name(bufnr)
+            if path ~= "" and vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified then
+                local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                local content = table.concat(lines, "\n")
+                if vim.bo[bufnr].eol then content = content .. "\n" end
+                local handle = io.open(path, "rb")
+                local disk = handle and handle:read("*a") or nil
+                if handle then handle:close() end
+                if disk == content then
+                    vim.bo[bufnr].modified = false
+                    vim.api.nvim_buf_call(bufnr, function() vim.cmd("silent checktime") end)
+                end
+            end
+        end
+        local changed = resync_open_buffers()
+        return { resynced = #changed }
+    end,
     unreferenced_symbols = unreferenced_symbols,
     enclosing_symbols = enclosing_symbols,
     -- Internal: the bridge reports a disk read so the code window can follow.

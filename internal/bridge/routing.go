@@ -41,7 +41,8 @@ type session struct {
 	// Client is who the call is for (see client.go). One instance serves
 	// every client that opened its root, and the editor keys the undo
 	// ledger, the baselines and the disclosed-diagnostics set by it.
-	Client string
+	Client       string
+	LegacyDirect bool
 }
 
 func attachedSession(root, endpoint string) session {

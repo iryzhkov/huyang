@@ -1109,6 +1109,19 @@ func callTool(name string, args map[string]any, ses session) (string, error) {
 		}
 		args = stripped
 	}
+	if name == "apply_code_action" && ses.Headless && !ses.LegacyDirect {
+		if out, handled, err := callLegacyCodeAction(args, ses); handled {
+			return out, err
+		}
+	}
+	if name == "undo_edit" && ses.Headless && !ses.LegacyDirect {
+		if out, handled, err := callLegacyUndo(args, ses); handled {
+			return out, err
+		}
+	}
+	if legacyTransactionalTools[name] && ses.Headless && !ses.LegacyDirect && legacyTransactionsEnabled(name, args) {
+		return callLegacyTransaction(name, args, ses)
+	}
 	if lspToolNames[name] {
 		// "from" and "to" belong to move_file; they name paths exactly as
 		// "file" does and have to be rooted the same way. The debugger's

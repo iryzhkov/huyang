@@ -62,6 +62,7 @@ type sandboxEntry struct {
 
 type Sandbox struct {
 	Base         string
+	SourceRoot   string
 	Root         string
 	Tree         string
 	Backend      string
@@ -135,7 +136,7 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 		return nil, err
 	}
 	sandbox := &Sandbox{
-		Base: sandboxBase, Root: root, Tree: filepath.Join(root, "tree"), Backend: backend,
+		Base: sandboxBase, SourceRoot: sourceRoot, Root: root, Tree: filepath.Join(root, "tree"), Backend: backend,
 		BaseRevision: baseRevision, WorkspaceID: workspaceID, PlanID: planID,
 		PlanRevision: planRevision, baseManifest: append([]sandboxEntry(nil), manifest...),
 	}
@@ -453,6 +454,89 @@ func (s *Sandbox) BaseStageFiles() ([]PlanStageFile, error) {
 		})
 	}
 	return files, nil
+}
+
+func (s *Sandbox) PreparedChanges(ctx context.Context) ([]PlanStageFile, error) {
+	current, _, err := inventorySandboxTree(ctx, s.Tree, SandboxLimits{MaxEntries: DefaultSandboxLimits().MaxEntries, MaxLogicalBytes: 1<<63 - 1})
+	if err != nil {
+		return nil, err
+	}
+	baseByPath := make(map[string]sandboxEntry, len(s.baseManifest))
+	currentByPath := make(map[string]sandboxEntry, len(current))
+	paths := map[string]bool{}
+	for _, entry := range s.baseManifest {
+		baseByPath[entry.Path] = entry
+		paths[entry.Path] = true
+	}
+	for _, entry := range current {
+		currentByPath[entry.Path] = entry
+		paths[entry.Path] = true
+	}
+	names := make([]string, 0, len(paths))
+	for path := range paths {
+		names = append(names, path)
+	}
+	sort.Strings(names)
+
+	var changes []PlanStageFile
+	for _, relative := range names {
+		beforeEntry, beforeExists := baseByPath[relative]
+		afterEntry, afterExists := currentByPath[relative]
+		if (beforeExists && beforeEntry.Kind == ObjectDirectory) || (afterExists && afterEntry.Kind == ObjectDirectory) {
+			continue
+		}
+		if beforeExists && afterExists && sandboxEntriesEqual(beforeEntry, afterEntry) {
+			continue
+		}
+		change := PlanStageFile{Path: relative, BeforeExists: beforeExists, AfterExists: afterExists}
+		if beforeExists {
+			canonical := filepath.Join(s.SourceRoot, filepath.FromSlash(relative))
+			change.BeforeDisk, change.Before, err = inspectPath(canonical)
+			if err != nil {
+				return nil, err
+			}
+			if !sandboxEntryMatchesSnapshot(beforeEntry, change.BeforeDisk, change.Before) {
+				return nil, fmt.Errorf("sandbox_source_changed: canonical %s no longer matches the sealed base", relative)
+			}
+		} else {
+			change.BeforeDisk = DiskSnapshot{Kind: ObjectMissing}
+		}
+		if afterExists {
+			prepared := filepath.Join(s.Tree, filepath.FromSlash(relative))
+			change.AfterDisk, change.After, err = inspectPath(prepared)
+			if err != nil {
+				return nil, err
+			}
+			if change.AfterDisk.Kind != ObjectRegularText && change.AfterDisk.Kind != ObjectBinary && change.AfterDisk.Kind != ObjectSymlink {
+				return nil, fmt.Errorf("sandbox_special_file: prepared %s has unsupported kind %s", relative, change.AfterDisk.Kind)
+			}
+			change.AfterDisk.Device, change.AfterDisk.Inode, change.AfterDisk.MTimeNS = 0, 0, 0
+		} else {
+			change.AfterDisk = DiskSnapshot{Kind: ObjectMissing}
+		}
+		changes = append(changes, change)
+	}
+	return changes, nil
+}
+
+func sandboxEntriesEqual(left, right sandboxEntry) bool {
+	if left.Kind != right.Kind || left.Mode.Perm() != right.Mode.Perm() || left.Size != right.Size || left.Target != right.Target {
+		return false
+	}
+	return left.Kind == ObjectDirectory || left.Kind == ObjectSymlink || left.Hash == right.Hash
+}
+
+func sandboxEntryMatchesSnapshot(entry sandboxEntry, snapshot DiskSnapshot, content []byte) bool {
+	if entry.Kind == ObjectSymlink {
+		return snapshot.Kind == ObjectSymlink && snapshot.SymlinkTarget == entry.Target
+	}
+	if entry.Kind != ObjectRegularText && entry.Kind != ObjectBinary {
+		return false
+	}
+	if snapshot.Kind != ObjectRegularText && snapshot.Kind != ObjectBinary {
+		return false
+	}
+	return snapshot.Mode == uint32(entry.Mode.Perm()) && snapshot.Size == entry.Size && sha256.Sum256(content) == entry.Hash
 }
 
 func (s *Sandbox) writeMarker(state string) error {

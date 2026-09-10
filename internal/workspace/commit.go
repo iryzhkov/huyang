@@ -216,6 +216,11 @@ func stateMatchesSnapshot(path string, expected DiskSnapshot, content []byte) (b
 }
 
 func applyCommitEntry(path string, entry CommitJournalEntry) error {
+	if entry.After.Kind != ObjectMissing {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+	}
 	switch entry.After.Kind {
 	case ObjectMissing:
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -287,6 +292,94 @@ func (w *Workspace) recordCanonicalCommit() Identity {
 	w.identity.StateSeq++
 	w.documents = make(map[string]cachedDocument)
 	return w.identity
+}
+
+func (w *Workspace) CommitPreparedTransaction(ctx context.Context, transactionID, operationID string, files []PlanStageFile, finalize func(context.Context) error) (Identity, error) {
+	if transactionID == "" || operationID == "" {
+		return Identity{}, errors.New("legacy transaction requires transaction and operation IDs")
+	}
+	if len(files) == 0 {
+		return w.Identity(), nil
+	}
+	now := time.Now().UTC()
+	journal := CommitJournal{
+		Version: commitJournalVersion, WorkspaceID: w.Identity().ID, PlanID: transactionID,
+		PlanRevision: 1, PreparedRevision: "legacy:" + operationID, State: CommitJournalPrepared,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	seen := map[string]bool{}
+	for _, file := range files {
+		if file.Path == "" || seen[file.Path] {
+			return Identity{}, fmt.Errorf("invalid prepared write path %q", file.Path)
+		}
+		seen[file.Path] = true
+		absolute, err := w.confinedPath(file.Path)
+		if err != nil {
+			return Identity{}, err
+		}
+		matches, err := stateMatchesSnapshot(absolute, file.BeforeDisk, file.Before)
+		if err != nil {
+			return Identity{}, err
+		}
+		if !matches {
+			return Identity{}, fmt.Errorf("commit_precondition_changed: %s changed before commit", file.Path)
+		}
+		journal.Entries = append(journal.Entries, CommitJournalEntry{
+			Path: file.Path, Preimage: append([]byte(nil), file.Before...), Postimage: append([]byte(nil), file.After...),
+			Before: file.BeforeDisk, After: file.AfterDisk, Progress: CommitPathPending,
+		})
+	}
+	journalPath := w.commitJournalPath(transactionID)
+	if journalPath == "" {
+		return Identity{}, errors.New("commit journal state directory is required")
+	}
+	if err := w.persistCommitJournal(journalPath, &journal, "prepare_journal"); err != nil {
+		return Identity{}, err
+	}
+	journal.State = CommitJournalApplying
+	if err := w.persistCommitJournal(journalPath, &journal, "applying_journal"); err != nil {
+		return Identity{}, err
+	}
+	recoveryFailure := func(cause error) (Identity, error) {
+		journal.State = CommitJournalRecoveryRequired
+		_ = w.persistCommitJournal(journalPath, &journal, "recovery_required_journal")
+		return Identity{}, fmt.Errorf("commit_recovery_required: %w", cause)
+	}
+	for _, index := range commitEntryOrder(journal.Entries) {
+		entry := &journal.Entries[index]
+		if err := ctx.Err(); err != nil {
+			return recoveryFailure(err)
+		}
+		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
+			return recoveryFailure(err)
+		}
+		absolute, err := w.confinedPath(entry.Path)
+		if err == nil {
+			err = applyCommitEntry(absolute, *entry)
+		}
+		if err != nil {
+			return recoveryFailure(err)
+		}
+		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
+			return recoveryFailure(err)
+		}
+		entry.Progress = CommitPathApplied
+		if err := w.persistCommitJournal(journalPath, &journal, "progress_journal"); err != nil {
+			return recoveryFailure(err)
+		}
+	}
+	if finalize != nil {
+		if err := finalize(ctx); err != nil {
+			return recoveryFailure(err)
+		}
+	}
+	identity := w.recordCanonicalCommit()
+	journal.State = CommitJournalCommitted
+	journal.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
+	if err := w.persistCommitJournal(journalPath, &journal, "committed_journal"); err != nil {
+		return recoveryFailure(err)
+	}
+	return identity, nil
 }
 
 // CommitPlan applies one READY prepared revision through a durable per-path write-ahead
