@@ -114,6 +114,22 @@ func targetSchema() map[string]any {
 	}
 }
 
+func readTargetSchema() map[string]any {
+	schema := targetSchema()
+	alternatives := append([]any{}, schema["oneOf"].([]any)...)
+	alternatives = append(alternatives, schemaObject(map[string]any{
+		"path": stringSchema("Workspace-relative or absolute text file path."),
+	}, "path"))
+	schema["oneOf"] = alternatives
+	return schema
+}
+
+func mutationRangeTargetSchema() map[string]any {
+	schema := targetSchema()
+	schema["oneOf"] = append([]any{}, schema["oneOf"].([]any)[:2]...)
+	return schema
+}
+
 func workspaceIDProperty() map[string]any {
 	return stringSchema("Explicit workspace ID returned by workspace_open.")
 }
@@ -144,48 +160,18 @@ func planOperationSchema(operationKinds []string) map[string]any {
 func changePlanSchema(stateful map[string]any, operationKinds []string) map[string]any {
 	operation := planOperationSchema(operationKinds)
 	operations := map[string]any{"type": "array", "items": operation}
-	base := func(extra map[string]any) map[string]any {
-		properties := map[string]any{
-			"workspace_id":    stateful["workspace_id"],
-			"idempotency_key": stateful["idempotency_key"],
-		}
-		for key, value := range extra {
-			properties[key] = value
-		}
-		return properties
-	}
-	create := schemaObject(base(map[string]any{
-		"action": enumSchema("create"), "operations": operations,
-	}), "workspace_id", "idempotency_key", "action")
-	edit := schemaObject(base(map[string]any{
-		"action": enumSchema("edit"), "plan_id": stringSchema("Opaque plan identifier."),
-		"plan_revision": map[string]any{"type": "integer", "minimum": 1},
+	return schemaObject(map[string]any{
+		"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
+		"action":            enumSchema("create", "edit", "preview", "inspect", "prepare", "apply", "discard"),
+		"operations":        operations,
+		"plan_id":           stringSchema("Required after creation unless prepare supplies operations inline."),
+		"plan_revision":     map[string]any{"type": "integer", "minimum": 1, "description": "Required with plan_id."},
+		"prepared_revision": stringSchema("Required when action=apply."),
 		"edit": schemaObject(map[string]any{
-			"mode":       enumSchema("add", "update", "remove", "reorder", "replace_all"),
-			"operations": operations,
-			"op_ids":     map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
+			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": operations,
+			"op_ids": map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
 		}, "mode"),
-	}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision", "edit")
-	planAction := func(action string) map[string]any {
-		return schemaObject(base(map[string]any{
-			"action": enumSchema(action), "plan_id": stringSchema("Opaque plan identifier."),
-			"plan_revision": map[string]any{"type": "integer", "minimum": 1},
-		}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision")
-	}
-	prepareInline := schemaObject(base(map[string]any{
-		"action": enumSchema("prepare"), "operations": operations,
-	}), "workspace_id", "idempotency_key", "action", "operations")
-	apply := schemaObject(base(map[string]any{
-		"action": enumSchema("apply"), "plan_id": stringSchema("Opaque plan identifier."),
-		"plan_revision":     map[string]any{"type": "integer", "minimum": 1},
-		"prepared_revision": stringSchema("Exact prepared revision."),
-	}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision", "prepared_revision")
-	schema := schemaObject(map[string]any{})
-	schema["oneOf"] = []any{
-		create, edit, planAction("preview"), planAction("inspect"), planAction("discard"),
-		planAction("prepare"), prepareInline, apply,
-	}
-	return schema
+	}, "workspace_id", "idempotency_key", "action")
 }
 
 func buildModernTools() []modernTool {
@@ -211,7 +197,7 @@ func buildModernTools() []modernTool {
 	searchProperties := map[string]any{
 		"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
-		"git_history": historySource,
+		"git_history": historySource, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
 	}
 	searchSchema := schemaObject(searchProperties, "workspace_id")
 	searchSchema["oneOf"] = []any{
@@ -235,8 +221,8 @@ func buildModernTools() []modernTool {
 		{Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 		}, "workspace_id", "relation", "target")},
-		{Name: "read", Description: "Read exact source, outline, bounded provenance, or commit changes through an opaque handle.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "target": targetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
+		{Name: "read", Description: "Read exact or line-bounded source by path or revision-bound handle, plus outlines, provenance, and commit changes.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+			"workspace_id": workspaceIDProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 		}, "workspace_id", "target")},
@@ -244,11 +230,11 @@ func buildModernTools() []modernTool {
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
 		}, "workspace_id")},
 		{Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
-		{Name: "edit_apply", Description: "Preview or apply exactly one guarded operation through the direct workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean"},
 			"operation": schemaObject(map[string]any{
-				"kind": enumSchema(operationKinds...), "target": targetSchema(), "content": stringSchema("Exact replacement bytes as UTF-8 text."),
+				"kind": enumSchema("replace_range"), "target": mutationRangeTargetSchema(), "content": stringSchema("Exact replacement bytes as UTF-8 text."),
 			}, "kind", "target"),
 		}, "workspace_id", "idempotency_key", "operation")},
 		{Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
@@ -408,7 +394,7 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			return nil, err
 		}
 		envelope := direct.call(ctx, descriptor.Name, arguments)
-		pretty, renderErr := renderJSON(envelope)
+		pretty, renderErr := renderJSON(compactTextEnvelope(envelope))
 		if renderErr != nil {
 			return nil, renderErr
 		}
@@ -418,6 +404,20 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			IsError:           envelope["outcome"] == "failed" || envelope["outcome"] == "conflict",
 		}, nil
 	})
+}
+
+func compactTextEnvelope(envelope map[string]any) map[string]any {
+	compact := map[string]any{
+		"api_version": envelope["api_version"], "request_id": envelope["request_id"],
+		"outcome": envelope["outcome"], "summary": envelope["summary"],
+		"evidence": envelope["evidence"], "warnings": envelope["warnings"], "next": envelope["next"],
+	}
+	for _, key := range []string{"code", "workspace", "transaction", "idempotency", "idempotency_persisted"} {
+		if value, ok := envelope[key]; ok {
+			compact[key] = value
+		}
+	}
+	return compact
 }
 
 func validateToolArguments(schema map[string]any, arguments map[string]any) error {
@@ -781,7 +781,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			outcome = "unavailable"
 		}
 		result := modernEnvelope(requestID, workspace, outcome, "", "Diagnostic evidence retrieved from the durable workspace inbox", map[string]any{"diagnostics": report})
-		result["evidence"] = map[string]any{"ids": report.EvidenceIDs, "truncated": false}
+		result["evidence"] = map[string]any{"ids": nonNilStrings(report.EvidenceIDs), "truncated": false}
 		return result
 	case "evidence_get":
 		evidence, err := workspace.Evidence(fmt.Sprint(arguments["evidence_id"]))
@@ -797,12 +797,19 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.changePlan(ctx, requestID, workspace, arguments)
 	case "verify_run":
 		return d.verify(ctx, requestID, workspace, arguments)
+	case "revision_diff":
+		return d.revisionDiff(requestID, workspace, arguments)
 	case "debug_session", "debug_breakpoints", "debug_control", "debug_inspect":
 		return d.debug(ctx, requestID, name, workspace, arguments)
 	default:
-		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
-			fmt.Sprintf("%s is registered but its semantic provider is not available in S07 direct mode", name),
-			map[string]any{"tool": name, "coverage": map[string]any{"complete": false, "unavailable": []string{"semantic_provider_or_later_stage"}}})
+		result := modernEnvelope(requestID, workspace, "unavailable", "semantic_provider_unavailable",
+			fmt.Sprintf("%s requires a semantic provider that is not available for this workspace", name),
+			map[string]any{"tool": name, "coverage": map[string]any{"complete": false, "unavailable": []string{"semantic_provider"}}})
+		result["next"] = []any{
+			map[string]any{"tool": "search", "action": "literal_fallback"},
+			map[string]any{"tool": "read", "action": "read_known_path"},
+		}
+		return result
 	}
 }
 
@@ -920,9 +927,16 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 			}
 			return modernFailure(requestID, workspace, "search_refinement_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
-			"hits": result.Matches, "result_set": result, "coverage": result.Coverage,
+		limit := argInt(arguments, "limit", 50)
+		hits, truncated := compactSearchHits(result.Matches, limit)
+		envelope := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
+			"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
 		})
+		if truncated {
+			envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d retained matches", len(hits), result.Retained)}
+			envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.Handle}}
+		}
+		return envelope
 	}
 	query, _ := arguments["query"].(string)
 	mode := workspacecore.SearchMode("literal")
@@ -933,7 +947,47 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 	if err != nil {
 		return modernFailure(requestID, workspace, "search_failed", err)
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches", len(result.Hits)), result)
+	limit := argInt(arguments, "limit", 50)
+	hits, truncated := compactSearchHits(result.Hits, limit)
+	summary := fmt.Sprintf("%d matches", len(result.Hits))
+	if !result.Coverage.Complete {
+		summary = fmt.Sprintf("%d matches; search coverage incomplete", len(result.Hits))
+	}
+	data := map[string]any{
+		"workspace": result.Workspace, "hits": hits, "returned": len(hits), "total": len(result.Hits),
+		"coverage": result.Coverage, "query": result.Query, "mode": result.Mode, "result_set": result.ResultSet,
+	}
+	envelope := modernEnvelope(requestID, workspace, "ok", "", summary, data)
+	if truncated {
+		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d matches", len(hits), len(result.Hits))}
+		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.ResultSet.Handle}}
+	} else if !result.Coverage.Complete {
+		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
+	}
+	return envelope
+}
+
+func compactSearchHits(hits []workspacecore.SearchHit, limit int) ([]map[string]any, bool) {
+	if limit <= 0 {
+		limit = 100
+	}
+	returned := hits
+	if len(returned) > limit {
+		returned = returned[:limit]
+	}
+	compact := make([]map[string]any, 0, len(returned))
+	for _, hit := range returned {
+		item := map[string]any{
+			"path": hit.Path, "byte_start": hit.ByteStart, "byte_end": hit.ByteEnd,
+			"line": hit.Line, "column": hit.Column, "match": hit.Match, "range": hit.Range,
+		}
+		if hit.MatchHandle != nil {
+			item["handle"] = hit.MatchHandle.Handle
+			item["match_handle"] = map[string]any{"handle": hit.MatchHandle.Handle}
+		}
+		compact = append(compact, item)
+	}
+	return compact, len(hits) > len(returned)
 }
 
 func (d *directWorkspaces) symbolFind(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -960,9 +1014,17 @@ func (d *directWorkspaces) symbolFind(requestID string, workspace *workspacecore
 		outcome = "partial"
 		code = "semantic_coverage_partial"
 	}
-	return modernEnvelope(requestID, workspace, outcome, code, fmt.Sprintf("%d symbols found", len(records)), map[string]any{
+	summary := fmt.Sprintf("%d symbols found", len(records))
+	if len(records) == 0 && !coverage.Complete {
+		summary = "Symbol search could not establish results because semantic coverage is incomplete"
+	}
+	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"ranked_handles": items, "coverage": coverage,
 	})
+	if !coverage.Complete {
+		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": query}}
+	}
+	return result
 }
 
 func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1008,18 +1070,22 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 		if view == "history" {
 			startLine = bytes.Count(read.Content[:resolved.ByteStart], []byte("\n")) + 1
 			endLine = bytes.Count(read.Content[:resolved.ByteEnd], []byte("\n")) + 1
-		} else {
+		} else if startLine == 0 && endLine == 0 {
 			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
 				"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
 				"coverage": read.Coverage, "resolution": resolution,
 			})
 		}
 	} else {
-		fileRange, ok := target["file_range"].(map[string]any)
-		if !ok {
-			return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.handle or target.file_range", map[string]any{})
+		if directPath, present := target["path"].(string); present {
+			path = directPath
+		} else if symbol, present := target["symbol_locator"].(map[string]any); present {
+			path, _ = symbol["path"].(string)
+		} else if fileRange, present := target["file_range"].(map[string]any); present {
+			path, _ = fileRange["path"].(string)
+		} else {
+			return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
 		}
-		path, _ = fileRange["path"].(string)
 	}
 	if view == "history" {
 		history, err := workspace.FileHistory(workspacecore.HistoryRequest{Path: path, StartLine: startLine, EndLine: endLine, Limit: argInt(arguments, "limit", 20)})
@@ -1039,8 +1105,41 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 	if err != nil {
 		return modernFailure(requestID, workspace, "read_failed", err)
 	}
-	data := map[string]any{"path": read.Path, "content": string(read.Content), "snapshot": read.Snapshot, "coverage": read.Coverage}
+	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, startLine, endLine)
+	if rangeErr != nil {
+		return modernFailure(requestID, workspace, "invalid_line_range", rangeErr)
+	}
+	data := map[string]any{"path": read.Path, "content": string(content), "snapshot": read.Snapshot, "coverage": read.Coverage}
+	if startLine != 0 || endLine != 0 {
+		data["start_line"], data["end_line"] = actualStart, actualEnd
+	}
 	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
+}
+
+func boundedLines(content []byte, startLine, endLine int) ([]byte, int, int, error) {
+	if startLine == 0 && endLine == 0 {
+		return content, 0, 0, nil
+	}
+	if startLine == 0 {
+		startLine = 1
+	}
+	if endLine == 0 {
+		endLine = startLine
+	}
+	if endLine < startLine {
+		return nil, 0, 0, errors.New("end_line must be greater than or equal to start_line")
+	}
+	lines := bytes.SplitAfter(content, []byte("\n"))
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	if startLine > len(lines) {
+		return nil, 0, 0, fmt.Errorf("start_line %d exceeds document line count %d", startLine, len(lines))
+	}
+	if endLine > len(lines) {
+		endLine = len(lines)
+	}
+	return bytes.Join(lines[startLine-1:endLine], nil), startLine, endLine, nil
 }
 
 func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1089,8 +1188,12 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		return modernFailure(requestID, workspace, "edit_failed", err)
 	}
 	summary, outcome := "Guarded range preview is ready; canonical bytes unchanged", "ok"
-	data := map[string]any{"change": change, "resolution": resolution, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}}}
-	var evidenceIDs []string
+	data := map[string]any{
+		"change": compactTextChange(change), "resolution": resolution, "tool_delta": []any{},
+		"diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
+		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq), "canonical_changed": !preview,
+	}
+	evidenceIDs := make([]string, 0)
 	if !preview {
 		report, evidenceErr := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidencePush, ProviderID: "native_text", Producer: "native_text_core",
@@ -1106,10 +1209,104 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 			data["verification"] = report
 			evidenceIDs = report.EvidenceIDs
 		}
+		data["document_revision"] = after.Revision
 	}
+	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 	result := modernEnvelope(requestID, workspace, outcome, "", summary, data)
-	result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
+	result["evidence"] = map[string]any{"ids": nonNilStrings(evidenceIDs), "truncated": false}
 	return result
+}
+
+func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	from := fmt.Sprint(arguments["from_revision"])
+	to := fmt.Sprint(arguments["to_revision_or_current"])
+	current := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	if to == "current" {
+		to = current
+	}
+	fromSeq, fromErr := workspaceRevisionSequence(from)
+	toSeq, toErr := workspaceRevisionSequence(to)
+	if fromErr != nil || toErr != nil || fromSeq > toSeq {
+		return modernEnvelope(requestID, workspace, "failed", "invalid_revision_range", "revision_diff requires an ordered wsrev_N range", map[string]any{"from_revision": from, "to_revision": to})
+	}
+	if toSeq > workspace.Identity().StateSeq {
+		return modernEnvelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
+	}
+	type recordedDiff struct {
+		from, to uint64
+		diff     any
+	}
+	d.replayMu.Lock()
+	var recorded []recordedDiff
+	for key, replay := range d.replays {
+		if !replay.complete || !strings.HasPrefix(key, string(workspace.Identity().ID)+"\x00edit_apply\x00") {
+			continue
+		}
+		data, _ := replay.result["data"].(map[string]any)
+		if changed, _ := data["canonical_changed"].(bool); !changed {
+			continue
+		}
+		editFrom, editTo := fmt.Sprint(data["from_revision"]), fmt.Sprint(data["revision"])
+		left, leftErr := workspaceRevisionSequence(editFrom)
+		right, rightErr := workspaceRevisionSequence(editTo)
+		if leftErr == nil && rightErr == nil && left >= fromSeq && right <= toSeq {
+			change, _ := data["change"].(map[string]any)
+			if diff, ok := change["diff"]; ok {
+				recorded = append(recorded, recordedDiff{from: left, to: right, diff: diff})
+			}
+		}
+	}
+	d.replayMu.Unlock()
+	sort.Slice(recorded, func(i, j int) bool { return recorded[i].from < recorded[j].from })
+	diffs := make([]any, 0, len(recorded))
+	cursor := fromSeq
+	for _, item := range recorded {
+		if item.from != cursor {
+			continue
+		}
+		diffs = append(diffs, item.diff)
+		cursor = item.to
+	}
+	if cursor != toSeq {
+		result := modernEnvelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Native edit evidence does not cover the full requested revision range", map[string]any{
+			"from_revision": from, "to_revision": to, "current_revision": current, "covered_through": fmt.Sprintf("wsrev_%d", cursor), "diffs": diffs,
+		})
+		result["warnings"] = []string{"The uncovered revision may contain an external write, provider edit, or expired receipt."}
+		result["next"] = []any{map[string]any{"tool": "read", "action": "inspect_current_files"}}
+		return result
+	}
+	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d native edit diffs between %s and %s", len(diffs), from, to), map[string]any{
+		"from_revision": from, "to_revision": to, "current_revision": current, "diffs": diffs,
+	})
+}
+
+func workspaceRevisionSequence(revision string) (uint64, error) {
+	var sequence uint64
+	if _, err := fmt.Sscanf(revision, "wsrev_%d", &sequence); err != nil || sequence == 0 {
+		return 0, errors.New("invalid workspace revision")
+	}
+	return sequence, nil
+}
+
+func compactTextChange(change workspacecore.TextChange) map[string]any {
+	return map[string]any{
+		"workspace":    change.Workspace,
+		"before":       change.Before,
+		"after_sha256": change.AfterHash,
+		"range":        change.Range,
+		"replacement":  string(change.Replacement),
+		"diff": map[string]any{
+			"path": change.Diff.Path, "before_sha256": change.Diff.BeforeSHA256,
+			"after_sha256": change.Diff.AfterSHA256, "patch": change.Diff.Patch,
+		},
+	}
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1125,7 +1322,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		result := modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{"plan": plan})
 		result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
 		if plan.Preparation != nil {
-			var evidenceIDs []string
+			evidenceIDs := make([]string, 0)
 			for _, stage := range plan.Preparation.Verification {
 				evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
 			}

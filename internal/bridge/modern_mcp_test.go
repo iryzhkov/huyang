@@ -166,6 +166,21 @@ func callModern(t *testing.T, session *mcp.ClientSession, name string, arguments
 	return structuredMap(t, result)
 }
 
+func assertModernOutputValid(t *testing.T, value map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSchemaValue(outputEnvelopeSchema(), decoded, "result"); err != nil {
+		t.Fatalf("invalid modern output: %v\n%#v", err, value)
+	}
+}
+
 func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "note.txt")
@@ -194,6 +209,7 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 		"workspace_id": workspaceID, "idempotency_key": "preview-1", "preview_only": true,
 		"operation": map[string]any{"kind": "replace_range", "target": target, "content": "gamma"},
 	})
+	assertModernOutputValid(t, preview)
 	if preview["outcome"] != "ok" || preview["idempotency"] != "created" {
 		t.Fatalf("preview = %#v", preview)
 	}
@@ -226,6 +242,16 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	if string(after) != "alpha gamma\n" {
 		t.Fatalf("applied bytes = %q", after)
 	}
+	applyData := applied["data"].(map[string]any)
+	if applyData["revision"] != "wsrev_2" {
+		t.Fatalf("edit omitted resulting revision: %#v", applied)
+	}
+	diffed := callModern(t, session, "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "current",
+	})
+	if diffed["outcome"] != "ok" || len(diffed["data"].(map[string]any)["diffs"].([]any)) != 1 {
+		t.Fatalf("native revision diff = %#v", diffed)
+	}
 
 	read := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID,
@@ -233,6 +259,13 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	})
 	if content := read["data"].(map[string]any)["content"]; content != "alpha gamma\n" {
 		t.Fatalf("read content = %#v", content)
+	}
+	bounded := callModern(t, session, "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": file},
+		"view": "source", "start_line": 1, "end_line": 1,
+	})
+	if content := bounded["data"].(map[string]any)["content"]; content != "alpha gamma\n" {
+		t.Fatalf("bounded path read = %#v", bounded)
 	}
 }
 
@@ -264,6 +297,7 @@ func TestModernDiagnosticInboxNoticesAndEvidenceRetrieval(t *testing.T) {
 		t.Fatalf("same-workspace notice = %#v", inspection)
 	}
 	diagnostics := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})
+	assertModernOutputValid(t, diagnostics)
 	diagnosticData, ok := diagnostics["data"].(map[string]any)
 	if !ok || diagnosticData["diagnostics"] == nil {
 		t.Fatalf("diagnostics response = %#v", diagnostics)

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -286,6 +287,22 @@ func TestBoundedWalkerSkipsGitAndDisclosesCaps(t *testing.T) {
 		if strings.Contains(entry.Path, ".git") {
 			t.Fatalf("walker included Git internals: %+v", orientation)
 		}
+	}
+}
+
+func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a-binary"), bytes.Repeat([]byte{0}, 900), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "z-source.go"), "package fixture\nfunc needle() {}\n")
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{MaxFiles: 20, MaxDepth: 4, MaxBytes: 128, MaxMatches: 20})
+	result, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].Path != "z-source.go" {
+		t.Fatalf("binary consumed searchable text budget: %+v", result)
 	}
 }
 

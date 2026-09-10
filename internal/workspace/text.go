@@ -341,6 +341,10 @@ func normalizeLimits(limits Limits) Limits {
 func (w *Workspace) Inspect() Inspection {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	gitStatus := "unavailable"
+	if _, err := os.Stat(filepath.Join(w.identity.Root, ".git")); err == nil {
+		gitStatus = "available"
+	}
 	allowlist := make([]string, 0, len(w.allowlist))
 	for name := range w.allowlist {
 		allowlist = append(allowlist, name)
@@ -357,7 +361,7 @@ func (w *Workspace) Inspect() Inspection {
 		Allowlist: allowlist,
 		Coverage:  Coverage{Complete: true, Semantic: w.semanticCoverage()},
 		Native:    map[string]bool{"walk": true, "search": true, "read": true, "guarded_edit": true, "diff": true, "recovery": true},
-		Optional:  map[string]string{"git": "unavailable", "provider": "unavailable", "parser": w.parserStatus(), "lsp": "unavailable", "formatter": "unavailable", "project_commands": "unavailable"},
+		Optional:  map[string]string{"git": gitStatus, "provider": "unavailable", "parser": w.parserStatus(), "lsp": "unavailable", "formatter": "unavailable", "project_commands": "unavailable"},
 		Failures:  failures,
 	}
 }
@@ -453,7 +457,7 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 				coverage.Capped = true
 				break
 			}
-			info, err := os.Lstat(name)
+			_, err := os.Lstat(name)
 			if errors.Is(err, os.ErrNotExist) {
 				files = append(files, name)
 				continue
@@ -463,13 +467,6 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 				coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(err.Error(), 256))
 				continue
 			}
-			if coverage.BytesRead+info.Size() > w.limits.MaxBytes {
-				coverage.Complete = false
-				coverage.Capped = true
-				coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": byte limit")
-				continue
-			}
-			coverage.BytesRead += info.Size()
 			files = append(files, name)
 		}
 		return files, coverage, nil
@@ -506,19 +503,6 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 			coverage.Capped = true
 			return errLimitReached
 		}
-		info, infoErr := entry.Info()
-		if infoErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, rel+": "+sanitizeText(infoErr.Error(), 256))
-			return nil
-		}
-		if coverage.BytesRead+info.Size() > w.limits.MaxBytes {
-			coverage.Complete = false
-			coverage.Capped = true
-			coverage.Skipped = append(coverage.Skipped, rel+": byte limit")
-			return nil
-		}
-		coverage.BytesRead += info.Size()
 		files = append(files, path)
 		return nil
 	})

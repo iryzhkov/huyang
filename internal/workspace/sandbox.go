@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const sandboxMarkerVersion = 1
@@ -166,6 +167,9 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 			if err := os.Mkdir(target, entry.Mode.Perm()); err != nil {
 				return nil, err
 			}
+			if err := os.Chmod(target, entry.Mode.Perm()); err != nil {
+				return nil, err
+			}
 		case ObjectSymlink:
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return nil, err
@@ -183,6 +187,9 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 				err = copySandboxFile(ctx, source, target, entry.Mode.Perm())
 			}
 			if err != nil {
+				return nil, err
+			}
+			if err := os.Chmod(target, entry.Mode.Perm()); err != nil {
 				return nil, err
 			}
 		default:
@@ -247,8 +254,7 @@ func inventorySandboxTree(ctx context.Context, root string, limits SandboxLimits
 			if limits.MaxLogicalBytes > 0 && logical > limits.MaxLogicalBytes {
 				return fmt.Errorf("sandbox_quota: logical byte limit %d exceeded", limits.MaxLogicalBytes)
 			}
-			entry.Hash, err = stableFileHash(path, info)
-			entry.Kind = ObjectRegularText
+			entry.Hash, entry.Kind, err = stableFileHash(path, info)
 		default:
 			return fmt.Errorf("sandbox_special_file: %s has unsupported mode %s", relative, info.Mode())
 		}
@@ -283,30 +289,74 @@ func equalSandboxContent(left, right []sandboxEntry) bool {
 	return true
 }
 
-func stableFileHash(path string, before os.FileInfo) ([sha256.Size]byte, error) {
+func stableFileHash(path string, before os.FileInfo) ([sha256.Size]byte, ObjectKind, error) {
 	var zero [sha256.Size]byte
 	file, err := os.Open(path)
 	if err != nil {
-		return zero, err
+		return zero, "", err
 	}
+	detector := &streamingTextDetector{}
 	hash := sha256.New()
-	_, copyErr := io.Copy(hash, file)
+	_, copyErr := io.Copy(io.MultiWriter(hash, detector), file)
 	after, statErr := file.Stat()
 	closeErr := file.Close()
 	if copyErr != nil {
-		return zero, copyErr
+		return zero, "", copyErr
 	}
 	if statErr != nil {
-		return zero, statErr
+		return zero, "", statErr
 	}
 	if closeErr != nil {
-		return zero, closeErr
+		return zero, "", closeErr
 	}
 	if !sameSandboxInfo(before, after) {
-		return zero, errors.New("sandbox_source_changed: regular file changed while hashing")
+		return zero, "", errors.New("sandbox_source_changed: regular file changed while hashing")
 	}
 	copy(zero[:], hash.Sum(nil))
-	return zero, nil
+	kind := ObjectRegularText
+	if !detector.valid() {
+		kind = ObjectBinary
+	}
+	return zero, kind, nil
+}
+
+type streamingTextDetector struct {
+	invalid bool
+	tail    []byte
+}
+
+func (d *streamingTextDetector) Write(chunk []byte) (int, error) {
+	written := len(chunk)
+	if d.invalid {
+		return written, nil
+	}
+	data := append(append([]byte(nil), d.tail...), chunk...)
+	d.tail = d.tail[:0]
+	for len(data) > 0 {
+		if data[0] == 0 {
+			d.invalid = true
+			break
+		}
+		if data[0] < utf8.RuneSelf {
+			data = data[1:]
+			continue
+		}
+		if !utf8.FullRune(data) {
+			d.tail = append(d.tail, data...)
+			break
+		}
+		value, size := utf8.DecodeRune(data)
+		if value == utf8.RuneError && size == 1 {
+			d.invalid = true
+			break
+		}
+		data = data[size:]
+	}
+	return written, nil
+}
+
+func (d *streamingTextDetector) valid() bool {
+	return !d.invalid && len(d.tail) == 0
 }
 
 func stableReadlink(path string, before os.FileInfo) (string, error) {
@@ -435,7 +485,7 @@ func (s *Sandbox) StageFileForToolDelta(delta ToolDelta) (PlanStageFile, error) 
 func (s *Sandbox) BaseStageFiles() ([]PlanStageFile, error) {
 	var files []PlanStageFile
 	for _, entry := range s.baseManifest {
-		if entry.Kind != ObjectRegularText {
+		if entry.Kind != ObjectRegularText || entry.Path == ".git" || strings.HasPrefix(entry.Path, ".git/") {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(s.Tree, filepath.FromSlash(entry.Path)))

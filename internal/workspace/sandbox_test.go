@@ -38,6 +38,13 @@ func TestSandboxMaterializesExactTreeAndPreparedBytesWithoutAliases(t *testing.T
 	if sandbox.Backend != "reflink" && sandbox.Backend != "safe_copy" {
 		t.Fatalf("backend = %q", sandbox.Backend)
 	}
+	baseFiles, err := sandbox.BaseStageFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baseFiles) != 1 || baseFiles[0].Path != "dirty.txt" {
+		t.Fatalf("verification base files included metadata or binary content: %+v", baseFiles)
+	}
 	if target, err := os.Readlink(filepath.Join(sandbox.Tree, "link")); err != nil || target != "dirty.txt" {
 		t.Fatalf("symlink = %q, %v", target, err)
 	}
@@ -64,6 +71,45 @@ func TestSandboxMaterializesExactTreeAndPreparedBytesWithoutAliases(t *testing.T
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("sandbox retained: %v", err)
+	}
+}
+
+func TestSandboxPreservesReadOnlyFileModesUnderUmask(t *testing.T) {
+	source, base := t.TempDir(), t.TempDir()
+	path := filepath.Join(source, "packed-object")
+	if err := os.WriteFile(path, []byte("immutable\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	previous := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(previous) })
+	sandbox, err := MaterializeSandbox(context.Background(), source, base, ID("ws_0123456789abcdef0123456789abcdef"), "plan_readonly", 1, "wsrev_1", DefaultSandboxLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sandbox.Cleanup() })
+	info, err := os.Stat(filepath.Join(sandbox.Tree, "packed-object"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Fatalf("sandbox mode = %o, want 444", info.Mode().Perm())
+	}
+}
+
+func TestStreamingTextDetectorHandlesSplitUTF8AndNUL(t *testing.T) {
+	text := &streamingTextDetector{}
+	for _, chunk := range [][]byte{{'a', 0xe2}, {0x82}, {0xac, 'z'}} {
+		if _, err := text.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !text.valid() {
+		t.Fatal("valid UTF-8 split across chunks was classified as binary")
+	}
+	binary := &streamingTextDetector{}
+	_, _ = binary.Write([]byte{'a', 0, 'b'})
+	if binary.valid() {
+		t.Fatal("NUL-containing content was classified as text")
 	}
 }
 
