@@ -134,6 +134,9 @@ type Workspace struct {
 
 	plansMu sync.Mutex
 	plans   map[string]PlanRecord
+
+	prepareMu  sync.Mutex
+	activePlan string
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {

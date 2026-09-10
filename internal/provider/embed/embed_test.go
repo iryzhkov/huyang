@@ -1,8 +1,11 @@
 package embed
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -156,7 +159,6 @@ return true
 	}
 }
 
-
 func TestCancellationAndDeadlineRestartWithNewEpoch(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -294,6 +296,79 @@ func TestMalformedCompletionIsClassified(t *testing.T) {
 	}
 	if failure.Code != provider.FailureProtocol || failure.Epoch != 7 {
 		t.Fatalf("decodeCompletion failure = %#v, want protocol failure at epoch 7", failure)
+	}
+}
+
+func TestTransactionBatchFailureRestoresEveryUnsavedBuffer(t *testing.T) {
+	backend, first, _ := testBackend(t, false)
+	second := filepath.Join(filepath.Dir(first), "second.lua")
+	firstBytes := []byte("local answer = 42\nreturn answer\n")
+	secondBytes := []byte("return 'second'\n")
+	if err := os.WriteFile(second, secondBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := []map[string]any{
+		{"path": first, "before_b64": base64.StdEncoding.EncodeToString(firstBytes), "after_b64": base64.StdEncoding.EncodeToString([]byte("return 1\n")), "before_exists": true, "after_exists": true},
+		{"path": second, "before_b64": base64.StdEncoding.EncodeToString(secondBytes), "after_b64": base64.StdEncoding.EncodeToString([]byte("return 2\n")), "before_exists": true, "after_exists": true},
+	}
+	_, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "transaction-fault"},
+		Operation: "huyang_prepare", Arguments: map[string]any{
+			"plan_id": "plan_fault", "plan_revision": 1, "files": files, "fail_after": 2,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected provider apply failure") {
+		t.Fatalf("prepare fault = %v", err)
+	}
+	for index, path := range []string{first, second} {
+		result, callErr := callBufferLines(context.Background(), backend, path, fmt.Sprintf("inspect-%d", index))
+		if callErr != nil {
+			t.Fatal(callErr)
+		}
+		want := strings.TrimSuffix(string([][]byte{firstBytes, secondBytes}[index]), "\n")
+		if !strings.Contains(fmt.Sprint(result.Value), strings.Split(want, "\n")[0]) {
+			t.Fatalf("%s was not restored: %#v", path, result)
+		}
+		disk, readErr := os.ReadFile(path)
+		if readErr != nil || !bytes.Equal(disk, [][]byte{firstBytes, secondBytes}[index]) {
+			t.Fatalf("disk changed for %s: %q, %v", path, disk, readErr)
+		}
+	}
+}
+
+func TestTransactionProviderDeathDropsStagedViewAndRestartsClean(t *testing.T) {
+	backend, file, _ := testBackend(t, false)
+	original := []byte("local answer = 42\nreturn answer\n")
+	_, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "transaction-death"},
+		Operation: "huyang_prepare", Arguments: map[string]any{
+			"plan_id": "plan_death", "plan_revision": 1, "exit_provider_after": 1,
+			"files": []map[string]any{{
+				"path": file, "before_b64": base64.StdEncoding.EncodeToString(original),
+				"after_b64":     base64.StdEncoding.EncodeToString([]byte("return 99\n")),
+				"before_exists": true, "after_exists": true,
+			}},
+		},
+	})
+	var failure *provider.Failure
+	if !errors.As(err, &failure) || failure.Code != provider.FailureDied {
+		t.Fatalf("provider death = %v", err)
+	}
+	if _, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "transaction-death-rollback"},
+		Operation: "huyang_rollback", Arguments: map[string]any{"plan_id": "plan_death"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := callBufferLines(context.Background(), backend, file, "transaction-death-inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fmt.Sprint(result.Value), "local answer = 42") {
+		t.Fatalf("restarted provider retained staged bytes: %#v", result)
+	}
+	if disk, readErr := os.ReadFile(file); readErr != nil || !bytes.Equal(disk, original) {
+		t.Fatalf("provider death changed disk: %q, %v", disk, readErr)
 	}
 }
 

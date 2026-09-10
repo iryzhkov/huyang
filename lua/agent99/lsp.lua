@@ -1211,6 +1211,17 @@ local dispatch_table = {
     delete_file = delete_file,
     move_symbols = move_symbols,
     check_project = check_project,
+    -- Internal Huyang transaction calls stage exact bytes without saving or emitting
+    -- intermediate edit verdicts. The Go coordinator owns the lease and durable state.
+    huyang_prepare = function(args)
+        return require("agent99.transaction").prepare(args)
+    end,
+    huyang_rollback = function(args)
+        return require("agent99.transaction").rollback(args)
+    end,
+    huyang_transaction_status = function(args)
+        return require("agent99.transaction").status(args)
+    end,
     unreferenced_symbols = unreferenced_symbols,
     enclosing_symbols = enclosing_symbols,
     -- Internal: the bridge reports a disk read so the code window can follow.
@@ -1360,7 +1371,7 @@ function M.dispatch(tool, args)
     -- ui_follow and enclosing_symbols are the bridge's own calls in the
     -- middle of serving a read or a grep, not replies the agent sees: they
     -- take no carry (it would vanish) and keep absolute paths.
-    local internal = tool == "ui_follow" or tool == "enclosing_symbols"
+    local internal = tool == "ui_follow" or tool == "enclosing_symbols" or tool:match("^huyang_") ~= nil
     -- Verdicts owed from earlier edits (deferred by wait=false, or
     -- diagnostics that arrived after their report) ride on this reply.
     if not internal and type(result) == "table"

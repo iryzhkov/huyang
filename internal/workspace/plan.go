@@ -35,9 +35,15 @@ const (
 type PlanState string
 
 const (
-	PlanOpen      PlanState = "OPEN"
-	PlanPreviewed PlanState = "PREVIEWED"
-	PlanDiscarded PlanState = "DISCARDED"
+	PlanOpen        PlanState = "OPEN"
+	PlanPreviewed   PlanState = "PREVIEWED"
+	PlanPreparing   PlanState = "PREPARING"
+	PlanFailed      PlanState = "FAILED"
+	PlanProvisional PlanState = "PROVISIONAL"
+	PlanReady       PlanState = "READY"
+	PlanRollingBack PlanState = "ROLLING_BACK"
+	PlanRolledBack  PlanState = "ROLLED_BACK"
+	PlanDiscarded   PlanState = "DISCARDED"
 )
 
 type PlanTarget struct {
@@ -91,16 +97,17 @@ type PlanPreview struct {
 }
 
 type PlanRecord struct {
-	PlanID       string          `json:"plan_id"`
-	WorkspaceID  ID              `json:"workspace_id"`
-	State        PlanState       `json:"state"`
-	PlanRevision uint64          `json:"plan_revision"`
-	BaseStateSeq uint64          `json:"base_state_seq"`
-	Operations   []PlanOperation `json:"operations"`
-	Preview      *PlanPreview    `json:"preview,omitempty"`
-	Events       []PlanEvent     `json:"events"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	PlanID       string           `json:"plan_id"`
+	WorkspaceID  ID               `json:"workspace_id"`
+	State        PlanState        `json:"state"`
+	PlanRevision uint64           `json:"plan_revision"`
+	BaseStateSeq uint64           `json:"base_state_seq"`
+	Operations   []PlanOperation  `json:"operations"`
+	Preview      *PlanPreview     `json:"preview,omitempty"`
+	Preparation  *PlanPreparation `json:"preparation,omitempty"`
+	Events       []PlanEvent      `json:"events"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
 }
 
 type PlanEvent struct {
@@ -143,12 +150,27 @@ func (w *Workspace) loadPlans() error {
 	}
 	w.plansMu.Lock()
 	defer w.plansMu.Unlock()
+	recovered := false
 	for i := range state.Plans {
 		plan := clonePlan(state.Plans[i])
 		if plan.WorkspaceID != w.Identity().ID {
 			return fmt.Errorf("plan %s belongs to workspace %s", plan.PlanID, plan.WorkspaceID)
 		}
+		switch plan.State {
+		case PlanPreparing, PlanReady, PlanProvisional, PlanRollingBack:
+			plan.State = PlanFailed
+			plan.Preparation = nil
+			plan.UpdatedAt = time.Now().UTC()
+			plan.Events = append(plan.Events, PlanEvent{
+				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
+				Outcome: "provider_buffers_discarded", At: plan.UpdatedAt,
+			})
+			recovered = true
+		}
 		w.plans[plan.PlanID] = plan
+	}
+	if recovered {
+		return w.persistPlansLocked()
 	}
 	return nil
 }

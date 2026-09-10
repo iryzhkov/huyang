@@ -62,6 +62,9 @@ func (d *directWorkspaces) loadRegistry() error {
 		d.records[record.ID] = record
 	}
 	for _, replay := range state.Replays {
+		if providerBackedReplay(replay.Result) {
+			continue
+		}
 		d.replays[replay.Key] = &directReplay{
 			argumentsHash: replay.ArgumentsHash,
 			result:        replay.Result,
@@ -70,6 +73,17 @@ func (d *directWorkspaces) loadRegistry() error {
 		}
 	}
 	return nil
+}
+
+func providerBackedReplay(result map[string]any) bool {
+	transaction, _ := result["transaction"].(map[string]any)
+	state, _ := transaction["state"].(string)
+	switch workspacecore.PlanState(state) {
+	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack:
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *directWorkspaces) persistRegistry() error {

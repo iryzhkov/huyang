@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"agent99/internal/provider"
 	workspacecore "agent99/internal/workspace"
 	"bytes"
 	"context"
@@ -261,16 +262,16 @@ func buildModernTools() []modernTool {
 			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
 		}, "workspace_id", "evidence_id")},
 		{Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "action": enumSchema("start", "attach", "restart", "stop"),
+			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("start", "attach", "restart", "stop"),
 		}, "workspace_id", "idempotency_key", "action")},
 		{Name: "debug_breakpoints", Description: "List, set, remove, or clear debugger breakpoints using normal source targets.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "action": enumSchema("list", "set", "remove", "clear"), "target": targetSchema(),
+			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("list", "set", "remove", "clear"), "target": targetSchema(),
 		}, "workspace_id", "idempotency_key", "action")},
 		{Name: "debug_control", Description: "Continue, pause, step, or run a debugger session to a revision-bound target.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "action": enumSchema("continue", "pause", "step_over", "step_into", "step_out", "run_to"), "target": targetSchema(),
+			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("continue", "pause", "step_over", "step_into", "step_out", "run_to"), "target": targetSchema(),
 		}, "workspace_id", "idempotency_key", "action")},
 		{Name: "debug_inspect", Description: "Inspect debugger threads, stacks, scopes, variables, or explicitly governed evaluation.", Profiles: debug, ReadOnly: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "action": enumSchema("threads", "stack", "scopes", "variables", "evaluate"), "policy": enumSchema("read_only", "allow_side_effects"),
+			"workspace_id": workspaceIDProperty(), "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("threads", "stack", "scopes", "variables", "evaluate"), "policy": enumSchema("read_only", "allow_side_effects"),
 		}, "workspace_id", "action")},
 	}
 }
@@ -542,6 +543,10 @@ type directWorkspaces struct {
 	registryPath string
 	loadErr      error
 	scheduler    *workspaceScheduler
+
+	providerMu sync.Mutex
+	stagers    map[workspacecore.ID]workspacecore.PlanStager
+	providers  map[workspacecore.ID]provider.Provider
 }
 
 type directReplay struct {
@@ -563,6 +568,8 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		replays:      make(map[string]*directReplay),
 		registryPath: filepath.Join(stateDir, "registry.json"),
 		scheduler:    newWorkspaceScheduler(providerQuota, externalJobQuota),
+		stagers:      make(map[workspacecore.ID]workspacecore.PlanStager),
+		providers:    make(map[workspacecore.ID]provider.Provider),
 	}
 	direct.loadErr = direct.loadRegistry()
 	return direct
@@ -681,6 +688,14 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	if workspace == nil {
 		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
+	if modernSchedulerClass(name) == scheduleProviderRead {
+		transactionID, _ := arguments["transaction_id"].(string)
+		if err := workspace.CheckProviderAccess(transactionID); err != nil {
+			return modernEnvelope(requestID, workspace, "conflict", "workspace_busy", err.Error(), map[string]any{
+				"transaction_id": transactionID,
+			})
+		}
+	}
 	switch name {
 	case "workspace_inspect":
 		inspection := workspace.Inspect()
@@ -705,7 +720,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	case "edit_apply":
 		return d.edit(requestID, workspace, arguments)
 	case "change_plan":
-		return d.changePlan(requestID, workspace, arguments)
+		return d.changePlan(ctx, requestID, workspace, arguments)
 	default:
 		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
 			fmt.Sprintf("%s is registered but its semantic provider is not available in S07 direct mode", name),
@@ -715,7 +730,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 
 func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[string]any {
 	kind, _ := arguments["kind"].(string)
-	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: d.stateDir}
+	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: d.stateDir, ProviderEpoch: 1}
 	switch kind {
 	case "project":
 		options.Root, _ = arguments["root"].(string)
@@ -1005,7 +1020,7 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 	})
 }
 
-func (d *directWorkspaces) changePlan(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	decode := func(value any, target any) error {
 		encoded, err := json.Marshal(value)
@@ -1059,16 +1074,52 @@ func (d *directWorkspaces) changePlan(requestID string, workspace *workspacecore
 		if err == nil {
 			return planResult("Plan inspection loaded from durable intent", plan)
 		}
-	case "discard":
-		plan, err = workspace.DiscardPlan(
-			fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]),
-		)
-		if err == nil {
-			return planResult("Plan discarded; canonical workspace unchanged", plan)
+	case "prepare":
+		planID := fmt.Sprint(arguments["plan_id"])
+		revision := uintArgument(arguments["plan_revision"])
+		if raw, inline := arguments["operations"]; inline {
+			var operations []workspacecore.PlanOperation
+			if err = decode(raw, &operations); err == nil {
+				plan, err = workspace.CreatePlan(operations)
+				if err == nil {
+					planID, revision = plan.PlanID, plan.PlanRevision
+				}
+			}
 		}
-	case "prepare", "apply":
+		var stager workspacecore.PlanStager
+		if err == nil {
+			stager, err = d.planStager(workspace)
+		}
+		if err == nil {
+			plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
+		}
+		if err == nil {
+			return planResult("Plan prepared in exclusive unsaved provider buffers; canonical workspace unchanged", plan)
+		}
+	case "discard":
+		planID := fmt.Sprint(arguments["plan_id"])
+		revision := uintArgument(arguments["plan_revision"])
+		current, inspectErr := workspace.InspectPlan(planID, revision)
+		if inspectErr != nil {
+			err = inspectErr
+			break
+		}
+		if current.State == workspacecore.PlanReady || current.State == workspacecore.PlanProvisional || current.State == workspacecore.PlanFailed {
+			stager, stagerErr := d.planStager(workspace)
+			if stagerErr != nil {
+				err = stagerErr
+			} else {
+				plan, err = workspace.RollbackPlan(ctx, planID, revision, stager)
+			}
+		} else {
+			plan, err = workspace.DiscardPlan(planID, revision)
+		}
+		if err == nil {
+			return planResult("Plan discarded and provider preimages restored; canonical workspace unchanged", plan)
+		}
+	case "apply":
 		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
-			fmt.Sprintf("%s belongs to a later transaction stage; S10 records intent and preview only", action),
+			"apply belongs to S12 journaled commit; S11 only prepares unsaved provider buffers",
 			map[string]any{"action": action, "canonical_changed": false})
 	default:
 		err = fmt.Errorf("unknown change_plan action %q", action)
@@ -1076,10 +1127,17 @@ func (d *directWorkspaces) changePlan(requestID string, workspace *workspacecore
 	if err != nil {
 		code := "plan_action_failed"
 		outcome := "failed"
-		if strings.Contains(err.Error(), "plan_revision_changed") {
+		switch {
+		case strings.Contains(err.Error(), "plan_revision_changed"):
 			code, outcome = "plan_revision_changed", "conflict"
+		case strings.Contains(err.Error(), "workspace_busy"):
+			code, outcome = "workspace_busy", "conflict"
+		case strings.Contains(err.Error(), "plan_validation_conflicts"):
+			code, outcome = "plan_validation_conflicts", "conflict"
+		case strings.Contains(err.Error(), "provider"):
+			code = "provider_prepare_failed"
 		}
-		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), map[string]any{"action": action})
+		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), map[string]any{"action": action, "canonical_changed": false})
 	}
 	panic("unreachable")
 }

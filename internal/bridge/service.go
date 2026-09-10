@@ -192,6 +192,7 @@ func (s *huyangService) Close() {
 		if current, err := os.Lstat(s.config.SocketPath); err == nil && s.socketInfo != nil && os.SameFile(current, s.socketInfo) {
 			_ = os.Remove(s.config.SocketPath)
 		}
+		s.direct.closeProviders()
 	})
 }
 
