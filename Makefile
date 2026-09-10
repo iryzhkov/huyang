@@ -1,8 +1,9 @@
 .PHONY: build smoke e2e
 
-# Compile the bridge (agent loop + MCP server, one static binary).
+# Compile the compatibility bridge and the standalone Huyang service/adapter.
 build:
 	go build -o bin/agent99-bridge ./cmd/agent99-bridge
+	go build -o bin/huyang ./cmd/huyang
 
 # Bridge + LSP tools against a headless Neovim (no API calls, free).
 # SUITES narrows the run while iterating (unit mcp headless multi debug),

@@ -441,29 +441,50 @@ func legacySDKResult(result map[string]any) *mcp.CallToolResult {
 type directWorkspaces struct {
 	mu       sync.RWMutex
 	items    map[workspacecore.ID]*workspacecore.Workspace
+	records  map[workspacecore.ID]persistedWorkspace
 	stateDir string
 	requests atomic.Uint64
 
 	replayMu sync.Mutex
-	replays  map[string]directReplay
+	replays  map[string]*directReplay
+
+	persistMu    sync.Mutex
+	registryPath string
+	loadErr      error
+	scheduler    *workspaceScheduler
 }
 
 type directReplay struct {
 	argumentsHash string
 	result        map[string]any
+	done          chan struct{}
+	complete      bool
 }
 
 func newDirectWorkspaces(stateDir string) *directWorkspaces {
-	return &directWorkspaces{
-		items: make(map[workspacecore.ID]*workspacecore.Workspace), stateDir: stateDir,
-		replays: make(map[string]directReplay),
+	return newDirectWorkspacesWithQuotas(stateDir, 4, 2)
+}
+
+func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
+	direct := &directWorkspaces{
+		items:        make(map[workspacecore.ID]*workspacecore.Workspace),
+		records:      make(map[workspacecore.ID]persistedWorkspace),
+		stateDir:     stateDir,
+		replays:      make(map[string]*directReplay),
+		registryPath: filepath.Join(stateDir, "registry.json"),
+		scheduler:    newWorkspaceScheduler(providerQuota, externalJobQuota),
 	}
+	direct.loadErr = direct.loadRegistry()
+	return direct
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
 	requestID := fmt.Sprintf("req_%d", d.requests.Add(1))
+	if d.loadErr != nil {
+		return modernEnvelope(requestID, nil, "failed", "service_state_unavailable", d.loadErr.Error(), map[string]any{})
+	}
 	if !isStatefulModernTool(name) {
-		return d.execute(ctx, requestID, name, arguments)
+		return d.executeScheduled(ctx, requestID, name, arguments)
 	}
 	idempotencyKey, _ := arguments["idempotency_key"].(string)
 	if idempotencyKey == "" {
@@ -479,20 +500,43 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 	replayKey := workspaceID + "\x00" + name + "\x00" + idempotencyKey
 
 	d.replayMu.Lock()
-	defer d.replayMu.Unlock()
 	if previous, ok := d.replays[replayKey]; ok {
-		if previous.argumentsHash != argumentsHash {
-			return modernEnvelope(requestID, nil, "conflict", "idempotency_key_reused",
-				"Idempotency key was already used with different arguments", map[string]any{})
+		d.replayMu.Unlock()
+		select {
+		case <-previous.done:
+			if previous.argumentsHash != argumentsHash {
+				return modernEnvelope(requestID, nil, "conflict", "idempotency_key_reused",
+					"Idempotency key was already used with different arguments", map[string]any{})
+			}
+			replayed := cloneEnvelope(previous.result)
+			replayed["request_id"] = requestID
+			replayed["idempotency"] = "replayed"
+			return replayed
+		case <-ctx.Done():
+			return modernEnvelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
 		}
-		replayed := cloneEnvelope(previous.result)
-		replayed["request_id"] = requestID
-		replayed["idempotency"] = "replayed"
-		return replayed
 	}
-	result := d.execute(ctx, requestID, name, arguments)
+	pending := &directReplay{argumentsHash: argumentsHash, done: make(chan struct{})}
+	d.replays[replayKey] = pending
+	d.replayMu.Unlock()
+
+	result := d.executeScheduled(ctx, requestID, name, arguments)
 	result["idempotency"] = "created"
-	d.replays[replayKey] = directReplay{argumentsHash: argumentsHash, result: cloneEnvelope(result)}
+	result["idempotency_persisted"] = true
+	d.replayMu.Lock()
+	pending.result = cloneEnvelope(result)
+	pending.complete = true
+	d.replayMu.Unlock()
+	if err := d.persistRegistry(); err != nil {
+		result["warnings"] = append(result["warnings"].([]string), "idempotency receipt was not persisted: "+err.Error())
+		result["idempotency_persisted"] = false
+		d.replayMu.Lock()
+		pending.result = cloneEnvelope(result)
+		d.replayMu.Unlock()
+	}
+	d.replayMu.Lock()
+	close(pending.done)
+	d.replayMu.Unlock()
 	return result
 }
 
@@ -511,6 +555,28 @@ func cloneEnvelope(source map[string]any) map[string]any {
 		clone[key] = value
 	}
 	return clone
+}
+
+func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
+	if name == "workspace_open" {
+		return d.execute(ctx, requestID, name, arguments)
+	}
+	workspaceID, _ := arguments["workspace_id"].(string)
+	release, err := d.scheduler.acquire(ctx, workspaceID, modernSchedulerClass(name))
+	if err != nil {
+		return modernEnvelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
+			"workspace_id": workspaceID,
+			"class":        modernSchedulerClass(name),
+		})
+	}
+	result := d.execute(ctx, requestID, name, arguments)
+	release()
+	if !isStatefulModernTool(name) {
+		if err := d.persistWorkspaceIdentity(workspacecore.ID(workspaceID)); err != nil {
+			result["warnings"] = append(result["warnings"].([]string), "workspace state was not persisted: "+err.Error())
+		}
+	}
+	return result
 }
 
 func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
@@ -533,9 +599,13 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			if err != nil {
 				return modernFailure(requestID, workspace, "workspace_map_failed", err)
 			}
-			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), map[string]any{"inspection": inspection, "overview": orientation})
+			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), map[string]any{
+				"inspection": inspection, "overview": orientation, "scheduler": d.scheduler.description(),
+			})
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", inspection)
+		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", map[string]any{
+			"inspection": inspection, "scheduler": d.scheduler.description(),
+		})
 	case "search":
 		query, _ := arguments["query"].(string)
 		mode := workspacecore.SearchMode("literal")
@@ -567,28 +637,64 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 	case "documents":
 		for _, value := range anySlice(arguments["files"]) {
 			if name, ok := value.(string); ok {
-				options.Files = append(options.Files, name)
+				absolute, err := filepath.Abs(name)
+				if err != nil {
+					return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
+				}
+				options.Files = append(options.Files, filepath.Clean(absolute))
 			}
 		}
+		sort.Strings(options.Files)
 	default:
 		return modernEnvelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
 	}
-	workspace, err := workspacecore.Open(options)
+	opened, err := workspacecore.Open(options)
 	if err != nil {
 		return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 	}
-	d.mu.Lock()
-	d.items[workspace.Identity().ID] = workspace
-	d.mu.Unlock()
-	orientation, err := workspace.Orient()
-	if err != nil {
-		return modernFailure(requestID, workspace, "workspace_overview_failed", err)
+	identity := opened.Identity()
+	record := persistedWorkspace{
+		ID: identity.ID, Kind: identity.Kind, Root: identity.Root, Files: append([]string(nil), options.Files...),
+		ProviderEpoch: identity.Epoch, StateSeq: identity.StateSeq,
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Opened %s workspace with %d entries", kind, len(orientation.Entries)), map[string]any{
-		"revision":       fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
-		"capabilities":   workspace.Inspect(),
+
+	created := true
+	d.mu.Lock()
+	for id, existing := range d.records {
+		if samePersistedWorkspace(existing, record) {
+			opened = d.items[id]
+			created = false
+			break
+		}
+	}
+	if created {
+		d.items[identity.ID] = opened
+		d.records[identity.ID] = record
+	}
+	d.mu.Unlock()
+	if created {
+		if err := d.persistRegistry(); err != nil {
+			d.mu.Lock()
+			delete(d.items, identity.ID)
+			delete(d.records, identity.ID)
+			d.mu.Unlock()
+			return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
+		}
+	}
+	orientation, err := opened.Orient()
+	if err != nil {
+		return modernFailure(requestID, opened, "workspace_overview_failed", err)
+	}
+	action := "Opened"
+	if !created {
+		action = "Reopened"
+	}
+	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
+		"revision":       fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
+		"capabilities":   opened.Inspect(),
 		"overview":       orientation,
 		"recent_commits": []any{},
+		"registry":       map[string]any{"persistent": true, "reused": !created},
 	})
 }
 

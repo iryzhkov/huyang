@@ -15,25 +15,28 @@
 
 ## Current checkpoint
 
-- Completed stage: S07 — Official MCP SDK in direct mode.
-- Starting commit: `7295ccff28ba3db2b2e04b4233cd6d77f58a5e49`.
+- Completed stage: S08 — Shared service and scheduler.
+- Starting commit: `ed7171cb8ede35c5ad931077c69fd6f2c218e6e7`.
 - Reconciliation before implementation confirmed `feature/huyang` clean after fetching
-  origin, the reviewed base in history, S06 committed at the starting commit, and S07 as the
+  origin, the reviewed base in history, S07 committed at the starting commit, and S08 as the
   first incomplete checklist stage.
-- S07 exit gates are satisfied:
-  - official Go SDK `v1.7.0` supplies direct stdio transport and MCP `2026-07-28` plus
-    legacy negotiation;
-  - schemas, structured/text results, annotations, stable errors, cancellation, and absent
-    Tasks capability for a non-task direct server are covered;
-  - one deterministic registry produces the frozen 17/8/13/12 profiles;
-  - SDK/Inspector conformance, malformed/large requests, cancellation, concurrent request
-    matching, direct native behavior, and the client matrix pass;
+- S08 exit gates are satisfied:
+  - `huyang serve` owns a durable modern workspace/idempotency registry through a private
+    Unix control socket and optional authenticated loopback stateless HTTP;
+  - `huyang mcp --profile full|orient|edit|debug` is a state-free proxy, defaults to
+    `full`, and the fixed HTTP routes expose the frozen 17/8/13/12 catalogs;
+  - persisted workspace identity, state sequence, provider epoch, and completed stateful
+    receipts survive service restart;
+  - explicit scheduler classes serialize same-workspace canonical/provider work, keep
+    workspace lanes independent, and enforce cancellable provider/external-job quotas;
+  - official SDK tests prove adapter reconnect, service restart, durable replay, provider
+    epoch restart, fixed routes, loopback/auth safety, and ambiguous-route elimination;
   - focused race, full smoke, Go test/vet, and diff checks pass.
-- Exact next stage: S08 — Shared service and scheduler.
+- Exact next stage: S09 — Semantic handles.
 
 ## Predecessor artifacts
 
-S07 reconciled and consumed these committed predecessor artifacts completely:
+S08 reconciled and consumed these committed predecessor artifacts completely:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
@@ -43,110 +46,86 @@ S07 reconciled and consumed these committed predecessor artifacts completely:
 - `docs/plans/huyang-s04-embedded-provider.md`
 - `docs/plans/huyang-s05-workspaces-revisions.md`
 - `docs/plans/huyang-s06-text-core-documents.md`
+- `docs/plans/huyang-s07-mcp-sdk-direct.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-S07 adds the committed predecessor artifact for S08:
+S08 adds the committed predecessor artifact for S09:
 
-- `docs/plans/huyang-s07-mcp-sdk-direct.md`
+- `docs/plans/huyang-s08-service-scheduler.md`
 
-## S07 changes
+## S08 changes
 
-- Replaced the handwritten MCP stdio scanner with official Go SDK `v1.7.0` transport,
-  discovery, initialization, legacy negotiation, concurrent dispatch, and cancellation.
-- Added one modern registry and deterministic `full|orient|edit|debug` presentation filters
-  with the frozen 17/8/13/12 memberships.
-- Added closed draft-2020-12 input schemas, explicit output schemas, annotations,
-  structured-content plus text fallback, nested argument validation, and stable application
-  envelopes.
-- Wired modern direct mode to the S06 native core for project/document open, inspect/map,
-  literal/regex search, exact reads, and guarded replace-range preview/apply.
-- Added direct stateful idempotency replay/conflict handling; later-stage capabilities remain
-  stable `capability_not_implemented` results.
-- Propagated SDK cancellation context through legacy provider calls.
-- Added official SDK client/race tests for catalogs, native workflow, schemas, large/malformed
-  requests, cancellation, concurrent IDs, Tasks capability gating, and catalog budgets.
-- Added `docs/plans/huyang-s07-mcp-sdk-direct.md`; marked only S07 complete.
+- Added `cmd/huyang` and built `bin/huyang` alongside the unchanged
+  `bin/agent99-bridge` compatibility binary.
+- Added `huyang serve` with a mode-0600 Unix control socket and concurrent official-SDK
+  sessions sharing one service registry.
+- Added the thin `huyang mcp` adapter, full-by-default fixed profiles, and a bounded control
+  handshake that carries no workspace ownership.
+- Added optional numeric-loopback-only Streamable HTTP on `/mcp`, `/mcp/orient`,
+  `/mcp/edit`, and `/mcp/debug`, protected by a durable mode-0600 bearer credential.
+- Added a versioned, fsync-and-rename registry for workspace definitions, explicit IDs,
+  provider epochs, state sequences, and completed idempotency receipts.
+- Made repeated canonical workspace opens reuse identity and made concurrent duplicate
+  stateful requests wait for the first durable result.
+- Added explicit `pure_read`, `provider_read`, `canonical_write`,
+  `sandbox_write`, and `external_job` scheduler classes with configurable quotas.
+- Added service, adapter, restart, retry, HTTP, safety, scheduler, and restored-identity tests;
+  marked only S08 complete.
 
 ## Verification
 
 Run from `/home/igor/Work/huyang` on 2026-09-10:
 
-- `go test -race ./internal/bridge -run 'TestModern|TestRequested|TestOfficial|TestSDK|TestDirect' -count=1`
-  — exit 0: `ok agent99/internal/bridge`.
-- `go test ./internal/bridge -run TestModernCatalogTokenBudgets -count=1 -v` — exit 0;
-  recorded full/orient/edit/debug counts of 17/8/13/12 and 8,935/3,780/6,597/6,118
-  `cl100k_base` tokens.
-- MCP Inspector CLI `2.6.0 --method tools/list --strict` against direct edit-profile stdio
-  — exit 0 with zero schema portability errors after remediation.
-- Direct read/edit black-box task — `MATRIX PASS` from T3 `0.0.38`, Codex CLI `0.151.0`,
-  Claude Code `2.1.259`, OpenCode `1.18.27`, and the official Go SDK client.
-- `make smoke` — exit 0; reported `unit_edit: OK`, `unit_testrun: OK`,
-  `unit_check: OK`, `unit_index: OK`, `headless: OK`, `multi-workspace: OK`,
-  `debug: OK`, and `smoke: OK`.
-- `go test ./...` — exit 0; bridge, provider, embed, embedspike, socket, and workspace
-  packages passed; the command package has no tests.
+- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0:
+  `ok agent99/internal/workspace` and `ok agent99/internal/bridge`.
+- The focused S08 cases inside that race run cover scheduler serialization/separation,
+  provider-quota cancellation, adapter reconnect, daemon restart, durable replay, provider
+  epoch persistence, full-default stdio proxying, all four HTTP catalogs, bearer enforcement,
+  loopback restriction, and safe socket-path handling.
+- `make smoke` — exit 0; built both `bin/agent99-bridge` and `bin/huyang`, then
+  reported `unit_edit: OK`, `unit_testrun: OK`, `unit_check: OK`,
+  `unit_index: OK`, `headless: OK`, `multi-workspace: OK`, `debug: OK`, and
+  `smoke: OK`.
+- `go test ./...` — exit 0; both command packages and all bridge, provider, embed,
+  embedspike, socket, and workspace packages passed.
 - `go vet ./...` — exit 0; no output.
-- `git diff --check` — exit 0; no output.
+- `git diff --check` — exit 0 after the final documentation update; no output.
 - `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`
   — exit 0 before the stage.
 
-## Exact S07 client commands
+## S08 service interfaces
 
-The temporary fixture was `/tmp/huyang-client-matrix/note.txt` with `alpha beta\n`.
-Commands below all ran from an isolated temporary directory or this checkout:
+The new command surfaces are:
 
 ```sh
-codex exec --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check \
-  --dangerously-bypass-approvals-and-sandbox -C /tmp/huyang-client-matrix \
-  -c 'mcp_servers.huyang.command="/home/igor/Work/huyang/bin/agent99-bridge"' \
-  -c 'mcp_servers.huyang.args=["mcp","--profile","edit"]' \
-  'Use only the huyang MCP tools, never shell or built-in file tools. Open /tmp/huyang-client-matrix/note.txt as a documents workspace. Search for beta. Replace exactly beta with gamma using edit_apply and a unique idempotency_key, then read the file through huyang and verify it is exactly "alpha gamma\n". End with exactly MATRIX PASS on success.'
-# exit 0; MATRIX PASS
-
-claude -p --model haiku --strict-mcp-config \
-  --mcp-config /tmp/huyang-client-matrix/claude-mcp.json \
-  --allowedTools 'mcp__huyang__workspace_open,mcp__huyang__search,mcp__huyang__edit_apply,mcp__huyang__read' \
-  --permission-mode bypassPermissions --max-budget-usd 0.30 \
-  'Use only the huyang MCP tools. Open /tmp/huyang-client-matrix/note.txt as a documents workspace. Search for beta. Replace exactly beta with gamma using edit_apply and a unique idempotency_key, then read the file through huyang and verify it is exactly "alpha gamma\n". End with exactly MATRIX PASS on success.'
-# exit 0; MATRIX PASS
-
-opencode run --pure -m opencode/nemotron-3-ultra-free --format default \
-  'Use only huyang MCP tools, never shell. Open /tmp/huyang-client-matrix/note.txt as a documents workspace. Search beta. Copy the returned hit.range object verbatim. edit_apply replace_range with operation.target.file_range equal to that exact range, content gamma, and key opencode-edit-6. Search gamma, copy its range, read with target.file_range equal to the copied range. End exactly MATRIX PASS only if verified.'
-# exit 0; MATRIX PASS
-
-t3 serve --mode desktop --host 127.0.0.1 --port 43333 \
-  --base-dir /tmp/huyang-t3-matrix --no-browser \
-  --auto-bootstrap-project-from-cwd /tmp/huyang-client-matrix
-# T3 0.0.38 isolated UI + Claude Haiku 4.5; MATRIX PASS
-
-npx --yes @modelcontextprotocol/inspector@2.6.0 --cli \
-  --config /tmp/huyang-client-matrix/claude-mcp.json --server huyang \
-  --method tools/list --strict --format json
-# exit 0; zero errors
+huyang serve [--socket PATH] [--state-dir PATH] [--http 127.0.0.1:PORT] \
+  [--provider-quota N] [--external-job-quota N]
+huyang mcp [--profile full|orient|edit|debug] [--socket PATH]
 ```
 
-T3's collaborative preview reported unavailable, so the isolated T3 UI was driven through a
-temporary headless Chromium profile. Both isolated processes were stopped and all temporary
-matrix, T3 state, and Chromium profile directories were removed afterward.
+The Unix socket is the portable local adapter boundary. HTTP is off by default, accepts only
+numeric loopback binds, and writes its bearer credential to `<state-dir>/http-token`.
+The official SDK client tests exercise both boundaries; no service was installed or deployed.
 
 ## Decisions and risks
 
-- SDK `v1.7.0` is the newest reviewed stable release supporting MCP `2026-07-28`;
-  later visible releases were prereleases and were not selected.
-- The no-argument `agent99-bridge mcp` path retains the legacy catalog. S07 adds explicit
-  modern profiles; S08 owns the `huyang mcp` command and full-by-default adapter.
-- Direct mode deliberately does not advertise Tasks because it has no resumable long-running
-  operation. A future implementation must advertise the negotiated capability before use.
-- Direct workspace and idempotency state is process-local. Persistence, disconnect/reconnect,
-  restart semantics, quotas, and scheduling remain S08 work.
-- Most semantic, verification, evidence, and debug capabilities remain explicit stable
-  unavailable results for their later named stages.
-- Codex correctly required explicit mutation approval for a destructive annotation. OpenCode
-  required a capable model to preserve the complete revision range; its MCP transport and
-  schema path passed unchanged.
-- Client testing used only temporary files and an isolated T3 `--base-dir`. No install,
-  deployment, installed-plugin update, live MCP restart, live configuration/state mutation,
-  push, or pull request occurred.
-- Exact next stage: S08 — Shared service and scheduler.
+- The stdio adapter deliberately proxies newline-delimited MCP bytes rather than owning an SDK
+  server or registry; disconnect/reconnect therefore cannot discard shared correctness state.
+- The service handshake selects only one frozen modern profile. Legacy remains on the existing
+  `agent99-bridge` path and no initialization field or mid-session catalog change is used.
+- `workspace_open` is safe to retry because canonical project roots and exact sorted document
+  allowlists reuse an existing ID. All subsequent routing remains explicit by workspace ID.
+- A completed stateful result is durable before concurrent duplicates are released. A registry
+  write failure is surfaced on the result and never silently advertised as persisted.
+- S08 persists provider epoch transitions and supplies bounded provider scheduling, but modern
+  semantic calls remain the S07 stable unavailable handlers until S09 introduces semantic
+  handles. S08 does not claim provider-backed semantic coverage.
+- `sandbox_write` is intentionally one workspace lane in S08; transaction-specific parallel
+  sandboxes belong to S15.
+- Pure native reads can run beside a write because the workspace core provides its own coherent
+  locking; canonical/provider mutations remain serialized per workspace.
+- No install, deployment, installed-plugin update, live MCP restart, live configuration/state
+  mutation, push, or pull request occurred.
+- Exact next stage: S09 — Semantic handles.

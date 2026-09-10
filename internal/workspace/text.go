@@ -38,6 +38,12 @@ type OpenOptions struct {
 	StateDir      string
 	Limits        Limits
 	Sectioner     Sectioner
+
+	// Identity and StateSeq restore a service-owned workspace registry. They are
+	// both optional for a newly opened workspace; callers restoring an existing
+	// workspace must provide a valid ID and its last non-zero state sequence.
+	Identity ID
+	StateSeq uint64
 }
 
 type Coverage struct {
@@ -226,13 +232,22 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
 		canonical = resolved
 	}
-	id, err := newID()
-	if err != nil {
-		return nil, err
+	id := options.Identity
+	if id == "" {
+		id, err = newID()
+		if err != nil {
+			return nil, err
+		}
+	} else if !validID(id) {
+		return nil, fmt.Errorf("invalid restored workspace ID %q", id)
+	}
+	stateSeq := options.StateSeq
+	if stateSeq == 0 {
+		stateSeq = 1
 	}
 	limits := normalizeLimits(options.Limits)
 	workspace := &Workspace{
-		identity:  Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: 1},
+		identity:  Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
 		documents: make(map[string]cachedDocument),
 		revisions: make(map[RevisionID]DocumentSnapshot),
 		allowlist: make(map[string]struct{}),

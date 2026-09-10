@@ -136,6 +136,16 @@ func newID() (ID, error) {
 	return ID("ws_" + hex.EncodeToString(raw[:])), nil
 }
 
+func validID(id ID) bool {
+	const prefix = "ws_"
+	value := string(id)
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+32 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value[len(prefix):])
+	return err == nil && len(decoded) == 16
+}
+
 func (w *Workspace) Identity() Identity {
 	w.mu.Lock()
 	defer w.mu.Unlock()

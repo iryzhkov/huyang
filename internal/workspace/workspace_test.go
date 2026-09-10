@@ -83,6 +83,24 @@ func TestWorkspaceIdentityAndLayeredSnapshot(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRestoresServiceOwnedIdentity(t *testing.T) {
+	root := t.TempDir()
+	restoredID := ID("ws_00112233445566778899aabbccddeeff")
+	restored, err := Open(OpenOptions{
+		Kind: KindProject, Root: root, Identity: restoredID, StateSeq: 9, ProviderEpoch: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := restored.Identity()
+	if identity.ID != restoredID || identity.StateSeq != 9 || identity.Epoch != 4 {
+		t.Fatalf("restored identity = %+v", identity)
+	}
+	if _, err := Open(OpenOptions{Kind: KindProject, Root: root, Identity: "ws_bad"}); err == nil {
+		t.Fatal("invalid restored ID was accepted")
+	}
+}
+
 func TestMutationRequiresWorkspaceAndRevision(t *testing.T) {
 	ws, root := testWorkspace(t)
 	path := filepath.Join(root, "a.txt")
