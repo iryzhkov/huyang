@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -104,11 +103,11 @@ func TestExclusivePrepareStagesUnsavedAndRollbackRestoresExactPreimages(t *testi
 	if string(stager.buffers["a.txt"]) != "ALPHA\n" || string(stager.buffers["b.txt"]) != "BETA\n" {
 		t.Fatalf("provider buffers were not staged: %#v", stager.buffers)
 	}
-	if err := ws.CheckProviderAccess("other"); err == nil || !strings.Contains(err.Error(), "workspace_busy") {
-		t.Fatalf("non-owner provider call was not blocked: %v", err)
+	if err := ws.CheckProviderAccess("other"); err != nil {
+		t.Fatalf("canonical provider access should remain independent of sandbox staging: %v", err)
 	}
 	if err := ws.CheckProviderAccess(plan.PlanID); err != nil {
-		t.Fatalf("owner was blocked: %v", err)
+		t.Fatalf("transaction provider access was blocked: %v", err)
 	}
 	for path, want := range map[string]string{"a.txt": "alpha\n", "b.txt": "beta\n"} {
 		content, err := os.ReadFile(filepath.Join(root, path))
@@ -128,6 +127,51 @@ func TestExclusivePrepareStagesUnsavedAndRollbackRestoresExactPreimages(t *testi
 	}
 	if err := ws.CheckProviderAccess("other"); err != nil {
 		t.Fatalf("lease was not released: %v", err)
+	}
+}
+
+func TestDisjointPlansPrepareConcurrentlyWithoutBlockingCanonicalReads(t *testing.T) {
+	ws, root, _, _ := prepareFixture(t)
+	a, err := ws.NewRange("a.txt", 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ws.NewRange("b.txt", 0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planA, err := ws.CreatePlan([]PlanOperation{{OpID: "a-only", Kind: OperationReplaceRange, Target: &PlanTarget{FileRange: &a}, Content: "A"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planB, err := ws.CreatePlan([]PlanOperation{{OpID: "b-only", Kind: OperationReplaceRange, Target: &PlanTarget{FileRange: &b}, Content: "B"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	block := func() { entered <- struct{}{}; <-release }
+	stagerA := &fakePlanStager{epoch: 1, buffers: map[string][]byte{"a.txt": []byte("alpha\n")}, afterStage: block}
+	stagerB := &fakePlanStager{epoch: 1, buffers: map[string][]byte{"b.txt": []byte("beta\n")}, afterStage: block}
+	results := make(chan error, 2)
+	go func() {
+		_, err := ws.PreparePlan(context.Background(), planA.PlanID, planA.PlanRevision, stagerA)
+		results <- err
+	}()
+	go func() {
+		_, err := ws.PreparePlan(context.Background(), planB.PlanID, planB.PlanRevision, stagerB)
+		results <- err
+	}()
+	<-entered
+	<-entered
+	if content, err := os.ReadFile(filepath.Join(root, "a.txt")); err != nil || string(content) != "alpha\n" {
+		t.Fatalf("canonical read changed during parallel prepare: %q, %v", content, err)
+	}
+	close(release)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

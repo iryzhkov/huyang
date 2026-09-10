@@ -2,12 +2,10 @@ package bridge
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"agent99/internal/provider"
 	workspacecore "agent99/internal/workspace"
 )
 
@@ -60,22 +58,17 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, original) {
 		t.Fatalf("prepare changed canonical disk: %q, %v", current, err)
 	}
-	blocked := callModern(t, session, "debug_session", map[string]any{
+	unblocked := callModern(t, session, "debug_session", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "non-owner-provider-call", "action": "start",
 	})
-	if blocked["outcome"] != "conflict" || blocked["code"] != "workspace_busy" {
-		t.Fatalf("non-owner provider call observed staged view: %#v", blocked)
+	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
+		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
 	}
-	backend := direct.providers[workspaceIDValue(workspaceID)]
-	staged, err := backend.Call(context.Background(), provider.Request{
-		Context:   provider.RequestContext{RequestID: "inspect-staged", WorkspaceID: workspaceID, TransactionID: planID},
-		Operation: "buffer_lines", Arguments: map[string]any{"file": file, "first": 1, "last": 1},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := firstProviderLine(staged.Value); got != "1: alpha DELTA gamma" {
-		t.Fatalf("provider did not expose staged owner bytes: %q (%#v)", got, staged.Value)
+	sandboxStager := direct.sandboxStagers[planID]
+	sandboxFile := filepath.Join(sandboxStager.sandbox.Tree, "note.txt")
+	staged, err := os.ReadFile(sandboxFile)
+	if err != nil || !bytes.Equal(staged, []byte("alpha DELTA gamma\n")) {
+		t.Fatalf("sandbox does not contain prepared bytes: %q, %v", staged, err)
 	}
 	discarded := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "discard", "action": "discard",
@@ -84,15 +77,8 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if discarded["outcome"] != "ok" || discarded["transaction"].(map[string]any)["state"] != "ROLLED_BACK" {
 		t.Fatalf("discard = %#v", discarded)
 	}
-	restored, err := backend.Call(context.Background(), provider.Request{
-		Context:   provider.RequestContext{RequestID: "inspect-restored", WorkspaceID: workspaceID},
-		Operation: "buffer_lines", Arguments: map[string]any{"file": file, "first": 1, "last": 1},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := firstProviderLine(restored.Value); got != "1: alpha beta gamma" {
-		t.Fatalf("provider rollback did not restore exact preimage: %q (%#v)", got, restored.Value)
+	if _, err := os.Stat(sandboxStager.sandbox.Root); !os.IsNotExist(err) {
+		t.Fatalf("discard did not remove owned sandbox: %v", err)
 	}
 }
 
@@ -148,24 +134,9 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
 		t.Fatalf("canonical apply = %q, %v", current, err)
 	}
-	backend := direct.providers[workspaceIDValue(workspaceID)]
-	status, err := backend.Call(context.Background(), provider.Request{
-		Context:   provider.RequestContext{RequestID: "status-after-commit", WorkspaceID: workspaceID},
-		Operation: "huyang_transaction_status", Arguments: map[string]any{"plan_id": planID},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	statusValue := status.Value.(map[string]any)
-	if active, _ := statusValue["active"].(bool); active {
-		t.Fatalf("provider transaction remained active after commit: %#v", status.Value)
-	}
-	canonical, err := backend.Call(context.Background(), provider.Request{
-		Context:   provider.RequestContext{RequestID: "read-after-commit", WorkspaceID: workspaceID},
-		Operation: "buffer_lines", Arguments: map[string]any{"file": file},
-	})
-	if err != nil || firstProviderLine(canonical.Value) != "1: alpha DELTA gamma" {
-		t.Fatalf("provider was not resynced: %#v, %v", canonical.Value, err)
+	sandboxStager := direct.sandboxStagers[planID]
+	if _, err := os.Stat(sandboxStager.sandbox.Root); !os.IsNotExist(err) {
+		t.Fatalf("commit did not remove owned sandbox: %v", err)
 	}
 }
 

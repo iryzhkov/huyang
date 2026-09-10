@@ -3,8 +3,11 @@ package bridge
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"agent99/internal/provider"
@@ -62,36 +65,153 @@ func (s *providerPlanStager) call(ctx context.Context, operation, planID string,
 	})
 }
 
-func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace) (workspacecore.PlanStager, error) {
-	id := workspace.Identity().ID
-	d.providerMu.Lock()
-	defer d.providerMu.Unlock()
-	if stager := d.stagers[id]; stager != nil {
-		if backend := d.providers[id]; backend != nil && backend.Health(context.Background()).State == provider.HealthHealthy {
-			return stager, nil
-		}
-		if backend := d.providers[id]; backend != nil {
-			_ = backend.Close(context.Background())
-		}
-		delete(d.providers, id)
-		delete(d.stagers, id)
-		workspace.SyncProviderEpoch(workspace.Identity().Epoch + 1)
+type sandboxPlanStager struct {
+	mu           sync.Mutex
+	workspace    *workspacecore.Workspace
+	sandboxBase  string
+	planID       string
+	planRevision uint64
+	baseRevision string
+	sandbox      *workspacecore.Sandbox
+	provider     provider.Provider
+	stager       *providerPlanStager
+	done         bool
+}
+
+func (s *sandboxPlanStager) Epoch() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stager != nil {
+		return s.stager.Epoch()
 	}
+	return s.workspace.Identity().Epoch
+}
+
+func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sandbox == nil {
+		return "", s.baseRevision, "canonical"
+	}
+	return s.sandbox.Backend, s.baseRevision, "canonical"
+}
+
+func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return errors.New("sandbox preparation is already closed")
+	}
+	if s.sandbox != nil {
+		return errors.New("sandbox preparation is already staged")
+	}
+	sandbox, err := workspacecore.MaterializeSandbox(
+		ctx, s.workspace.Identity().Root, s.sandboxBase, s.workspace.Identity().ID,
+		s.planID, s.planRevision, s.baseRevision, workspacecore.DefaultSandboxLimits(),
+	)
+	if err != nil {
+		return err
+	}
+	s.sandbox = sandbox
 	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: workspace.Identity().Root, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+		Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
 		RuntimePath: shippedRuntimePath(), Debug: false,
 	})
 	if err != nil {
-		return nil, err
+		_ = sandbox.Cleanup()
+		s.sandbox = nil
+		return err
 	}
-	epoch := workspace.Identity().Epoch
-	if backend.Descriptor().Epoch > epoch {
-		epoch = backend.Descriptor().Epoch
-		workspace.SyncProviderEpoch(epoch)
+	s.provider = backend
+	s.stager = &providerPlanStager{
+		workspaceID: s.workspace.Identity().ID, provider: backend, epoch: backend.Descriptor().Epoch,
 	}
-	stager := &providerPlanStager{workspaceID: id, provider: backend, epoch: epoch}
-	d.stagers[id] = stager
-	d.providers[id] = backend
+	if err := s.stager.Stage(ctx, request); err != nil {
+		_ = backend.Close(context.Background())
+		_ = sandbox.Cleanup()
+		s.provider, s.stager, s.sandbox = nil, nil, nil
+		return err
+	}
+	if err := sandbox.ApplyPrepared(request); err != nil {
+		_ = s.stager.Rollback(context.Background(), request.PlanID)
+		_ = backend.Close(context.Background())
+		_ = sandbox.Cleanup()
+		s.provider, s.stager, s.sandbox = nil, nil, nil
+		return err
+	}
+	return nil
+}
+
+func (s *sandboxPlanStager) Commit(ctx context.Context, planID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return nil
+	}
+	var result error
+	if s.stager != nil {
+		result = s.stager.Commit(ctx, planID)
+	}
+	if s.provider != nil {
+		if err := s.provider.Close(context.Background()); result == nil {
+			result = err
+		}
+	}
+	if s.sandbox != nil {
+		if err := s.sandbox.Cleanup(); result == nil {
+			result = err
+		}
+	}
+	s.done = result == nil
+	return result
+}
+
+func (s *sandboxPlanStager) Rollback(ctx context.Context, planID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return nil
+	}
+	var result error
+	if s.stager != nil {
+		result = s.stager.Rollback(ctx, planID)
+	}
+	if s.provider != nil {
+		if err := s.provider.Close(context.Background()); result == nil {
+			result = err
+		}
+	}
+	if s.sandbox != nil {
+		if err := s.sandbox.Cleanup(); result == nil {
+			result = err
+		}
+	}
+	s.done = result == nil
+	return result
+}
+
+func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
+	d.providerMu.Lock()
+	defer d.providerMu.Unlock()
+	if existing := d.sandboxStagers[planID]; existing != nil {
+		existing.mu.Lock()
+		reusable := !existing.done && existing.planRevision == planRevision
+		existing.mu.Unlock()
+		if reusable {
+			return existing, nil
+		}
+		_ = existing.Rollback(context.Background(), planID)
+		delete(d.sandboxStagers, planID)
+	}
+	if !create {
+		return nil, errors.New("provider_unavailable: prepared sandbox is not available")
+	}
+	identity := workspace.Identity()
+	stager := &sandboxPlanStager{
+		workspace: workspace, sandboxBase: filepath.Join(d.stateDir, "sandboxes"),
+		planID: planID, planRevision: planRevision, baseRevision: fmt.Sprintf("wsrev_%d", identity.StateSeq),
+	}
+	d.sandboxStagers[planID] = stager
 	return stager, nil
 }
 
@@ -102,5 +222,9 @@ func (d *directWorkspaces) closeProviders() {
 		_ = backend.Close(context.Background())
 		delete(d.providers, id)
 		delete(d.stagers, id)
+	}
+	for planID, stager := range d.sandboxStagers {
+		_ = stager.Rollback(context.Background(), planID)
+		delete(d.sandboxStagers, planID)
 	}
 }

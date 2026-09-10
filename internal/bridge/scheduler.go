@@ -19,7 +19,9 @@ const (
 type workspaceScheduler struct {
 	mu            sync.Mutex
 	lanes         map[string]chan struct{}
+	sandboxLanes  map[string]chan struct{}
 	providerSlots chan struct{}
+	sandboxSlots  chan struct{}
 	externalSlots chan struct{}
 	providerQuota int
 	externalQuota int
@@ -34,7 +36,9 @@ func newWorkspaceScheduler(providerQuota, externalJobQuota int) *workspaceSchedu
 	}
 	return &workspaceScheduler{
 		lanes:         make(map[string]chan struct{}),
+		sandboxLanes:  make(map[string]chan struct{}),
 		providerSlots: make(chan struct{}, providerQuota),
+		sandboxSlots:  make(chan struct{}, 4),
 		externalSlots: make(chan struct{}, externalJobQuota),
 		providerQuota: providerQuota,
 		externalQuota: externalJobQuota,
@@ -50,8 +54,10 @@ func (s *workspaceScheduler) description() map[string]any {
 			string(scheduleSandboxWrite),
 			string(scheduleExternalJob),
 		},
-		"provider_quota":     s.providerQuota,
-		"external_job_quota": s.externalQuota,
+		"provider_quota":          s.providerQuota,
+		"external_job_quota":      s.externalQuota,
+		"sandbox_service_quota":   cap(s.sandboxSlots),
+		"sandbox_workspace_quota": 2,
 	}
 }
 
@@ -80,13 +86,20 @@ func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, cl
 		if err != nil {
 			return nil, err
 		}
-		releaseLane, err := acquireSlot(ctx, s.lane(workspaceID))
+		releaseService, err := acquireSlot(ctx, s.sandboxSlots)
 		if err != nil {
 			releaseProvider()
 			return nil, err
 		}
+		releaseWorkspace, err := acquireSlot(ctx, s.sandboxLane(workspaceID))
+		if err != nil {
+			releaseService()
+			releaseProvider()
+			return nil, err
+		}
 		return func() {
-			releaseLane()
+			releaseWorkspace()
+			releaseService()
 			releaseProvider()
 		}, nil
 	case scheduleExternalJob:
@@ -103,6 +116,17 @@ func (s *workspaceScheduler) lane(workspaceID string) chan struct{} {
 	if lane == nil {
 		lane = make(chan struct{}, 1)
 		s.lanes[workspaceID] = lane
+	}
+	return lane
+}
+
+func (s *workspaceScheduler) sandboxLane(workspaceID string) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lane := s.sandboxLanes[workspaceID]
+	if lane == nil {
+		lane = make(chan struct{}, 2)
+		s.sandboxLanes[workspaceID] = lane
 	}
 	return lane
 }

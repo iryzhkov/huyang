@@ -136,7 +136,7 @@ type Workspace struct {
 	plans   map[string]PlanRecord
 
 	prepareMu   sync.Mutex
-	activePlan  string
+	activePlans map[string]struct{}
 	commitFault func(point, path string) error
 }
 

@@ -544,9 +544,10 @@ type directWorkspaces struct {
 	loadErr      error
 	scheduler    *workspaceScheduler
 
-	providerMu sync.Mutex
-	stagers    map[workspacecore.ID]workspacecore.PlanStager
-	providers  map[workspacecore.ID]provider.Provider
+	providerMu     sync.Mutex
+	stagers        map[workspacecore.ID]workspacecore.PlanStager
+	providers      map[workspacecore.ID]provider.Provider
+	sandboxStagers map[string]*sandboxPlanStager
 }
 
 type directReplay struct {
@@ -562,16 +563,20 @@ func newDirectWorkspaces(stateDir string) *directWorkspaces {
 
 func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
 	direct := &directWorkspaces{
-		items:        make(map[workspacecore.ID]*workspacecore.Workspace),
-		records:      make(map[workspacecore.ID]persistedWorkspace),
-		stateDir:     stateDir,
-		replays:      make(map[string]*directReplay),
-		registryPath: filepath.Join(stateDir, "registry.json"),
-		scheduler:    newWorkspaceScheduler(providerQuota, externalJobQuota),
-		stagers:      make(map[workspacecore.ID]workspacecore.PlanStager),
-		providers:    make(map[workspacecore.ID]provider.Provider),
+		items:          make(map[workspacecore.ID]*workspacecore.Workspace),
+		records:        make(map[workspacecore.ID]persistedWorkspace),
+		stateDir:       stateDir,
+		replays:        make(map[string]*directReplay),
+		registryPath:   filepath.Join(stateDir, "registry.json"),
+		scheduler:      newWorkspaceScheduler(providerQuota, externalJobQuota),
+		stagers:        make(map[workspacecore.ID]workspacecore.PlanStager),
+		providers:      make(map[workspacecore.ID]provider.Provider),
+		sandboxStagers: make(map[string]*sandboxPlanStager),
 	}
 	direct.loadErr = direct.loadRegistry()
+	if direct.loadErr == nil {
+		direct.loadErr = workspacecore.ReapSandboxes(filepath.Join(stateDir, "sandboxes"), nil)
+	}
 	return direct
 }
 
@@ -659,11 +664,17 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		return d.execute(ctx, requestID, name, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
-	release, err := d.scheduler.acquire(ctx, workspaceID, modernSchedulerClass(name))
+	class := modernSchedulerClass(name)
+	if name == "change_plan" {
+		if action, _ := arguments["action"].(string); action != "prepare" {
+			class = scheduleCanonicalWrite
+		}
+	}
+	release, err := d.scheduler.acquire(ctx, workspaceID, class)
 	if err != nil {
 		return modernEnvelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
 			"workspace_id": workspaceID,
-			"class":        modernSchedulerClass(name),
+			"class":        class,
 		})
 	}
 	result := d.execute(ctx, requestID, name, arguments)
@@ -1088,13 +1099,13 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		var stager workspacecore.PlanStager
 		if err == nil {
-			stager, err = d.planStager(workspace)
+			stager, err = d.planStager(workspace, planID, revision, true)
 		}
 		if err == nil {
 			plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
 		}
 		if err == nil {
-			return planResult("Plan prepared in exclusive unsaved provider buffers; canonical workspace unchanged", plan)
+			return planResult("Plan prepared in an isolated sandbox; canonical workspace unchanged", plan)
 		}
 	case "discard":
 		planID := fmt.Sprint(arguments["plan_id"])
@@ -1105,7 +1116,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			break
 		}
 		if current.State == workspacecore.PlanReady || current.State == workspacecore.PlanProvisional || current.State == workspacecore.PlanFailed {
-			stager, stagerErr := d.planStager(workspace)
+			stager, stagerErr := d.planStager(workspace, planID, revision, false)
 			if stagerErr != nil {
 				err = stagerErr
 			} else {
@@ -1115,14 +1126,14 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			plan, err = workspace.DiscardPlan(planID, revision)
 		}
 		if err == nil {
-			return planResult("Plan discarded and provider preimages restored; canonical workspace unchanged", plan)
+			return planResult("Plan discarded and isolated sandbox removed; canonical workspace unchanged", plan)
 		}
 	case "apply":
 		planID := fmt.Sprint(arguments["plan_id"])
 		revision := uintArgument(arguments["plan_revision"])
 		preparedRevision := fmt.Sprint(arguments["prepared_revision"])
 		var stager workspacecore.PlanStager
-		stager, err = d.planStager(workspace)
+		stager, err = d.planStager(workspace, planID, revision, false)
 		if err == nil {
 			plan, err = workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager)
 		}

@@ -12,21 +12,19 @@
 
 ## Current checkpoint
 
-- Completed stage: S14 — Sandbox backend decision spike.
-- Starting commit: acbd3cd159d6f453ebb2c2ba08342ce93e8e9041.
+- Completed stage: S15 — Isolated sandbox prepare.
+- Starting commit: 2d4fe9b5bf4e95aac3d6e34bf1371a9198798c3c.
 - Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
   base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read the complete plan,
   frozen tool contract, handoff, and every predecessor/stage artifact named below, and verified
-  S14 was exactly the first incomplete checklist stage.
-- The S13 focused crash-recovery race gate passed before S14 spike editing.
-- S14 exit gates are satisfied: reflink, kernel overlay, fuse-overlay, and safe-copy choices
-  were measured on the available intended host and Btrfs workspace filesystem; exact
-  repository-sized and adversarial fixture copies cover dirty, untracked, ignored, permissions,
-  symlinks, sparse files, isolation, special-file refusal, and cleanup; deterministic selection,
-  fallback, exclusions, quotas, and cleanup are frozen; reflink is the primary and userspace
-  byte copy is the safe fallback; and no production sandbox backend was added.
-- Only S14 is newly marked complete in the committed checklist.
-- Exact next stage: S15 — Isolated sandbox prepare.
+  S15 was exactly the first incomplete checklist stage.
+- The S14 portable and intended-filesystem spike gates passed before production editing.
+- S15 exit gates are satisfied: exact stable snapshots, reflink/safe-copy fallback, quotas,
+  ownership and cleanup, per-sandbox providers, canonical path mapping, bounded parallel
+  same-workspace preparation, stable canonical reads, verified prepared bytes, and commit-time
+  canonical conflict checks are implemented and covered.
+- Only S15 is newly marked complete in the committed checklist.
+- Exact next stage: S16 — Repository formatting and verification pipeline.
 
 ## Predecessor and stage artifacts
 
@@ -64,89 +62,75 @@ S14 adds:
 - docs/plans/fixtures/huyang-s14-sandbox-backends.json
 - internal/sandboxspike/sandbox_spike_test.go
 
-## S14 changes
+S15 adds:
 
-- Added a decision record selecting capability-probed per-file reflinks as the primary sandbox
-  materializer and a non-hardlink userspace byte copy as the portable safe fallback.
-- Added a machine-readable host, filesystem, measurement, selection, quota, exclusion, and
-  cleanup fixture.
-- Added a test-only sandbox spike package. It preserves and verifies dirty, untracked, ignored,
-  mode, symlink, sparse, binary, and in-tree Git entries; proves source/sandbox inode separation
-  and write isolation; rejects special files; and reports host backend capabilities.
-- Measured the exact 49,361,676-byte checkout on compressed Btrfs: clone-only copy completed in
-  0.027 s and forced byte copy in 0.083 s in bounded single-run observations.
-- Probed overlay choices: direct kernel overlay mount required privilege, user-namespace overlay
-  mounted successfully, and fuse-overlayfs was absent. Overlay was rejected because an exact
-  immutable lower tree still requires the chosen reflink/copy snapshot, after which namespace,
-  whiteout, ownership, and cleanup machinery add cost without satisfying another S15 invariant.
-- Defined conservative S15 starting quotas, exact-by-default inclusion of ignored/untracked
-  state, fail-closed special/path policy, whole-candidate fallback, source-change conflict,
-  destination-manifest validation, ownership markers, and confined cleanup.
-- Added no production sandbox backend, provider, transaction behavior, deployment, installation,
-  live configuration/state change, push, or pull request.
+- docs/plans/huyang-s15-isolated-sandbox.md
+- internal/workspace/sandbox.go
+- internal/workspace/sandbox_linux.go
+- internal/workspace/sandbox_other.go
+- internal/workspace/sandbox_test.go
+
+## S15 changes
+
+- Added production exact-tree inventory and snapshot materialization with stable source hashing,
+  per-file clone-only reflinks, whole-candidate safe-copy fallback, special-file refusal,
+  cancellation, S14 quotas, and destination-manifest verification.
+- Added service-owned versioned markers, confined cleanup, and startup reaping that preserves
+  referenced or foreign directories.
+- Replaced the canonical exclusive preparation provider with one embedded provider per sandbox.
+  Prepared postimages are present and verified on sandbox disk; results expose canonical paths
+  with sandbox provenance and never expose sandbox paths as canonical locators.
+- Changed scheduling so two same-workspace preparations and four service-wide preparations can
+  run concurrently subject to provider quota. Apply and other canonical plan mutations retain
+  the canonical lane.
+- Canonical provider reads no longer block behind isolated prepared state. Existing journaled
+  apply still performs the complete canonical precondition check, so competing writers may both
+  prepare and one conflicts at apply after the other changes its base.
+- Added sandbox, parallel preparation, quota/cancellation, SDK/provider lifecycle, discard,
+  cleanup, and canonical stability coverage.
+- Added no formatter/check/test pipeline, diagnostic evidence store, installation, deployment,
+  installed-plugin update, live configuration/state change, push, or pull request.
 
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test -race ./internal/workspace -run
-  'TestStartupRecovery|TestCompensating|TestCrashRecovery|TestJournaledCommit' -count=1`
-  — exit 0 before spike editing; the S13 predecessor gate remained green.
-- `HUYANG_SANDBOX_SPIKE_DIR=/home/igor/Work go test -race -v
-  ./internal/sandboxspike -count=1` — exit 0: both reflink and safe-copy fixture paths passed
-  on the intended Btrfs workspace filesystem; special-file refusal and capability reporting
-  passed; fuse-overlayfs was reported absent.
-- `go test -v ./internal/sandboxspike -count=1` — exit 0: clone-only was unsupported on the
-  system temporary filesystem and skipped as unavailable, while the safe-copy fallback,
-  manifest equality, mutation isolation, special-file refusal, and capability test passed.
-- Whole-checkout measurement commands using
-  `cp -a --reflink=always --sparse=auto SOURCE/. DEST` and
-  `cp -a --reflink=never --sparse=always SOURCE/. DEST` — both exit 0; elapsed times were
-  0.027 s and 0.083 s respectively for 49,361,676 logical bytes.
-- Kernel-overlay probe — direct `mount -t overlay` exit 32 (`must be superuser`);
-  `unshare -Urnm ... mount -t overlay` exit 0; `kernel.unprivileged_userns_clone=1`.
-- `jq empty docs/plans/fixtures/huyang-s14-sandbox-backends.json` — exit 0.
-- `make smoke` — exit 0: built both binaries and ended unit_edit, unit_testrun, unit_check,
-  unit_index, headless, multi-workspace, debug, and smoke with OK.
-- `go test ./...` — exit 0; every Go package, including the test-only sandbox spike, passed.
+- `go test -v ./internal/sandboxspike -count=1` — exit 0; safe-copy fallback,
+  manifest/isolation, special-file, and capability tests passed on the temporary filesystem;
+  unsupported reflinks skipped explicitly.
+- `HUYANG_SANDBOX_SPIKE_DIR=/home/igor/Work go test -v ./internal/sandboxspike -count=1`
+  — exit 0; reflink and safe-copy paths, exact manifest/isolation, special-file refusal, and
+  capability reporting passed on the intended Btrfs filesystem.
+- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0; sandbox,
+  parallel-prepare, scheduler, provider, transaction, journal, recovery, SDK, and service
+  focused suites passed.
+- `go test ./...` — exit 0; every Go package passed.
+- `make smoke` — exit 0; both binaries built and unit_edit, unit_testrun, unit_check,
+  unit_index, headless, multi-workspace, debug, and final smoke markers reported OK.
 - `go vet ./...` — exit 0 with no output.
-- `git diff --check` — exit 0 after the final artifact, fixture, checklist, and handoff
+- `git diff --check` — exit 0 after final code, tests, artifact, checklist, and handoff
   updates.
 
 ## Decisions and risks
 
-- Reflink is the primary because clone-only succeeds on the intended Btrfs source/destination
-  pair, creates distinct inodes, retains exact fixture state, and makes repository-sized
-  snapshots cheaply. Backend selection probes every filesystem pair and does not trust a
-  filesystem name.
-- Userspace byte copy is the mandatory fallback. It preserves the same manifest without source
-  aliases and works on the temporary filesystem where reflink is unsupported.
-- GNU `cp` is only the spike oracle. S15 owns a Go implementation with clone-only semantics
-  and an internal byte-copy walker, cancellation, stable source inventory, and destination
-  verification.
-- A clone failure discards the entire candidate before safe-copy retry. Source changes,
-  permissions, special files, quotas, and cancellation fail closed rather than being disguised
-  as backend fallback.
-- Exact snapshots include dirty, untracked, ignored, generated, and in-tree Git entries.
-  Explicit trusted exclusions are allowed only with provisional coverage and can never remove
-  a declared mutation target.
-- Kernel overlay inside an unprivileged user namespace is technically available on this host,
-  but it cannot use the mutable canonical tree as a truthful lower layer. Pre-snapshotting that
-  lower layer removes its materialization advantage while retaining namespace/mount/whiteout
-  lifecycle risk, so it is not selected. Fuse-overlayfs is absent and is not installed.
-- The default quotas are conservative starting points, not measured maxima. S15 must expose
-  queueing/resource failures and validate stable source and destination manifests before a
-  sandbox provider starts.
-- Sparse logical size, physical reservation, COW-growth headroom, cleanup ownership markers,
-  and special-file refusal are explicit because copying bytes alone does not bound disk or
-  deletion risk.
-- Measurements cover the available intended development host and one exact repository-sized
-  tree. They are single-run observations, not performance promises; the capability probe plus
-  safe fallback is the portability mechanism.
-- The temporary whole-checkout probe directory was moved to the desktop Trash after
-  measurement; the smaller test directories were removed by their test cleanup.
-- Existing unrelated Python language-server diagnostics remain pre-existing; the focused race,
-  smoke, Go test, and Go vet gates pass.
-- No production sandbox implementation, install, deployment, installed-plugin update, live MCP
-  restart, live configuration/state mutation, push, or pull request occurred.
-- Exact next stage: S15 — Isolated sandbox prepare.
+- Exact-by-default means ignored and in-tree Git entries are copied; no ignore convention is
+  treated as authorization to verify different bytes.
+- Reflink is capability-probed per source/destination pair. Only unsupported clone errors choose
+  safe copy; source change, quota, permission, cancellation, and special-file failures remain
+  explicit failures.
+- Safe copy conservatively counts logical bytes toward its materialization limit. It may reject
+  a very large sparse tree that a future allocation-aware implementation could admit, but cannot
+  exceed the configured copy limit silently.
+- Each sandbox has a separate provider and transaction-local serialization. The fixed two/four
+  sandbox caps are the reviewed S14 defaults and remain further bounded by provider quota.
+- Prepared sandbox files are exact postimages. The provider retains its semantic staged buffers
+  until discard/apply, then closes before the owned tree is removed.
+- Cleanup validates the single-child resolved location and marker identity before recursive
+  removal. Invalid or foreign directories are retained rather than guessed safe.
+- Startup currently reaps all unreferenced valid sandbox markers because restored plan loading
+  invalidates process-local prepared providers. Referenced directories and foreign entries stay.
+- Trusted configured exclusions, formatting, checks, tests, generator write-set enforcement,
+  and full tool delta belong to S16; diagnostic provenance/evidence storage belongs to S17.
+- No deployment, installation, live-service/configuration mutation, installed-plugin update,
+  push, or pull request occurred.
+- Exact next stage: S16 — Repository formatting and verification pipeline.

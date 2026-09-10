@@ -400,9 +400,7 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 		return w.markCommitRecovery(result, journalPath, &journal, err)
 	}
 	w.prepareMu.Lock()
-	if w.activePlan == planID {
-		w.activePlan = ""
-	}
+	delete(w.activePlans, planID)
 	w.prepareMu.Unlock()
 	return result, nil
 }

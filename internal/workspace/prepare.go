@@ -34,6 +34,11 @@ type PlanStager interface {
 	Epoch() uint64
 }
 
+// PlanStagerMetadata describes an isolated preparation without exposing sandbox paths.
+type PlanStagerMetadata interface {
+	PreparationMetadata() (backend, baseRevision, evidencePaths string)
+}
+
 // PlanPreparation records the provider-backed result and eventual canonical apply receipt.
 type PlanPreparation struct {
 	PreparedRevision    string   `json:"prepared_revision"`
@@ -45,15 +50,13 @@ type PlanPreparation struct {
 	Diagnostics         string   `json:"diagnostics"`
 	DiskChecks          string   `json:"disk_checks"`
 	IntermediateReports bool     `json:"intermediate_reports"`
+	SandboxBackend      string   `json:"sandbox_backend,omitempty"`
+	BaseRevision        string   `json:"base_revision,omitempty"`
+	EvidencePaths       string   `json:"evidence_paths,omitempty"`
 }
 
 // CheckProviderAccess prevents a provider-backed call from observing an unlabeled staged view.
 func (w *Workspace) CheckProviderAccess(transactionID string) error {
-	w.prepareMu.Lock()
-	defer w.prepareMu.Unlock()
-	if w.activePlan != "" && w.activePlan != transactionID {
-		return fmt.Errorf("workspace_busy: transaction %s holds the provider lease", w.activePlan)
-	}
 	return nil
 }
 
@@ -64,27 +67,22 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		return PlanRecord{}, errors.New("provider_unavailable: prepare requires a provider")
 	}
 	w.prepareMu.Lock()
-	if w.activePlan != "" {
-		owner := w.activePlan
+	if _, exists := w.activePlans[planID]; exists {
 		w.prepareMu.Unlock()
-		if owner == planID {
-			current, inspectErr := w.InspectPlan(planID, expected)
-			if inspectErr == nil && (current.State == PlanReady || current.State == PlanProvisional) {
-				return current, nil
-			}
+		current, inspectErr := w.InspectPlan(planID, expected)
+		if inspectErr == nil && (current.State == PlanReady || current.State == PlanProvisional) {
+			return current, nil
 		}
-		return PlanRecord{}, fmt.Errorf("workspace_busy: transaction %s holds the provider lease", owner)
+		return PlanRecord{}, fmt.Errorf("workspace_busy: transaction %s is already preparing", planID)
 	}
-	w.activePlan = planID
+	w.activePlans[planID] = struct{}{}
 	w.prepareMu.Unlock()
 
 	release := true
 	defer func() {
 		if release {
 			w.prepareMu.Lock()
-			if w.activePlan == planID {
-				w.activePlan = ""
-			}
+			delete(w.activePlans, planID)
 			w.prepareMu.Unlock()
 		}
 	}()
@@ -105,7 +103,6 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if plan.Preview.Outcome != "ok" {
 		return plan, errors.New("plan_validation_conflicts: preview must succeed before prepare")
 	}
-
 	if _, err := w.transitionPlan(planID, expected, PlanPreparing, "prepare_started", "pending", nil); err != nil {
 		return PlanRecord{}, err
 	}
@@ -125,11 +122,17 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", message, nil)
 		return PlanRecord{}, errors.New(message)
 	}
+	backend, baseRevision, evidencePaths := "", plan.Preview.PreviewRevision, "canonical"
+	diskChecks := "unavailable_buffer_backed_prepare"
+	if metadata, ok := stager.(PlanStagerMetadata); ok {
+		backend, baseRevision, evidencePaths = metadata.PreparationMetadata()
+		diskChecks = "sandbox_manifest_verified"
+	}
 	prepared := &PlanPreparation{
-		PreparedRevision: "prep_" + hashBytes(fmt.Appendf(nil, "%s:%d", plan.Preview.PreviewRevision, stager.Epoch())),
+		PreparedRevision: "prep_" + hashBytes(fmt.Appendf(nil, "%s:%d:%s:%s", plan.Preview.PreviewRevision, stager.Epoch(), backend, baseRevision)),
 		ProviderEpoch:    stager.Epoch(), AffectedFiles: append([]string(nil), plan.Preview.AffectedFiles...),
-		CanonicalChanged: false, Diagnostics: "suppressed", DiskChecks: "unavailable_buffer_backed_prepare",
-		IntermediateReports: false,
+		CanonicalChanged: false, Diagnostics: "suppressed", DiskChecks: diskChecks,
+		IntermediateReports: false, SandboxBackend: backend, BaseRevision: baseRevision, EvidencePaths: evidencePaths,
 	}
 	result, err := w.transitionPlan(planID, expected, PlanReady, "prepare", "ok", prepared)
 	if err != nil {
@@ -170,9 +173,7 @@ func (w *Workspace) RollbackPlan(ctx context.Context, planID string, expected ui
 	}
 	result, err := w.transitionPlan(planID, expected, PlanRolledBack, "rollback", "ok", nil)
 	w.prepareMu.Lock()
-	if w.activePlan == planID {
-		w.activePlan = ""
-	}
+	delete(w.activePlans, planID)
 	w.prepareMu.Unlock()
 	return result, err
 }

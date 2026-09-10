@@ -52,6 +52,31 @@ func TestSchedulerProviderQuotaAndCancellation(t *testing.T) {
 	}
 }
 
+func TestSchedulerAllowsTwoSameWorkspaceSandboxesAndQueuesTheThird(t *testing.T) {
+	scheduler := newWorkspaceScheduler(4, 1)
+	releaseFirst, err := scheduler.acquire(context.Background(), "ws_a", scheduleSandboxWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseFirst()
+	releaseSecond, err := scheduler.acquire(context.Background(), "ws_a", scheduleSandboxWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseSecond()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := scheduler.acquire(ctx, "ws_a", scheduleSandboxWrite); err == nil {
+		t.Fatal("third same-workspace sandbox ignored quota and cancellation")
+	}
+	releaseRead, err := scheduler.acquire(context.Background(), "ws_a", schedulePureRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseRead()
+}
+
 func TestSchedulerPureReadsDoNotQueueBehindWrites(t *testing.T) {
 	scheduler := newWorkspaceScheduler(1, 1)
 	releaseWrite, err := scheduler.acquire(context.Background(), "ws_a", scheduleCanonicalWrite)

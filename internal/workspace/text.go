@@ -264,6 +264,7 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		stateDir:  options.StateDir,
 		sectioner:   options.Sectioner,
 		plans:       make(map[string]PlanRecord),
+		activePlans: make(map[string]struct{}),
 		commitFault: options.CommitFault,
 	}
 	for _, name := range options.Files {

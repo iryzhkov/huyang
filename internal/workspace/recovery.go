@@ -300,20 +300,17 @@ func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager Pl
 		}
 	}
 	w.prepareMu.Lock()
-	if w.activePlan != "" {
-		active := w.activePlan
+	if _, exists := w.activePlans[transactionID]; exists {
 		w.prepareMu.Unlock()
-		return result, fmt.Errorf("workspace_busy: transaction %s owns the provider", active)
+		return result, fmt.Errorf("workspace_busy: transaction %s is already active", transactionID)
 	}
-	w.activePlan = transactionID
+	w.activePlans[transactionID] = struct{}{}
 	w.prepareMu.Unlock()
 	release := true
 	defer func() {
 		if release {
 			w.prepareMu.Lock()
-			if w.activePlan == transactionID {
-				w.activePlan = ""
-			}
+			delete(w.activePlans, transactionID)
 			w.prepareMu.Unlock()
 		}
 	}()
