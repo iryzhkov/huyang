@@ -849,7 +849,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S17 — Diagnostic evidence and provenance
 - [x] S18 — Impact graph, targeted tests and variants
 - [x] S19 — First legacy wrapper families
-- [ ] S19D — Compact modern debugger facade
+- [x] S19D — Compact modern debugger facade
 - [ ] S20 — Remaining wrappers, evaluation and release candidate
 
 The default dependency graph is linear where shared code is involved. Backlog-v2 may

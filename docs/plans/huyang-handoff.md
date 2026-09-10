@@ -12,13 +12,25 @@
 
 ## Current checkpoint
 
-- Completed stage: S19 — First legacy wrapper families.
-- Starting commit: `3edeaef629cbbfa4a70fd7fefb200849693abfdd`.
-- S19 migrates symbol/range and create/move/delete wrappers through isolated prepared deltas
-  and one-operation commit journals while preserving the legacy schemas and response text.
-- The reviewed base remains in branch history. Only S19 is checked complete.
-- Exact next stage: S19D — Compact modern debugger facade.
-- S19D and S20 work were not started.
+- Completed stage: S19D — Compact modern debugger facade.
+- Starting commit: `a69be491f8c68313b27eaaa551fc279a7beb0723`.
+- The reviewed base remains in branch history; the worktree was clean after fetching origin.
+- Exact exit gates:
+  - the four closed-action modern debug tools map to the proven DAP operations while the modern
+    `full` and `debug` catalogs expose no legacy one-tool-per-action debugger names;
+  - breakpoints and stopped source locations reuse revision-bound workspace targets/handles;
+  - start/attach may include initial breakpoints, and stop/control results retain stop reason,
+    top source location, compact locals, output changes, and stale-source coverage;
+  - read-only evaluate refuses without execution unless enforceable purity exists, while explicit
+    `allow_side_effects` is forwarded and disclosed;
+  - missing adapters/runtime/source mappings return actionable `unavailable` or partial coverage
+    without breaking orientation tools;
+  - equivalent debugger workflows use fewer calls and fewer advertised schema bytes than the
+    legacy roster, recorded in the S19D artifact;
+  - `go test ./internal/bridge -run 'TestModernDebug|TestModernRegistry'`, `tests/smoke.sh debug`,
+    `make smoke`, `go test ./...`, `go vet ./...`, and `git diff --check` all exit 0.
+- S19D met every exit gate and is committed with this handoff.
+- Exact next stage: S20 — Remaining wrappers, evaluation and release candidate.
 
 ## Predecessor and stage artifacts
 
@@ -76,6 +88,22 @@ S18 adds:
 - targeted/full verification integration in internal/workspace/pipeline.go,
   internal/bridge/modern_mcp.go, and internal/bridge/pipeline_test.go
 
+S19 adds:
+
+- docs/plans/huyang-s19-legacy-wrappers.md
+- internal/workspace/commit.go
+- internal/workspace/commit_test.go
+- internal/bridge/legacy_state.go
+- internal/bridge/legacy_wrapper.go
+- internal/bridge/legacy_wrapper_test.go
+
+S19D adds:
+
+- docs/plans/huyang-s19d-debugger-facade.md
+- internal/bridge/modern_debug.go
+- internal/bridge/modern_debug_test.go
+- modern debugger integration coverage in tests/drive_debug.py
+
 ## S17 changes
 
 - Added a durable, atomically persisted per-workspace diagnostic ledger with stable diagnostic
@@ -128,12 +156,29 @@ S18 adds:
 - Added exact snapshot, journal, escape, sandbox-delta, drift, and state-sequence regression tests.
 - Detailed evidence and scope: docs/plans/huyang-s19-legacy-wrappers.md.
 
+## S19D changes
+
+- Replaced four placeholder modern debug schemas with executable `debug_session`,
+  `debug_breakpoints`, `debug_control`, and `debug_inspect` facades over the proven DAP provider.
+- Added closed per-action arguments and complete mappings for all 19 facade actions while keeping
+  the modern `full` and `debug` catalogs free of the legacy one-tool-per-action roster.
+- Added initial breakpoints and shared revision-bound handle, exact file-range, and symbol targets;
+  debugger source locations return registered handles and locators.
+- Added stop-context normalization with state/reason, top location, locals, output/tracked/stale-source
+  changes, stack locations, and explicit partial coverage when source mapping is unavailable.
+- Made evaluation refuse without execution under the default read-only policy; explicit
+  `allow_side_effects` is forwarded and disclosed in the result.
+- Added actionable unavailable results for missing adapters/runtime and provider cleanup at MCP exit.
+- Added real Delve smoke coverage for the modern profile while preserving the full legacy debugger
+  smoke suite. The four modern descriptors total 7,505 bytes versus 8,383 for 13 legacy tools.
+- Detailed evidence and scope: docs/plans/huyang-s19d-debugger-facade.md.
+
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test ./internal/workspace ./internal/bridge` — exit 0.
-- `tests/smoke.sh headless:edit headless:verdict headless:files headless:clients` — exit 0.
+- `go test ./internal/bridge -run 'TestModernDebug|TestModernRegistry'` — exit 0.
+- `tests/smoke.sh debug` — exit 0; legacy and modern real-Delve paths passed.
 - `make smoke` — exit 0; unit, MCP, headless, multi-workspace, and debugger suites passed.
 - `go test ./...` — exit 0; every Go package passed.
 - `go vet ./...` — exit 0 with no output.
@@ -141,14 +186,15 @@ Run from /home/igor/Work/huyang on 2026-09-10:
 
 ## Decisions and risks
 
-- Synchronous symbol/range calls use canonical provider buffers for exact semantic behavior, capture
-  those bytes into isolation, then accept the journaled disk image without losing provider state.
-- File lifecycle sandboxes remain until their per-client undo receipt is consumed or the workspace
-  closes. State lives under the configured Huyang state root, mode 0700.
-- `wait=false` remains direct because consuming its deferred verdict during synchronous commit would
-  break the frozen response/timing contract.
-- Undo overlap merging is strict for ordinary calls; only `all=true` may overwrite an overlapping
-  older wrapper delta after the provider has accepted the complete legacy undo.
+- Modern action schemas advertise a closed action enum and closed property set; a compact server-side
+  validator enforces action-specific required and irrelevant fields without duplicating every property
+  in every action branch.
+- Shared target validation now honors JSON Schema `oneOf` exactly and validates common root keywords;
+  schemas with an intentionally empty union root continue to delegate closure to their alternatives.
+- DAP cannot enforce expression purity, so read-only evaluation always refuses. Side effects require
+  the explicit `allow_side_effects` policy and remain a documented debuggee-state risk.
+- Provider errors are classified conservatively: missing debugger facilities degrade to unavailable,
+  while unclassified adapter failures remain failed rather than being misrepresented as partial success.
 - No deployment, installation, live-service/configuration mutation, installed-plugin update, push,
   or pull request occurred.
-- Exact next stage: S19D — Compact modern debugger facade.
+- Exact next stage: S20 — Remaining wrappers, evaluation and release candidate.

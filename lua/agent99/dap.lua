@@ -2412,6 +2412,56 @@ local function frame_for(s, args)
     return frame, nil, frames, thread, st.totalFrames
 end
 
+local function debug_threads(args)
+    local dap = need_dap()
+    local root = args.root or vim.fn.getcwd()
+    local s, reply = need_session(dap, root)
+    if not s then return reply end
+    local payload = request(s, "threads", {})
+    local threads = {}
+    for _, thread in ipairs(payload.threads or {}) do
+        threads[#threads + 1] = {
+            id = thread.id,
+            name = thread.name,
+            current = thread.id == (state.current_thread or s.stopped_thread_id),
+        }
+    end
+    return {
+        state = state.stop and "stopped" or "running",
+        current_thread = state.current_thread or s.stopped_thread_id,
+        threads = threads,
+        count = #threads,
+    }
+end
+
+local function debug_scopes(args)
+    local dap = need_dap()
+    local root = args.root or vim.fn.getcwd()
+    local s, reply = need_session(dap, root)
+    if not s then return reply end
+    local frame, running = frame_for(s, args)
+    if not frame then return running end
+    local payload = request(s, "scopes", { frameId = frame.id })
+    local scopes = {}
+    for _, scope in ipairs(payload.scopes or {}) do
+        scopes[#scopes + 1] = {
+            name = scope.name,
+            presentation_hint = scope.presentationHint,
+            expensive = scope.expensive == true,
+            variables_reference = scope.variablesReference,
+            named_variables = scope.namedVariables,
+            indexed_variables = scope.indexedVariables,
+        }
+    end
+    return {
+        state = "stopped",
+        frame = tonumber(args.frame) or 0,
+        thread = args.thread or state.current_thread or s.stopped_thread_id,
+        scopes = scopes,
+        count = #scopes,
+    }
+end
+
 local function debug_stack(args)
     local dap = need_dap()
     local root = args.root or vim.fn.getcwd()
@@ -2424,7 +2474,11 @@ local function debug_stack(args)
     local depth = math.max(1, math.min(tonumber(args.depth) or STACK_DEPTH_DEFAULT, 200))
     local st = request(s, "stackTrace", { threadId = thread, startFrame = 0, levels = depth })
     local frames = st.stackFrames or {}
-    local out = { thread = thread, frames = format_stack(frames, root, depth, args.all_frames == true) }
+    local out = { thread = thread, frames = format_stack(frames, root, depth, args.all_frames == true), locations = {} }
+    for _, frame in ipairs(frames) do
+        local info = annotate_frame(frame)
+        out.locations[#out.locations + 1] = info
+    end
     -- `truncated` used to be `totalFrames - #frames`, and delve answers
     -- `totalFrames` with its own default stack cap: the same stopped thread,
     -- ten frames deep, reported "truncated": 50 at depth=3, depth=6 and
@@ -2705,7 +2759,9 @@ local dispatch_table = {
     debug_continue = debug_continue,
     debug_step = debug_step,
     debug_wait = debug_wait,
+    debug_threads = debug_threads,
     debug_stack = debug_stack,
+    debug_scopes = debug_scopes,
     debug_variables = debug_variables,
     debug_evaluate = debug_evaluate,
     debug_output = debug_output,

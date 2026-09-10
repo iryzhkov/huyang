@@ -451,7 +451,9 @@ func runMCP() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
-	server := newSDKServer(profile, newDirectWorkspaces(stateDir))
+	direct := newDirectWorkspaces(stateDir)
+	defer direct.closeProviders()
+	server := newSDKServer(profile, direct)
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "agent99 mcp:", err)
 	}

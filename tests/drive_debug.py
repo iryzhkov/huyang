@@ -56,6 +56,94 @@ def initialize(b):
                          "clientInfo": {"name": "drive_debug", "version": "0"}})
 
 
+def run_modern_facade(env):
+    work = tempfile.mkdtemp(prefix="agent99-modern-debug-")
+    root = os.path.join(work, "proj")
+    shutil.copytree(DEBUGPROJ, root)
+    main_go = os.path.join(root, "main.go")
+    marker = "a99modern-" + os.path.basename(work)
+    b = Bridge(env=env, cwd=root, mcp_args=["--profile", "debug"])
+    try:
+        initialize(b)
+        tools = {t["name"] for t in b.rpc("tools/list")["result"]["tools"]}
+        facade = {"debug_session", "debug_breakpoints", "debug_control", "debug_inspect"}
+        check("modern debugger facade roster", facade <= tools and not (DEBUG_TOOLS - {"debug_breakpoints"}) & tools, tools)
+
+        opened = b.call("workspace_open", {"kind": "project", "root": root})
+        workspace_id = opened["workspace"]["id"]
+        base = {"workspace_id": workspace_id}
+        started = b.call("debug_session", {
+            **base,
+            "idempotency_key": "modern-start",
+            "action": "start",
+            "file": main_go,
+            "args": [marker],
+            "track": ["i"],
+            "initial_breakpoints": [{
+                "target": {"symbol_locator": {"path": "main.go", "name_path": "accumulate"}},
+                "line_offset": 4,
+            }],
+        })
+        debug = started["data"]["debug"]
+        check("modern start returns complete stop context",
+              started["outcome"] == "ok" and debug.get("state") == "stopped"
+              and debug.get("reason") == "breakpoint"
+              and debug.get("top_location", {}).get("handle")
+              and debug.get("locals")
+              and "changes_since_previous_stop" in debug, started)
+
+        threads = b.call("debug_inspect", {**base, "action": "threads"})
+        check("modern thread inspection", threads["data"]["debug"].get("threads"), threads)
+        scopes = b.call("debug_inspect", {**base, "action": "scopes"})
+        check("modern scope inspection", scopes["data"]["debug"].get("scopes"), scopes)
+        variables = b.call("debug_inspect", {**base, "action": "variables"})
+        check("modern variable inspection", variables["data"]["debug"].get("variables"), variables)
+
+        refused = b.call("debug_inspect", {
+            **base, "action": "evaluate", "expression": "i + 1",
+        })
+        check("modern evaluate is read-only by default",
+              refused["outcome"] == "unavailable"
+              and refused["code"] == "approval_required"
+              and refused["data"]["debug"]["executed"] is False, refused)
+        evaluated = b.call("debug_inspect", {
+            **base,
+            "action": "evaluate",
+            "expression": "i + 1",
+            "policy": "allow_side_effects",
+        })
+        check("modern explicit evaluation policy",
+              evaluated["outcome"] == "ok"
+              and evaluated["data"]["debug"]["evaluation"]["debuggee_state_may_have_changed"] is True,
+              evaluated)
+
+        stepped = b.call("debug_control", {
+            **base, "idempotency_key": "modern-step", "action": "step_over",
+        })
+        check("modern control returns stop context",
+              stepped["data"]["debug"].get("state") == "stopped"
+              and stepped["data"]["debug"].get("top_location", {}).get("handle"),
+              stepped)
+        stopped = b.call("debug_session", {
+            **base, "idempotency_key": "modern-stop", "action": "stop",
+        })
+        check("modern debugger stop", stopped["outcome"] == "ok", stopped)
+    finally:
+        try:
+            b.close()
+        except Exception:
+            try:
+                b.proc.kill()
+            except Exception:
+                pass
+        for pid in pids_matching(marker):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     env = {k: v for k, v in os.environ.items() if k not in ("AGENT99_NVIM", "NVIM")}
     env["AGENT99_HEADLESS_INIT"] = os.path.join(REPO, "tests", "minimal_init.lua")
@@ -295,6 +383,7 @@ def main():
             except OSError:
                 pass
         shutil.rmtree(work, ignore_errors=True)
+    run_modern_facade(env)
     print("debug: OK")
 
 

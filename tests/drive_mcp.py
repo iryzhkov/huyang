@@ -33,9 +33,10 @@ class Bridge:
     # cwd matters to the server: with no workspace open it will open the
     # project around its working directory, the way a client started in a
     # repository means that repository.
-    def __init__(self, env=None, cwd=None):
+    def __init__(self, env=None, cwd=None, mcp_args=None):
+        command = [BRIDGE, "mcp"] + (mcp_args or [])
         self.proc = subprocess.Popen(
-            [BRIDGE, "mcp"],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
             env=env, cwd=cwd,
         )
@@ -62,6 +63,8 @@ class Bridge:
     def call(self, name, arguments, client=None):
         meta = {"agent99/client": client} if client else None
         reply = self.rpc("tools/call", {"name": name, "arguments": arguments}, meta=meta)
+        if "result" not in reply:
+            raise RuntimeError("%s RPC failed: %s" % (name, reply))
         result = reply["result"]
         text = result["content"][0]["text"]
         if result.get("isError"):

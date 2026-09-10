@@ -264,18 +264,10 @@ func buildModernTools() []modernTool {
 		{Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
 		}, "workspace_id", "evidence_id")},
-		{Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("start", "attach", "restart", "stop"),
-		}, "workspace_id", "idempotency_key", "action")},
-		{Name: "debug_breakpoints", Description: "List, set, remove, or clear debugger breakpoints using normal source targets.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("list", "set", "remove", "clear"), "target": targetSchema(),
-		}, "workspace_id", "idempotency_key", "action")},
-		{Name: "debug_control", Description: "Continue, pause, step, or run a debugger session to a revision-bound target.", Profiles: debug, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("continue", "pause", "step_over", "step_into", "step_out", "run_to"), "target": targetSchema(),
-		}, "workspace_id", "idempotency_key", "action")},
-		{Name: "debug_inspect", Description: "Inspect debugger threads, stacks, scopes, variables, or explicitly governed evaluation.", Profiles: debug, ReadOnly: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "transaction_id": stringSchema("Required to access an exclusively prepared provider view."), "action": enumSchema("threads", "stack", "scopes", "variables", "evaluate"), "policy": enumSchema("read_only", "allow_side_effects"),
-		}, "workspace_id", "action")},
+		modernDebugSessionTool(debug),
+		modernDebugBreakpointsTool(debug),
+		modernDebugControlTool(debug),
+		modernDebugInspectTool(debug),
 	}
 }
 
@@ -412,6 +404,9 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 		if err := validateToolArguments(descriptor.InputSchema, arguments); err != nil {
 			return nil, err
 		}
+		if err := validateModernDebugArguments(descriptor.Name, arguments); err != nil {
+			return nil, err
+		}
 		envelope := direct.call(ctx, descriptor.Name, arguments)
 		pretty, renderErr := renderJSON(envelope)
 		if renderErr != nil {
@@ -431,13 +426,30 @@ func validateToolArguments(schema map[string]any, arguments map[string]any) erro
 
 func validateSchemaValue(schema map[string]any, value any, path string) error {
 	if alternatives, ok := schema["oneOf"].([]any); ok {
+		base := make(map[string]any, len(schema)-1)
+		for key, item := range schema {
+			if key != "oneOf" {
+				base[key] = item
+			}
+		}
+		if properties, ok := base["properties"].(map[string]any); ok && len(properties) == 0 {
+			delete(base, "properties")
+			delete(base, "additionalProperties")
+		}
+		if err := validateSchemaValue(base, value, path); err != nil {
+			return err
+		}
+		matches := 0
 		for _, candidate := range alternatives {
 			candidateSchema, _ := candidate.(map[string]any)
 			if candidateSchema != nil && validateSchemaValue(candidateSchema, value, path) == nil {
-				return nil
+				matches++
 			}
 		}
-		return fmt.Errorf("%s does not match any allowed shape", path)
+		if matches != 1 {
+			return fmt.Errorf("%s must match exactly one allowed shape", path)
+		}
+		return nil
 	}
 	if enum, ok := schema["enum"].([]any); ok {
 		found := false
@@ -458,7 +470,7 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 			return fmt.Errorf("%s must be an object", path)
 		}
 		properties, _ := schema["properties"].(map[string]any)
-		if closed, _ := schema["additionalProperties"].(bool); !closed {
+		if closed, present := schema["additionalProperties"].(bool); present && !closed {
 			for key := range object {
 				if _, ok := properties[key]; !ok {
 					return fmt.Errorf("%s contains unknown property %q", path, key)
@@ -776,6 +788,8 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.changePlan(ctx, requestID, workspace, arguments)
 	case "verify_run":
 		return d.verify(ctx, requestID, workspace, arguments)
+	case "debug_session", "debug_breakpoints", "debug_control", "debug_inspect":
+		return d.debug(ctx, requestID, name, workspace, arguments)
 	default:
 		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
 			fmt.Sprintf("%s is registered but its semantic provider is not available in S07 direct mode", name),
