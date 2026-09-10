@@ -210,8 +210,14 @@ func TestJournaledCommitFailureLeavesExactRecoverableRecord(t *testing.T) {
 		t.Fatal(openErr)
 	}
 	restored, inspectErr := reopened.InspectPlan(prepared.PlanID, prepared.PlanRevision)
-	if inspectErr != nil || restored.State != PlanRecoveryRequired {
+	if inspectErr != nil || restored.State != PlanRolledBack {
 		t.Fatalf("durable recovery state = %#v, %v", restored, inspectErr)
+	}
+	for path, want := range map[string]string{a: "old-a\n", b: "old-b\n"} {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil || string(got) != want {
+			t.Fatalf("recovered %s = %q, %v", path, got, readErr)
+		}
 	}
 }
 

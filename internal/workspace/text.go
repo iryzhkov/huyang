@@ -38,6 +38,7 @@ type OpenOptions struct {
 	StateDir      string
 	Limits        Limits
 	Sectioner     Sectioner
+	CommitFault   func(point, path string) error
 
 	// Identity and StateSeq restore a service-owned workspace registry. They are
 	// both optional for a newly opened workspace; callers restoring an existing
@@ -261,8 +262,9 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		allowlist: make(map[string]struct{}),
 		limits:    limits,
 		stateDir:  options.StateDir,
-		sectioner: options.Sectioner,
-		plans:     make(map[string]PlanRecord),
+		sectioner:   options.Sectioner,
+		plans:       make(map[string]PlanRecord),
+		commitFault: options.CommitFault,
 	}
 	for _, name := range options.Files {
 		absolute := name
@@ -281,6 +283,9 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		workspace.allowlist[absolute] = struct{}{}
 	}
 	if err := workspace.loadPlans(); err != nil {
+		return nil, err
+	}
+	if err := workspace.recoverCommitJournals(); err != nil {
 		return nil, err
 	}
 	return workspace, nil

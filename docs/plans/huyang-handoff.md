@@ -12,21 +12,19 @@
 
 ## Current checkpoint
 
-- Completed stage: S12 — Journaled commit.
-- Starting commit: d1417ac5ca33f940a47f690e1234659d5c19ec6f.
-- Reconciliation fetched origin and confirmed a clean feature/huyang branch, the reviewed
-  base in branch history, S11 committed with its focused tests/artifact, and S12 as exactly
-  the first incomplete checklist stage.
-- The S11 predecessor race gate passed before S12 editing.
-- S12 exit gates are satisfied: the entire prepared canonical write set is revalidated;
-  exact preimages, postimages, modes, symlink targets, and per-path progress are durably
-  journaled and synced before writes; normal create/replace/move/delete applies through
-  same-directory temporary writes, file sync, rename, and directory sync; the provider is
-  resynced after success; and ordinary injected failures persist RECOVERY_REQUIRED state.
-- The implementation retains the cooperative journal guarantee and does not claim
-  filesystem-wide atomicity. Startup recovery and compensating undo remain S13.
-- Only S12 is newly marked complete in the committed checklist.
-- Exact next stage: S13 — Crash recovery and compensating undo.
+- Completed stage: S13 — Crash recovery and compensating undo.
+- Starting commit: 7185f4661d166dce4f2e86b3c3b66cca5aeee8c0.
+- Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
+  base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read every declared
+  predecessor artifact, and verified S13 was exactly the first incomplete checklist stage.
+- The S12 focused race gate passed before S13 code editing.
+- S13 exit gates are satisfied: startup recovery handles every incomplete journal state before
+  returning an open root; recovery restores exact preimages only from recognized transaction
+  postimages; third-party bytes remain untouched with explicit RECOVERY_REQUIRED; committed undo
+  is a journaled provider-staged compensating transaction; and separate-process SIGKILL coverage
+  spans both sides of every commit/recovery journal and canonical replacement boundary.
+- Only S13 is newly marked complete in the committed checklist.
+- Exact next stage: S14 — Sandbox backend decision spike.
 
 ## Predecessor and stage artifacts
 
@@ -54,24 +52,28 @@ S12 adds:
 
 - docs/plans/huyang-s12-journaled-commit.md
 
-## S12 changes
+S13 adds:
 
-- Added COMMITTING, COMMITTED, and RECOVERY_REQUIRED plan states plus canonical revision and
-  journal identity on successful preparation records.
-- Added a versioned write-ahead commit journal with exact pre/post bytes, filesystem kind,
-  permissions, symlink target, deterministic write ordering, and durable per-path progress.
-- Added whole-write-set revalidation immediately before mutation. A stale revision, content,
-  inode, mode, object kind, or symlink target refuses apply before the first path changes.
-- Added same-directory temp-write/file-sync/rename/directory-sync regular and binary writes,
-  same-directory temporary symlink rename, and synced deletes. Moves preserve the source
-  object's bytes, kind, mode, and symlink target.
-- Added explicit provider commit/resync after canonical writes. Provider buffers retain the
-  prepared postimages, become clean canonical buffers, deleted buffers close, and the provider
-  transaction is released.
-- Wired the frozen modern apply branch to require plan revision plus prepared revision and
-  return COMMITTED through the official SDK path.
-- Added focused race-tested core and embedded-provider coverage for normal filesystem commits,
-  exact journal records, durable failure state, pre-write stale refusal, and provider resync.
+- docs/plans/huyang-s13-crash-recovery.md
+
+## S13 changes
+
+- Added startup scanning and rollback for prepared, applying, and recovery-required commit
+  journals before a workspace root becomes available.
+- Added exact logical-image matching over bytes, kind, size, mode, and symlink target, inverse
+  durable write ordering, per-path restored progress, and idempotent completed recovery.
+- Added fail-closed journal validation and a final pre-replacement recheck. A third-party image
+  observed before or during recovery is retained, the journal remains RECOVERY_REQUIRED, and
+  workspace open returns `commit_recovery_required`.
+- Added before/after failpoints for every prepared/applying/progress/committed journal write
+  while retaining the canonical before/after apply failpoints.
+- Added `CompensatePlan`: an exact-image provider-staged transaction with its own journal,
+  canonical revision, complete committed-postimage precondition, mode/symlink support, and
+  idempotent committed replay.
+- Added separate-process SIGKILL tests at fourteen commit boundaries and six recovery
+  boundaries, plus incomplete-state, external-race, and exact compensating-undo tests.
+- Kept legacy `undo_edit` unchanged as the compatibility adapter; wrapper migration remains
+  in its later named stages.
 
 ## Verification
 
@@ -79,39 +81,42 @@ Run from /home/igor/Work/huyang on 2026-09-10:
 
 - `go test -race ./internal/workspace ./internal/bridge -run
   'TestJournaledCommit|TestOfficialClientAppliesJournaled|TestOfficialClientPreparesExclusive'
-  -count=1 -v` — exit 0: journal, stale refusal, recovery record, prepare/discard, and real
-  embedded-provider apply/resync cases passed.
-- `go test -race ./internal/workspace ./internal/provider/embed ./internal/bridge -count=1`
-  — exit 0 after the final implementation: all three packages passed.
-- `make smoke` — exit 0: built both binaries and ended unit_edit, unit_testrun,
-  unit_check, unit_index, headless, multi-workspace, debug, and smoke with OK.
-- `go test ./...` — exit 0 after the final implementation; all Go packages passed.
+  -count=1` — exit 0 before editing; the S12 predecessor gate remained green.
+- `go test -race ./internal/workspace -run
+  'TestStartupRecovery|TestCompensating|TestCrashRecovery|TestJournaledCommit' -count=1`
+  — exit 0: all incomplete states, third-party preservation, compensating undo, fourteen
+  separate-process commit kills, and six separate-process recovery kills passed.
+- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0 after the final
+  implementation; both packages passed.
+- `make smoke` — exit 0: built both binaries and ended unit_edit, unit_testrun, unit_check,
+  unit_index, headless, multi-workspace, debug, and smoke with OK.
+- `go test ./...` — exit 0 after the final implementation; every Go package passed.
 - `go vet ./...` — exit 0 with no output after the final implementation.
-- `git diff --check` — exit 0 after the final implementation, artifact, checklist, and
-  handoff updates.
+- `git diff --check` — exit 0 after the final code, test, artifact, checklist, and handoff
+  updates.
 
 ## Decisions and risks
 
-- Journals are retained after COMMITTED for later garbage collection rather than deleted at
-  the success boundary. S13 can therefore exercise and audit the same durable format used by
-  ordinary commits.
-- Write ordering creates/replaces destinations before deleting sources. This narrows the
-  ordinary move failure mode to a recoverable duplicate rather than premature source loss.
-- Exact preconditions include object kind and the complete observed disk snapshot, not content
-  hash alone. Symlinks are copied as links and never followed for mutation.
-- The provider does not stage non-text filesystem objects. Their exact state is owned by the Go
-  journal; regular text buffers still provide the coherent prepared semantic view.
-- A post-write error does not pretend the workspace rolled back. The journal and plan remain
-  RECOVERY_REQUIRED with exact pre/post state and progress; S13 implements startup recovery,
-  kill-step coverage, third-party race protection, and compensating undo.
-- A COMMITTING record found during plan load is conservatively changed to RECOVERY_REQUIRED,
-  but no automatic filesystem recovery is performed ahead of S13.
-- Commit success advances the workspace state sequence exactly once and invalidates cached
-  canonical document observations before returning the new canonical revision.
-- Disk-based formatters/checks/tests remain unavailable in exclusive buffer-backed prepare.
-  Repository verification and authoritative diagnostic evidence remain S16 and S17.
-- Existing unrelated Python language-server diagnostics remain pre-existing; all Go race,
-  test, vet, smoke, and diff gates pass.
-- No install, deployment, installed-plugin update, live MCP restart, live configuration/state
-  mutation, push, or pull request occurred.
-- Exact next stage: S13 — Crash recovery and compensating undo.
+- Startup recovery runs after durable plan loading but before `Open` returns. The provider is
+  not opened until later, so recovery always precedes semantic access to a conflicted root.
+- Recovery accepts only an exact logical preimage or postimage. Device, inode, and mtime cannot
+  be restored by an atomic replacement and are treated as observations; bytes, kind, size,
+  permission bits, and symlink target remain exact.
+- Recovery uses reverse durable commit order and records restored progress after every path.
+  Completed rollback journals are retained and reconcile plan state idempotently on later opens.
+- The final image check occurs immediately before replacement. Ordinary filesystems cannot
+  provide a pathname compare-and-swap, so an arbitrary writer can still race the final check and
+  rename; this unavoidable limitation remains inside the documented cooperative guarantee.
+- A corrupt, foreign-workspace, unsupported, or conflicting journal fails closed before the
+  root opens. No recovery path guesses or overwrites an unrecognized image.
+- Compensating undo is a distinct provider-staged journal whose preimages are the committed
+  postimages. It does not rewind history implicitly and cannot apply after a third-party change.
+- The frozen modern `change_plan` action union is unchanged. Legacy `undo_edit` remains its
+  existing compatibility adapter until the named wrapper migration stages consume the new core.
+- Completed commit and compensation journals remain retained; garbage collection is still later
+  maintenance work.
+- Existing unrelated Python language-server diagnostics remain pre-existing; Go race, test, vet,
+  smoke, and diff gates pass.
+- No sandbox decision or implementation, install, deployment, installed-plugin update, live MCP
+  restart, live configuration/state mutation, push, or pull request occurred.
+- Exact next stage: S14 — Sandbox backend decision spike.

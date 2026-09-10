@@ -22,13 +22,15 @@ const (
 	CommitJournalApplying         CommitJournalState = "applying"
 	CommitJournalCommitted        CommitJournalState = "committed"
 	CommitJournalRecoveryRequired CommitJournalState = "recovery_required"
+	CommitJournalRolledBack       CommitJournalState = "rolled_back"
 )
 
 type CommitPathProgress string
 
 const (
 	CommitPathPending CommitPathProgress = "pending"
-	CommitPathApplied CommitPathProgress = "applied"
+	CommitPathApplied  CommitPathProgress = "applied"
+	CommitPathRestored CommitPathProgress = "restored"
 )
 
 type CommitJournalEntry struct {
@@ -41,16 +43,18 @@ type CommitJournalEntry struct {
 }
 
 type CommitJournal struct {
-	Version          int                      `json:"version"`
-	WorkspaceID      ID                       `json:"workspace_id"`
-	PlanID           string                   `json:"plan_id"`
-	PlanRevision     uint64                   `json:"plan_revision"`
-	PreparedRevision string                   `json:"prepared_revision"`
-	State            CommitJournalState       `json:"state"`
-	Entries          []CommitJournalEntry `json:"entries"`
-	LastError        string                   `json:"last_error,omitempty"`
-	CreatedAt        time.Time                `json:"created_at"`
-	UpdatedAt        time.Time                `json:"updated_at"`
+	Version           int                  `json:"version"`
+	WorkspaceID       ID                   `json:"workspace_id"`
+	PlanID            string               `json:"plan_id"`
+	PlanRevision      uint64               `json:"plan_revision"`
+	PreparedRevision  string               `json:"prepared_revision"`
+	CompensatesPlanID string               `json:"compensates_plan_id,omitempty"`
+	CanonicalRevision string               `json:"canonical_revision,omitempty"`
+	State             CommitJournalState   `json:"state"`
+	Entries           []CommitJournalEntry `json:"entries"`
+	LastError         string               `json:"last_error,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
 }
 
 // planStageRequest reconstructs the exact prepared write set and its filesystem metadata.
@@ -174,18 +178,7 @@ func (w *Workspace) writeCommitJournal(path string, journal *CommitJournal) erro
 }
 
 func (w *Workspace) loadCommitJournal(planID string) (CommitJournal, error) {
-	var journal CommitJournal
-	content, err := os.ReadFile(w.commitJournalPath(planID))
-	if err != nil {
-		return journal, err
-	}
-	if err := json.Unmarshal(content, &journal); err != nil {
-		return journal, err
-	}
-	if journal.Version != commitJournalVersion {
-		return journal, fmt.Errorf("unsupported commit journal version %d", journal.Version)
-	}
-	return journal, nil
+	return loadCommitJournalFile(w.commitJournalPath(planID))
 }
 
 func (w *Workspace) fireCommitFault(point, path string) error {
@@ -343,7 +336,7 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	if journalPath == "" {
 		return PlanRecord{}, errors.New("commit journal state directory is required")
 	}
-	if err := w.writeCommitJournal(journalPath, &journal); err != nil {
+	if err := w.persistCommitJournal(journalPath, &journal, "prepare_journal"); err != nil {
 		return PlanRecord{}, err
 	}
 	if _, err := w.transitionPlan(planID, expected, PlanCommitting, "commit_started", "pending", plan.Preparation); err != nil {
@@ -363,7 +356,7 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 		}
 	}
 	journal.State = CommitJournalApplying
-	if err := w.writeCommitJournal(journalPath, &journal); err != nil {
+	if err := w.persistCommitJournal(journalPath, &journal, "applying_journal"); err != nil {
 		return w.markCommitRecovery(plan, journalPath, &journal, err)
 	}
 	for _, index := range commitEntryOrder(journal.Entries) {
@@ -385,7 +378,7 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 			return w.markCommitRecovery(plan, journalPath, &journal, err)
 		}
 		entry.Progress = CommitPathApplied
-		if err := w.writeCommitJournal(journalPath, &journal); err != nil {
+		if err := w.persistCommitJournal(journalPath, &journal, "progress_journal"); err != nil {
 			return w.markCommitRecovery(plan, journalPath, &journal, err)
 		}
 	}
@@ -402,7 +395,8 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 		return w.markCommitRecovery(plan, journalPath, &journal, err)
 	}
 	journal.State = CommitJournalCommitted
-	if err := w.writeCommitJournal(journalPath, &journal); err != nil {
+	journal.CanonicalRevision = preparation.CanonicalRevision
+	if err := w.persistCommitJournal(journalPath, &journal, "committed_journal"); err != nil {
 		return w.markCommitRecovery(result, journalPath, &journal, err)
 	}
 	w.prepareMu.Lock()

@@ -842,7 +842,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S10 — Transaction intent, validation and preview
 - [x] S11 — Exclusive provider prepare
 - [x] S12 — Journaled commit
-- [ ] S13 — Crash recovery and compensating undo
+- [x] S13 — Crash recovery and compensating undo
 - [ ] S14 — Sandbox backend decision spike
 - [ ] S15 — Isolated sandbox prepare
 - [ ] S16 — Repository formatting and verification pipeline
