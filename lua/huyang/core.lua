@@ -2,7 +2,7 @@
 -- tool waits with, buffer loading with disk synchronisation, the LSP request
 -- wrapper, position addressing, and the small path and project helpers.
 --
--- Every function here runs inside the tool coroutine started by agent99.rpc
+-- Every function here runs inside the tool coroutine started by huyang.rpc
 -- (see lsp.lua for the concurrency model). Nothing here is a tool; the tool
 -- modules (index, edit, install, lsp) build on these.
 

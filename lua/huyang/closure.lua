@@ -25,8 +25,8 @@
 
 local M = {}
 
-local core = require("agent99.core")
-local index = require("agent99.index")
+local core = require("huyang.core")
+local index = require("huyang.index")
 
 -- Bounds. A closure is paid for on every edit that has one, so it buys the
 -- common case (a handful of dependents) and stops rather than turning one

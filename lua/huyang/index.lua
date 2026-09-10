@@ -9,8 +9,8 @@
 
 local M = {}
 
-local core = require("agent99.core")
-local cap = require("agent99.cap")
+local core = require("huyang.core")
+local cap = require("huyang.cap")
 local err, sleep, load_buf, rel_path = core.err, core.sleep, core.load_buf, core.rel_path
 local get_client, request = core.get_client, core.request
 local has_parser, expand_glob, decl_line = core.has_parser, core.expand_glob, core.decl_line
@@ -761,7 +761,7 @@ local function skim(args)
         -- silently missing and a grandchild lifted to the top. Whatever
         -- the grammar could still read is worth printing, but not
         -- without saying what it could not.
-        local syntax = require("agent99.syntax")
+        local syntax = require("huyang.syntax")
         local broken = syntax.first_error(bufnr)
         if broken then
             entry.parse_error = syntax.where(broken)
@@ -2531,7 +2531,7 @@ local function find_symbol(args)
             item.body = symbol_body(m.bufnr, m.entry)
             if i == 1 then
                 pcall(function()
-                    require("agent99.ui").on_read(item.file, m.entry.first)
+                    require("huyang.ui").on_read(item.file, m.entry.first)
                 end)
             end
         end

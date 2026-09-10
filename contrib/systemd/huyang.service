@@ -1,0 +1,13 @@
+[Unit]
+Description=Huyang semantic workspace service
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/huyang
+ExecStart=%h/.local/share/huyang/bin/huyang serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

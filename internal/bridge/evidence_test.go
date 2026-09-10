@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	workspacecore "agent99/internal/workspace"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing.T) {

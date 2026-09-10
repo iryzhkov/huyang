@@ -55,7 +55,7 @@ local function dispatch(payload, complete)
     local co = coroutine.create(function()
         -- LuaJIT pcall is yield-safe, so this catches errors from any resume.
         local ok, result = pcall(function()
-            return require("agent99.lsp").dispatch(payload.tool, payload.args)
+            return require("huyang.lsp").dispatch(payload.tool, payload.args)
         end)
         complete(response_payload(ok, result))
     end)

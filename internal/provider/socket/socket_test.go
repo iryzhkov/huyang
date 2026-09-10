@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"agent99/internal/provider"
+	"github.com/iryzhkov/huyang/internal/provider"
 )
 
 func TestAttachedProviderHasDeterministicIdentityAndExplicitCapabilities(t *testing.T) {

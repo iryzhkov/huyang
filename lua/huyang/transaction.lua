@@ -56,7 +56,7 @@ local function capture(path, before_exists)
     local was_loaded = existing > 0 and vim.api.nvim_buf_is_loaded(existing)
     local buf
     if before_exists then
-        buf = require("agent99.core").load_buf(path)
+        buf = require("huyang.core").load_buf(path)
     else
         if vim.uv.fs_lstat(path) then err("provider preimage changed: %s now exists", path) end
         if existing > 0 then

@@ -6,8 +6,8 @@
 
 local M = {}
 
-local core = require("agent99.core")
-local cap = require("agent99.cap")
+local core = require("huyang.core")
+local cap = require("huyang.cap")
 local err, await, sleep, load_buf, rel_path = core.err, core.await, core.sleep, core.load_buf, core.rel_path
 local project_files, better_sample, has_parser = core.project_files, core.better_sample, core.has_parser
 local enabled_lsp_configs_for, DATA_FILETYPES = core.enabled_lsp_configs_for, core.DATA_FILETYPES
@@ -328,7 +328,7 @@ local function check_project(args)
     if type(root) ~= "string" or root == "" then
         root = vim.fn.getcwd()
     end
-    local okc, config = pcall(require, "agent99.config")
+    local okc, config = pcall(require, "huyang.config")
     local configured = okc and config.options and config.options.post_edit
         and config.options.post_edit.check or nil
 
@@ -573,7 +573,7 @@ local function check_project(args)
     -- Per client, per root, per command. Two clients checking one root each
     -- compare against what they themselves last saw, and neither is handed
     -- the other's idea of "before".
-    local key = require("agent99.client").key(root, cmd)
+    local key = require("huyang.client").key(root, cmd)
     local base = check_baseline[key]
     if unusable then
         out.output = vim.list_slice(lines, 1, CHECK_MAX_LINES)
@@ -722,7 +722,7 @@ local function workspace_support(args)
             local debugger
             if not DATA_FILETYPES[ft] then
                 local okd, dbg = pcall(function()
-                    return require("agent99.dap").debugger_for(ft, root)
+                    return require("huyang.dap").debugger_for(ft, root)
                 end)
                 if okd then debugger = dbg end
             end

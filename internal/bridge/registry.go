@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	workspacecore "agent99/internal/workspace"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 const registryStateVersion = 1

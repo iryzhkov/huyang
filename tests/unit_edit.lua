@@ -7,7 +7,7 @@
 --
 -- Run with: nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_edit.lua
 
-local edit = require("agent99.edit")
+local edit = require("huyang.edit")
 
 local failures = 0
 
@@ -158,7 +158,7 @@ check("map_region leaves an untouched buffer alone",
 -- detection that decides it. No server is needed to check the decision, and
 -- none of the ones the smoke test can start would attach to a .js file
 -- anyway.
-local core = require("agent99.core")
+local core = require("huyang.core")
 
 local function named_buffer(name, lines)
     local bufnr = vim.api.nvim_create_buf(false, true)

@@ -6,8 +6,8 @@
 
 local M = {}
 
-local core = require("agent99.core")
-local index = require("agent99.index")
+local core = require("huyang.core")
+local index = require("huyang.index")
 local err, await, sleep, load_buf, rel_path = core.err, core.await, core.sleep, core.load_buf, core.rel_path
 local assert_writable = core.assert_writable
 local get_client, request, client_for, write_buf = core.get_client, core.request, core.client_for, core.write_buf
@@ -17,8 +17,8 @@ local position_params, fresh_buf, enabled_lsp_configs_for =
     core.position_params, core.fresh_buf, core.enabled_lsp_configs_for
 local resolve_symbol, doc_block_start, decl_block_top =
     index.resolve_symbol, index.doc_block_start, index.decl_block_top
-local closure = require("agent99.closure")
-local cap = require("agent99.cap")
+local closure = require("huyang.closure")
+local cap = require("huyang.cap")
 
 -- Neovim 0.12 moved the diff to vim.text.diff and deprecated vim.diff; one
 -- name for it here keeps the rest of the file indifferent to the version.
@@ -32,7 +32,7 @@ local text_diff = (vim.text and vim.text.diff) or vim.diff
 -- apply_lines silently drop the losing side later, gives the agent an
 -- immediate, actionable error instead of a same-run surprise.
 local function primary_region_conflict(bufnr, first, last)
-    local ok, req = pcall(require, "agent99.request")
+    local ok, req = pcall(require, "huyang.request")
     if not ok then
         return nil
     end
@@ -68,7 +68,7 @@ end
 -- optionally runs linters, then splits what it sees into new, fixed and
 -- pre-existing, so the model reads what its edit caused and nothing else.
 local function post_edit_options(args)
-    local ok, config = pcall(require, "agent99.config")
+    local ok, config = pcall(require, "huyang.config")
     local opts = ok and config.options and config.options.post_edit
     local merged = vim.tbl_deep_extend("force", {
         wait_ms = 4000,
@@ -176,7 +176,7 @@ local function ledger_absorb(bufnr, before_lines, after_lines)
         table.concat(after_lines, "\n") .. "\n",
         { result_type = "indices" })
     if type(hunks) ~= "table" or #hunks == 0 then return end
-    local ledger = require("agent99.edits")
+    local ledger = require("huyang.edits")
     -- Bottom-up, in the old text's numbering: each hunk moves what sits
     -- below it, and a lower hunk's shift never carries an entry above a
     -- higher hunk's footprint.
@@ -1511,7 +1511,7 @@ local watched = {}    -- [bufnr] = { reported_at, after, names, root, label, set
 local carries = {}    -- [client] = { late_diagnostics, deferred_verdicts, still_pending }
 
 local function carry_for(id)
-    id = id or require("agent99.client").current()
+    id = id or require("huyang.client").current()
     if not carries[id] then carries[id] = {} end
     return carries[id]
 end
@@ -1557,7 +1557,7 @@ local function watch_after_report(bufnr, root, names, opts, label, extra)
     -- client's reports only: another client has not been shown any of it,
     -- and discharging its watches here is how it came to be told "none new
     -- to this list" about text it had never seen.
-    local me = require("agent99.client").current()
+    local me = require("huyang.client").current()
     local now = vim.uv.now()
     for b, w in pairs(watched) do
         if b ~= bufnr and w.client == me and vim.api.nvim_buf_is_valid(b) then
@@ -1663,7 +1663,7 @@ function flush_deferred(wait)
                 -- As the client that made the edit: the report says what is
                 -- new to *its* list, and another client's call happening to
                 -- be the one running must not consume or widen it.
-                local report = require("agent99.client").as_client(d.client, function()
+                local report = require("huyang.client").as_client(d.client, function()
                     return post_edit_report(bufnr, d.before, d.root, d.headless, opts, d.full,
                         { since = d.since, acks = d.acks, names = d.names, label = d.label,
                           closure = d.closure, also = d.also, also_names = d.also_names })
@@ -1687,7 +1687,7 @@ end
 local function take_carry()
     collect_late()
     flush_deferred(false)
-    local id = require("agent99.client").current()
+    local id = require("huyang.client").current()
     local out = carries[id] or {}
     carries[id] = {}
     if type(out.late_diagnostics) == "table" and #out.late_diagnostics > 0 then
@@ -1814,7 +1814,7 @@ end
 local prior_state_by_client = {}
 
 local function prior_state()
-    local id = require("agent99.client").current()
+    local id = require("huyang.client").current()
     local state = prior_state_by_client[id]
     if not state then
         state = { last = {}, carried = {}, hinted = false }
@@ -1897,7 +1897,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
             headless = headless, opts = opts, full = full, label = label,
             -- Whose edit it was: the verdict is owed to that client, and
             -- rode out on whichever client's next reply left first.
-            client = require("agent99.client").current(),
+            client = require("huyang.client").current(),
             -- The version the servers were told about, so the deferred check
             -- can use the same exact signal the waiting path does.
             version = vim.lsp.util.buf_versions and vim.lsp.util.buf_versions[bufnr] or nil,
@@ -2127,7 +2127,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- not. When the grammar says the file is broken, finish_edit leads
         -- the verdict with that instead.
         local broken = core.has_parser(ft)
-            and require("agent99.syntax").first_error(bufnr) or nil
+            and require("huyang.syntax").first_error(bufnr) or nil
         if not core.has_parser(ft) then
             report.diagnostics_after = "no language server attached to this file; nothing checked"
         elseif broken then
@@ -2351,7 +2351,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- carries a client id: somebody else is editing this workspace, and
         -- their edits land in the same editor and the same diagnostics.
         if not full and entered > 0 then
-            local okd, others = pcall(function() return require("agent99.edits").others() end)
+            local okd, others = pcall(function() return require("huyang.edits").others() end)
             if okd and others and others.clients > 0 then
                 how_new = how_new .. ("; %d other client%s has edits in this workspace")
                     :format(others.clients, others.clients == 1 and "" or "s")
@@ -2476,7 +2476,7 @@ local function apply_code_action(args)
     -- a token too; those re-run the edit tool with adjusted arguments.
     if entry.edit then
         action_cache[tostring(args.token)] = nil
-        local result = require("agent99.lsp").dispatch(entry.edit, action.args)
+        local result = require("huyang.lsp").dispatch(entry.edit, action.args)
         if type(result) == "table" then
             result.applied = action.title
         end
@@ -2549,7 +2549,7 @@ local function edit_note(args)
 end
 
 local function record_edit(bufnr, entry_path, kind, first, last, old_lines, new_lines)
-    require("agent99.edits").record({
+    require("huyang.edits").record({
         file = vim.api.nvim_buf_get_name(bufnr),
         bufnr = bufnr,
         name_path = entry_path,
@@ -2709,7 +2709,7 @@ local function finish_edit(bufnr, args, before, ledger_path, kind, first, last_o
     -- is already in hand; asking it again is the whole check. Only when the
     -- tree is broken is the pre-edit text reconstructed and parsed too, so a
     -- file that arrived invalid is not blamed on the edit that touched it.
-    local syntax = require("agent99.syntax")
+    local syntax = require("huyang.syntax")
     local broke = syntax.first_error(bufnr)
     if broke then
         local whole = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -3797,7 +3797,7 @@ local function insert_lines(args)
     -- insert over three files took three undo_edit calls, and a caller who
     -- did not check was left with two of them still inserted.
     local reports = {}
-    require("agent99.edits").as_one_step(function()
+    require("huyang.edits").as_one_step(function()
         for _, t in ipairs(targets) do
             settle_before_edit(t.bufnr)
             local before = diag_snapshot()
@@ -3817,7 +3817,7 @@ end
 local MAX_UNDONE_SHOWN = 40
 
 local function undo_edit(args)
-    local edits = require("agent99.edits")
+    local edits = require("huyang.edits")
     local count = (not args.all) and (tonumber(args.count) or 1) or nil
     -- What the other clients sharing this editor have pending, read before
     -- anything is undone: their entries are in their own ledgers and are
@@ -4065,7 +4065,7 @@ local function rename_symbol(args)
     vim.lsp.util.apply_workspace_edit(edit, client.offset_encoding)
     -- One rename is one undo step, however many files it reached: undoing it
     -- file by file leaves the project half-renamed and uncompilable.
-    require("agent99.edits").as_one_step(function()
+    require("huyang.edits").as_one_step(function()
         for _, snap in ipairs(snaps) do
             local new = vim.api.nvim_buf_get_lines(snap.bufnr, 0, -1, false)
             record_edit(snap.bufnr, "rename " .. new_name, "rename", 1, #snap.old, snap.old, new)
@@ -4512,7 +4512,7 @@ local function replace_pattern(args)
     -- One pattern replace is one undo step across every file it changed.
     local own_bufs = {}
     for _, p in ipairs(pending) do own_bufs[p.bufnr] = true end
-    require("agent99.edits").as_one_step(function()
+    require("huyang.edits").as_one_step(function()
         for _, p in ipairs(pending) do
             vim.api.nvim_buf_set_lines(p.bufnr, 0, -1, false, p.new)
             record_edit(p.bufnr, "replace_pattern " .. pattern, "pattern",
@@ -4693,7 +4693,7 @@ local function create_file(args)
     if args.headless then
         write_buf(bufnr)
     end
-    require("agent99.edits").record_file_op({
+    require("huyang.edits").record_file_op({
         file = path,
         kind = "create_file",
         undo = function()
@@ -4774,7 +4774,7 @@ local function move_file(args)
     end
     notify_file_operation("workspace/didRenameFiles", files)
 
-    require("agent99.edits").record_file_op({
+    require("huyang.edits").record_file_op({
         file = to,
         kind = "move_file",
         undo = function()
@@ -4859,7 +4859,7 @@ local function delete_file(args)
     end
     notify_file_operation("workspace/didDeleteFiles", files)
 
-    require("agent99.edits").record_file_op({
+    require("huyang.edits").record_file_op({
         file = path,
         kind = "delete_file",
         undo = function()
@@ -4943,7 +4943,7 @@ local function collapse_blanks(bufnr, row, keep)
 end
 
 -- The files other than the two this move edits, and what breaks in them, are
--- worked out by the shared closure pass in agent99.closure - move_symbols had
+-- worked out by the shared closure pass in huyang.closure - move_symbols had
 -- the first version of it, one hop deep and its own.
 -- Move whole symbols from one file to another.
 --
@@ -5089,7 +5089,7 @@ local function move_symbols(args)
         -- two-line `package x` stub behind, which no build and no linter
         -- complains about and a repeated move/undo litters the package with.
         created_op = function()
-            require("agent99.edits").record_file_op({
+            require("huyang.edits").record_file_op({
             file = to_path,
             kind = "create_file",
             undo = function()
@@ -5203,7 +5203,7 @@ local function move_symbols(args)
     -- them plus the destination's create belong to one undo step: undoing
     -- "half" a move restored the destination while the symbol stayed deleted
     -- from the source, so it existed in neither file.
-    require("agent99.edits").as_one_step(function()
+    require("huyang.edits").as_one_step(function()
         if created_op then created_op() end
         record_edit(from_buf, ("moved out of %s"):format(rel_path(args.from)), "move_symbols",
             1, #from_before, from_before, vim.api.nvim_buf_get_lines(from_buf, 0, -1, false))

@@ -1,10 +1,10 @@
 package bridge
 
 import (
-	workspacecore "agent99/internal/workspace"
 	"context"
 	"encoding/json"
 	"errors"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 	"io"
 	"net"
 	"net/http"

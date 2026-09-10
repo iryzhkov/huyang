@@ -1,4 +1,4 @@
-module agent99
+module github.com/iryzhkov/huyang
 
 go 1.27
 

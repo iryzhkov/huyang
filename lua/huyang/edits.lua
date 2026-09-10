@@ -13,7 +13,7 @@
 
 local M = {}
 
-local client = require("agent99.client")
+local client = require("huyang.client")
 
 local ledgers = {}    -- [client] = { entry, ... }, newest last
 local groups = {}     -- [client] = { seq = n, open = n or nil }
@@ -78,7 +78,7 @@ function M.record(entry)
     current[#current + 1] = entry
     -- Live UI: show the edit in the code window as it happens.
     pcall(function()
-        require("agent99.ui").on_edit(entry)
+        require("huyang.ui").on_edit(entry)
     end)
 end
 
@@ -198,7 +198,7 @@ function M.undo_last(n, skip)
             -- it in the buffer, and only the save refused - by which point
             -- the ledger entry was gone and the hand edit with it.
             pcall(function()
-                require("agent99.core").resync_buf(e.bufnr)
+                require("huyang.core").resync_buf(e.bufnr)
             end)
             local now = vim.api.nvim_buf_get_lines(e.bufnr,
                 e.first - 1, e.first - 1 + e.new_count, false)
@@ -230,7 +230,7 @@ function M.undo_last(n, skip)
         local saved, save_why = true, nil
         if e.bufnr and vim.api.nvim_buf_is_valid(e.bufnr) then
             local okw, res = pcall(function()
-                return require("agent99.core").write_buf(e.bufnr)
+                return require("huyang.core").write_buf(e.bufnr)
             end)
             saved = okw and res ~= false
             if not saved then save_why = "the file changed on disk since; nothing was written" end

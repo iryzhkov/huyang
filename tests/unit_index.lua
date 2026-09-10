@@ -5,7 +5,7 @@
 --
 -- Run with: nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_index.lua
 
-local index = require("agent99.index")
+local index = require("huyang.index")
 
 local failures = 0
 
@@ -80,7 +80,7 @@ check("a file with no parser answers the line it was given",
 -- true totals are known by construction. These arrive as successful replies,
 -- so a check that only asserts a note exists passes against a note whose
 -- number is wrong; every assertion here is on the exact number.
-local cap = require("agent99.cap")
+local cap = require("huyang.cap")
 
 check("cap.note carries all three numbers",
     cap.note(150, 620, "declarations", "find_symbol reaches them")
@@ -187,7 +187,7 @@ local locations = {}
 for i = 0, 99 do locations[#locations + 1] = loc("/tmp/agent99-cap-a.lua", i) end
 for i = 0, 49 do locations[#locations + 1] = loc("/tmp/agent99-cap-b.lua", i) end
 locations[#locations + 1] = loc("/tmp/agent99-cap-c.lua", 0)
-local refs = require("agent99.lsp")._internal.format_locations(locations)
+local refs = require("huyang.lsp")._internal.format_locations(locations)
 check("references counts locations after the cut",
     refs.count == 151 and refs.shown == 100 and refs.total == 151 and refs.dropped == 51, refs)
 check("references counts the files too",

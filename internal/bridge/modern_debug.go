@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"agent99/internal/provider"
-	workspacecore "agent99/internal/workspace"
+	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 const modernDebugTimeout = 5 * time.Minute
+
 func debugActionSchema(properties map[string]any, required []string, actions ...string) map[string]any {
 	names := append([]string(nil), actions...)
 	sort.Strings(names)
@@ -322,7 +323,6 @@ func (d *directWorkspaces) debugProvider(workspace *workspacecore.Workspace) (pr
 	return backend, nil
 }
 
-
 func callModernDebugProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
 	callContext := ctx
 	if callContext == nil {
@@ -509,7 +509,7 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 func debugUnavailable(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
 	result := modernEnvelope(requestID, workspace, "unavailable", code, err.Error(), map[string]any{
 		"coverage": map[string]any{"complete": false, "unavailable": []string{"debug_adapter_or_runtime"}},
-		"repair": map[string]any{"inspect": "workspace_inspect", "detail": err.Error()},
+		"repair":   map[string]any{"inspect": "workspace_inspect", "detail": err.Error()},
 	})
 	result["next"] = []any{map[string]any{"tool": "workspace_inspect", "arguments": map[string]any{
 		"workspace_id": string(workspace.Identity().ID),
@@ -649,4 +649,3 @@ func debugNext(workspace *workspacecore.Workspace, name, action string, data map
 	}
 	return []any{}
 }
-

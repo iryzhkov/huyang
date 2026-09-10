@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"agent99/internal/provider"
+	"github.com/iryzhkov/huyang/internal/provider"
 )
 
 const (
@@ -49,12 +49,12 @@ var (
 
 var debugStopLua = strings.Join([]string{
 	`(function() pcall(function()`,
-	`require("agent99.dap").shutdown_sync() end) return "" end)()`,
+	`require("huyang.dap").shutdown_sync() end) return "" end)()`,
 }, " ")
 
 var saveLua = strings.Join([]string{
 	`(function() local ok, r = pcall(function()`,
-	`return require("agent99.lsp").save_all() end)`,
+	`return require("huyang.lsp").save_all() end)`,
 	`if not ok then return tostring(r) end`,
 	`return table.concat(r, "; ") end)()`,
 }, " ")
@@ -159,10 +159,10 @@ func Attach(root, endpoint string) *Backend {
 func descriptor(root, endpoint string, pid int) provider.Descriptor {
 	sum := sha256.Sum256([]byte("socket\x00" + root))
 	return provider.Descriptor{
-		ID:        provider.ID("socket_" + hex.EncodeToString(sum[:8])),
-		Backend:   "socket",
-		Root:      root,
-		Endpoint:  endpoint,
+		ID:           provider.ID("socket_" + hex.EncodeToString(sum[:8])),
+		Backend:      "socket",
+		Root:         root,
+		Endpoint:     endpoint,
 		ProcessID:    pid,
 		Cancellation: provider.CancellationUnsupported,
 		Capabilities: []provider.Capability{
@@ -222,7 +222,7 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 		return provider.Result{}, err
 	}
 	encoded := base64.StdEncoding.EncodeToString(payload)
-	id, err := remoteExpr(endpoint, fmt.Sprintf("v:lua.Agent99RpcStart('%s')", encoded))
+	id, err := remoteExpr(endpoint, fmt.Sprintf("v:lua.HuyangRpcStart('%s')", encoded))
 	if err != nil {
 		return provider.Result{}, err
 	}
@@ -237,7 +237,7 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 		deadline = request.Context.Deadline
 	}
 	for time.Now().Before(deadline) {
-		out, err := remoteExpr(endpoint, fmt.Sprintf("v:lua.Agent99RpcPoll('%s')", id))
+		out, err := remoteExpr(endpoint, fmt.Sprintf("v:lua.HuyangRpcPoll('%s')", id))
 		if err != nil {
 			return provider.Result{}, err
 		}
@@ -330,7 +330,7 @@ func Alive(endpoint string) bool {
 	if _, err := os.Stat(endpoint); err != nil {
 		return false
 	}
-	out, err := remoteExpr(endpoint, "luaeval('type(Agent99RpcStart)')")
+	out, err := remoteExpr(endpoint, "luaeval('type(HuyangRpcStart)')")
 	return err == nil && strings.TrimSpace(out) == "function"
 }
 
@@ -432,7 +432,7 @@ func remoteExpr(endpoint, expression string) (string, error) {
 		if detail == "" {
 			detail = strings.TrimSpace(output.String())
 		}
-		if strings.Contains(detail, "Agent99Rpc") {
+		if strings.Contains(detail, "HuyangRpc") {
 			detail += " (is the agent99 plugin on the runtimepath of that Neovim?)"
 		}
 		return "", fmt.Errorf("nvim RPC failed: %s", detail)

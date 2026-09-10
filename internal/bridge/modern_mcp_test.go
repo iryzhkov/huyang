@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	workspacecore "agent99/internal/workspace"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pkoukk/tiktoken-go"
@@ -648,14 +648,5 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 				profile, tool.Name, len(encoded), len(encoding.Encode(string(encoded), nil, nil)))
 		}
 		cleanup()
-	}
-	for _, legacyFull := range []bool{false, true} {
-		legacy := openaiTools(legacyFull)
-		compact, err := json.Marshal(legacy)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("profile=legacy-full-%t tools=%d bytes=%d cl100k_base_tokens=%d",
-			legacyFull, len(legacy), len(compact), len(encoding.Encode(string(compact), nil, nil)))
 	}
 }

@@ -1,7 +1,7 @@
 package bridge
 
 // Tool definitions and execution. The LSP tools run inside Neovim (see
-// nvim.go and the plugin's lua/agent99/lsp.lua); the file tools run here,
+// nvim.go and the plugin's lua/huyang/lsp.lua); the file tools run here,
 // rooted at the project.
 
 import (

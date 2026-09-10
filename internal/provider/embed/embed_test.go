@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"agent99/internal/provider"
+	"github.com/iryzhkov/huyang/internal/provider"
 )
 
 type traceLog struct {
@@ -116,7 +116,7 @@ func TestCompletionNotificationsDispatchByRequestID(t *testing.T) {
 	backend.mu.Unlock()
 	var ignored any
 	if err := g.nvim.ExecLua(`
-local lsp = require("agent99.lsp")
+local lsp = require("huyang.lsp")
 lsp.dispatch = function(_, args)
     vim.wait(args.delay)
     return args.value
@@ -406,7 +406,7 @@ func blockDispatch(t *testing.T, backend *Backend) {
 	backend.mu.Unlock()
 	var ignored any
 	err := g.nvim.ExecLua(`
-local lsp = require("agent99.lsp")
+local lsp = require("huyang.lsp")
 lsp.dispatch = function()
     vim.wait(30000)
     return "unexpected completion"

@@ -2,13 +2,14 @@
 
 ## Authority and invariant
 
-- Repository: https://github.com/iryzhkov/agent99
+- Source repository before the split: https://github.com/iryzhkov/agent99
+- New repository targets: https://github.com/iryzhkov/huyang and https://git.ryzhkov.dev/igor/huyang
 - Standalone checkout: /home/igor/Work/huyang
 - Branch: feature/huyang
 - Reviewed base: 1c5302efe9ca51e1701e73df72d903f225fefe04
 - Base ancestry check passed with git merge-base --is-ancestor.
-- No install, deployment, installed-plugin update, live MCP restart, live
-  configuration/state mutation, push, or pull request is authorized.
+- On 2026-09-10 the user explicitly authorized the repository split, push, replacement
+  deployment, live harness/configuration changes, and removal of Agent99 leftovers.
 
 ## Current checkpoint
 
@@ -30,7 +31,12 @@
   - the definition of done is reconciled honestly, the branch is committed and clean, and no
     deployment, installation, live service/configuration mutation, push, or pull request occurs.
 - S20 met every exit gate and is committed with this handoff.
-- Exact next stage: none. Await explicit rollout approval; do not install or deploy.
+- Post-S20 rollout started from commit `83009bc6caa3ef363bbdf140a9d31992c190ee44`.
+- Rollout exit gates: remove the Agent99 product/UI from the Huyang tree; pass `make smoke`,
+  `go test ./...`, `go vet ./...`, and `git diff --check`; publish a standalone
+  `huyang` repository to both upstream Git services; deploy and activate the user service;
+  replace Agent99 MCP registrations and instruction files on laptop, normandy, homelab, and
+  gaming-pc; verify each reachable host and record any queued laptop continuation.
 
 ## Predecessor and stage artifacts
 
@@ -242,8 +248,21 @@ Run from /home/igor/Work/huyang on 2026-09-10:
   behavior. The journal discovers touched loaded buffers, but coverage claims remain evidence-bound.
 - The multi-file journal provides the documented cooperative recovery guarantee, not
   filesystem-wide atomicity. Sandbox fallback/resource and trusted-command risks remain.
-- Compatibility lasts through the first stable release and at least 90 days after modern-default
-  rollout, with one tagged deprecation release and at least 30 days before removal.
-- No deployment, installation, live-service/configuration mutation, installed-plugin update,
-  push, or pull request occurred.
-- Exact next stage: none. Await explicit rollout approval.
+- The user superseded the planned Agent99 executable/UI deprecation window by explicitly
+  requesting complete replacement and removal during rollout.
+- Exact next stage: none. Rollout was explicitly authorized and is tracked below.
+
+## Post-S20 repository split and rollout
+
+- Started from `83009bc6caa3ef363bbdf140a9d31992c190ee44`; the reviewed base remains an ancestor.
+- Renamed the Go module to `github.com/iryzhkov/huyang` and the embedded Lua kernel to
+  `lua/huyang`.
+- Removed the interactive Agent99 UI, embedded LLM agent loop, `agent99-bridge` command,
+  and legacy Python/UI smoke suites. Huyang now ships one executable, `bin/huyang`.
+- The embedded provider is the default; `HUYANG_PROVIDER_BACKEND` is primary while the
+  historical environment alias remains accepted for migration.
+- Added `contrib/systemd/huyang.service`.
+- Pre-publish verification on 2026-09-10: `make smoke`, `go test ./...`,
+  `go vet ./...`, and `git diff --check` all exited 0.
+- Repository publication, host deployment, harness replacement, instruction updates, and
+  per-host verification follow this commit and will be recorded in a deployment record.

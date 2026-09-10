@@ -1,14 +1,14 @@
 package bridge
 
 import (
-	"agent99/internal/provider"
-	workspacecore "agent99/internal/workspace"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 	"os"
 	"path/filepath"
 	"slices"
@@ -314,10 +314,10 @@ func outputEnvelopeSchema() map[string]any {
 			"id":    stringSchema("Opaque plan or transaction identifier."),
 			"state": enumSchema("OPEN", "PREVIEWED", "PREPARING", "CONFLICTED", "FAILED", "PROVISIONAL", "READY", "COMMITTING", "COMMITTED", "RECOVERY_REQUIRED", "ROLLING_BACK", "ROLLED_BACK", "EXPIRED", "DISCARDED"),
 		}, "id", "state"),
-		"data":                  map[string]any{"type": "object", "additionalProperties": true},
-		"evidence":              schemaObject(map[string]any{"ids": map[string]any{"type": "array", "items": stringSchema("Evidence ID.")}, "truncated": map[string]any{"type": "boolean"}}, "ids", "truncated"),
-		"warnings":              map[string]any{"type": "array", "items": stringSchema("Warning.")},
-		"next":                  map[string]any{"type": "array", "maxItems": 2},
+		"data":     map[string]any{"type": "object", "additionalProperties": true},
+		"evidence": schemaObject(map[string]any{"ids": map[string]any{"type": "array", "items": stringSchema("Evidence ID.")}, "truncated": map[string]any{"type": "boolean"}}, "ids", "truncated"),
+		"warnings": map[string]any{"type": "array", "items": stringSchema("Warning.")},
+		"next":     map[string]any{"type": "array", "maxItems": 2},
 		"diagnostic_updates": map[string]any{"type": "array", "items": schemaObject(map[string]any{
 			"cursor": stringSchema("Diagnostic inbox cursor."), "kind": enumSchema("new", "resolved"),
 			"id": stringSchema("Stable diagnostic ID."), "severity": map[string]any{"type": "integer"},

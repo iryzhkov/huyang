@@ -1,4 +1,4 @@
--- LSP query helpers for agent99.
+-- LSP query helpers for huyang.
 --
 -- Every function here runs inside the user's Neovim instance, invoked over
 -- RPC by the MCP bridge (see bridge/agent99_mcp.py). The point of this module
@@ -12,31 +12,31 @@
 -- `col` is accepted as an alternative.
 --
 -- Concurrency model: every tool runs inside a coroutine started by
--- agent99.rpc. Anything that must wait (LSP replies, attach polling) yields
+-- huyang.rpc. Anything that must wait (LSP replies, attach polling) yields
 -- via `await` and is resumed from a callback, so the user's UI never blocks
 -- while a tool call is in flight; the bridge polls for the result with cheap
 -- --remote-expr calls.
 
 local M = {}
 
-local core = require("agent99.core")
-local cap = require("agent99.cap")
+local core = require("huyang.core")
+local cap = require("huyang.cap")
 local err, sleep = core.err, core.sleep
 local load_buf, rel_path, fresh_buf = core.load_buf, core.rel_path, core.fresh_buf
 local get_client, request, resync_open_buffers = core.get_client, core.request, core.resync_open_buffers
 local position_params, line_preview = core.position_params, core.line_preview
 local MAX_LOCATIONS, FRESH_RETRY_MS = core.MAX_LOCATIONS, core.FRESH_RETRY_MS
 
-local index = require("agent99.index")
+local index = require("huyang.index")
 local symbol_kind, ts_outline, symbol_index = index.symbol_kind, index.ts_outline, index.symbol_index
 local annotate_locations = index.annotate_locations
 local skim, workspace_map, document_symbols = index.skim, index.workspace_map, index.document_symbols
 local workspace_tree = index.workspace_tree
-local run_tests = require("agent99.testrun").run_tests
+local run_tests = require("huyang.testrun").run_tests
 local workspace_symbols, ts_query, find_symbol = index.workspace_symbols, index.ts_query, index.find_symbol
 local enclosing_symbols = index.enclosing_symbols
 
-local edit = require("agent99.edit")
+local edit = require("huyang.edit")
 local code_actions, apply_code_action = edit.code_actions, edit.apply_code_action
 local replace_symbol_body, replace_symbol_lines = edit.replace_symbol_body, edit.replace_symbol_lines
 local insert_symbol_tool, undo_edit, rename_symbol = edit.insert_symbol_tool, edit.undo_edit, edit.rename_symbol
@@ -45,7 +45,7 @@ local create_file, move_file, delete_file, move_symbols = edit.create_file, edit
     edit.move_symbols
 local replace_pattern = edit.replace_pattern
 
-local install = require("agent99.install")
+local install = require("huyang.install")
 local check_project, workspace_support, install_language = install.check_project, install.workspace_support,
     install.install_language
 -- The headless bridge saves every modified buffer through this.
@@ -518,7 +518,7 @@ local function buffer_lines(args)
     local first = tonumber(args.first) or 1
     local last = tonumber(args.last) or vim.api.nvim_buf_line_count(bufnr)
     pcall(function()
-        require("agent99.ui").on_read(vim.api.nvim_buf_get_name(bufnr), first)
+        require("huyang.ui").on_read(vim.api.nvim_buf_get_name(bufnr), first)
     end)
     local lines = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false)
     local numbered = {}
@@ -1185,7 +1185,7 @@ local dispatch_table = {
     workspace_symbols = workspace_symbols,
     diagnostics = diagnostics,
     huyang_diagnostic_evidence = function(args)
-        return require("agent99.edit").diagnostic_evidence(args)
+        return require("huyang.edit").diagnostic_evidence(args)
     end,
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
@@ -1217,16 +1217,16 @@ local dispatch_table = {
     -- Internal Huyang transaction calls stage exact bytes without saving or emitting
     -- intermediate edit verdicts. The Go coordinator owns the lease and durable state.
     huyang_prepare = function(args)
-        return require("agent99.transaction").prepare(args)
+        return require("huyang.transaction").prepare(args)
     end,
     huyang_rollback = function(args)
-        return require("agent99.transaction").rollback(args)
+        return require("huyang.transaction").rollback(args)
     end,
     huyang_commit = function(args)
-        return require("agent99.transaction").commit(args)
+        return require("huyang.transaction").commit(args)
     end,
     huyang_transaction_status = function(args)
-        return require("agent99.transaction").status(args)
+        return require("huyang.transaction").status(args)
     end,
     huyang_capture_files = function(args)
         local files, seen = {}, {}
@@ -1276,7 +1276,7 @@ local dispatch_table = {
     -- Internal: the bridge reports a disk read so the code window can follow.
     ui_follow = function(args)
         pcall(function()
-            require("agent99.ui").on_read(args.file, tonumber(args.line) or 1)
+            require("huyang.ui").on_read(args.file, tonumber(args.line) or 1)
         end)
         return { ok = true }
     end,
@@ -1333,7 +1333,7 @@ for name in pairs(PER_FILE_TOOLS) do
                 end
             end
             local reports = {}
-            require("agent99.edits").as_one_step(function()
+            require("huyang.edits").as_one_step(function()
                 for _, f in ipairs(files) do
                     local one = vim.tbl_extend("force", args, { file = f, files = nil })
                     local ok, res = pcall(fn, one)
@@ -1405,12 +1405,12 @@ function M.dispatch(tool, args)
     -- opened its root. The id rides in the arguments, put there by the
     -- bridge (bridge/client.go); a call that carries none is the editor's
     -- own.
-    require("agent99.client").enter(args and args.client)
+    require("huyang.client").enter(args and args.client)
     local fn = dispatch_table[tool]
     if not fn then
         -- The debugger tools live in their own module; they share the
         -- transport, the position addressing and the relativized replies.
-        local okd, dap_tools = pcall(require, "agent99.dap")
+        local okd, dap_tools = pcall(require, "huyang.dap")
         if okd and dap_tools.handles(tool) then
             return relativize(dap_tools.dispatch(tool, args))
         end
@@ -1435,7 +1435,7 @@ function M.dispatch(tool, args)
     return result
 end
 
--- Internals shared with agent99.dap, exported rather than moved so the
+-- Internals shared with huyang.dap, exported rather than moved so the
 -- debugger module can reuse the coroutine helpers, buffer loading and the
 -- symbol index without this file growing further.
 M._internal = {

@@ -374,4 +374,3 @@ func (w *Workspace) compensationRecovery(result CompensationResult, path string,
 	result.State = CommitJournalRecoveryRequired
 	return result, cause
 }
-

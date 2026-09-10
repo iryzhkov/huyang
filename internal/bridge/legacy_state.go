@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	workspacecore "agent99/internal/workspace"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 type legacyReceipt struct {

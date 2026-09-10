@@ -269,7 +269,6 @@ func servedTools() []tool {
 	return standaloneTools(append(out, fileTools...))
 }
 
-
 func textResult(text string, isError bool) map[string]any {
 	return map[string]any{
 		"content": []map[string]any{{"type": "text", "text": text}},
@@ -423,7 +422,6 @@ func dispatchMCPToolContext(ctx context.Context, name string, arguments map[stri
 	}
 	return textResult(out, false), ses.Root
 }
-
 
 func runMCP() {
 	defer closeAllWorkspaces()

@@ -8,9 +8,9 @@
 
 local M = {}
 
-local core = require("agent99.core")
-local index = require("agent99.index")
-local install = require("agent99.install")
+local core = require("huyang.core")
+local index = require("huyang.index")
+local install = require("huyang.install")
 local err, await, rel_path, load_buf = core.err, core.await, core.rel_path, core.load_buf
 
 local OUTPUT_MAX_LINES = 80
@@ -511,7 +511,7 @@ local function run_tests(args)
     if type(root) ~= "string" or root == "" then
         root = vim.fn.getcwd()
     end
-    local okc, config = pcall(require, "agent99.config")
+    local okc, config = pcall(require, "huyang.config")
     local post_edit = okc and config.options and config.options.post_edit or {}
     local path = args.path
     if type(path) == "string" and path ~= "" then
@@ -618,7 +618,7 @@ local function run_tests(args)
     -- Per client, per root, per command: a client that has never run these
     -- tests has no baseline, rather than inheriting one recorded by another
     -- client over a tree in a state it never saw.
-    local key = require("agent99.client").key(root, cmd)
+    local key = require("huyang.client").key(root, cmd)
     local function names_of(list)
         local names = {}
         for _, f in ipairs(list) do names[#names + 1] = f.test end

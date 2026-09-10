@@ -4,7 +4,7 @@
 --
 -- Run with: nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_testrun.lua
 
-local testrun = require("agent99.testrun")
+local testrun = require("huyang.testrun")
 
 local failures = 0
 

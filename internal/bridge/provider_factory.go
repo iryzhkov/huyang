@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agent99/internal/provider"
-	embedprovider "agent99/internal/provider/embed"
-	socketprovider "agent99/internal/provider/socket"
+	"github.com/iryzhkov/huyang/internal/provider"
+	embedprovider "github.com/iryzhkov/huyang/internal/provider/embed"
+	socketprovider "github.com/iryzhkov/huyang/internal/provider/socket"
 )
 
 type providerOpenConfig struct {
@@ -31,18 +31,18 @@ type configuredProviderFactory struct {
 
 func (f configuredProviderFactory) Open(config providerOpenConfig) (provider.Provider, error) {
 	switch f.backend {
-	case "", "socket":
-		return socketprovider.Open(socketprovider.Config{
-			Root: config.Root, InitFile: config.InitFile, Debug: config.Debug,
-		})
-	case "embed":
+	case "", "embed":
 		return embedprovider.Open(embedprovider.Config{
 			Root: config.Root, InitFile: config.InitFile,
 			RuntimePath: config.RuntimePath, Debug: config.Debug,
 		})
+	case "socket":
+		return socketprovider.Open(socketprovider.Config{
+			Root: config.Root, InitFile: config.InitFile, Debug: config.Debug,
+		})
 	default:
 		return nil, fmt.Errorf(
-			"unknown AGENT99_PROVIDER_BACKEND %q (want socket or embed)", f.backend,
+			"unknown HUYANG_PROVIDER_BACKEND %q (want embed or socket)", f.backend,
 		)
 	}
 }
@@ -65,8 +65,10 @@ func (configuredProviderFactory) SweepStale() {
 }
 
 func shippedRuntimePath() string {
-	if configured := strings.TrimSpace(os.Getenv("AGENT99_RUNTIME_PATH")); configured != "" {
-		return configured
+	for _, name := range []string{"HUYANG_RUNTIME_PATH", "AGENT99_RUNTIME_PATH"} {
+		if configured := strings.TrimSpace(os.Getenv(name)); configured != "" {
+			return configured
+		}
 	}
 	candidates := []string{}
 	if executable, err := os.Executable(); err == nil {
@@ -77,13 +79,20 @@ func shippedRuntimePath() string {
 		candidates = append(candidates, cwd)
 	}
 	for _, candidate := range candidates {
-		if _, err := os.Stat(filepath.Join(candidate, "lua", "agent99", "rpc.lua")); err == nil {
+		if _, err := os.Stat(filepath.Join(candidate, "lua", "huyang", "rpc.lua")); err == nil {
 			return candidate
 		}
 	}
 	return ""
 }
 
-var referenceProviders providerFactory = configuredProviderFactory{
-	backend: strings.TrimSpace(os.Getenv("AGENT99_PROVIDER_BACKEND")),
+func providerBackend() string {
+	for _, name := range []string{"HUYANG_PROVIDER_BACKEND", "AGENT99_PROVIDER_BACKEND"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
+
+var referenceProviders providerFactory = configuredProviderFactory{backend: providerBackend()}

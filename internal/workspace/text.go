@@ -256,12 +256,12 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 	}
 	limits := normalizeLimits(options.Limits)
 	workspace := &Workspace{
-		identity:  Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
-		documents: make(map[string]cachedDocument),
-		revisions: make(map[RevisionID]DocumentSnapshot),
-		allowlist: make(map[string]struct{}),
-		limits:    limits,
-		stateDir:  options.StateDir,
+		identity:    Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
+		documents:   make(map[string]cachedDocument),
+		revisions:   make(map[RevisionID]DocumentSnapshot),
+		allowlist:   make(map[string]struct{}),
+		limits:      limits,
+		stateDir:    options.StateDir,
 		sectioner:   options.Sectioner,
 		plans:       make(map[string]PlanRecord),
 		activePlans: make(map[string]struct{}),

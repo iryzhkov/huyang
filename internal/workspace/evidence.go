@@ -140,13 +140,13 @@ type DiagnosticEvidence struct {
 }
 
 type diagnosticState struct {
-	Version    int                            `json:"version"`
-	Sequence   uint64                         `json:"sequence"`
-	Ack        uint64                         `json:"ack"`
-	Items      map[string]DiagnosticItem      `json:"items"`
-	Active     map[string][]string            `json:"active"`
-	Evidence   map[string]DiagnosticEvidence  `json:"evidence"`
-	Notices    []DiagnosticNotice             `json:"notices"`
+	Version            int                            `json:"version"`
+	Sequence           uint64                         `json:"sequence"`
+	Ack                uint64                         `json:"ack"`
+	Items              map[string]DiagnosticItem      `json:"items"`
+	Active             map[string][]string            `json:"active"`
+	Evidence           map[string]DiagnosticEvidence  `json:"evidence"`
+	Notices            []DiagnosticNotice             `json:"notices"`
 	Dimensions         map[string]DiagnosticDimension `json:"dimensions"`
 	ProviderDimensions map[string]DiagnosticDimension `json:"provider_dimensions"`
 }

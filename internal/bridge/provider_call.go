@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agent99/internal/provider"
+	"github.com/iryzhkov/huyang/internal/provider"
 )
 
 var providerRequestSeq atomic.Uint64

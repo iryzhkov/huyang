@@ -22,8 +22,8 @@ import (
 	"strings"
 	"sync"
 
-	"agent99/internal/provider"
-	workspacecore "agent99/internal/workspace"
+	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 // session is the Neovim instance a tool call is routed to, plus the project

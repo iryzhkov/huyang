@@ -217,9 +217,9 @@ var lspTools = []tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"file":       map[string]any{"type": "string", "description": "File containing the symbol."},
-				"name_path":  map[string]any{"type": "string", "description": "Symbol name path; the default for chunks that name none. A name two declarations share (Stack/push, Queue/push) is settled by the chunk's match text or absolute lines when only one of them holds it; otherwise give the full path."},
-				"line":       map[string]any{"type": "integer", "description": "The symbol's declaration line, when several answer to the same name path (find_symbol prints it). A chunk takes its own line= for the symbol it names."},
+				"file":      map[string]any{"type": "string", "description": "File containing the symbol."},
+				"name_path": map[string]any{"type": "string", "description": "Symbol name path; the default for chunks that name none. A name two declarations share (Stack/push, Queue/push) is settled by the chunk's match text or absolute lines when only one of them holds it; otherwise give the full path."},
+				"line":      map[string]any{"type": "integer", "description": "The symbol's declaration line, when several answer to the same name path (find_symbol prints it). A chunk takes its own line= for the symbol it names."},
 				"files": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
@@ -553,7 +553,7 @@ var lspTools = []tool{
 // (the claude provider has its own Read/Grep/Glob).
 var fileTools = []tool{
 	{
-		Name:        "read_file",
+		Name: "read_file",
 		Description: fmt.Sprintf("Read a file with line numbers (offset/limit). A plain read of a "+
 			"file over %d lines returns its skim (the outline) instead of its text; pass "+
 			"offset/limit to read the text of one anyway, and a file that long which nothing "+

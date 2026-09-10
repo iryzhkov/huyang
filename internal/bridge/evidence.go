@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"agent99/internal/provider"
-	workspacecore "agent99/internal/workspace"
+	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 type providerDiagnosticPayload struct {

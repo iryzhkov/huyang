@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agent99/internal/provider"
+	"github.com/iryzhkov/huyang/internal/provider"
 
 	"github.com/neovim/go-client/nvim"
 )
@@ -212,7 +212,7 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 	payload := map[string]any{"tool": request.Operation, "args": request.Arguments}
 	var started string
 	if err := g.nvim.ExecLua(
-		`return require("agent99.rpc").start_notify(...)`,
+		`return require("huyang.rpc").start_notify(...)`,
 		&started, g.channel, id, payload,
 	); err != nil {
 		return provider.Result{}, &provider.Failure{
@@ -256,7 +256,7 @@ func (b *Backend) Save(ctx context.Context) error {
 	finished := make(chan error, 1)
 	go func() {
 		var messages []string
-		err := g.nvim.ExecLua(`return require("agent99.lsp").save_all()`, &messages)
+		err := g.nvim.ExecLua(`return require("huyang.lsp").save_all()`, &messages)
 		if err == nil && len(messages) != 0 {
 			err = errors.New(strings.Join(messages, "; "))
 		}
@@ -295,7 +295,7 @@ func (b *Backend) Close(context.Context) error {
 		if b.config.Debug {
 			finished := make(chan struct{})
 			go func() {
-				_ = g.nvim.ExecLua(`pcall(function() require("agent99.dap").shutdown_sync() end)`, nil)
+				_ = g.nvim.ExecLua(`pcall(function() require("huyang.dap").shutdown_sync() end)`, nil)
 				close(finished)
 			}()
 			select {
@@ -487,7 +487,7 @@ func (b *Backend) bootstrap(ctx context.Context, g *generation) error {
 			}
 		}
 		var handshake map[string]any
-		if err := g.nvim.ExecLua(`return require("agent99.rpc").handshake()`, &handshake); err != nil {
+		if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
 			finished <- fail(provider.FailureBootstrap, "loading agent99 kernel: "+err.Error(), err)
 			return
 		}

@@ -5,7 +5,7 @@
 --
 -- Run with: nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_check.lua
 
-local install = require("agent99.install")
+local install = require("huyang.install")
 
 local failures = 0
 

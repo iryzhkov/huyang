@@ -1,10 +1,10 @@
 -- Debugger tools for agent99: a Debug Adapter Protocol session driven
 -- through nvim-dap inside the Neovim instance the bridge already owns.
 --
--- Everything here runs in the tool coroutine started by agent99.rpc, so a
+-- Everything here runs in the tool coroutine started by huyang.rpc, so a
 -- wait for the next stop is an `await` on a callback the nvim-dap listeners
 -- fire, raced against a timer - the same shape as an LSP request in
--- agent99.lsp. The session, its output and the breakpoints the agent placed
+-- huyang.lsp. The session, its output and the breakpoints the agent placed
 -- live in one module-level table, mirroring check_baseline: one instance,
 -- one session, dying with the instance.
 --
@@ -47,12 +47,12 @@ local function err(fmt, ...)
     error(fmt:format(...), 0)
 end
 
--- Helpers shared with agent99.lsp (await, load_buf, symbol index, ...).
+-- Helpers shared with huyang.lsp (await, load_buf, symbol index, ...).
 local function I()
-    return require("agent99.lsp")._internal
+    return require("huyang.lsp")._internal
 end
 
-local cap = require("agent99.cap")
+local cap = require("huyang.cap")
 
 local function has_dap()
     local ok, dap = pcall(require, "dap")
@@ -71,7 +71,7 @@ local function need_dap()
 end
 
 local function options()
-    local ok, config = pcall(require, "agent99.config")
+    local ok, config = pcall(require, "huyang.config")
     local opts = ok and config.options and config.options.debug or {}
     local idle = tonumber(os.getenv("AGENT99_DEBUG_IDLE_MS")) or opts.idle_ms or 600000
     return { idle_ms = idle }
