@@ -38,7 +38,7 @@ import (
 
 // frictionSource names this tool's directory in the spool. Every tool that
 // writes the spool has its own, so one report can rank them side by side.
-const frictionSource = "agent99"
+const frictionSource = "huyang"
 
 // frictionEvent is one line of the spool.
 type frictionEvent struct {
@@ -76,15 +76,17 @@ var (
 // for it, because this is a shared tool and nobody else's editing should start
 // producing a record of itself because they installed a plugin. Turning it on
 // is a deliberate act: create the file `enabled` in the spool directory, or set
-// AGENT99_FRICTION=1 (TOOLFEEDBACK=1 does the same for every tool that writes
+// HUYANG_FRICTION=1 (TOOLFEEDBACK=1 does the same for every tool that writes
 // this spool). Either way the spool is a file on the local machine and nothing
 // transmits it anywhere; collecting it is a separate, equally deliberate step.
 func frictionEnabled() bool {
-	switch os.Getenv("AGENT99_FRICTION") {
-	case "1":
-		return true
-	case "0":
-		return false
+	for _, name := range []string{"HUYANG_FRICTION", "AGENT99_FRICTION"} {
+		switch os.Getenv(name) {
+		case "1":
+			return true
+		case "0":
+			return false
+		}
 	}
 	switch os.Getenv("TOOLFEEDBACK") {
 	case "1":
@@ -102,9 +104,9 @@ func frictionEnabled() bool {
 
 // frictionDir is where the spool files live, one per host per day.
 func frictionDir() string {
-	// AGENT99_FRICTION_DIR first, then the name the other tools writing this
-	// spool use, so one setting moves all of them together.
-	for _, name := range []string{"AGENT99_FRICTION_DIR", "TOOLFEEDBACK_DIR"} {
+	// The Huyang-specific setting wins, then the old agent99 spelling for
+	// compatibility, then the shared setting that moves every tool together.
+	for _, name := range []string{"HUYANG_FRICTION_DIR", "AGENT99_FRICTION_DIR", "TOOLFEEDBACK_DIR"} {
 		if dir := os.Getenv(name); dir != "" {
 			return dir
 		}
@@ -123,7 +125,7 @@ func frictionDir() string {
 // process. The session id is the one Claude Code exports to its MCP servers,
 // which is the same id its transcript is filed under - that is what lets a
 // later pass line a spooled error up with what the agent did next. Without
-// it (another client, or a bare `agent99-bridge mcp`) a random id at least
+// it (another client, or a bare `huyang mcp`) a random id at least
 // keeps one process's calls together.
 func frictionIdent() {
 	frictionOnce.Do(func() {
@@ -200,7 +202,7 @@ func noteFrictionClient(params map[string]any) {
 }
 
 var (
-	// Relative paths count too: an error naming agent99/bridge/mcp.go has to
+	// Relative paths count too: an error naming internal/bridge/mcp.go has to
 	// fold the same way as one naming /home/igor/src/x.go, or the same failure
 	// splits into a cluster per file.
 	frictionPathRe  = regexp.MustCompile(`(?:[A-Za-z]:)?[\w.~@+-]*(?:/[\w.~@+-]+)+`)

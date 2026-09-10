@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -383,6 +384,7 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			OpenWorldHint:   boolPointer(false),
 		},
 	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		started := time.Now()
 		arguments, err := decodeArguments(request.Params.Arguments)
 		if err != nil {
 			return nil, err
@@ -394,6 +396,12 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			return nil, err
 		}
 		envelope := direct.call(ctx, descriptor.Name, arguments)
+		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
+		logFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
+			map[string]any{
+				"isError": isError,
+				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
+			}, started)
 		pretty, renderErr := renderJSON(compactTextEnvelope(envelope))
 		if renderErr != nil {
 			return nil, renderErr
@@ -401,9 +409,22 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 		return &mcp.CallToolResult{
 			Content:           []mcp.Content{&mcp.TextContent{Text: string(pretty)}},
 			StructuredContent: envelope,
-			IsError:           envelope["outcome"] == "failed" || envelope["outcome"] == "conflict",
+			IsError:           isError,
 		}, nil
 	})
+}
+
+func modernFrictionRoot(direct *directWorkspaces, tool string, arguments map[string]any) string {
+	if workspaceID, _ := arguments["workspace_id"].(string); workspaceID != "" {
+		if workspace := direct.get(workspacecore.ID(workspaceID)); workspace != nil {
+			return workspace.Identity().Root
+		}
+	}
+	if tool == "workspace_open" {
+		root, _ := arguments["root"].(string)
+		return root
+	}
+	return ""
 }
 
 func compactTextEnvelope(envelope map[string]any) map[string]any {

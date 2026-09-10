@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -72,8 +73,8 @@ func TestArgKeysAreSortedNamesOnly(t *testing.T) {
 
 func TestLogFrictionWritesOneEvent(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AGENT99_FRICTION_DIR", dir)
-	t.Setenv("AGENT99_FRICTION", "1")
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "1")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-under-test")
 
 	failed := textResult("Error: no files to search: pass file, files, or glob", true)
@@ -120,21 +121,21 @@ func TestLogFrictionWritesOneEvent(t *testing.T) {
 
 func TestFrictionCanBeTurnedOff(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AGENT99_FRICTION_DIR", dir)
-	t.Setenv("AGENT99_FRICTION", "0")
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "0")
 
 	logFriction("grep", "", map[string]any{}, textResult("ok", false), time.Now())
 
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
-		t.Errorf("AGENT99_FRICTION=0 still wrote %v", entries)
+		t.Errorf("HUYANG_FRICTION=0 still wrote %v", entries)
 	}
 }
 
 func TestFrictionIsOffUntilAskedFor(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AGENT99_FRICTION_DIR", dir)
-	t.Setenv("AGENT99_FRICTION", "")
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "")
 	t.Setenv("TOOLFEEDBACK", "")
 
 	if frictionEnabled() {
@@ -155,5 +156,32 @@ func TestFrictionIsOffUntilAskedFor(t *testing.T) {
 	logFriction("grep", "", map[string]any{}, textResult("ok", false), time.Now())
 	if entries, _ := os.ReadDir(filepath.Join(dir, frictionSource)); len(entries) != 1 {
 		t.Errorf("expected one spool file once enabled, got %d", len(entries))
+	}
+}
+
+func TestModernToolCallsWriteFrictionEvents(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "1")
+
+	session, cleanup := connectOfficialClient(t, profileOrient, newDirectWorkspaces(t.TempDir()))
+	defer cleanup()
+	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+
+	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one modern MCP spool file, got %v (err %v)", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, frictionSource, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event frictionEvent
+	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
+		t.Fatalf("modern MCP spool line is not JSON: %v", err)
+	}
+	if event.Tool != "workspace_open" || !event.OK || event.Root != filepath.Base(root) {
+		t.Fatalf("wrong modern MCP friction event: %+v", event)
 	}
 }
