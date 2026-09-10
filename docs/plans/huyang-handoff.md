@@ -14,100 +14,107 @@
 
 ## Current checkpoint
 
-- Selected stage: S02 — Provider seam with socket reference backend
-- Starting commit: `5a1a0f74271b29a5d8a1412e56e907b24fe18412`
+- Selected stage: S03 — Embedded provider decision spike
+- Starting commit: `943dde3705d855f82b4d3e682fd1e2fbbe49f475`
 - Exit achieved:
-  - provider request/result, health, lifecycle, identity, capability, role, and
-    analysis-profile contracts wrap the existing reference implementation;
-  - deterministic provider IDs and profile routing select one primary on the hot path while
-    modeling complementary providers and declared fallbacks;
-  - the current runtime and tests route through the provider interface without changing public
-    tool names, schemas, responses, or socket behavior;
-  - request context includes cancellation and deadline fields, and the reference backend
-    explicitly reports in-flight cancellation as unsupported;
-  - direct socket/start-poll assumptions are confined to `internal/provider/socket`;
-  - targeted provider tests, `make smoke`, `go test ./...`, `go vet ./...`, and
+  - `github.com/neovim/go-client/nvim` v1.2.1 is pinned and exercised from a
+    disposable test package with `nvim --embed --headless`;
+  - hermetic spike coverage proves inbound requests, unsolicited notifications, cancellation,
+    out-of-order completions, provider death, and bounded stderr handling;
+  - Neovim 0.11.4, 0.12.1, and host 0.12.5 pass, with startup, warm-call overhead, memory,
+    and stderr behavior measured against the socket reference topology;
+  - the committed S03 decision record chooses the low-level library transport with
+    Huyang-owned lifecycle; no disposable binary remains in the repository;
+  - targeted S03 tests, `make smoke`, `go test ./...`, `go vet ./...`, and
     `git diff --check` pass.
-- Status: complete pending the final S02 commit and clean-tree confirmation.
-- Next stage after successful S02: S03 — Embedded provider decision spike
+- Status: complete pending the final S03 commit and clean-tree confirmation.
+- Next stage after successful S03: S04 — Embedded provider production path.
 
 ## Predecessor artifacts
 
-S02 reconciled and consumed these committed predecessor artifacts completely:
+S03 reconciled and consumed these committed predecessor artifacts completely:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
 - `docs/plans/huyang-s01-package-boundary.md`
+- `docs/plans/huyang-s02-provider-seam.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-The S01 commit is `5a1a0f74271b29a5d8a1412e56e907b24fe18412`. Its package-boundary checks,
-frozen-fixture comparison, history, and clean checkpoint reconcile with the current tree.
+The S02 commit is `943dde3705d855f82b4d3e682fd1e2fbbe49f475`. Its provider boundary,
+socket confinement, frozen-fixture comparison, history, full gates, and clean checkpoint
+reconcile with the current tree.
 
-## S02 changes
+## S03 changes
 
-- Added `internal/provider` contracts for provider descriptors, request context, results,
-  health, lifecycle, capabilities, roles, registrations, and named analysis profiles.
-- Added deterministic primary/complementary/fallback routing by language and capability;
-  ordinary legacy calls route through the configured primary rather than choosing a provider.
-- Extracted the complete Neovim socket/start-poll implementation into
-  `internal/provider/socket`, including process ownership, RPC, autosave, shutdown, foreign
-  instance detection, stale endpoint cleanup, timeouts, and Linux parent-death behavior.
-- Added a small backend composition factory so workspace, lifecycle, and routing code depend
-  only on provider contracts.
-- Routed embedded-editor, one-shot tool, agent, and standalone MCP calls through the same
-  provider request path. Legacy client injection, result rendering, autosave, socket/PID
-  compatibility fields, and timeout wording remain intact.
-- Added `docs/plans/huyang-s02-provider-seam.md` and provider/profile/backend tests.
-- Added no embedded MessagePack client, provider decision, public API, service, workspace
-  identity, transaction, dependency, Lua, installation, or deployment change.
+- Pinned `github.com/neovim/go-client` v1.2.1 in `go.mod` and `go.sum`; the
+  selected tag resolves to commit `37f6413db894a93ee7aa43ceafe771a8c13e9222`.
+- Added the test-only `internal/provider/embedspike` package. It owns no production code and
+  exercises `nvim.New` over an explicitly owned `nvim --embed --headless` child.
+- Covered headless startup, embedder client identification, inbound blocking requests,
+  unsolicited notifications, reordered completion notifications, provider-wide cancellation,
+  concurrent-call failure on provider death, and bounded stderr draining.
+- Added an opt-in bounded comparison for startup, trivial warm-call overhead, Linux RSS, and
+  stderr retention against the socket reference topology.
+- Added `docs/plans/huyang-s03-embedded-provider-spike.md`, choosing the pinned library's
+  low-level transport while retaining process lifecycle and cancellation policy in Huyang.
+- Downloaded release archives only into `/tmp/huyang-s03.ZKlt9D` for the version matrix. No
+  binary, production embedded backend, Lua protocol, installation, deployment, live
+  configuration/state, push, or pull request was added or performed.
 
 ## Verification
 
 Run from `/home/igor/Work/huyang` on 2026-09-10:
 
-- `go test ./internal/provider/... ./internal/bridge` — exit 0;
-  `ok agent99/internal/provider`, `ok agent99/internal/provider/socket`, and
-  `ok agent99/internal/bridge`.
-- `agent99 grep(pattern="exec\\.Command.*nvim|--server|--remote-expr|Agent99Rpc(Start|Poll)|remoteExpr|\\.Socket", glob="internal/**/*.go")`
-  — every implementation hit is under `internal/provider/socket/socket.go`; no workspace-core
-  transport primitive remains.
-- `git diff --exit-code 5a1a0f74271b29a5d8a1412e56e907b24fe18412 -- docs/plans/fixtures/huyang-v1alpha1 docs/plans/huyang-tools-v1alpha1.md docs/plans/huyang-s00-baseline.md docs/plans/huyang-s00-model-selection.md docs/plans/huyang-s01-package-boundary.md`
-  — exit 0; all frozen predecessor artifacts are byte-identical.
-- First `make smoke` attempt — exit 2: one timing-sensitive delayed-diagnostic assertion
-  observed its verdict 139 ms earlier than expected; every other suite case passed.
-- Two diagnostic-only reproductions, `python3 tests/drive_headless.py verdict`, each exited 1
-  because lua_ls did not attach in the isolated group. No source or configuration was changed
-  in response to those environment/timing outcomes.
-- Final `make smoke` rerun — exit 0; ended with `debug: OK` and `smoke: OK`, including the
-  complete headless verdict, multi-workspace, and debugger suites.
-- `go test ./...` — exit 0; command package compiled, and bridge/provider/socket packages
-  passed.
+- `go test ./internal/provider/embedspike -v` initially failed to compile because the pinned
+  library names the constant `nvim.EmbedderClientType`; after correction it reached one
+  runtime failure because `nvim_set_client_info` requires non-nil dictionaries. Both were
+  corrected without changing the chosen boundary.
+- `go test -race ./internal/provider/embedspike -count=1` initially found one test-harness
+  race between `Cmd.Wait` and reading `Cmd.ProcessState`. The harness now observes its
+  completion channel instead; the rerun exited 0 with `ok`.
+- `go test ./internal/provider/embedspike -count=1 -v` — exit 0 on host Neovim 0.12.5;
+  all six protocol/lifecycle tests passed and the opt-in measurement test skipped.
+- `HUYANG_NVIM=/tmp/huyang-s03.ZKlt9D/v011/bin/nvim go test
+  ./internal/provider/embedspike -count=1 -v` — exit 0 on Neovim 0.11.4.
+- `HUYANG_NVIM=/tmp/huyang-s03.ZKlt9D/v012/bin/nvim go test
+  ./internal/provider/embedspike -count=1 -v` — exit 0 on Neovim 0.12.1.
+- `HUYANG_NVIM=<0.11.4 path> HUYANG_SPIKE_MEASURE=1 go test
+  ./internal/provider/embedspike -run TestMeasureTransports -count=1 -v` — exit 0;
+  embed/socket startup 6.871/7.529 ms, warm call 0.096/2.870 ms, RSS
+  13,640/13,052 KiB.
+- The equivalent 0.12.1 measurement — exit 0; startup 6.984/8.033 ms, warm call
+  0.100/2.983 ms, RSS 13,800/13,180 KiB.
+- The equivalent host 0.12.5 measurement — exit 0; startup 7.632/8.501 ms, warm call
+  0.094/3.661 ms, RSS 13,608/12,572 KiB.
+- `make smoke` — exit 0; ended with `debug: OK` and `smoke: OK`. The shell printed its
+  expected post-SIGKILL job notification after the success line.
+- `go test ./...` — exit 0; command package had no tests and bridge/provider/socket/spike
+  packages passed.
 - `go vet ./...` — exit 0; no output.
 - `git diff --check` — exit 0; no output.
 
-The final commit and clean-tree checks must be performed after this handoff is saved. The next
-task must reconcile them rather than trusting this sentence.
+Release archives were fetched from official Neovim GitHub release URLs and extracted beneath
+`/tmp`; the repository contains no downloaded or generated binary.
 
 ## Decisions and risks
 
-- The provider contract is transport-independent and carries stable descriptor, health,
-  request/result, save, close, and death-notification semantics. Later stages can add evidence
-  fields without changing the call boundary.
-- Provider IDs derive from backend kind and canonical root; PID and ephemeral endpoint are
-  compatibility metadata and never identity.
-- The default profile has the reference provider as primary for all current capabilities.
-  Complementary and fallback providers are modeled and deterministically ordered, but legacy
-  calls neither aggregate them nor silently fail over.
-- Request deadlines are populated at the bridge boundary. The socket backend advertises
-  `cancellation: unsupported` because killing a polling helper cannot prove the Lua coroutine
-  stopped; S03 must test direct embedded cancellation rather than strengthening this claim.
-- The legacy SHA-1 socket filename prefix, process arguments, RPC payload, polling intervals,
-  tool timeouts, save expression, shutdown behavior, and response fields are preserved.
-- The first smoke run exposed an existing timing-sensitive delayed-verdict check; the complete
-  rerun passed without code changes. S03 should continue treating delayed diagnostic timing as
-  evidence-sensitive, not as transport completion.
+- S03 chooses `github.com/neovim/go-client/nvim` v1.2.1; no blocking protocol
+  incompatibility or reason to write a MessagePack implementation was found.
+- S04 must use `nvim.New` with an explicitly owned child rather than
+  `nvim.NewChildProcess`: Huyang needs the process handle and an independently drained,
+  bounded stderr stream for health, cancellation, parent death, and restart evidence.
+- v1.2.1 has no context-aware per-request API. Until the Lua kernel implements and
+  acknowledges request-specific cancellation, cancellation must terminate the provider,
+  fail all in-flight requests explicitly, increment the epoch, and restart.
+- Completion dispatch is keyed by request ID. Tests intentionally observe a later-submitted
+  completion arriving first; FIFO assumptions are prohibited.
+- The 0.11–0.12 transport matrix uses `--clean -u NONE` and does not prove runtimepath,
+  user-config, LSP, DAP, or agent99-kernel parity. Those are S04 gates, not missing S03 work.
+- Measurements are small local medians and single RSS samples. They justify the transport
+  decision but do not replace S04 tracing or production p95 telemetry.
+- The socket backend remains the comparison oracle and rollback path.
 - The user-approved single-host serial bootstrap remains in effect. No install, deployment,
   live MCP/config/state mutation, push, or pull request occurred.
-- Exact next stage: S03 — Embedded provider decision spike.
+- Exact next stage: S04 — Embedded provider production path.
