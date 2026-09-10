@@ -12,19 +12,21 @@
 
 ## Current checkpoint
 
-- Completed stage: S13 — Crash recovery and compensating undo.
-- Starting commit: 7185f4661d166dce4f2e86b3c3b66cca5aeee8c0.
+- Completed stage: S14 — Sandbox backend decision spike.
+- Starting commit: acbd3cd159d6f453ebb2c2ba08342ce93e8e9041.
 - Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
-  base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read every declared
-  predecessor artifact, and verified S13 was exactly the first incomplete checklist stage.
-- The S12 focused race gate passed before S13 code editing.
-- S13 exit gates are satisfied: startup recovery handles every incomplete journal state before
-  returning an open root; recovery restores exact preimages only from recognized transaction
-  postimages; third-party bytes remain untouched with explicit RECOVERY_REQUIRED; committed undo
-  is a journaled provider-staged compensating transaction; and separate-process SIGKILL coverage
-  spans both sides of every commit/recovery journal and canonical replacement boundary.
-- Only S13 is newly marked complete in the committed checklist.
-- Exact next stage: S14 — Sandbox backend decision spike.
+  base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read the complete plan,
+  frozen tool contract, handoff, and every predecessor/stage artifact named below, and verified
+  S14 was exactly the first incomplete checklist stage.
+- The S13 focused crash-recovery race gate passed before S14 spike editing.
+- S14 exit gates are satisfied: reflink, kernel overlay, fuse-overlay, and safe-copy choices
+  were measured on the available intended host and Btrfs workspace filesystem; exact
+  repository-sized and adversarial fixture copies cover dirty, untracked, ignored, permissions,
+  symlinks, sparse files, isolation, special-file refusal, and cleanup; deterministic selection,
+  fallback, exclusions, quotas, and cleanup are frozen; reflink is the primary and userspace
+  byte copy is the safe fallback; and no production sandbox backend was added.
+- Only S14 is newly marked complete in the committed checklist.
+- Exact next stage: S15 — Isolated sandbox prepare.
 
 ## Predecessor and stage artifacts
 
@@ -56,67 +58,95 @@ S13 adds:
 
 - docs/plans/huyang-s13-crash-recovery.md
 
-## S13 changes
+S14 adds:
 
-- Added startup scanning and rollback for prepared, applying, and recovery-required commit
-  journals before a workspace root becomes available.
-- Added exact logical-image matching over bytes, kind, size, mode, and symlink target, inverse
-  durable write ordering, per-path restored progress, and idempotent completed recovery.
-- Added fail-closed journal validation and a final pre-replacement recheck. A third-party image
-  observed before or during recovery is retained, the journal remains RECOVERY_REQUIRED, and
-  workspace open returns `commit_recovery_required`.
-- Added before/after failpoints for every prepared/applying/progress/committed journal write
-  while retaining the canonical before/after apply failpoints.
-- Added `CompensatePlan`: an exact-image provider-staged transaction with its own journal,
-  canonical revision, complete committed-postimage precondition, mode/symlink support, and
-  idempotent committed replay.
-- Added separate-process SIGKILL tests at fourteen commit boundaries and six recovery
-  boundaries, plus incomplete-state, external-race, and exact compensating-undo tests.
-- Kept legacy `undo_edit` unchanged as the compatibility adapter; wrapper migration remains
-  in its later named stages.
+- docs/plans/huyang-s14-sandbox-backend.md
+- docs/plans/fixtures/huyang-s14-sandbox-backends.json
+- internal/sandboxspike/sandbox_spike_test.go
+
+## S14 changes
+
+- Added a decision record selecting capability-probed per-file reflinks as the primary sandbox
+  materializer and a non-hardlink userspace byte copy as the portable safe fallback.
+- Added a machine-readable host, filesystem, measurement, selection, quota, exclusion, and
+  cleanup fixture.
+- Added a test-only sandbox spike package. It preserves and verifies dirty, untracked, ignored,
+  mode, symlink, sparse, binary, and in-tree Git entries; proves source/sandbox inode separation
+  and write isolation; rejects special files; and reports host backend capabilities.
+- Measured the exact 49,361,676-byte checkout on compressed Btrfs: clone-only copy completed in
+  0.027 s and forced byte copy in 0.083 s in bounded single-run observations.
+- Probed overlay choices: direct kernel overlay mount required privilege, user-namespace overlay
+  mounted successfully, and fuse-overlayfs was absent. Overlay was rejected because an exact
+  immutable lower tree still requires the chosen reflink/copy snapshot, after which namespace,
+  whiteout, ownership, and cleanup machinery add cost without satisfying another S15 invariant.
+- Defined conservative S15 starting quotas, exact-by-default inclusion of ignored/untracked
+  state, fail-closed special/path policy, whole-candidate fallback, source-change conflict,
+  destination-manifest validation, ownership markers, and confined cleanup.
+- Added no production sandbox backend, provider, transaction behavior, deployment, installation,
+  live configuration/state change, push, or pull request.
 
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test -race ./internal/workspace ./internal/bridge -run
-  'TestJournaledCommit|TestOfficialClientAppliesJournaled|TestOfficialClientPreparesExclusive'
-  -count=1` — exit 0 before editing; the S12 predecessor gate remained green.
 - `go test -race ./internal/workspace -run
   'TestStartupRecovery|TestCompensating|TestCrashRecovery|TestJournaledCommit' -count=1`
-  — exit 0: all incomplete states, third-party preservation, compensating undo, fourteen
-  separate-process commit kills, and six separate-process recovery kills passed.
-- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0 after the final
-  implementation; both packages passed.
+  — exit 0 before spike editing; the S13 predecessor gate remained green.
+- `HUYANG_SANDBOX_SPIKE_DIR=/home/igor/Work go test -race -v
+  ./internal/sandboxspike -count=1` — exit 0: both reflink and safe-copy fixture paths passed
+  on the intended Btrfs workspace filesystem; special-file refusal and capability reporting
+  passed; fuse-overlayfs was reported absent.
+- `go test -v ./internal/sandboxspike -count=1` — exit 0: clone-only was unsupported on the
+  system temporary filesystem and skipped as unavailable, while the safe-copy fallback,
+  manifest equality, mutation isolation, special-file refusal, and capability test passed.
+- Whole-checkout measurement commands using
+  `cp -a --reflink=always --sparse=auto SOURCE/. DEST` and
+  `cp -a --reflink=never --sparse=always SOURCE/. DEST` — both exit 0; elapsed times were
+  0.027 s and 0.083 s respectively for 49,361,676 logical bytes.
+- Kernel-overlay probe — direct `mount -t overlay` exit 32 (`must be superuser`);
+  `unshare -Urnm ... mount -t overlay` exit 0; `kernel.unprivileged_userns_clone=1`.
+- `jq empty docs/plans/fixtures/huyang-s14-sandbox-backends.json` — exit 0.
 - `make smoke` — exit 0: built both binaries and ended unit_edit, unit_testrun, unit_check,
   unit_index, headless, multi-workspace, debug, and smoke with OK.
-- `go test ./...` — exit 0 after the final implementation; every Go package passed.
-- `go vet ./...` — exit 0 with no output after the final implementation.
-- `git diff --check` — exit 0 after the final code, test, artifact, checklist, and handoff
+- `go test ./...` — exit 0; every Go package, including the test-only sandbox spike, passed.
+- `go vet ./...` — exit 0 with no output.
+- `git diff --check` — exit 0 after the final artifact, fixture, checklist, and handoff
   updates.
 
 ## Decisions and risks
 
-- Startup recovery runs after durable plan loading but before `Open` returns. The provider is
-  not opened until later, so recovery always precedes semantic access to a conflicted root.
-- Recovery accepts only an exact logical preimage or postimage. Device, inode, and mtime cannot
-  be restored by an atomic replacement and are treated as observations; bytes, kind, size,
-  permission bits, and symlink target remain exact.
-- Recovery uses reverse durable commit order and records restored progress after every path.
-  Completed rollback journals are retained and reconcile plan state idempotently on later opens.
-- The final image check occurs immediately before replacement. Ordinary filesystems cannot
-  provide a pathname compare-and-swap, so an arbitrary writer can still race the final check and
-  rename; this unavoidable limitation remains inside the documented cooperative guarantee.
-- A corrupt, foreign-workspace, unsupported, or conflicting journal fails closed before the
-  root opens. No recovery path guesses or overwrites an unrecognized image.
-- Compensating undo is a distinct provider-staged journal whose preimages are the committed
-  postimages. It does not rewind history implicitly and cannot apply after a third-party change.
-- The frozen modern `change_plan` action union is unchanged. Legacy `undo_edit` remains its
-  existing compatibility adapter until the named wrapper migration stages consume the new core.
-- Completed commit and compensation journals remain retained; garbage collection is still later
-  maintenance work.
-- Existing unrelated Python language-server diagnostics remain pre-existing; Go race, test, vet,
-  smoke, and diff gates pass.
-- No sandbox decision or implementation, install, deployment, installed-plugin update, live MCP
+- Reflink is the primary because clone-only succeeds on the intended Btrfs source/destination
+  pair, creates distinct inodes, retains exact fixture state, and makes repository-sized
+  snapshots cheaply. Backend selection probes every filesystem pair and does not trust a
+  filesystem name.
+- Userspace byte copy is the mandatory fallback. It preserves the same manifest without source
+  aliases and works on the temporary filesystem where reflink is unsupported.
+- GNU `cp` is only the spike oracle. S15 owns a Go implementation with clone-only semantics
+  and an internal byte-copy walker, cancellation, stable source inventory, and destination
+  verification.
+- A clone failure discards the entire candidate before safe-copy retry. Source changes,
+  permissions, special files, quotas, and cancellation fail closed rather than being disguised
+  as backend fallback.
+- Exact snapshots include dirty, untracked, ignored, generated, and in-tree Git entries.
+  Explicit trusted exclusions are allowed only with provisional coverage and can never remove
+  a declared mutation target.
+- Kernel overlay inside an unprivileged user namespace is technically available on this host,
+  but it cannot use the mutable canonical tree as a truthful lower layer. Pre-snapshotting that
+  lower layer removes its materialization advantage while retaining namespace/mount/whiteout
+  lifecycle risk, so it is not selected. Fuse-overlayfs is absent and is not installed.
+- The default quotas are conservative starting points, not measured maxima. S15 must expose
+  queueing/resource failures and validate stable source and destination manifests before a
+  sandbox provider starts.
+- Sparse logical size, physical reservation, COW-growth headroom, cleanup ownership markers,
+  and special-file refusal are explicit because copying bytes alone does not bound disk or
+  deletion risk.
+- Measurements cover the available intended development host and one exact repository-sized
+  tree. They are single-run observations, not performance promises; the capability probe plus
+  safe fallback is the portability mechanism.
+- The temporary whole-checkout probe directory was moved to the desktop Trash after
+  measurement; the smaller test directories were removed by their test cleanup.
+- Existing unrelated Python language-server diagnostics remain pre-existing; the focused race,
+  smoke, Go test, and Go vet gates pass.
+- No production sandbox implementation, install, deployment, installed-plugin update, live MCP
   restart, live configuration/state mutation, push, or pull request occurred.
-- Exact next stage: S14 — Sandbox backend decision spike.
+- Exact next stage: S15 — Isolated sandbox prepare.

@@ -1,0 +1,81 @@
+{
+  "fixture_version": "huyang.sandbox/s14-v1",
+  "captured": "2026-09-10",
+  "host": {
+    "name": "omarchy-normandy",
+    "kernel": "Linux 7.1.9-arch1-2 x86_64",
+    "workspace_filesystem": "btrfs",
+    "workspace_mount": "/home",
+    "workspace_mount_options": ["rw", "relatime", "compress=zstd:3", "ssd", "space_cache=v2"],
+    "available_bytes": 49688027136,
+    "cp": "GNU coreutils 9.11",
+    "fuse_overlayfs": "unavailable",
+    "kernel_overlay": {
+      "module": "present",
+      "direct_mount_exit": 32,
+      "direct_mount_result": "requires superuser",
+      "unprivileged_user_namespace_mount_exit": 0,
+      "unprivileged_userns_clone": true
+    }
+  },
+  "repository_snapshot": {
+    "source": "/home/igor/Work/huyang",
+    "logical_bytes_including_git_and_worktree": 49361676,
+    "allocated_bytes_reported_by_du": 50315264,
+    "reflink": {
+      "command": "cp -a --reflink=always --sparse=auto SOURCE/. DEST",
+      "elapsed_seconds": 0.027,
+      "result": "pass"
+    },
+    "safe_copy": {
+      "command": "cp -a --reflink=never --sparse=always SOURCE/. DEST",
+      "elapsed_seconds": 0.083,
+      "result": "pass"
+    }
+  },
+  "adversarial_fixture": {
+    "contents": ["dirty bytes", "untracked file", "ignored binary", "mode-0600 file", "executable mode", "relative symlink", "sparse file", "git metadata"],
+    "reflink_elapsed_seconds": 0.002632213,
+    "safe_copy_elapsed_seconds": 0.001750682,
+    "source_inode_alias": false,
+    "sandbox_write_escaped": false,
+    "special_file_policy": "reject"
+  },
+  "selection": {
+    "primary": "reflink",
+    "fallback": "safe_copy",
+    "overlay": "not selected",
+    "fuse_overlay": "not selected",
+    "hardlinks": "prohibited between canonical and sandbox trees",
+    "algorithm": [
+      "inventory with lstat and enforce quotas before materialization",
+      "when source and destination are on one filesystem, probe a regular file with clone-only semantics",
+      "materialize the entire candidate with clone-only semantics",
+      "on any clone failure, remove the whole candidate and retry safe-copy in a fresh directory",
+      "otherwise use safe-copy directly",
+      "verify the destination manifest before starting its provider"
+    ]
+  },
+  "default_quotas_for_s15": {
+    "files": 200000,
+    "logical_regular_bytes": 17179869184,
+    "materialized_bytes_safe_copy": 4294967296,
+    "wall_seconds": 60,
+    "sandboxes_per_workspace": 2,
+    "sandboxes_service_wide": 4,
+    "minimum_free_headroom_bytes": 1073741824
+  },
+  "exclusion_policy": {
+    "default": "include every canonical entry, including dirty, untracked, ignored, and in-tree .git metadata",
+    "always_excluded": ["Huyang service state outside the canonical root", "sandbox destination", "Unix sockets", "FIFOs", "devices"],
+    "symlinks": "copy link objects without following",
+    "configured_exclusions": "allowed only as an explicit policy that makes exact-workspace verification provisional and cannot exclude a declared mutation target"
+  },
+  "cleanup_policy": {
+    "directory_mode": "0700",
+    "close_provider_before_removal": true,
+    "remove_failed_candidates_before_fallback": true,
+    "startup_reap": "remove unreferenced incomplete sandboxes after validating ownership marker and confined real path",
+    "failure": "retain a bounded recovery record and report cleanup_required; never follow a sandbox symlink"
+  }
+}

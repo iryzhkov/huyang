@@ -843,7 +843,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S11 — Exclusive provider prepare
 - [x] S12 — Journaled commit
 - [x] S13 — Crash recovery and compensating undo
-- [ ] S14 — Sandbox backend decision spike
+- [x] S14 — Sandbox backend decision spike
 - [ ] S15 — Isolated sandbox prepare
 - [ ] S16 — Repository formatting and verification pipeline
 - [ ] S17 — Diagnostic evidence and provenance
