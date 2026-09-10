@@ -76,12 +76,17 @@ type DocumentSnapshot struct {
 type ConflictCode string
 
 const (
-	ConflictWorkspaceIDRequired ConflictCode = "workspace_id_required"
-	ConflictWorkspaceIDMismatch ConflictCode = "workspace_id_mismatch"
-	ConflictRevisionRequired    ConflictCode = "revision_required"
-	ConflictWorkspaceEpoch      ConflictCode = "workspace_epoch_changed"
-	ConflictDocumentChanged     ConflictCode = "document_content_changed"
-	ConflictDocumentDeleted     ConflictCode = "document_deleted"
+	ConflictWorkspaceIDRequired    ConflictCode = "workspace_id_required"
+	ConflictWorkspaceIDMismatch    ConflictCode = "workspace_id_mismatch"
+	ConflictRevisionRequired       ConflictCode = "revision_required"
+	ConflictWorkspaceEpoch         ConflictCode = "workspace_epoch_changed"
+	ConflictDocumentChanged        ConflictCode = "document_content_changed"
+	ConflictDocumentDeleted        ConflictCode = "document_deleted"
+	ConflictTargetDeleted          ConflictCode = "target_deleted"
+	ConflictSymbolAmbiguous        ConflictCode = "symbol_ambiguous"
+	ConflictSymbolMoved            ConflictCode = "symbol_moved"
+	ConflictSymbolSignatureChanged ConflictCode = "symbol_signature_changed"
+	ConflictFormatOnlyRelocation   ConflictCode = "format_only_relocation"
 )
 
 type Conflict struct {
@@ -122,6 +127,9 @@ type Workspace struct {
 	stateDir  string
 	sectioner Sectioner
 	failures  []EnvironmentFailure
+
+	handlesMu sync.Mutex
+	handles   *handleStore
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {

@@ -6,37 +6,28 @@
 - Standalone checkout: `/home/igor/Work/huyang`
 - Branch: `feature/huyang`
 - Reviewed base: `1c5302efe9ca51e1701e73df72d903f225fefe04`
-- Base ancestry check: passed with
+- Base ancestry check passed with
   `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`.
-- Deployment boundary: no install, deployment, installed-plugin update, live MCP restart, live
+- No install, deployment, installed-plugin update, live MCP restart, live
   configuration/state mutation, push, or pull request is authorized.
-- Dependency protocol: clean branch, committed checklist in the implementation plan, and this
-  handoff. Exactly one ungated successor is queued after a successful stage.
 
 ## Current checkpoint
 
-- Completed stage: S08 — Shared service and scheduler.
-- Starting commit: `ed7171cb8ede35c5ad931077c69fd6f2c218e6e7`.
-- Reconciliation before implementation confirmed `feature/huyang` clean after fetching
-  origin, the reviewed base in history, S07 committed at the starting commit, and S08 as the
-  first incomplete checklist stage.
-- S08 exit gates are satisfied:
-  - `huyang serve` owns a durable modern workspace/idempotency registry through a private
-    Unix control socket and optional authenticated loopback stateless HTTP;
-  - `huyang mcp --profile full|orient|edit|debug` is a state-free proxy, defaults to
-    `full`, and the fixed HTTP routes expose the frozen 17/8/13/12 catalogs;
-  - persisted workspace identity, state sequence, provider epoch, and completed stateful
-    receipts survive service restart;
-  - explicit scheduler classes serialize same-workspace canonical/provider work, keep
-    workspace lanes independent, and enforce cancellable provider/external-job quotas;
-  - official SDK tests prove adapter reconnect, service restart, durable replay, provider
-    epoch restart, fixed routes, loopback/auth safety, and ambiguous-route elimination;
-  - focused race, full smoke, Go test/vet, and diff checks pass.
-- Exact next stage: S09 — Semantic handles.
+- Completed stage: S09 — Semantic handles.
+- Starting commit: `590beff7bd14e4bdd7285ed2569e96e2c12aba5d`.
+- Reconciliation before implementation fetched origin and confirmed a clean
+  `feature/huyang` branch, the reviewed base in branch history, S08 committed at the
+  starting commit, and S09 as exactly the first incomplete checklist stage.
+- S09 exit gates are satisfied: inspectable epoch-bound range/symbol handles, explicit
+  exact/relocated/conflicted resolution, safe adversarial relocation, complete frozen
+  result-set coverage, monotonic refinement lineage, and opaque-handle support on the
+  existing one-operation edit path.
+- Only S09 is marked complete in the committed checklist.
+- Exact next stage: S09H — Read-only Git source provenance.
 
-## Predecessor artifacts
+## Predecessor and stage artifacts
 
-S08 reconciled and consumed these committed predecessor artifacts completely:
+These tracked artifacts were read completely before implementation:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
@@ -47,32 +38,32 @@ S08 reconciled and consumed these committed predecessor artifacts completely:
 - `docs/plans/huyang-s05-workspaces-revisions.md`
 - `docs/plans/huyang-s06-text-core-documents.md`
 - `docs/plans/huyang-s07-mcp-sdk-direct.md`
+- `docs/plans/huyang-s08-service-scheduler.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-S08 adds the committed predecessor artifact for S09:
+S09 adds:
 
-- `docs/plans/huyang-s08-service-scheduler.md`
+- `docs/plans/huyang-s09-semantic-handles.md`
 
-## S08 changes
+## S09 changes
 
-- Added `cmd/huyang` and built `bin/huyang` alongside the unchanged
-  `bin/agent99-bridge` compatibility binary.
-- Added `huyang serve` with a mode-0600 Unix control socket and concurrent official-SDK
-  sessions sharing one service registry.
-- Added the thin `huyang mcp` adapter, full-by-default fixed profiles, and a bounded control
-  handshake that carries no workspace ownership.
-- Added optional numeric-loopback-only Streamable HTTP on `/mcp`, `/mcp/orient`,
-  `/mcp/edit`, and `/mcp/debug`, protected by a durable mode-0600 bearer credential.
-- Added a versioned, fsync-and-rename registry for workspace definitions, explicit IDs,
-  provider epochs, state sequences, and completed idempotency receipts.
-- Made repeated canonical workspace opens reuse identity and made concurrent duplicate
-  stateful requests wait for the first durable result.
-- Added explicit `pure_read`, `provider_read`, `canonical_write`,
-  `sandbox_write`, and `external_job` scheduler classes with configurable quotas.
-- Added service, adapter, restart, retry, HTTP, safety, scheduler, and restored-identity tests;
-  marked only S08 complete.
+- Added service-local opaque range, match, symbol, and result-set handles with
+  inspectable locator records, configurable TTL and workspace-epoch invalidation.
+- Added explicit exact, relocated, and conflicted resolution. Range relocation requires
+  a unique content/anchor match; semantic relocation uses parser sections, normalized
+  node/signature hashes and file identity.
+- Added adversarial handling for formatting, movement, overload/duplicate ambiguity,
+  rename, signature change, and delete/recreate so no unsafe case silently rebinds.
+- Search now freezes the full unpaged match set behind an opaque result-set handle and
+  reports source coverage, revisions, counts, overlap and all-match eligibility.
+- Added monotonic result-set refinement with inherited coverage, parent lineage, and
+  retained/eliminated counts. Current and explicitly historical set types are distinct.
+- Updated modern MCP search, read, symbol-find and existing one-operation edit surfaces
+  to issue or accept opaque handles while retaining human range locators.
+- Added focused workspace and official-SDK bridge tests. No S09H Git provenance or S10
+  durable transaction intent was implemented.
 
 ## Verification
 
@@ -80,52 +71,36 @@ Run from `/home/igor/Work/huyang` on 2026-09-10:
 
 - `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0:
   `ok agent99/internal/workspace` and `ok agent99/internal/bridge`.
-- The focused S08 cases inside that race run cover scheduler serialization/separation,
-  provider-quota cancellation, adapter reconnect, daemon restart, durable replay, provider
-  epoch persistence, full-default stdio proxying, all four HTTP catalogs, bearer enforcement,
-  loopback restriction, and safe socket-path handling.
-- `make smoke` — exit 0; built both `bin/agent99-bridge` and `bin/huyang`, then
-  reported `unit_edit: OK`, `unit_testrun: OK`, `unit_check: OK`,
-  `unit_index: OK`, `headless: OK`, `multi-workspace: OK`, `debug: OK`, and
-  `smoke: OK`.
-- `go test ./...` — exit 0; both command packages and all bridge, provider, embed,
-  embedspike, socket, and workspace packages passed.
+- The focused race run covers exact inspection, TTL/epoch invalidation, unique range
+  relocation and opaque edits; complete/capped/non-overlapping/stale result sets;
+  monotonic refinement and historical/current separation; and format, move, signature,
+  rename, duplicate and delete/recreate symbol cases.
+- `make smoke` — exit 0; built `bin/agent99-bridge` and `bin/huyang`,
+  then reported `unit_edit: OK`, `unit_testrun: OK`, `unit_check: OK`,
+  `unit_index: OK`, `headless: OK`, `multi-workspace: OK`,
+  `debug: OK` and `smoke: OK`.
+- `go test ./...` — exit 0; all command, bridge, provider and workspace packages
+  passed.
 - `go vet ./...` — exit 0; no output.
 - `git diff --check` — exit 0 after the final documentation update; no output.
-- `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`
-  — exit 0 before the stage.
-
-## S08 service interfaces
-
-The new command surfaces are:
-
-```sh
-huyang serve [--socket PATH] [--state-dir PATH] [--http 127.0.0.1:PORT] \
-  [--provider-quota N] [--external-job-quota N]
-huyang mcp [--profile full|orient|edit|debug] [--socket PATH]
-```
-
-The Unix socket is the portable local adapter boundary. HTTP is off by default, accepts only
-numeric loopback binds, and writes its bearer credential to `<state-dir>/http-token`.
-The official SDK client tests exercise both boundaries; no service was installed or deployed.
 
 ## Decisions and risks
 
-- The stdio adapter deliberately proxies newline-delimited MCP bytes rather than owning an SDK
-  server or registry; disconnect/reconnect therefore cannot discard shared correctness state.
-- The service handshake selects only one frozen modern profile. Legacy remains on the existing
-  `agent99-bridge` path and no initialization field or mid-session catalog change is used.
-- `workspace_open` is safe to retry because canonical project roots and exact sorted document
-  allowlists reuse an existing ID. All subsequent routing remains explicit by workspace ID.
-- A completed stateful result is durable before concurrent duplicates are released. A registry
-  write failure is surfaced on the result and never silently advertised as persisted.
-- S08 persists provider epoch transitions and supplies bounded provider scheduling, but modern
-  semantic calls remain the S07 stable unavailable handlers until S09 introduces semantic
-  handles. S08 does not claim provider-backed semantic coverage.
-- `sandbox_write` is intentionally one workspace lane in S08; transaction-specific parallel
-  sandboxes belong to S15.
-- Pure native reads can run beside a write because the workspace core provides its own coherent
-  locking; canonical/provider mutations remain serialized per workspace.
-- No install, deployment, installed-plugin update, live MCP restart, live configuration/state
-  mutation, push, or pull request occurred.
-- Exact next stage: S09 — Semantic handles.
+- Handles are deliberately in-memory and service-local. Workspace epoch changes make
+  restart invalidation explicit; persistence is outside S09.
+- Presentation paging never truncates the private frozen match set. All-match resolution
+  additionally requires complete, non-overlapping coverage and unchanged file manifest,
+  document revisions, workspace revision and epoch.
+- Refinements only add predicates and cannot broaden inherited coverage. Historical sets
+  use a separate source kind, but their Git-backed production is deferred to S09H.
+- Semantic symbol quality is bounded by the configured section-capable parser/provider.
+  Without one, `workspace_symbol_find` remains truthfully partial; content-anchored
+  range and match handles remain available in the provider-independent text core.
+- Opaque handles augment the existing human locator forms. The edit integration is the
+  existing single-operation preparation/application path, not a durable multi-operation
+  plan.
+- Language-server diagnostics on changed Go files contain only modernization hints and no
+  errors or warnings.
+- No install, deployment, installed-plugin update, live MCP restart, live
+  configuration/state mutation, push, or pull request occurred.
+- Exact next stage: S09H — Read-only Git source provenance.

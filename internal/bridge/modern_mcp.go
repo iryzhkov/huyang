@@ -129,6 +129,22 @@ func buildModernTools() []modernTool {
 	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "target": targetSchema()}
 	stateful := statefulProperties()
 	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"}
+	refinement := schemaObject(map[string]any{
+		"path": stringSchema("Additional path substring."),
+		"matched_text": schemaObject(map[string]any{
+			"literal": stringSchema("Additional literal match constraint."),
+			"regex":   stringSchema("Additional regular-expression constraint."),
+		}),
+	})
+	searchProperties := map[string]any{
+		"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
+		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
+	}
+	searchSchema := schemaObject(searchProperties, "workspace_id")
+	searchSchema["oneOf"] = []any{
+		schemaObject(searchProperties, "workspace_id", "query"),
+		schemaObject(searchProperties, "workspace_id", "result_set_handle", "refine"),
+	}
 	return []modernTool{
 		{Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":  enumSchema("project", "documents"),
@@ -138,9 +154,7 @@ func buildModernTools() []modernTool {
 		{Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
 		}, "workspace_id")},
-		{Name: "search", Description: "Search literal or explicit-regex text in the current revision with exact ranges and honest coverage.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
-		}, "workspace_id", "query")},
+		{Name: "search", Description: "Search current source or monotonically refine a frozen result set with inspectable match handles and honest coverage.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
 		{Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or path."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
@@ -607,16 +621,9 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			"inspection": inspection, "scheduler": d.scheduler.description(),
 		})
 	case "search":
-		query, _ := arguments["query"].(string)
-		mode := workspacecore.SearchMode("literal")
-		if requested, _ := arguments["mode"].(string); requested != "" {
-			mode = workspacecore.SearchMode(requested)
-		}
-		result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
-		if err != nil {
-			return modernFailure(requestID, workspace, "search_failed", err)
-		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches", len(result.Hits)), result)
+		return d.search(requestID, workspace, arguments)
+	case "symbol_find":
+		return d.symbolFind(requestID, workspace, arguments)
 	case "read":
 		return d.read(requestID, workspace, arguments)
 	case "edit_apply":
@@ -704,14 +711,100 @@ func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
 	return d.items[id]
 }
 
+func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
+		refine, _ := arguments["refine"].(map[string]any)
+		matched, _ := refine["matched_text"].(map[string]any)
+		path, _ := refine["path"].(string)
+		literal, _ := matched["literal"].(string)
+		regex, _ := matched["regex"].(string)
+		result, err := workspace.RefineResultSet(workspacecore.ResultSetID(parent), workspacecore.ResultRefinement{
+			Path: path, MatchLiteral: literal, MatchRegex: regex,
+		})
+		if err != nil {
+			var conflict *workspacecore.Conflict
+			if errors.As(err, &conflict) {
+				return modernEnvelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"result_set_handle": parent})
+			}
+			return modernFailure(requestID, workspace, "search_refinement_failed", err)
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
+			"hits": result.Matches, "result_set": result, "coverage": result.Coverage,
+		})
+	}
+	query, _ := arguments["query"].(string)
+	mode := workspacecore.SearchMode("literal")
+	if requested, _ := arguments["mode"].(string); requested != "" {
+		mode = workspacecore.SearchMode(requested)
+	}
+	result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
+	if err != nil {
+		return modernFailure(requestID, workspace, "search_failed", err)
+	}
+	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches", len(result.Hits)), result)
+}
+
+func (d *directWorkspaces) symbolFind(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	query, _ := arguments["query"].(string)
+	records, coverage, err := workspace.FindSymbols(query)
+	if err != nil {
+		return modernFailure(requestID, workspace, "symbol_find_failed", err)
+	}
+	items := make([]map[string]any, 0, len(records))
+	includeSource, _ := arguments["include_source"].(bool)
+	for _, record := range records {
+		item := map[string]any{"handle": record}
+		if includeSource {
+			read, readErr := workspace.Read(record.Locator.Path)
+			if readErr == nil && record.Locator.ByteStart >= 0 && record.Locator.ByteEnd <= len(read.Content) {
+				item["source"] = string(read.Content[record.Locator.ByteStart:record.Locator.ByteEnd])
+			}
+		}
+		items = append(items, item)
+	}
+	outcome := "ok"
+	code := ""
+	if !coverage.Complete {
+		outcome = "partial"
+		code = "semantic_coverage_partial"
+	}
+	return modernEnvelope(requestID, workspace, outcome, code, fmt.Sprintf("%d symbols found", len(records)), map[string]any{
+		"ranked_handles": items, "coverage": coverage,
+	})
+}
+
 func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, ok := arguments["target"].(map[string]any)
 	if !ok {
 		return modernEnvelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
 	}
+	if opaque, _ := target["handle"].(string); opaque != "" {
+		resolution, err := workspace.ResolveHandle(workspacecore.HandleID(opaque))
+		if err != nil {
+			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
+		}
+		if resolution.Status == workspacecore.ResolutionConflicted {
+			return modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), "Handle no longer resolves uniquely", resolution)
+		}
+		resolved, err := resolution.RangeHandle()
+		if err != nil {
+			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
+		}
+		read, err := workspace.Read(resolved.Path)
+		if err != nil {
+			return modernFailure(requestID, workspace, "read_failed", err)
+		}
+		if resolved.ByteStart < 0 || resolved.ByteEnd > len(read.Content) || resolved.ByteEnd < resolved.ByteStart {
+			return modernEnvelope(requestID, workspace, "conflict", "target_deleted", "Resolved handle range is no longer readable", resolution)
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
+			"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
+			"coverage": read.Coverage, "resolution": resolution,
+		})
+	}
 	fileRange, ok := target["file_range"].(map[string]any)
 	if !ok {
-		return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "S07 direct reads require target.file_range", map[string]any{})
+		return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.handle or target.file_range", map[string]any{})
 	}
 	path, _ := fileRange["path"].(string)
 	if arguments["view"] == "outline" {
@@ -735,8 +828,23 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		return modernEnvelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})
 	}
 	target, _ := operation["target"].(map[string]any)
-	fileRange, _ := target["file_range"].(map[string]any)
-	handle, err := decodeRangeHandle(fileRange)
+	var handle workspacecore.RangeHandle
+	var resolution *workspacecore.HandleResolution
+	var err error
+	if opaque, _ := target["handle"].(string); opaque != "" {
+		resolved, resolveErr := workspace.ResolveHandle(workspacecore.HandleID(opaque))
+		if resolveErr != nil {
+			return modernFailure(requestID, workspace, "handle_resolve_failed", resolveErr)
+		}
+		resolution = &resolved
+		if resolved.Status == workspacecore.ResolutionConflicted {
+			return modernEnvelope(requestID, workspace, "conflict", string(resolved.Code), "Handle no longer resolves uniquely", resolved)
+		}
+		handle, err = resolved.RangeHandle()
+	} else {
+		fileRange, _ := target["file_range"].(map[string]any)
+		handle, err = decodeRangeHandle(fileRange)
+	}
 	if err != nil {
 		return modernFailure(requestID, workspace, "invalid_target", err)
 	}
@@ -764,7 +872,7 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		summary = "Guarded range edit applied"
 	}
 	return modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{
-		"change": change, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
+		"change": change, "resolution": resolution, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
 		"verification": map[string]any{"confidence": "provisional", "coverage": map[string]any{"edited_documents": "complete", "semantic_provider": "unavailable"}},
 	})
 }

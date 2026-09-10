@@ -232,6 +232,65 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	}
 }
 
+func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "first.txt")
+	second := filepath.Join(root, "second.txt")
+	if err := os.WriteFile(first, []byte("alpha beta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("beta gamma\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session, cleanup := connectOfficialClient(t, profileEdit, newDirectWorkspaces(t.TempDir()))
+	defer cleanup()
+
+	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "documents", "files": []string{first, second}})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+	})
+	searchData := searched["data"].(map[string]any)
+	resultSet := searchData["result_set"].(map[string]any)
+	if resultSet["kind"] != "current_source" || resultSet["match_count"] != float64(2) ||
+		resultSet["all_matches_eligible"] != true {
+		t.Fatalf("search result set = %#v", resultSet)
+	}
+	refined := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "result_set_handle": resultSet["handle"],
+		"refine": map[string]any{"path": "first.txt"},
+	})
+	refinedData := refined["data"].(map[string]any)
+	refinedSet := refinedData["result_set"].(map[string]any)
+	if refined["outcome"] != "ok" || refinedSet["parent"] != resultSet["handle"] ||
+		refinedSet["retained"] != float64(1) || refinedSet["eliminated"] != float64(1) || len(refinedData["hits"].([]any)) != 1 {
+		t.Fatalf("refined result = %#v", refined)
+	}
+
+	hit := searchData["hits"].([]any)[0].(map[string]any)
+	opaque := hit["match_handle"].(map[string]any)["handle"].(string)
+	read := callModern(t, session, "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"handle": opaque},
+	})
+	if read["outcome"] != "ok" || read["data"].(map[string]any)["content"] != "beta" {
+		t.Fatalf("handle read = %#v", read)
+	}
+	applied := callModern(t, session, "edit_apply", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "opaque-apply",
+		"operation": map[string]any{"kind": "replace_range", "target": map[string]any{"handle": opaque}, "content": "delta"},
+	})
+	if applied["outcome"] != "ok" {
+		t.Fatalf("handle edit = %#v", applied)
+	}
+	content, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "alpha delta\n" {
+		t.Fatalf("handle edit bytes = %q", content)
+	}
+}
+
 func TestOfficialClientMatchesConcurrentResponsesToRequests(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	session, cleanup := connectOfficialClient(t, profileOrient, direct)

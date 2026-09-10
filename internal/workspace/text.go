@@ -89,19 +89,25 @@ type SearchRequest struct {
 }
 
 type SearchHit struct {
-	Path      string      `json:"path"`
-	ByteStart int         `json:"byte_start"`
-	ByteEnd   int         `json:"byte_end"`
-	Line      int         `json:"line"`
-	Column    int         `json:"column"`
-	Match     string      `json:"match"`
-	Range     RangeHandle `json:"range"`
+	Path        string        `json:"path"`
+	ByteStart   int           `json:"byte_start"`
+	ByteEnd     int           `json:"byte_end"`
+	Line        int           `json:"line"`
+	Column      int           `json:"column"`
+	Match       string        `json:"match"`
+	Range       RangeHandle   `json:"range"`
+	MatchHandle *HandleRecord `json:"match_handle,omitempty"`
 }
 
 type SearchResult struct {
-	Workspace Identity    `json:"workspace"`
-	Hits      []SearchHit `json:"hits"`
-	Coverage  Coverage    `json:"coverage"`
+	Workspace         Identity              `json:"workspace"`
+	Hits              []SearchHit           `json:"hits"`
+	Coverage          Coverage              `json:"coverage"`
+	Query             string                `json:"query"`
+	Mode              SearchMode            `json:"mode"`
+	DocumentRevisions map[string]RevisionID `json:"-"`
+	SourceFiles       []string              `json:"-"`
+	ResultSet         *ResultSet            `json:"result_set,omitempty"`
 }
 
 type RangeHandle struct {
@@ -145,11 +151,13 @@ type Sectioner interface {
 }
 
 type Outline struct {
-	Workspace Identity     `json:"workspace"`
-	Path      string       `json:"path"`
-	Sections  []Section    `json:"sections,omitempty"`
-	Fallback  *RangeHandle `json:"fallback_range,omitempty"`
-	Coverage  Coverage     `json:"coverage"`
+	Workspace      Identity       `json:"workspace"`
+	Path           string         `json:"path"`
+	Sections       []Section      `json:"sections,omitempty"`
+	Handles        []HandleRecord `json:"handles,omitempty"`
+	Fallback       *RangeHandle   `json:"fallback_range,omitempty"`
+	FallbackHandle *HandleRecord  `json:"fallback_handle,omitempty"`
+	Coverage       Coverage       `json:"coverage"`
 }
 
 type EnvironmentFailure struct {
@@ -566,6 +574,7 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 		return SearchResult{}, err
 	}
 	coverage.BytesRead = 0
+	revisions := make(map[string]RevisionID)
 	var hits []SearchHit
 	for _, name := range files {
 		if len(hits) >= w.limits.MaxMatches {
@@ -587,6 +596,7 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 		}
 		coverage.FilesRead++
 		coverage.BytesRead += int64(len(read.Content))
+		revisions[read.Path] = read.Snapshot.Revision
 		ranges := matchRanges(read.Content, []byte(request.Query), expression)
 		for _, span := range ranges {
 			if span[0] == span[1] {
@@ -602,13 +612,27 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 				return SearchResult{}, handleErr
 			}
 			line, column := bytePosition(read.Content, span[0])
+			record, registerErr := w.RegisterRangeHandle(handle, HandleMatch,
+				fmt.Sprintf("%s:%d:%d exact match", displayPath(w.identity.Root, read.Path), line, column))
+			if registerErr != nil {
+				return SearchResult{}, registerErr
+			}
 			hits = append(hits, SearchHit{
 				Path: read.Path, ByteStart: span[0], ByteEnd: span[1], Line: line, Column: column,
-				Match: string(read.Content[span[0]:span[1]]), Range: handle,
+				Match: string(read.Content[span[0]:span[1]]), Range: handle, MatchHandle: &record,
 			})
 		}
 	}
-	return SearchResult{Workspace: w.Identity(), Hits: hits, Coverage: coverage}, nil
+	result := SearchResult{
+		Workspace: w.Identity(), Hits: hits, Coverage: coverage, Query: request.Query, Mode: mode,
+		DocumentRevisions: revisions, SourceFiles: append([]string(nil), files...),
+	}
+	set, err := w.FreezeSearch(result)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	result.ResultSet = &set
+	return result, nil
 }
 
 func matchRanges(content, literal []byte, expression *regexp.Regexp) [][2]int {
@@ -687,8 +711,12 @@ func (w *Workspace) Outline(path string) (Outline, error) {
 		if handleErr != nil {
 			return Outline{}, handleErr
 		}
+		record, registerErr := w.RegisterRangeHandle(fallback, HandleRange, fmt.Sprintf("%s whole document", read.Path))
+		if registerErr != nil {
+			return Outline{}, registerErr
+		}
 		coverage.Semantic = "text_only"
-		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, Coverage: coverage}, nil
+		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, FallbackHandle: &record, Coverage: coverage}, nil
 	}
 	sections, err := w.sectioner.Sections(read.Path, append([]byte(nil), read.Content...))
 	if err != nil {
@@ -698,10 +726,22 @@ func (w *Workspace) Outline(path string) (Outline, error) {
 		if handleErr != nil {
 			return Outline{}, handleErr
 		}
-		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, Coverage: coverage}, nil
+		record, registerErr := w.RegisterRangeHandle(fallback, HandleRange, fmt.Sprintf("%s whole document", read.Path))
+		if registerErr != nil {
+			return Outline{}, registerErr
+		}
+		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, FallbackHandle: &record, Coverage: coverage}, nil
+	}
+	handles := make([]HandleRecord, 0, len(sections))
+	for _, section := range sections {
+		record, registerErr := w.registerSymbol(read, section)
+		if registerErr != nil {
+			return Outline{}, registerErr
+		}
+		handles = append(handles, record)
 	}
 	coverage.Semantic = "parser_sections"
-	return Outline{Workspace: read.Workspace, Path: read.Path, Sections: sections, Coverage: coverage}, nil
+	return Outline{Workspace: read.Workspace, Path: read.Path, Sections: sections, Handles: handles, Coverage: coverage}, nil
 }
 
 func (w *Workspace) PreviewReplace(workspaceID ID, handle RangeHandle, replacement []byte) (TextChange, error) {
