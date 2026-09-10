@@ -847,7 +847,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S15 — Isolated sandbox prepare
 - [x] S16 — Repository formatting and verification pipeline
 - [x] S17 — Diagnostic evidence and provenance
-- [ ] S18 — Impact graph, targeted tests and variants
+- [x] S18 — Impact graph, targeted tests and variants
 - [ ] S19 — First legacy wrapper families
 - [ ] S19D — Compact modern debugger facade
 - [ ] S20 — Remaining wrappers, evaluation and release candidate

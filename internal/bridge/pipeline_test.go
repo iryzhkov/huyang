@@ -34,7 +34,16 @@ func TestOfficialClientRunsTrustedPipelineAgainstPreparedSandbox(t *testing.T) {
 		"[format.transform]\ncommand = [\"sh\", \"-c\", \"sed -i s/DELTA/delta/ note.txt; printf tool > extra.txt\"]\n" +
 		"declared_writes = [\"note.txt\", \"extra.txt\"]\n" +
 		"[[check]]\ncommand = [\"sh\", \"-c\", \"grep -q delta note.txt\"]\n" +
-		"[[tests]]\ncommand = [\"sh\", \"-c\", \"test \\\"$(cat note.txt)\\\" = \\\"alpha delta gamma\\\"\"]\n"
+		`[[tests]]
+name = "note-unit"
+covers = ["note.txt"]
+variants = ["default"]
+command = ["sh", "-c", "test \"$(cat note.txt)\" = \"alpha delta gamma\""]
+[[variants]]
+name = "default"
+files = ["**"]
+required = true
+`
 	if err := os.WriteFile(filepath.Join(root, ".huyang.toml"), []byte(projectConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +103,21 @@ func TestOfficialClientRunsTrustedPipelineAgainstPreparedSandbox(t *testing.T) {
 	replayed := callModern(t, session, "verify_run", verifyArguments)
 	if replayed["idempotency"] != "replayed" {
 		t.Fatalf("verify replay = %#v", replayed)
+	}
+	affected := callModern(t, session, "verify_run", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "pipeline-affected-verify",
+		"revision_or_transaction": preparedRevision, "stages": []string{"tests"}, "test_scope": "affected",
+	})
+	affectedVerification := affected["data"].(map[string]any)["verification"].(map[string]any)
+	if affectedVerification["full_test_gate"] != nil {
+		t.Fatalf("affected verification claimed a full gate: %#v", affectedVerification)
+	}
+	targeted := affectedVerification["targeted_tests"].(map[string]any)
+	if targeted["status"] != "affected_tests_passed" || len(targeted["executed"].([]any)) != 1 {
+		t.Fatalf("targeted verification = %#v", affected)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "test-history", workspaceID+".json")); err != nil {
+		t.Fatalf("revision-keyed test history: %v", err)
 	}
 	applied := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-apply", "action": "apply",

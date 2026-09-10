@@ -1252,6 +1252,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	}
 	request := workspacecore.VerificationRequest{
 		Stages: stages, Revision: revision, TestScope: fmt.Sprint(arguments["test_scope"]),
+		TestHistoryPath: filepath.Join(d.stateDir, "test-history", string(workspace.Identity().ID)+".json"),
 	}
 	d.providerMu.Lock()
 	var stager *sandboxPlanStager

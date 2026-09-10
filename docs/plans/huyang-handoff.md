@@ -12,20 +12,19 @@
 
 ## Current checkpoint
 
-- Completed stage: S17 — Diagnostic evidence and provenance.
-- Starting commit: `bc5fc8f256d098c00abbddccab047fb278886dfb`.
+- Completed stage: S18 — Impact graph, targeted tests and variants.
+- Starting commit: `60e38abc1a310f954e6879f7c7c299999cf2a1e8`.
 - Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
   base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read the complete plan,
   frozen tool contract, handoff, and every predecessor/stage artifact named below, and verified
-  S17 was exactly the first incomplete checklist stage.
-- S17 exit gates are satisfied: versioned push/pull/workspace/project-check normalization and
-  deduplication; selected-provider provenance and conflict retention; coverage/confidence and
-  transaction/revision/producer provenance; progress-only veto; durable acknowledged inbox,
-  cursored evidence, and same-workspace notices; evidence-ranked attribution; provisional modern
-  results when evidence is incomplete; fake permutations and real gopls/tsserver/pyright/lua_ls/bash
-  cases never label incomplete evidence clean.
-- Only S17 is newly marked complete in the committed checklist.
-- Exact next stage: S18 — Impact graph, targeted tests and variants.
+  S18 was exactly the first incomplete checklist stage.
+- S18 exit gates are satisfied: bounded language-adapter dependency edges disclose provenance,
+  confidence, completeness and caps; exact-revision test history drives advisory selection;
+  selected/executed tests and reasons are explicit; build/configuration variants are reported;
+  reflection, dynamic loading, generated/config files, graph caps, and omitted variants retain
+  uncertainty; targeted success is independent from and never implies a full-gate pass.
+- Only S18 is newly marked complete in the committed checklist.
+- Exact next stage: S19 — First legacy wrapper families.
 
 ## Predecessor and stage artifacts
 
@@ -75,6 +74,14 @@ S17 adds:
 - internal/bridge/evidence_test.go
 - tests/huyang_diagnostics_init.lua
 
+S18 adds:
+
+- docs/plans/huyang-s18-impact-tests-variants.md
+- internal/workspace/impact.go
+- internal/workspace/impact_test.go
+- targeted/full verification integration in internal/workspace/pipeline.go,
+  internal/bridge/modern_mcp.go, and internal/bridge/pipeline_test.go
+
 ## S17 changes
 
 - Added a durable, atomically persisted per-workspace diagnostic ledger with stable diagnostic
@@ -98,22 +105,33 @@ S17 adds:
 - Added no S18 impact graph, affected-test selection, variants, legacy wrapper migration,
   debugger facade, deployment, installation, live configuration/state change, push, or pull request.
 
+## S18 changes
+
+- Added bounded revision-keyed impact graphs with Go, TypeScript/JavaScript, Python, and Lua
+  dependency adapters, transitive reverse impact, adapter/confidence provenance, and file/edge caps.
+- Added explicit risks for unresolved dependencies, reflection/dynamic loading, generated code,
+  configuration/schema files, unreadable files, graph caps, untested affected nodes, and omitted
+  required variants.
+- Extended trusted project policy with named test suites, path associations, variants, required
+  suites, named build/configuration variants, and impact caps.
+- Added advisory affected-test selection from affected paths, colocated tests, required suites,
+  variants, and prior revision-keyed failures. Selected and executed suites retain reasons.
+- Persisted bounded atomic test history by workspace and exact revision, including scope, suite,
+  variants, status, duration, and timestamp.
+- Kept `affected_tests_passed` separate from `full_tests_passed`; targeted verification never
+  sets `full_test_gate`.
+- Added no S19 legacy-wrapper migration, S19D debugger facade, S20 release work, deployment,
+  installation, live configuration/state mutation, push, or pull request.
+
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test -race ./internal/workspace ./internal/bridge -run 'Diagnostic|Evidence|Provisional' -count=1`
-  — exit 0; evidence core, provider barrier, inbox, provenance and provisional-state coverage passed.
-- `go test ./internal/bridge -run TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence -count=1 -v`
-  — exit 0; real gopls, typescript-language-server, pyright, lua-language-server and
-  bash-language-server cases passed. Pyright produced authoritative pull evidence; active gopls
-  progress and unstamped/silent cases remained provisional rather than clean.
-- First `make smoke` — exit 2 in headless search because the initial shared minimal test init
-  enabled tsserver for JavaScript and lengthened one compact grep annotation. No production search
-  code failed. The new LSP registrations were isolated into `tests/huyang_diagnostics_init.lua`.
-- `make smoke SUITES=headless:search` — exit 0 after isolation; every focused search case passed.
-- Final `make smoke` — exit 0; both binaries built and unit_edit, unit_testrun, unit_check,
-  unit_index, MCP, headless, multi-workspace and debug suites reported OK.
+- `go test -race ./internal/workspace ./internal/bridge -run 'Impact|Affected|Pipeline' -count=1`
+  — exit 0; bounded graphs, uncertainty, variants, selection, revision history, verdict separation,
+  and official MCP prepared-sandbox coverage passed.
+- `make smoke` — exit 0; both binaries built and unit_edit, unit_testrun, unit_check, unit_index,
+  MCP, headless, multi-workspace, and debug suites reported OK.
 - `go test ./...` — exit 0; every Go package passed.
 - `go vet ./...` — exit 0 with no output.
 - `git diff --check` — exit 0 after implementation and before final handoff/checklist updates;
@@ -121,23 +139,20 @@ Run from /home/igor/Work/huyang on 2026-09-10:
 
 ## Decisions and risks
 
-- Diagnostic identity is provider-scoped. Identical push/pull payloads from one producer deduplicate;
-  conflicting findings from distinct selected providers remain distinct and retain provenance.
-- Pull evidence supersedes an incomplete push from the same producer. Across selected producers,
-  the weakest evidence controls the required coverage dimension.
-- Work-done progress is only a veto. documentSymbol, semantic tokens, elapsed silence and arrival
-  order are never treated as authoritative completion or causal attribution.
-- A successful configured project check may corroborate unavailable LSP evidence, but remains
-  explicitly stored as `project_check`; it is not relabeled as LSP evidence.
-- The LSP attachment wait is bounded to 1.5 seconds. Slow, unstamped or silent providers return
-  provisional evidence and cannot resolve active findings or produce a clean verification stage.
-- The durable inbox is response-reliable and restart-safe. Transport-native subscription delivery
-  remains a compatible future enhancement over the same evidence IDs/cursors.
-- Modern native range edits still apply exact guarded bytes before diagnostics, as in S06/S07, but
-  now honestly return a provisional outcome when no semantic provider barrier exists.
-- S17 records transaction, revision, state sequence, producer/version and evidence-ranked culprit
-  candidates. S18 owns complete language-specific impact edges, transitive scope, variants and
-  advisory targeted-test selection; no such completeness is claimed here.
+- Impact traversal is bounded and revision-keyed. Every dependency edge names the built-in language
+  adapter and confidence; caps and unresolved imports make coverage incomplete.
+- Affected-test selection is advisory. Configuration associations, colocated affected tests,
+  required suites, selected variants, and prior failures are reasons, not a completeness proof.
+- Test history is durable per workspace and exact revision, atomically replaced and bounded to the
+  latest 1,000 entries.
+- Targeted and full verdicts are structurally separate. `affected_tests_passed` never populates
+  `full_test_gate`; only an explicit full run can report `full_tests_passed`.
+- Static adapters intentionally disclose reflection/dynamic loading, generated files,
+  configuration/schema effects, unresolved dependencies, graph caps, untested nodes, and omitted
+  variants. These risks recommend a broader full gate.
+- Built-in local import resolution is deliberately conservative. Alias-heavy package graphs,
+  runtime loaders, generators, build systems, and configuration can require future adapter
+  precision without weakening the current uncertainty disclosure.
 - No deployment, installation, live-service/configuration mutation, installed-plugin update,
   push, or pull request occurred.
-- Exact next stage: S18 — Impact graph, targeted tests and variants.
+- Exact next stage: S19 — First legacy wrapper families.

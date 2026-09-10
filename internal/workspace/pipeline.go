@@ -33,8 +33,12 @@ const (
 )
 
 type CommandPolicy struct {
+	Name           string   `toml:"name" json:"name,omitempty"`
 	Command        []string `toml:"command" json:"command"`
 	DeclaredWrites []string `toml:"declared_writes" json:"declared_writes,omitempty"`
+	Covers         []string `toml:"covers" json:"covers,omitempty"`
+	Variants       []string `toml:"variants" json:"variants,omitempty"`
+	Required       bool     `toml:"required" json:"required,omitempty"`
 }
 
 type FormatPolicy struct {
@@ -49,6 +53,8 @@ type PipelinePolicy struct {
 	Format   FormatPolicy    `toml:"format" json:"format"`
 	Check    []CommandPolicy `toml:"check" json:"check"`
 	Tests    []CommandPolicy `toml:"tests" json:"tests"`
+	Variants []VariantPolicy `toml:"variants" json:"variants,omitempty"`
+	Impact   ImpactPolicy    `toml:"impact" json:"impact"`
 	Resource struct {
 		TimeoutSeconds   int   `toml:"timeout_seconds" json:"timeout_seconds"`
 		MaxOutputBytes   int   `toml:"max_output_bytes" json:"max_output_bytes"`
@@ -77,6 +83,7 @@ type VerificationRequest struct {
 	Revision                 string
 	Transform                bool
 	TestScope                string
+	TestHistoryPath          string
 	ApplyConfiguredTransform bool
 	DiagnosticVerifier       func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
 }
@@ -94,6 +101,10 @@ type VerificationStage struct {
 	DurationMS      int64              `json:"duration_ms"`
 	Coverage        Coverage           `json:"coverage"`
 	EvidenceIDs     []string           `json:"evidence_ids,omitempty"`
+	TestScope       string             `json:"test_scope,omitempty"`
+	TestVerdict     string             `json:"test_verdict,omitempty"`
+	SelectedTests   []SelectedTest     `json:"selected_tests,omitempty"`
+	ExecutedTests   []string           `json:"executed_tests,omitempty"`
 }
 
 type ToolDelta struct {
@@ -116,6 +127,9 @@ type VerificationResult struct {
 	Stages        []VerificationStage `json:"stages"`
 	ToolDelta     []ToolDelta         `json:"tool_delta,omitempty"`
 	PreparedFiles []PlanStageFile     `json:"-"`
+	Impact        *ImpactGraph        `json:"impact,omitempty"`
+	Targeted      *TargetedTestResult `json:"targeted_tests,omitempty"`
+	FullTestGate  string              `json:"full_test_gate,omitempty"`
 }
 
 func DefaultPipelinePolicy() PipelinePolicy {
@@ -651,19 +665,45 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 			}
 		case "tests":
 			if request.TestScope == "affected" {
-				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"affected_test_selection_is_s18"}}})
-				continue
-			}
-			if len(policy.Tests) == 0 {
-				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})
-			}
-			for _, command := range policy.Tests {
-				stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, name, "check", command, policy, false)
-				result.Stages = append(result.Stages, stage)
-				result.ToolDelta = append(result.ToolDelta, delta...)
+				stages, targeted, err := runAffectedTests(ctx, sandbox, policy, request, affected)
+				result.Stages = append(result.Stages, stages...)
+				result.Targeted = targeted
+				if targeted != nil {
+					result.Impact = &targeted.Graph
+				}
 				if err != nil {
 					return result, err
 				}
+				continue
+			}
+			result.FullTestGate = "not_configured"
+			if len(policy.Tests) == 0 {
+				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, TestScope: "full", TestVerdict: "full_tests_unavailable", Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})
+				continue
+			}
+			var history []TestHistoryEntry
+			result.FullTestGate = "full_tests_passed"
+			for index, command := range policy.Tests {
+				stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, name, "check", command, policy, false)
+				testName := command.Name
+				if testName == "" {
+					testName = fmt.Sprintf("test_%d", index+1)
+				}
+				stage.TestScope = "full"
+				stage.TestVerdict = "full_tests_passed"
+				stage.ExecutedTests = []string{testName}
+				result.Stages = append(result.Stages, stage)
+				result.ToolDelta = append(result.ToolDelta, delta...)
+				history = append(history, historyEntry(request.Revision, "full", testName, command.Variants, stage))
+				if err != nil {
+					result.FullTestGate = "full_tests_failed"
+					result.Stages[len(result.Stages)-1].TestVerdict = result.FullTestGate
+					_ = recordTestHistory(request.TestHistoryPath, history)
+					return result, err
+				}
+			}
+			if err := recordTestHistory(request.TestHistoryPath, history); err != nil {
+				return result, err
 			}
 		default:
 			return result, fmt.Errorf("unknown verification stage %q", name)
