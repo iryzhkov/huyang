@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"agent99/internal/provider"
+	workspacecore "agent99/internal/workspace"
 )
 
 const (
@@ -40,6 +41,7 @@ type headlessWorkspace struct {
 	Root      string
 	Providers *provider.AnalysisProfile
 	Provider  provider.Provider
+	Workspace *workspacecore.Workspace
 	// lastUsed is when a call was last routed here, which is what the idle
 	// sweep in lifecycle.go measures. Guarded by headlessMu.
 	lastUsed time.Time
@@ -51,7 +53,10 @@ type headlessWorkspace struct {
 }
 
 func (w *headlessWorkspace) session() session {
-	return session{Root: w.Root, Providers: w.Providers, Provider: w.Provider, Headless: true}
+	return session{
+		Root: w.Root, Providers: w.Providers, Provider: w.Provider,
+		Workspace: w.Workspace, Headless: true,
+	}
 }
 
 var (
@@ -213,6 +218,7 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 	live := liveLocked()
 	if ws := live[abs]; ws != nil {
 		if ws.Provider.Health(context.Background()).State == provider.HealthHealthy {
+			ws.Workspace.SyncProviderEpoch(ws.Provider.Descriptor().Epoch)
 			noteRouted(stickyActive, abs)
 			forgetReopenableLocked(abs)
 			ws.lastUsed = time.Now()
@@ -269,10 +275,16 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 		_ = backend.Close(context.Background())
 		return nil, err
 	}
+	core, err := workspacecore.New(workspacecore.KindProject, abs, backend.Descriptor().Epoch)
+	if err != nil {
+		_ = backend.Close(context.Background())
+		return nil, err
+	}
 	ws := &headlessWorkspace{
 		Root:      abs,
 		Providers: profile,
 		Provider:  backend,
+		Workspace: core,
 		lastUsed:  time.Now(),
 	}
 	workspaces[abs] = ws

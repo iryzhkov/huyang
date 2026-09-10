@@ -153,6 +153,16 @@ func openWorkspaceResult(ws *headlessWorkspace, client string, wasOpen bool) map
 			"path no workspace holds is refused rather than guessed at, and so is one that " +
 			"leaves the root it was named under through a symlink"
 	}
+	descriptor = ws.Provider.Descriptor()
+	result["socket"] = descriptor.Endpoint
+	result["pid"] = descriptor.ProcessID
+	result["provider_backend"] = descriptor.Backend
+	result["provider_epoch"] = descriptor.Epoch
+	identity := ws.Workspace.SyncProviderEpoch(descriptor.Epoch)
+	result["workspace_id"] = identity.ID
+	result["workspace_kind"] = identity.Kind
+	result["workspace_epoch"] = identity.Epoch
+	result["state_seq"] = identity.StateSeq
 	return result
 }
 

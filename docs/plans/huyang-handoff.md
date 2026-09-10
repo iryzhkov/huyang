@@ -15,108 +15,95 @@
 
 ## Current checkpoint
 
-- Completed stage: S04 — Embedded provider production path.
-- Starting commit: `bdd753e565e52323e73db99775c424364ac36f9f`.
+- Completed stage: S05 — Explicit workspaces and revisions.
+- Starting commit: `483ab0a30603810c8ab7e7f0117cfa3d8f1fdd4f`.
 - Completion commit: the `feature/huyang` commit containing this handoff.
 - Predecessor reconciliation:
-  - S03 is committed at `bdd753e565e52323e73db99775c424364ac36f9f`;
-  - the reviewed base remains an ancestor and the worktree was clean after fetching origin;
-  - the pinned library, spike tests, decision record, and recorded S03 gates reconcile with the
-    committed tree. The prior “pending final commit” wording was stale documentation only.
-- S04 exit gates achieved:
-  - production embedded provider implements bootstrap/capability handshake, request-ID
-    completion notifications, health checks, cancellation/deadlines, epoch-changing restart,
-    bounded stderr, root ownership, and classified failures;
-  - socket remains selectable as the default comparison and rollback backend;
-  - headless, multi-workspace, debug, and injected provider-fault smoke suites pass against
-    both selectors;
-  - production trace coverage proves the embedded path starts no `nvim --server`,
-    `--remote-expr`, or `--listen` polling subprocess;
-  - targeted race tests, `make smoke`, `go test ./...`, `go vet ./...`, and
+  - S04 is committed at `483ab0a30603810c8ab7e7f0117cfa3d8f1fdd4f`;
+  - `feature/huyang` was clean after `git fetch origin --prune`;
+  - the reviewed base remains an ancestor;
+  - the committed checklist, S00–S04 records, frozen contract fixtures, provider code, and
+    recorded S04 gates agree that S05 was the first incomplete stage.
+- S05 exit gates achieved:
+  - the workspace core owns random 128-bit IDs, project kind, provider epoch, and monotonic
+    state sequence;
+  - layered document snapshots expose exact filesystem kind/identity, provider
+    changedtick/LSP versions/dirty state, and lazy SHA-256 revision tokens;
+  - forced mutation validation requires workspace ID and revision and catches same-metadata
+    rewrites, atomic saves, deletes/recreates, symlink retargets, and provider restarts;
+  - legacy root inference remains in the bridge adapter and core mutation entry points require
+    explicit identity/revision;
+  - focused race tests, both provider smoke matrices, `go test ./...`, `go vet ./...`, and
     `git diff --check` pass.
-- Checklist: only S04 was marked complete in this stage.
-- Exact next stage: S05 — Explicit workspaces and revisions.
+- Checklist: only S05 was marked complete in this stage.
+- Exact next stage: S06 — Provider-independent text core and document workspaces.
 
 ## Predecessor artifacts
 
-S04 reconciled and consumed these committed predecessor artifacts completely:
+S05 reconciled and consumed these committed predecessor artifacts completely:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
 - `docs/plans/huyang-s01-package-boundary.md`
 - `docs/plans/huyang-s02-provider-seam.md`
 - `docs/plans/huyang-s03-embedded-provider-spike.md`
+- `docs/plans/huyang-s04-embedded-provider.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-## S04 changes
+## S05 changes
 
-- Added the production `internal/provider/embed` backend. It owns
-  `nvim --embed --headless`, bootstraps the shipped Lua kernel, performs a version and
-  capability handshake, dispatches completion notifications by request ID, reports health,
-  retains bounded stderr, and exposes PID and epoch descriptors.
-- Context cancellation and deadline expiry restart the whole provider generation before
-  returning. Unexpected death fails all concurrent calls and is recovered lazily on the next
-  call. Stable `provider.Failure` codes distinguish launch, bootstrap, compatibility,
-  death, cancellation, deadline, and protocol failures.
-- Added Linux cross-process root ownership with `flock`; other-platform files preserve the
-  package build boundary without claiming an unsupported lock implementation.
-- Added `AGENT99_PROVIDER_BACKEND=embed`; unset or `socket` remains the default rollback
-  path, and explicit `AGENT99_NVIM` attachment remains socket-only.
-- Extended the Lua kernel with protocol-v1 handshake and asynchronous
-  `agent99/result` completion notification while retaining its socket entry points.
-- Added provider backend/epoch workspace-open evidence and propagated backend cancellation
-  semantics through the bridge.
-- Added `internal/provider/embed/embed_test.go` coverage for handshake, health, trace,
-  reordered completions, malformed completions, cancellation/deadline restarts, epochs,
-  provider death, lazy recovery, bounded stderr, launch failures, and root locks.
-- Updated smoke assertions for either backend and changed deliberately killed socket cleanup
-  to terminate its owned PID directly. The former fresh `--remote-expr` cleanup client could
-  abort in libuv when the server socket had already disappeared.
-- Added `docs/plans/huyang-s04-embedded-provider.md` and marked only S04 complete.
+- Added `internal/workspace` as the transport-independent identity/revision core.
+- Added random 128-bit workspace IDs, closed workspace kinds, provider epoch synchronization,
+  and monotonic state sequences.
+- Added layered document snapshots covering exact filesystem kind/identity, canonical URI,
+  dirty provider content, changedtick, per-provider LSP versions, and SHA-256 revisions.
+- Ordinary snapshots cache hashes by metadata; refresh and mutation validation force a fresh
+  exact-byte hash.
+- Added typed mutation conflicts for missing/mismatched workspace identity, missing revision,
+  provider epoch change, document deletion, and other content changes.
+- Mutation paths are lexically confined and inspect objects with `lstat`; symlinks are
+  revisioned as links rather than followed.
+- Wired the headless bridge to retain core identity across a provider generation restart,
+  propagate ID/epoch into provider request contexts, and return current identity fields from
+  `open_workspace`.
+- Added adversarial filesystem/race tests and socket/embed smoke assertions.
+- Added `docs/plans/huyang-s05-workspaces-revisions.md` and marked only S05 complete.
 
 ## Verification
 
 Run from `/home/igor/Work/huyang` on 2026-09-10:
 
-- `go test ./internal/provider/... ./internal/bridge` — exit 0 during implementation.
-- `go test ./internal/provider/embed -count=1 -v` initially exposed a typed-nil bootstrap
-  return in the new backend. After correction, all focused lifecycle/protocol tests passed.
-- `go test -race ./internal/provider/embed ./internal/bridge -count=1` — final exit 0:
-  `internal/provider/embed` passed in 2.799s and `internal/bridge` in 1.020s.
-- `AGENT99_PROVIDER_BACKEND=embed bash tests/smoke.sh headless:workspace` — exit 0 after
-  making workspace-open assertions descriptor-aware.
-- `AGENT99_PROVIDER_BACKEND=embed bash tests/smoke.sh multi` initially exposed the missing
-  cross-process root lock. After adding `flock` ownership and rebuilding the bridge, it
-  exited 0.
-- `AGENT99_PROVIDER_BACKEND=embed make smoke` — final exit 0; reported
-  `headless: OK`, `multi-workspace: OK`, `debug: OK`, and `smoke: OK`.
-- `make smoke` — final exit 0 on the default socket backend with the same four OK markers.
-- `go test ./...` — exit 0; bridge, provider, embed, embedspike, and socket packages passed;
-  the command package has no tests.
+- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0.
+- `go test ./...` — exit 0; bridge, provider, embed, embedspike, socket, and workspace
+  packages passed; the command package has no tests.
+- `make smoke` — exit 0 on the default socket backend; reported `headless: OK`,
+  `multi-workspace: OK`, `debug: OK`, and `smoke: OK`.
+- `AGENT99_PROVIDER_BACKEND=embed make smoke` — exit 0 with the same four OK markers.
+- `bash tests/smoke.sh headless:workspace` — exit 0 after the identity assertion.
+- `AGENT99_PROVIDER_BACKEND=embed bash tests/smoke.sh headless:workspace` — exit 0 after the
+  identity assertion.
 - `go vet ./...` — exit 0; no output.
 - `git diff --check` — exit 0; no output.
 - `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`
   — exit 0.
 
-Two intermediate smoke cleanup processes dumped core. `coredumpctl` identified their
-command as a fresh `nvim --server <dead-socket> --remote-expr ...` cleanup helper and the
-stack as a libuv abort; there was no OOM evidence. Replacing that cleanup helper with direct
-PID termination removed the abort, and both final full smoke runs passed.
-
 ## Decisions and risks
 
-- Cancellation is honestly advertised as `provider_restart`, not cooperative per-request
-  cancellation. The pinned client has no context-aware per-request call API; S04 therefore
-  uses provider-wide termination with explicit epoch change and deterministic restart.
-- Completion dispatch is keyed by request ID. FIFO completion assumptions remain prohibited.
-- Linux root lock files remain after unlock to avoid pathname/inode replacement races; an
-  unlocked file is not a foreign owner.
-- Production bootstrap accepts Neovim 0.11 and 0.12. S03 proved the transport on 0.11.4,
-  0.12.1, and host 0.12.5; the S04 full runtime/LSP/DAP smoke matrix ran on host 0.12.5.
-- The socket backend remains the default comparison oracle and immediate rollback path.
-- S04 adds no document identity, revision, state-sequence, scheduler, or successor-stage
-  behavior. Those remain gated by S05 and later stages.
+- S05 creates no modern MCP catalog. It establishes the core that the S07 adapter will expose;
+  the existing root/sticky routing remains explicitly legacy.
+- Content hashes are lazy and metadata-cached for ordinary snapshots. Mutation validation
+  always forces a hash, matching the contract's optimistic-concurrency boundary and catching
+  same-metadata replacement.
+- A document revision includes filesystem and provider layers, so inode/mode/mtime,
+  changedtick, dirty state, or selected LSP versions may conservatively invalidate a token even
+  when bytes are equal.
+- State sequence advances only when the core observes a change or provider epoch transition;
+  no filesystem watcher is claimed in this stage.
+- Provider-buffer bytes are accepted as an explicit layer rather than fetched implicitly.
+  Provider-independent collection and document workspaces belong to S06.
+- The revision core currently stores service-local revision evidence in memory. Durable
+  transaction and recovery records remain S10–S13 work.
 - No install, deployment, live MCP/config/state mutation, push, or pull request occurred.
-- Exact next stage: S05 — Explicit workspaces and revisions.
+- Exact next stage: S06 — Provider-independent text core and document workspaces.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agent99/internal/provider"
+	workspacecore "agent99/internal/workspace"
 )
 
 type recordingProvider struct {
@@ -28,9 +29,14 @@ func (p *recordingProvider) Done() <-chan struct{}       { return make(chan stru
 func TestProviderCallRoutesThroughProfileWithRequestContext(t *testing.T) {
 	backend := &recordingProvider{descriptor: provider.Descriptor{
 		ID:           "recording",
+		Epoch:        4,
 		Cancellation: provider.CancellationUnsupported,
 		Capabilities: []provider.Capability{provider.CapabilityExecute},
 	}}
+	core, err := workspacecore.New(workspacecore.KindProject, t.TempDir(), backend.descriptor.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile, err := provider.NewAnalysisProfile("default", []provider.Registration{{
 		Provider: backend,
 		Role:     provider.RolePrimary,
@@ -44,6 +50,7 @@ func TestProviderCallRoutesThroughProfileWithRequestContext(t *testing.T) {
 		Root:      "/workspace",
 		Providers: profile,
 		Provider:  backend,
+		Workspace: core,
 		Client:    "client-a",
 	}, "definition", arguments)
 	if err != nil {
@@ -62,6 +69,10 @@ func TestProviderCallRoutesThroughProfileWithRequestContext(t *testing.T) {
 	if backend.request.Context.RequestID == "" || !backend.request.Context.Deadline.After(before) {
 		t.Fatalf("request lifetime = %#v", backend.request.Context)
 	}
+	if backend.request.Context.WorkspaceID != string(core.Identity().ID) ||
+		backend.request.Context.Epoch != core.Identity().Epoch {
+		t.Fatalf("workspace context = %#v", backend.request.Context)
+	}
 	if backend.request.Arguments["client"] != "client-a" {
 		t.Fatalf("client argument = %#v", backend.request.Arguments)
 	}
@@ -73,5 +84,37 @@ func TestProviderCallRoutesThroughProfileWithRequestContext(t *testing.T) {
 func TestProviderCallRequiresConfiguredPrimary(t *testing.T) {
 	if _, err := providerCall(session{Root: "/workspace"}, "definition", nil); err == nil {
 		t.Fatal("call without provider succeeded")
+	}
+}
+
+func TestOpenWorkspaceResultCarriesExplicitIdentity(t *testing.T) {
+	backend := &recordingProvider{descriptor: provider.Descriptor{
+		ID:           "recording",
+		Backend:      "fake",
+		Epoch:        12,
+		Capabilities: []provider.Capability{provider.CapabilityExecute},
+	}}
+	profile, err := provider.NewAnalysisProfile("default", []provider.Registration{{
+		Provider: backend,
+		Role:     provider.RolePrimary,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	core, err := workspacecore.New(workspacecore.KindProject, t.TempDir(), backend.descriptor.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := openWorkspaceResult(&headlessWorkspace{
+		Root:      core.Identity().Root,
+		Providers: profile,
+		Provider:  backend,
+		Workspace: core,
+	}, "client-a", false)
+
+	identity := core.Identity()
+	if result["workspace_id"] != identity.ID || result["workspace_kind"] != workspacecore.KindProject ||
+		result["workspace_epoch"] != uint64(12) || result["state_seq"] != uint64(1) {
+		t.Fatalf("open result identity = %#v", result)
 	}
 }

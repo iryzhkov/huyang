@@ -194,6 +194,13 @@ def group_workspace(c):
                    and res.get("provider_epoch", 0) >= 1)
     check("open_workspace", res.get("root") == os.path.realpath(root)
           and (socket_ready or embed_ready), res)
+    check("open_workspace reports explicit Huyang identity",
+          isinstance(res.get("workspace_id"), str)
+          and res["workspace_id"].startswith("ws_")
+          and len(res["workspace_id"]) == 35
+          and res.get("workspace_kind") == "project"
+          and res.get("workspace_epoch") == res.get("provider_epoch")
+          and res.get("state_seq", 0) >= 1, res)
     c.pid = res["pid"]
     langs = {l["filetype"]: l for l in res.get("languages", [])}
     check("open_workspace reports languages",

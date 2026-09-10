@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"agent99/internal/provider"
+	workspacecore "agent99/internal/workspace"
 )
 
 // session is the Neovim instance a tool call is routed to, plus the project
@@ -30,6 +31,7 @@ type session struct {
 	Root      string
 	Providers *provider.AnalysisProfile
 	Provider  provider.Provider
+	Workspace *workspacecore.Workspace
 	// Headless is true when the instance is a workspace this server
 	// started: nobody is at the keyboard, so edits are saved to disk and
 	// the tools word their replies accordingly.

@@ -42,9 +42,18 @@ func providerCall(ses session, operation string, arguments map[string]any) (any,
 	if err != nil {
 		return nil, err
 	}
-	if route.Primary.Descriptor().ID != ses.Provider.Descriptor().ID {
+	descriptor := route.Primary.Descriptor()
+	if descriptor.ID != ses.Provider.Descriptor().ID {
 		return nil, fmt.Errorf("analysis profile primary %q does not match routed provider %q",
-			route.Primary.Descriptor().ID, ses.Provider.Descriptor().ID)
+			descriptor.ID, ses.Provider.Descriptor().ID)
+	}
+
+	var workspaceID string
+	var workspaceEpoch uint64
+	if ses.Workspace != nil {
+		identity := ses.Workspace.SyncProviderEpoch(descriptor.Epoch)
+		workspaceID = string(identity.ID)
+		workspaceEpoch = identity.Epoch
 	}
 
 	withClient := make(map[string]any, len(arguments)+1)
@@ -66,12 +75,17 @@ func providerCall(ses session, operation string, arguments map[string]any) (any,
 		Context: provider.RequestContext{
 			RequestID:    fmt.Sprintf("legacy_%d", providerRequestSeq.Add(1)),
 			Actor:        ses.Client,
+			WorkspaceID:  workspaceID,
+			Epoch:        workspaceEpoch,
 			Deadline:     deadline,
-			Cancellation: route.Primary.Descriptor().Cancellation,
+			Cancellation: descriptor.Cancellation,
 		},
 		Operation: operation,
 		Arguments: withClient,
 	})
+	if ses.Workspace != nil {
+		ses.Workspace.SyncProviderEpoch(route.Primary.Descriptor().Epoch)
+	}
 	if err != nil {
 		return nil, err
 	}
