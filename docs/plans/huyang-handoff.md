@@ -264,5 +264,15 @@ Run from /home/igor/Work/huyang on 2026-09-10:
 - Added `contrib/systemd/huyang.service`.
 - Pre-publish verification on 2026-09-10: `make smoke`, `go test ./...`,
   `go vet ./...`, and `git diff --check` all exited 0.
-- Repository publication, host deployment, harness replacement, instruction updates, and
-  per-host verification follow this commit and will be recorded in a deployment record.
+- Both new public repositories default to `main` at `4f87241`. Normandy, Homelab, and
+  Gaming PC run the enabled Huyang user service and advertise only Huyang to Claude, Codex,
+  and OpenCode; each passed MCP initialize and the 17-tool full-profile catalog check.
+- Agent99 was removed from the shared Neovim configuration in `a8c430a`, pushed to both
+  configured upstreams, pulled on the reachable hosts, and removed from their active lazy.nvim
+  installations.
+- `CLAUDE.md`, `AGENTS.md`, OpenCode instruction references, and the generated shared
+  guide now describe Huyang's modern revision/transaction/evidence workflow.
+- Exact deployment evidence and recovery state are in
+  `docs/plans/huyang-rollout-2026-09-10.md`.
+- Remaining work: laptop rollout. The laptop deliberately has no inbound SSH path and Normandy
+  has no steward host alias for it, so no safe successor could be queued from this host.
