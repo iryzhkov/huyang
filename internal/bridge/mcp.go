@@ -13,8 +13,8 @@ package bridge
 //     server inherited $NVIM from an enclosing :terminal.
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,6 +22,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -267,15 +269,6 @@ func servedTools() []tool {
 	return standaloneTools(append(out, fileTools...))
 }
 
-func writeMsg(w *bufio.Writer, msg map[string]any) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	w.Write(data)
-	w.WriteByte('\n')
-	w.Flush()
-}
 
 func textResult(text string, isError bool) map[string]any {
 	return map[string]any{
@@ -308,8 +301,12 @@ func jsonResult(v any) map[string]any {
 }
 
 func callMCPTool(name string, arguments map[string]any, client string) map[string]any {
+	return callMCPToolContext(context.Background(), name, arguments, client)
+}
+
+func callMCPToolContext(ctx context.Context, name string, arguments map[string]any, client string) map[string]any {
 	started := time.Now()
-	res, root := dispatchMCPTool(name, arguments, client)
+	res, root := dispatchMCPToolContext(ctx, name, arguments, client)
 	logFriction(name, root, arguments, res, started)
 	return res
 }
@@ -318,6 +315,10 @@ func callMCPTool(name string, arguments map[string]any, client string) map[strin
 // empty when the call failed before it was routed anywhere. The second return
 // exists for the friction spool: where a call ran is part of reading it later.
 func dispatchMCPTool(name string, arguments map[string]any, client string) (map[string]any, string) {
+	return dispatchMCPToolContext(context.Background(), name, arguments, client)
+}
+
+func dispatchMCPToolContext(ctx context.Context, name string, arguments map[string]any, client string) (map[string]any, string) {
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
@@ -390,6 +391,7 @@ func dispatchMCPTool(name string, arguments map[string]any, client string) (map[
 		return textResult("Error: "+err.Error(), true), ""
 	}
 	ses.Client = client
+	ses.Context = ctx
 	// A workspace opened for this call, or revived for it, is held by this
 	// client as surely as one it opened by name.
 	if ses.Headless {
@@ -422,89 +424,35 @@ func dispatchMCPTool(name string, arguments map[string]any, client string) (map[
 	return textResult(out, false), ses.Root
 }
 
-func mcpHandle(method string, params map[string]any) (map[string]any, bool) {
-	switch method {
-	case "initialize":
-		noteFrictionClient(params)
-		asked, _ := params["protocolVersion"].(string)
-		return map[string]any{
-			"protocolVersion": negotiateProtocolVersion(asked),
-			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "agent99-lsp", "version": serverVersion},
-		}, true
-	case "server/discover":
-		// Mandatory from the 2026-07-28 revision, and cheap: the versions
-		// this server actually implements, plus what it can do.
-		return map[string]any{
-			"protocolVersions": supportedProtocolVersions,
-			"capabilities":     map[string]any{"tools": map[string]any{}},
-			"serverInfo":       map[string]any{"name": "agent99-lsp", "version": serverVersion},
-		}, true
-	case "ping":
-		return map[string]any{}, true
-	case "tools/list":
-		return map[string]any{"tools": servedTools()}, true
-	case "tools/call":
-		name, _ := params["name"].(string)
-		arguments, _ := params["arguments"].(map[string]any)
-		// _meta is where a caller can say which agent it is speaking for
-		// (client.go); with no such field the whole connection is one
-		// client, which is what this process is.
-		return callMCPTool(name, arguments, callClient(metaClient(params))), true
-	}
-	return nil, false
-}
 
 func runMCP() {
 	defer closeAllWorkspaces()
-	// Sockets left by bridges that are gone, and a sweep that gives back the
-	// memory of a workspace nothing has touched for a while.
 	sweepStaleSockets()
 	startIdleReaper()
-	// A client that terminates the server instead of closing stdin must not
-	// leave a headless Neovim behind.
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	go func() {
-		<-sigs
-		closeAllWorkspaces()
-		os.Exit(0)
-	}()
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
-	out := bufio.NewWriter(os.Stdout)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var msg map[string]any
-		if err := json.Unmarshal(line, &msg); err != nil {
-			continue
-		}
-		id, hasID := msg["id"]
-		if !hasID {
-			continue // notification
-		}
-		method, _ := msg["method"].(string)
-		params, _ := msg["params"].(map[string]any)
-		reply := map[string]any{"jsonrpc": "2.0", "id": id}
-		if result, ok := mcpHandle(method, params); ok {
-			reply["result"] = result
-		} else {
-			reply["error"] = map[string]any{
-				"code":    -32601,
-				"message": fmt.Sprintf("method not found: %s", method),
-			}
-		}
-		writeMsg(out, reply)
+
+	profile, err := requestedMCPProfile(os.Args[2:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "agent99 mcp:", err)
+		return
 	}
-	// A request over the buffer cap ends Scan without an error on stdout;
-	// the client would wait forever for a reply that never comes. Say so on
-	// stderr, where the client shows it, and exit non-zero.
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "agent99 mcp: reading stdin: %v\n", err)
-		closeAllWorkspaces()
-		os.Exit(1)
+	if err := validateModernRegistry(); err != nil {
+		fmt.Fprintln(os.Stderr, "agent99 mcp: invalid modern registry:", err)
+		return
+	}
+
+	stateDir, err := directStateDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "agent99 mcp: create direct state directory:", err)
+		return
+	}
+	if os.Getenv("HUYANG_DIRECT_STATE_DIR") == "" {
+		defer os.RemoveAll(stateDir)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer stop()
+	server := newSDKServer(profile, newDirectWorkspaces(stateDir))
+	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+		fmt.Fprintln(os.Stderr, "agent99 mcp:", err)
 	}
 }

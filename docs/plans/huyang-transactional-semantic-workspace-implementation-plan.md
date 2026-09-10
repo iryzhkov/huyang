@@ -835,7 +835,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S04 — Embedded provider production path
 - [x] S05 — Explicit workspaces and revisions
 - [x] S06 — Provider-independent text core and document workspaces
-- [ ] S07 — Official MCP SDK in direct mode
+- [x] S07 — Official MCP SDK in direct mode
 - [ ] S08 — Shared service and scheduler
 - [ ] S09 — Semantic handles
 - [ ] S09H — Read-only Git source provenance

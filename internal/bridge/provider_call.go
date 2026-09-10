@@ -68,8 +68,12 @@ func providerCall(ses session, operation string, arguments map[string]any) (any,
 	if configured, ok := providerToolTimeouts[operation]; ok {
 		timeout = configured
 	}
+	base := ses.Context
+	if base == nil {
+		base = context.Background()
+	}
 	deadline := time.Now().Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(base, deadline)
 	defer cancel()
 	result, err := route.Primary.Call(ctx, provider.Request{
 		Context: provider.RequestContext{

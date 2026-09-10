@@ -15,6 +15,7 @@ package bridge
 // rather than guessed at.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 // session is the Neovim instance a tool call is routed to, plus the project
 // root its relative paths resolve against.
 type session struct {
+	Context   context.Context
 	Root      string
 	Providers *provider.AnalysisProfile
 	Provider  provider.Provider
