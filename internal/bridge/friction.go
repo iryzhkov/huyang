@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Friction spool: one JSON line per MCP tool call, appended to a file under
 // the local data directory, so that a later pass can measure which tools

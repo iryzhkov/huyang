@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // MCP stdio server exposing the tools. Speaks newline-delimited JSON-RPC on
 // stdin/stdout. Two modes:

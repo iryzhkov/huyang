@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Tool schemas: what the model is shown for every tool. The execution lives
 // in tools.go (file tools) and in the plugin's Lua (everything routed

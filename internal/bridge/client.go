@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Which client a call belongs to.
 //

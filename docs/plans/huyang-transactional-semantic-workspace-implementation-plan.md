@@ -829,7 +829,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 ### Committed stage checklist
 
 - [x] S00 — Baseline and contract freeze
-- [ ] S01 — Mechanical package boundary
+- [x] S01 — Mechanical package boundary
 - [ ] S02 — Provider seam with socket reference backend
 - [ ] S03 — Embedded provider decision spike
 - [ ] S04 — Embedded provider production path

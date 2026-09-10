@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // The agent loop for OpenAI-compatible chat-completions APIs (DeepSeek by
 // default). Reads a JSON payload on stdin, loops over tool calls, prints

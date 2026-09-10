@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Headless workspaces for the standalone MCP server. When the bridge is not
 // launched from inside Neovim (no $AGENT99_NVIM), a client such as Claude

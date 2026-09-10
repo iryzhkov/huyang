@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Transport into the running Neovim instance. Each tool call goes through
 // the non-blocking start/poll protocol implemented by the agent99 plugin

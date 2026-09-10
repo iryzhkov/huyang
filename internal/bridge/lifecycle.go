@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Workspace lifecycle: what happens to a headless Neovim between the call
 // that opened it and the one that closes it.

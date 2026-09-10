@@ -2,7 +2,7 @@
 
 # Compile the bridge (agent loop + MCP server, one static binary).
 build:
-	go build -o bin/agent99-bridge ./bridge
+	go build -o bin/agent99-bridge ./cmd/agent99-bridge
 
 # Bridge + LSP tools against a headless Neovim (no API calls, free).
 # SUITES narrows the run while iterating (unit mcp headless multi debug),

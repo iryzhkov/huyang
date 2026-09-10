@@ -1,4 +1,4 @@
-package main
+package bridge
 
 // Routing: which Neovim a tool call is sent to, and which project root its
 // relative paths resolve against.

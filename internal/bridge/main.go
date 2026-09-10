@@ -12,7 +12,7 @@
 //	                       for use with `claude -p --mcp-config`
 //
 // No dependencies outside the Go standard library.
-package main
+package bridge
 
 import (
 	"encoding/json"
@@ -20,7 +20,7 @@ import (
 	"os"
 )
 
-func main() {
+func Main() {
 	sub := ""
 	if len(os.Args) > 1 {
 		sub = os.Args[1]
