@@ -1,0 +1,58 @@
+{
+  "fixture_version": "huyang.tools/v1alpha1-s00",
+  "catalogs": {
+    "full": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"],
+    "orient": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get"],
+    "edit": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff"],
+    "debug": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"]
+  },
+  "catalog_rules": {
+    "default": "full",
+    "selection": "fixed startup argument or fixed HTTP route",
+    "profile_is_permission": false,
+    "workspace_health_changes_catalog": false,
+    "legacy_and_administration_opt_in": true
+  },
+  "shared": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "target": ["handle", "file_range", "symbol_locator"],
+    "outcome": ["ok", "partial", "provisional", "conflict", "unavailable", "failed"],
+    "operation": ["replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"],
+    "verification_status": ["selected", "running", "passed", "failed", "unavailable", "cancelled", "timed_out"],
+    "filesystem_kind": ["regular_text", "binary", "symlink", "directory", "missing"],
+    "stateful_requirements": ["workspace_id", "idempotency_key"],
+    "mutation_precondition": "revision_or_handle",
+    "coordinates": "one-based Unicode-scalar display; exact byte offsets authoritative",
+    "pagination": "cursor; never split primary failure or selected target",
+    "next_limit": 2
+  },
+  "tools": {
+    "workspace_open": {"read_only": true, "required": ["kind"], "kind": ["project", "documents"], "returns": ["workspace", "revision", "capabilities", "overview", "recent_commits", "next"]},
+    "workspace_inspect": {"read_only": true, "required": ["workspace_id"], "view": ["status", "overview", "map"], "returns": ["revision", "dirty_state", "providers", "coverage", "pipeline", "variants", "limits"]},
+    "search": {"read_only": true, "required_by_source": {"workspace": ["workspace_id", "query"], "result_set": ["workspace_id", "result_set_handle"], "git_history": ["workspace_id", "git_history"]}, "mode": ["literal", "regex", "structure"], "detail": ["compact", "context"], "result_set_types": ["current_source", "historical"]},
+    "symbol_find": {"read_only": true, "required": ["workspace_id", "query"], "batch": true, "returns": ["ranked_handles", "coverage"]},
+    "navigate": {"read_only": true, "required": ["workspace_id", "relation", "target"], "relation": ["definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"], "batch": true},
+    "read": {"read_only": true, "required": ["workspace_id", "target"], "view": ["source", "outline", "history", "changes"], "batch": true},
+    "diagnostics": {"read_only": true, "required": ["workspace_id"], "batch": true, "returns": ["items", "confidence", "coverage", "provenance", "cursor"]},
+    "code_actions": {"read_only": true, "required": ["workspace_id", "target"], "applies": false, "returns": ["revision_bound_action_handles", "known_write_sets"]},
+    "edit_apply": {"read_only": false, "required": ["workspace_id", "idempotency_key", "operation"], "operation_count": 1, "preview_only": true, "returns": ["patch", "revision", "tool_delta", "diagnostic_delta", "verification", "receipt"]},
+    "change_plan": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["create", "edit", "preview", "prepare", "inspect", "apply", "discard"], "apply_requires": ["plan_id", "plan_revision", "prepared_revision"], "inline_prepare": true},
+    "verify_run": {"read_only": false, "required": ["workspace_id", "idempotency_key", "stages", "revision_or_transaction"], "stages": ["format_gate", "parser", "diagnostics", "check", "tests"], "test_scope": ["affected", "full"]},
+    "revision_diff": {"read_only": true, "required": ["workspace_id", "from_revision", "to_revision_or_current"], "automatic_rebase": false},
+    "evidence_get": {"read_only": true, "required": ["workspace_id", "evidence_id"], "returns": ["pending_or_final_state", "cursor"]},
+    "debug_session": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["start", "attach", "restart", "stop"]},
+    "debug_breakpoints": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["list", "set", "remove", "clear"]},
+    "debug_control": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["continue", "pause", "step_over", "step_into", "step_out", "run_to"]},
+    "debug_inspect": {"read_only": true, "required": ["workspace_id", "action"], "action": ["threads", "stack", "scopes", "variables", "evaluate"], "evaluate_policy": ["read_only", "allow_side_effects"], "default_evaluate_policy": "read_only"}
+  },
+  "frozen_assertions": {
+    "search_refinement": "AND-only monotonic intersection with typed parent lineage",
+    "compact_search_rendering": "one outcome line, one path line per file, one physical line per hit, optional cursor/coverage line",
+    "structural_search": "search mode branch, not a separate tool",
+    "hover": "navigate relation, not a separate tool",
+    "launch": "huyang mcp --profile full|orient|edit|debug; full default; fixed HTTP routes",
+    "debug_evaluate": "potentially side-effecting unless runtime enforces read-only",
+    "byte_preserving_default": true,
+    "git_mutation_tools": false
+  }
+}

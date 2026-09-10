@@ -1,0 +1,66 @@
+{
+  "fixture_version": "huyang.tools/v1alpha1-s00",
+  "search_structured": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "request_id": "req_fixture_search",
+    "workspace": {"id": "ws_fixture", "epoch": 3, "state_seq": 81, "kind": "project"},
+    "summary": "7 matches in 3 files; 6 semantically classified",
+    "data": {
+      "query": {"text": "resolveSession", "mode": "literal"},
+      "coverage": {"complete": true, "files_considered": 18, "files_searched": 18, "files_skipped": [], "classified": 6, "unclassified": 1, "truncated": false},
+      "result_set": {"handle": "set_fixture", "parent": null, "revision": "wsrev_fixture", "matches": 7, "files": 3, "complete": true},
+      "groups": [{"file": "bridge/routing.go", "matches": 4, "hits": [{"line": 231, "column": 6, "excerpt": "func resolveSession(...)", "spans": [[5, 19]], "kind": "definition", "test": false, "match_handle": {"handle": "rng_fixture", "display": "bridge/routing.go:231 exact match in resolveSession"}, "enclosing": {"handle": "sym_fixture", "display": "bridge/routing.go:231 resolveSession function"}, "diagnostic": null}]}],
+      "next_cursor": null
+    },
+    "evidence": {"ids": [], "truncated": false},
+    "warnings": [],
+    "next": [{"tool": "read", "arguments": {"workspace_id": "ws_fixture", "target": {"handle": "sym_fixture"}}}]
+  },
+  "search_compact_text": "7 matches in 3 files [complete] set=set_fixture rev=wsrev_fixture\nbridge/routing.go (4)\n  231:6 definition rng_fixture | func resolveSession(...)\nmore cursor=cur_fixture",
+  "edit_success": {
+    "outcome": "ok",
+    "summary": "1 symbol changed; parser and configured checks passed",
+    "workspace": {"id": "ws_fixture", "epoch": 3, "state_seq": 82, "kind": "project"},
+    "transaction": {"id": "tx_fixture_edit", "state": "COMMITTED"},
+    "data": {"operation_id": "op_1", "canonical_revision": "wsrev_82", "patch_evidence": "ev_patch", "tool_delta": [], "diagnostic_delta": {"new": [], "resolved": []}, "verification": {"confidence": "authoritative", "coverage": {"edited_documents": "complete"}, "stages": [{"stage": "parser", "status": "passed"}, {"stage": "check", "status": "passed"}]}, "receipt": "receipt_fixture"},
+    "evidence": {"ids": ["ev_patch", "ev_check"], "truncated": false},
+    "warnings": [],
+    "next": []
+  },
+  "inline_prepare": {
+    "outcome": "ok",
+    "summary": "2 operations prepared in 2 files; canonical workspace unchanged",
+    "workspace": {"id": "ws_fixture", "epoch": 3, "state_seq": 82, "kind": "project"},
+    "transaction": {"id": "tx_fixture_plan", "state": "READY"},
+    "data": {"plan_id": "plan_fixture", "plan_revision": 1, "prepared_revision": "prep_fixture", "canonical_changed": false, "affected_files": ["a.go", "b.go"], "predicted_diff": "ev_predicted", "prepared_diff": "ev_prepared", "tool_delta": "ev_tool_delta"},
+    "evidence": {"ids": ["ev_predicted", "ev_prepared", "ev_tool_delta"], "truncated": false},
+    "warnings": [],
+    "next": [{"tool": "change_plan", "arguments": {"workspace_id": "ws_fixture", "action": "apply", "plan_id": "plan_fixture", "plan_revision": 1, "prepared_revision": "prep_fixture"}}]
+  },
+  "stale_conflict": {
+    "outcome": "conflict",
+    "code": "document_content_changed",
+    "summary": "Mutation refused: bridge/routing.go changed after the target revision",
+    "workspace": {"id": "ws_fixture", "epoch": 3, "state_seq": 83, "kind": "project"},
+    "data": {"target": {"handle": "sym_fixture", "display": "bridge/routing.go:231 resolveSession function"}, "expected_revision": "docrev_old", "current_revision": "docrev_new"},
+    "evidence": {"ids": ["ev_revision_delta"], "truncated": false},
+    "warnings": [],
+    "next": [{"tool": "revision_diff", "arguments": {"workspace_id": "ws_fixture", "from_revision": "docrev_old", "to_revision_or_current": "docrev_new"}}, {"tool": "read", "arguments": {"workspace_id": "ws_fixture", "target": {"handle": "sym_fixture"}}}]
+  },
+  "provisional_diagnostics": {
+    "outcome": "provisional",
+    "summary": "No new edited-file diagnostics; importer coverage timed out",
+    "data": {"confidence": "provisional", "coverage": {"edited_documents": "complete", "direct_importers": "unavailable"}, "new": [], "resolved": [], "provisional_reasons": ["diagnostic_barrier_timeout"], "diagnostic_cursor": "diagcur_fixture"},
+    "evidence": {"ids": ["ev_diag"], "truncated": false},
+    "warnings": [],
+    "next": [{"tool": "diagnostics", "arguments": {"workspace_id": "ws_fixture", "since": "diagcur_fixture"}}]
+  },
+  "debug_stop": {
+    "outcome": "ok",
+    "summary": "Stopped at main.go:11:5: breakpoint",
+    "data": {"session_id": "dbg_fixture", "reason": "breakpoint", "top_location": {"handle": "rng_debug", "display": "main.go:11 accumulate"}, "top_frame_locals": [{"name": "items", "value": "[1,2,3]"}], "changes_since_previous_stop": []},
+    "evidence": {"ids": [], "truncated": false},
+    "warnings": [],
+    "next": [{"tool": "debug_control", "arguments": {"workspace_id": "ws_fixture", "action": "continue"}}]
+  }
+}

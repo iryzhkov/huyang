@@ -1,0 +1,30 @@
+{
+  "fixture_version": "huyang.tools/v1alpha1-s00",
+  "analysis_profile": "default",
+  "language": "typescript",
+  "providers": [
+    {"id": "tsserver_primary", "role": "primary", "capabilities": ["navigation", "rename", "diagnostics"], "selected": true, "health": "healthy"},
+    {"id": "eslint_complement", "role": "complementary", "capabilities": ["diagnostics", "code_actions"], "selected": true, "health": "healthy"},
+    {"id": "denols_fallback", "role": "fallback", "fallback_for": "tsserver_primary", "capabilities": ["navigation", "diagnostics"], "selected": false, "health": "healthy"},
+    {"id": "broken_optional", "role": "complementary", "capabilities": ["diagnostics"], "selected": true, "health": "failed", "failure": {"code": "provider_launch_failed", "evidence_id": "ev_provider_failure"}}
+  ],
+  "navigation": {"provider": "tsserver_primary", "fallback_used": false},
+  "diagnostics": [
+    {"provider": "tsserver_primary", "severity": "error", "code": "TS2322", "message": "fixture type conflict", "target": {"handle": "rng_ts"}},
+    {"provider": "eslint_complement", "severity": "warning", "code": "fixture-rule", "message": "fixture lint conflict", "target": {"handle": "rng_eslint"}}
+  ],
+  "coverage": {
+    "outcome": "partial",
+    "selected_healthy": 2,
+    "selected_failed": 1,
+    "conflicting_findings_preserved": true,
+    "broken_provider_silently_replaced": false
+  },
+  "assertions": [
+    "one declared primary routes navigation and rename",
+    "complementary diagnostics retain provider identity",
+    "declared fallback is used only after reported primary failure",
+    "conflicting findings are not collapsed",
+    "one broken provider degrades only its evidence dimensions"
+  ]
+}
