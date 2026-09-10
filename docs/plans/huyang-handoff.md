@@ -13,17 +13,17 @@
 
 ## Current checkpoint
 
-- Completed stage: S09 — Semantic handles.
-- Starting commit: `590beff7bd14e4bdd7285ed2569e96e2c12aba5d`.
-- Reconciliation before implementation fetched origin and confirmed a clean
-  `feature/huyang` branch, the reviewed base in branch history, S08 committed at the
-  starting commit, and S09 as exactly the first incomplete checklist stage.
-- S09 exit gates are satisfied: inspectable epoch-bound range/symbol handles, explicit
-  exact/relocated/conflicted resolution, safe adversarial relocation, complete frozen
-  result-set coverage, monotonic refinement lineage, and opaque-handle support on the
-  existing one-operation edit path.
-- Only S09 is marked complete in the committed checklist.
-- Exact next stage: S09H — Read-only Git source provenance.
+- Completed stage: S09H — Read-only Git source provenance.
+- Starting commit: `93d4db19d452e895c2364df7bc8a21f89dc324aa`.
+- Reconciliation fetched origin and confirmed a clean `feature/huyang` branch, the reviewed
+  base in branch history, S09 committed with its focused tests/artifact, and S09H as exactly
+  the first incomplete checklist stage.
+- S09H exit gates are satisfied: bounded first-parent overview commits and opaque handles;
+  bounded history/change/search/file-age views; honest dirty/prepared mapping; sanitized,
+  local-only Git execution; and adversarial merge, rename, shallow, missing-object, malicious
+  config, binary, and submodule coverage.
+- Only S09H is newly marked complete in the committed checklist.
+- Exact next stage: S10 — Transaction intent, validation and preview.
 
 ## Predecessor and stage artifacts
 
@@ -39,31 +39,33 @@ These tracked artifacts were read completely before implementation:
 - `docs/plans/huyang-s06-text-core-documents.md`
 - `docs/plans/huyang-s07-mcp-sdk-direct.md`
 - `docs/plans/huyang-s08-service-scheduler.md`
+- `docs/plans/huyang-s09-semantic-handles.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-S09 adds:
+S09H adds:
 
-- `docs/plans/huyang-s09-semantic-handles.md`
+- `docs/plans/huyang-s09h-git-provenance.md`
 
-## S09 changes
+## S09H changes
 
-- Added service-local opaque range, match, symbol, and result-set handles with
-  inspectable locator records, configurable TTL and workspace-epoch invalidation.
-- Added explicit exact, relocated, and conflicted resolution. Range relocation requires
-  a unique content/anchor match; semantic relocation uses parser sections, normalized
-  node/signature hashes and file identity.
-- Added adversarial handling for formatting, movement, overload/duplicate ambiguity,
-  rename, signature change, and delete/recreate so no unsafe case silently rebinds.
-- Search now freezes the full unpaged match set behind an opaque result-set handle and
-  reports source coverage, revisions, counts, overlap and all-match eligibility.
-- Added monotonic result-set refinement with inherited coverage, parent lineage, and
-  retained/eliminated counts. Current and explicitly historical set types are distinct.
-- Updated modern MCP search, read, symbol-find and existing one-operation edit surfaces
-  to issue or accept opaque handles while retaining human range locators.
-- Added focused workspace and official-SDK bridge tests. No S09H Git provenance or S10
-  durable transaction intent was implemented.
+- Added a workspace-owned, optional Git provenance layer with opaque epoch/TTL-bound commit
+  handles and a bounded three-commit first-parent workspace overview.
+- Added exact-byte blame mapping for file, line/range, and semantic-handle history. Unmatched
+  canonical spans are `uncommitted`; unmatched prepared spans are `derived_from_plan`;
+  unchanged mapped spans retain committed provenance.
+- Added recent touching commits and named file-age metrics with explicit ref, traversal,
+  rename policy, shallow boundary, rename ambiguity, and provisional introduction evidence.
+- Added bounded commit path/patch views, using explicit first-parent diffs for merges and
+  typed binary/submodule coverage.
+- Added local message/path/diff history search with typed historical frozen result sets that
+  cannot be consumed by current-source all-match mutation.
+- Hardened Git execution against repository/environment-configured hooks, pagers, fsmonitor,
+  credential helpers, external diffs, textconv, repository redirection, object/index
+  redirection, SSH/askpass, submodule recursion, optional locks, and network protocols.
+- Updated the official-SDK `workspace_open`, `read`, and `search` surfaces. No S10
+  durable transaction intent or prepared-plan state was implemented.
 
 ## Verification
 
@@ -71,36 +73,36 @@ Run from `/home/igor/Work/huyang` on 2026-09-10:
 
 - `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0:
   `ok agent99/internal/workspace` and `ok agent99/internal/bridge`.
-- The focused race run covers exact inspection, TTL/epoch invalidation, unique range
-  relocation and opaque edits; complete/capped/non-overlapping/stale result sets;
-  monotonic refinement and historical/current separation; and format, move, signature,
-  rename, duplicate and delete/recreate symbol cases.
-- `make smoke` — exit 0; built `bin/agent99-bridge` and `bin/huyang`,
-  then reported `unit_edit: OK`, `unit_testrun: OK`, `unit_check: OK`,
-  `unit_index: OK`, `headless: OK`, `multi-workspace: OK`,
-  `debug: OK` and `smoke: OK`.
-- `go test ./...` — exit 0; all command, bridge, provider and workspace packages
-  passed.
+- The focused race run covers bounded overview and commit handles; first-parent merge shape;
+  rename following; shallow and missing-object degradation; dirty/prepared mapping; binary
+  and gitlink histories; historical search/change views; malicious Git config non-execution;
+  repository-inert HEAD/index/worktree state; and the official SDK surface.
+- `make smoke` — exit 0; built both binaries and reported `unit_edit: OK`,
+  `unit_testrun: OK`, `unit_check: OK`, `unit_index: OK`, `headless: OK`,
+  `multi-workspace: OK`, `debug: OK`, and `smoke: OK`.
+- `go test ./...` — exit 0; all command, bridge, provider, and workspace packages passed.
 - `go vet ./...` — exit 0; no output.
-- `git diff --check` — exit 0 after the final documentation update; no output.
+- `git diff --check` — exit 0 before final documentation; rerun after this handoff update
+  and before commit.
 
 ## Decisions and risks
 
-- Handles are deliberately in-memory and service-local. Workspace epoch changes make
-  restart invalidation explicit; persistence is outside S09.
-- Presentation paging never truncates the private frozen match set. All-match resolution
-  additionally requires complete, non-overlapping coverage and unchanged file manifest,
-  document revisions, workspace revision and epoch.
-- Refinements only add predicates and cannot broaden inherited coverage. Historical sets
-  use a separate source kind, but their Git-backed production is deferred to S09H.
-- Semantic symbol quality is bounded by the configured section-capable parser/provider.
-  Without one, `workspace_symbol_find` remains truthfully partial; content-anchored
-  range and match handles remain available in the provider-independent text core.
-- Opaque handles augment the existing human locator forms. The edit integration is the
-  existing single-operation preparation/application path, not a durable multi-operation
-  plan.
-- Language-server diagnostics on changed Go files contain only modernization hints and no
+- Git is an optional provenance layer, never a workspace correctness dependency. Document
+  workspaces and non-Git projects retain their text behavior and report history unavailable.
+- Automatic overview results deliberately omit email, bodies, and path lists. Detailed paths
+  and bounded patches require an explicit commit-handle read.
+- Git subprocess output is capped at 2 MiB and calls at ten seconds. History/ref/path limits
+  are fixed and capped; primary coverage flags are never hidden by truncation.
+- Merge change views use an explicit first-parent comparison. File history uses bounded
+  rename following; shallow or ambiguous introduction evidence remains provisional.
+- Prepared bytes are accepted only as an explicit core input and labeled
+  `derived_from_plan`. The later S10/S11 plan path will supply those bytes; S09H does not
+  create transaction state early.
+- Local repository config may still alter non-executable history semantics such as replace
+  objects; detected replace/graft history is disclosed as incomplete rather than silently
+  treated as canonical.
+- Language-server diagnostics on changed Go files contain modernization hints only and no
   errors or warnings.
 - No install, deployment, installed-plugin update, live MCP restart, live
   configuration/state mutation, push, or pull request occurred.
-- Exact next stage: S09H — Read-only Git source provenance.
+- Exact next stage: S10 — Transaction intent, validation and preview.

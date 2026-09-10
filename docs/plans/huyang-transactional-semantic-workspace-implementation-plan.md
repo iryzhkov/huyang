@@ -838,7 +838,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S07 — Official MCP SDK in direct mode
 - [x] S08 — Shared service and scheduler
 - [x] S09 — Semantic handles
-- [ ] S09H — Read-only Git source provenance
+- [x] S09H — Read-only Git source provenance
 - [ ] S10 — Transaction intent, validation and preview
 - [ ] S11 — Exclusive provider prepare
 - [ ] S12 — Journaled commit

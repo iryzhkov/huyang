@@ -130,6 +130,7 @@ type Workspace struct {
 
 	handlesMu sync.Mutex
 	handles   *handleStore
+	git       *gitState
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {

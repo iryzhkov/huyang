@@ -2,6 +2,7 @@ package bridge
 
 import (
 	workspacecore "agent99/internal/workspace"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -136,17 +137,25 @@ func buildModernTools() []modernTool {
 			"regex":   stringSchema("Additional regular-expression constraint."),
 		}),
 	})
+	historySource := schemaObject(map[string]any{
+		"query":  stringSchema("Literal query over bounded local history."),
+		"ref":    stringSchema("Local revision or range; defaults to HEAD."),
+		"fields": map[string]any{"type": "array", "items": enumSchema("message", "path", "diff")},
+		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
+	}, "query")
 	searchProperties := map[string]any{
 		"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
+		"git_history": historySource,
 	}
 	searchSchema := schemaObject(searchProperties, "workspace_id")
 	searchSchema["oneOf"] = []any{
 		schemaObject(searchProperties, "workspace_id", "query"),
 		schemaObject(searchProperties, "workspace_id", "result_set_handle", "refine"),
+		schemaObject(searchProperties, "workspace_id", "git_history"),
 	}
 	return []modernTool{
-		{Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":  enumSchema("project", "documents"),
 			"root":  stringSchema("Project root; required for kind=project."),
 			"files": map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
@@ -154,15 +163,17 @@ func buildModernTools() []modernTool {
 		{Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
 		}, "workspace_id")},
-		{Name: "search", Description: "Search current source or monotonically refine a frozen result set with inspectable match handles and honest coverage.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
+		{Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
 		{Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or path."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
 		{Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 		}, "workspace_id", "relation", "target")},
-		{Name: "read", Description: "Read exact current source or an outline for a revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Name: "read", Description: "Read exact source, outline, bounded provenance, or commit changes through an opaque handle.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "target": targetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
+			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 		}, "workspace_id", "target")},
 		{Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
@@ -692,6 +703,10 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 	if err != nil {
 		return modernFailure(requestID, opened, "workspace_overview_failed", err)
 	}
+	recent, recentErr := opened.RecentCommits(3)
+	if recentErr != nil {
+		recent = workspacecore.CommitList{Coverage: workspacecore.GitCoverage{Complete: false, Unavailable: []string{"git_history"}}}
+	}
 	action := "Opened"
 	if !created {
 		action = "Reopened"
@@ -700,7 +715,7 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 		"revision":       fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities":   opened.Inspect(),
 		"overview":       orientation,
-		"recent_commits": []any{},
+		"recent_commits": recent,
 		"registry":       map[string]any{"persistent": true, "reused": !created},
 	})
 }
@@ -712,6 +727,23 @@ func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
 }
 
 func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if source, ok := arguments["git_history"].(map[string]any); ok {
+		fields := make([]string, 0)
+		for _, value := range anySlice(source["fields"]) {
+			if field, ok := value.(string); ok {
+				fields = append(fields, field)
+			}
+		}
+		query, _ := source["query"].(string)
+		ref, _ := source["ref"].(string)
+		result, err := workspace.SearchHistory(workspacecore.HistorySearchRequest{
+			Query: query, Fields: fields, Ref: ref, Limit: argInt(source, "limit", 20),
+		})
+		if err != nil {
+			return modernFailure(requestID, workspace, "git_history_search_failed", err)
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical matches", len(result.Hits)), result)
+	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
 		refine, _ := arguments["refine"].(map[string]any)
 		matched, _ := refine["matched_text"].(map[string]any)
@@ -778,7 +810,22 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 	if !ok {
 		return modernEnvelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
 	}
-	if opaque, _ := target["handle"].(string); opaque != "" {
+	view, _ := arguments["view"].(string)
+	opaque, _ := target["handle"].(string)
+	if view == "changes" {
+		if opaque == "" {
+			return modernEnvelope(requestID, workspace, "failed", "commit_handle_required", "changes view requires an opaque commit handle", map[string]any{})
+		}
+		changes, err := workspace.CommitChanges(workspacecore.CommitHandle(opaque), argInt(arguments, "limit", 20))
+		if err != nil {
+			return modernFailure(requestID, workspace, "commit_changes_failed", err)
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d changed paths", len(changes.Changes)), changes)
+	}
+
+	var path string
+	startLine, endLine := argInt(arguments, "start_line", 0), argInt(arguments, "end_line", 0)
+	if opaque != "" {
 		resolution, err := workspace.ResolveHandle(workspacecore.HandleID(opaque))
 		if err != nil {
 			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
@@ -790,24 +837,38 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 		if err != nil {
 			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
 		}
-		read, err := workspace.Read(resolved.Path)
+		path = resolved.Path
+		read, err := workspace.Read(path)
 		if err != nil {
 			return modernFailure(requestID, workspace, "read_failed", err)
 		}
 		if resolved.ByteStart < 0 || resolved.ByteEnd > len(read.Content) || resolved.ByteEnd < resolved.ByteStart {
 			return modernEnvelope(requestID, workspace, "conflict", "target_deleted", "Resolved handle range is no longer readable", resolution)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
-			"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
-			"coverage": read.Coverage, "resolution": resolution,
-		})
+		if view == "history" {
+			startLine = bytes.Count(read.Content[:resolved.ByteStart], []byte("\n")) + 1
+			endLine = bytes.Count(read.Content[:resolved.ByteEnd], []byte("\n")) + 1
+		} else {
+			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
+				"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
+				"coverage": read.Coverage, "resolution": resolution,
+			})
+		}
+	} else {
+		fileRange, ok := target["file_range"].(map[string]any)
+		if !ok {
+			return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.handle or target.file_range", map[string]any{})
+		}
+		path, _ = fileRange["path"].(string)
 	}
-	fileRange, ok := target["file_range"].(map[string]any)
-	if !ok {
-		return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.handle or target.file_range", map[string]any{})
+	if view == "history" {
+		history, err := workspace.FileHistory(workspacecore.HistoryRequest{Path: path, StartLine: startLine, EndLine: endLine, Limit: argInt(arguments, "limit", 20)})
+		if err != nil {
+			return modernFailure(requestID, workspace, "git_history_read_failed", err)
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d provenance spans", len(history.Spans)), history)
 	}
-	path, _ := fileRange["path"].(string)
-	if arguments["view"] == "outline" {
+	if view == "outline" {
 		outline, err := workspace.Outline(path)
 		if err != nil {
 			return modernFailure(requestID, workspace, "read_failed", err)

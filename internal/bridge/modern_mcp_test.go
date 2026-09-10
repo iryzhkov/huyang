@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -288,6 +289,62 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	}
 	if string(content) != "alpha delta\n" {
 		t.Fatalf("handle edit bytes = %q", content)
+	}
+}
+
+func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
+	root := t.TempDir()
+	command := exec.Command("git", "-C", root, "init", "-q")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	file := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(file, []byte("alpha\nneedle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, arguments := range [][]string{{"add", "note.txt"}, {"commit", "-m", "mention needle"}} {
+		command = exec.Command("git", append([]string{"-C", root}, arguments...)...)
+		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", arguments, err, output)
+		}
+	}
+
+	session, cleanup := connectOfficialClient(t, profileOrient, newDirectWorkspaces(t.TempDir()))
+	defer cleanup()
+	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	recent := opened["data"].(map[string]any)["recent_commits"].(map[string]any)
+	commits := recent["commits"].([]any)
+	if len(commits) != 1 {
+		t.Fatalf("recent commits = %#v", recent)
+	}
+	commitHandle := commits[0].(map[string]any)["handle"].(string)
+
+	history := callModern(t, session, "read", map[string]any{
+		"workspace_id": workspaceID, "view": "history", "limit": 10,
+		"target": map[string]any{"file_range": map[string]any{
+			"path": "note.txt", "revision_id": "display-only", "byte_start": 0, "byte_end": 0,
+			"expected_sha256": "", "before_sha256": "", "after_sha256": "", "anchor_bytes": 0,
+		}},
+	})
+	if history["outcome"] != "ok" || len(history["data"].(map[string]any)["spans"].([]any)) == 0 {
+		t.Fatalf("history = %#v", history)
+	}
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID,
+		"git_history":  map[string]any{"query": "needle", "fields": []string{"message", "diff"}, "limit": 10},
+	})
+	set := searched["data"].(map[string]any)["result_set"].(map[string]any)
+	if searched["outcome"] != "ok" || set["kind"] != "historical" || set["all_matches_eligible"] != false {
+		t.Fatalf("historical search = %#v", searched)
+	}
+	changes := callModern(t, session, "read", map[string]any{
+		"workspace_id": workspaceID, "view": "changes", "limit": 10,
+		"target": map[string]any{"handle": commitHandle},
+	})
+	if changes["outcome"] != "ok" || len(changes["data"].(map[string]any)["changes"].([]any)) != 1 {
+		t.Fatalf("changes = %#v", changes)
 	}
 }
 
