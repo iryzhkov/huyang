@@ -8,39 +8,40 @@
 - Reviewed base: `1c5302efe9ca51e1701e73df72d903f225fefe04`
 - Base ancestry check: passed with
   `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`.
-- Deployment boundary: no install, deployment, installed-plugin update, live MCP restart,
-  live configuration/state mutation, push, or pull request is authorized.
+- Deployment boundary: no install, deployment, installed-plugin update, live MCP restart, live
+  configuration/state mutation, push, or pull request is authorized.
 - Dependency protocol: clean branch, committed checklist in the implementation plan, and this
   handoff. Exactly one ungated successor is queued after a successful stage.
 
 ## Current checkpoint
 
-- Completed stage: S05 — Explicit workspaces and revisions.
-- Starting commit: `483ab0a30603810c8ab7e7f0117cfa3d8f1fdd4f`.
+- Completed stage: S06 — Provider-independent text core and document workspaces.
+- Starting commit: `de2ef9cf10b0a3c92e624084f76c5ca035c9e324`.
 - Completion commit: the `feature/huyang` commit containing this handoff.
 - Predecessor reconciliation:
-  - S04 is committed at `483ab0a30603810c8ab7e7f0117cfa3d8f1fdd4f`;
-  - `feature/huyang` was clean after `git fetch origin --prune`;
+  - S05 is committed at `de2ef9cf10b0a3c92e624084f76c5ca035c9e324`;
+  - `feature/huyang` was clean after fetching origin;
   - the reviewed base remains an ancestor;
-  - the committed checklist, S00–S04 records, frozen contract fixtures, provider code, and
-    recorded S04 gates agree that S05 was the first incomplete stage.
-- S05 exit gates achieved:
-  - the workspace core owns random 128-bit IDs, project kind, provider epoch, and monotonic
-    state sequence;
-  - layered document snapshots expose exact filesystem kind/identity, provider
-    changedtick/LSP versions/dirty state, and lazy SHA-256 revision tokens;
-  - forced mutation validation requires workspace ID and revision and catches same-metadata
-    rewrites, atomic saves, deletes/recreates, symlink retargets, and provider restarts;
-  - legacy root inference remains in the bridge adapter and core mutation entry points require
-    explicit identity/revision;
-  - focused race tests, both provider smoke matrices, `go test ./...`, `go vet ./...`, and
-    `git diff --check` pass.
-- Checklist: only S05 was marked complete in this stage.
-- Exact next stage: S06 — Provider-independent text core and document workspaces.
+  - the committed checklist, S00–S05 records, frozen contract fixtures, workspace/provider
+    code, and recorded S05 gates agree that S06 was the first incomplete stage.
+- S06 exit gates achieved:
+  - document workspaces retain exact file allowlists and never walk or index siblings;
+  - the provider-independent core performs bounded native orientation, literal/regex search,
+    exact-byte reads, guarded previews/edits, exact diffs, and single-file recovery;
+  - Markdown, JSON, TOML, YAML, Dockerfile, and parserless fixtures work under home-like and
+    `/tmp` locations with optional layers absent;
+  - optional parser sections plug in behind a core interface; absent/broken parsing retains
+    range handles and reports `text_only` coverage;
+  - workspace inspection reports stable native capabilities, unavailable optional layers,
+    limits, allowlists, and bounded/sanitized environment failures without mutation;
+  - focused race tests, the default full smoke matrix, embedded workspace smoke, all Go tests,
+    vet, and whitespace checks pass.
+- Checklist: only S06 was marked complete in this stage.
+- Exact next stage: S07 — Official MCP SDK in direct mode.
 
 ## Predecessor artifacts
 
-S05 reconciled and consumed these committed predecessor artifacts completely:
+S06 reconciled and consumed these committed predecessor artifacts completely:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
@@ -48,42 +49,48 @@ S05 reconciled and consumed these committed predecessor artifacts completely:
 - `docs/plans/huyang-s02-provider-seam.md`
 - `docs/plans/huyang-s03-embedded-provider-spike.md`
 - `docs/plans/huyang-s04-embedded-provider.md`
+- `docs/plans/huyang-s05-workspaces-revisions.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-## S05 changes
+S06 adds the committed predecessor artifact for S07:
 
-- Added `internal/workspace` as the transport-independent identity/revision core.
-- Added random 128-bit workspace IDs, closed workspace kinds, provider epoch synchronization,
-  and monotonic state sequences.
-- Added layered document snapshots covering exact filesystem kind/identity, canonical URI,
-  dirty provider content, changedtick, per-provider LSP versions, and SHA-256 revisions.
-- Ordinary snapshots cache hashes by metadata; refresh and mutation validation force a fresh
-  exact-byte hash.
-- Added typed mutation conflicts for missing/mismatched workspace identity, missing revision,
-  provider epoch change, document deletion, and other content changes.
-- Mutation paths are lexically confined and inspect objects with `lstat`; symlinks are
-  revisioned as links rather than followed.
-- Wired the headless bridge to retain core identity across a provider generation restart,
-  propagate ID/epoch into provider request contexts, and return current identity fields from
-  `open_workspace`.
-- Added adversarial filesystem/race tests and socket/embed smoke assertions.
-- Added `docs/plans/huyang-s05-workspaces-revisions.md` and marked only S05 complete.
+- `docs/plans/huyang-s06-text-core-documents.md`
+
+## S06 changes
+
+- Added configurable `Open` and one-file `OpenDocument` core entry points with project and
+  exact-allowlist document workspace behavior.
+- Added bounded native `filepath.WalkDir` orientation with `.git` exclusion, no symlink
+  traversal, and file/byte/depth/match caps with explicit coverage.
+- Added literal-default and explicit-regex text search with exact byte spans, Unicode-scalar
+  display positions, document revisions, expected-content hashes, and bounded anchors.
+- Added exact-byte reads and revision/hash/anchor guarded range previews/applies.
+- Added revision-guarded native create/replace/delete, exact before/after diff evidence, and
+  mode-preserving same-directory writes.
+- Added caller-owned single-file recovery records that restore only a known postimage, clear
+  an unapplied preimage, and preserve/report third-party conflicts.
+- Added optional parser-section injection with a full-document range fallback and precise
+  `parser_sections|text_only` coverage.
+- Added stable workspace inspection for native/optional capabilities and sanitized provider or
+  environment failures.
+- Added `internal/workspace/text_test.go` and
+  `docs/plans/huyang-s06-text-core-documents.md`; marked only S06 complete.
 
 ## Verification
 
 Run from `/home/igor/Work/huyang` on 2026-09-10:
 
-- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0.
+- `go test -race ./internal/workspace -count=1` — exit 0:
+  `ok agent99/internal/workspace`.
 - `go test ./...` — exit 0; bridge, provider, embed, embedspike, socket, and workspace
   packages passed; the command package has no tests.
-- `make smoke` — exit 0 on the default socket backend; reported `headless: OK`,
+- `make smoke` — exit 0 on the default socket backend; reported `unit_edit: OK`,
+  `unit_testrun: OK`, `unit_check: OK`, `unit_index: OK`, `headless: OK`,
   `multi-workspace: OK`, `debug: OK`, and `smoke: OK`.
-- `AGENT99_PROVIDER_BACKEND=embed make smoke` — exit 0 with the same four OK markers.
-- `bash tests/smoke.sh headless:workspace` — exit 0 after the identity assertion.
-- `AGENT99_PROVIDER_BACKEND=embed bash tests/smoke.sh headless:workspace` — exit 0 after the
-  identity assertion.
+- `AGENT99_PROVIDER_BACKEND=embed bash tests/smoke.sh headless:workspace` — exit 0;
+  reported `headless (workspace): OK` and `smoke (headless:workspace): OK`.
 - `go vet ./...` — exit 0; no output.
 - `git diff --check` — exit 0; no output.
 - `git merge-base --is-ancestor 1c5302efe9ca51e1701e73df72d903f225fefe04 HEAD`
@@ -91,19 +98,21 @@ Run from `/home/igor/Work/huyang` on 2026-09-10:
 
 ## Decisions and risks
 
-- S05 creates no modern MCP catalog. It establishes the core that the S07 adapter will expose;
-  the existing root/sticky routing remains explicitly legacy.
-- Content hashes are lazy and metadata-cached for ordinary snapshots. Mutation validation
-  always forces a hash, matching the contract's optimistic-concurrency boundary and catching
-  same-metadata replacement.
-- A document revision includes filesystem and provider layers, so inode/mode/mtime,
-  changedtick, dirty state, or selected LSP versions may conservatively invalidate a token even
-  when bytes are equal.
-- State sequence advances only when the core observes a change or provider epoch transition;
-  no filesystem watcher is claimed in this stage.
-- Provider-buffer bytes are accepted as an explicit layer rather than fetched implicitly.
-  Provider-independent collection and document workspaces belong to S06.
-- The revision core currently stores service-local revision evidence in memory. Durable
-  transaction and recovery records remain S10–S13 work.
+- The native path is a core API, not a modern MCP catalog. S07 owns the official SDK,
+  generated frozen schemas, structured/text envelopes, annotations, negotiation, and direct
+  adapter exposure.
+- Exact allowlists are enforced by the same path-confinement function used by reads,
+  snapshots, mutations, and recovery; cwd/root context never grants sibling access.
+- Reads and edits reject binary, symlink, directory, special, over-budget, and non-allowlisted
+  targets rather than following or coercing them.
+- Parser integration is an injected `Sectioner`; S06 does not add a second parser runtime or
+  make native text behavior depend on Neovim.
+- S06 recovery is intentionally single-file and caller-state-directory scoped. It does not
+  claim the durable plan lifecycle, multi-file commit protocol, kill-9 failpoint guarantee,
+  or compensating undo reserved for S10–S13.
+- The compact patch string is explanatory; exact before/after bytes and hashes are
+  authoritative.
+- Project walking skips only `.git` intrinsically. Repository ignore/config policy remains a
+  later adapter/configuration concern; hard file/byte/depth/match caps prevent unbounded work.
 - No install, deployment, live MCP/config/state mutation, push, or pull request occurred.
-- Exact next stage: S06 — Provider-independent text core and document workspaces.
+- Exact next stage: S07 — Official MCP SDK in direct mode.

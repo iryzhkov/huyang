@@ -834,7 +834,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S03 — Embedded provider decision spike
 - [x] S04 — Embedded provider production path
 - [x] S05 — Explicit workspaces and revisions
-- [ ] S06 — Provider-independent text core and document workspaces
+- [x] S06 — Provider-independent text core and document workspaces
 - [ ] S07 — Official MCP SDK in direct mode
 - [ ] S08 — Shared service and scheduler
 - [ ] S09 — Semantic handles

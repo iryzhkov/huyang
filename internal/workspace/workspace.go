@@ -117,36 +117,15 @@ type Workspace struct {
 	identity  Identity
 	documents map[string]cachedDocument
 	revisions map[RevisionID]DocumentSnapshot
+	allowlist map[string]struct{}
+	limits    Limits
+	stateDir  string
+	sectioner Sectioner
+	failures  []EnvironmentFailure
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {
-	switch kind {
-	case KindProject, KindDocuments, KindTransactionSandbox:
-	default:
-		return nil, fmt.Errorf("unknown workspace kind %q", kind)
-	}
-	canonical, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
-		canonical = resolved
-	}
-	id, err := newID()
-	if err != nil {
-		return nil, err
-	}
-	return &Workspace{
-		identity: Identity{
-			ID:       id,
-			Kind:     kind,
-			Root:     canonical,
-			Epoch:    providerEpoch,
-			StateSeq: 1,
-		},
-		documents: make(map[string]cachedDocument),
-		revisions: make(map[RevisionID]DocumentSnapshot),
-	}, nil
+	return newWorkspace(OpenOptions{Kind: kind, Root: root, ProviderEpoch: providerEpoch})
 }
 
 func newID() (ID, error) {
@@ -285,6 +264,11 @@ func (w *Workspace) confinedPath(path string) (string, error) {
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("document %s is outside workspace root %s", absolute, w.identity.Root)
+	}
+	if w.identity.Kind == KindDocuments {
+		if _, allowed := w.allowlist[absolute]; !allowed {
+			return "", fmt.Errorf("document %s is not in the workspace allowlist", absolute)
+		}
 	}
 	return absolute, nil
 }
