@@ -150,10 +150,22 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	for _, file := range preparedRequest.Files {
 		preparedHash = hashBytes(fmt.Appendf(nil, "%s:%s:%t:%x", preparedHash, file.Path, file.AfterExists, file.After))
 	}
+	diagnosticStatus := "suppressed"
+	targetState := PlanReady
+	for _, stage := range verification.Stages {
+		if stage.Stage == "diagnostics" {
+			diagnosticStatus = stage.Coverage.Semantic
+			if stage.Status == VerificationPassed && (stage.Coverage.Semantic == string(ConfidenceAuthoritative) || stage.Coverage.Semantic == string(ConfidenceCorroborated)) {
+				targetState = PlanReady
+			} else {
+				targetState = PlanProvisional
+			}
+		}
+	}
 	prepared := &PlanPreparation{
 		PreparedRevision: "prep_" + preparedHash,
 		ProviderEpoch:    stager.Epoch(), AffectedFiles: append([]string(nil), plan.Preview.AffectedFiles...),
-		CanonicalChanged: false, Diagnostics: "suppressed", DiskChecks: diskChecks,
+		CanonicalChanged: false, Diagnostics: diagnosticStatus, DiskChecks: diskChecks,
 		IntermediateReports: false, SandboxBackend: backend, BaseRevision: baseRevision, EvidencePaths: evidencePaths,
 		Verification: append([]VerificationStage(nil), verification.Stages...),
 		ToolDelta:    append([]ToolDelta(nil), verification.ToolDelta...),
@@ -161,7 +173,7 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if target, ok := stager.(PreparedRevisionStager); ok {
 		target.SetPreparedRevision(prepared.PreparedRevision)
 	}
-	result, err := w.transitionPlan(planID, expected, PlanReady, "prepare", "ok", prepared)
+	result, err := w.transitionPlan(planID, expected, targetState, "prepare", diagnosticStatus, prepared)
 	if err != nil {
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		rollbackErr := stager.Rollback(rollbackCtx, planID)

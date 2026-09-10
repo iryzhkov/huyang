@@ -283,6 +283,10 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		}
 		workspace.allowlist[absolute] = struct{}{}
 	}
+	workspace.diagnostics, err = newDiagnosticStore(options.StateDir, id)
+	if err != nil {
+		return nil, err
+	}
 	if err := workspace.loadPlans(); err != nil {
 		return nil, err
 	}

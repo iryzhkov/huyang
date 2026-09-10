@@ -1184,6 +1184,9 @@ local dispatch_table = {
     document_symbols = document_symbols,
     workspace_symbols = workspace_symbols,
     diagnostics = diagnostics,
+    huyang_diagnostic_evidence = function(args)
+        return require("agent99.edit").diagnostic_evidence(args)
+    end,
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
     buffer_lines = buffer_lines,

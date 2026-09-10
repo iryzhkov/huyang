@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -325,6 +326,11 @@ func outputEnvelopeSchema() map[string]any {
 		"evidence":              schemaObject(map[string]any{"ids": map[string]any{"type": "array", "items": stringSchema("Evidence ID.")}, "truncated": map[string]any{"type": "boolean"}}, "ids", "truncated"),
 		"warnings":              map[string]any{"type": "array", "items": stringSchema("Warning.")},
 		"next":                  map[string]any{"type": "array", "maxItems": 2},
+		"diagnostic_updates": map[string]any{"type": "array", "items": schemaObject(map[string]any{
+			"cursor": stringSchema("Diagnostic inbox cursor."), "kind": enumSchema("new", "resolved"),
+			"id": stringSchema("Stable diagnostic ID."), "severity": map[string]any{"type": "integer"},
+			"document": stringSchema("Affected document."), "attribution": map[string]any{"type": "object"},
+		}, "cursor", "kind", "id")},
 		"idempotency":           enumSchema("created", "replayed"),
 		"idempotency_persisted": map[string]any{"type": "boolean"},
 	}, "api_version", "request_id", "outcome", "summary", "data", "evidence", "warnings", "next")
@@ -681,6 +687,13 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	}
 	result := d.execute(ctx, requestID, name, arguments)
 	release()
+	if name != "diagnostics" {
+		if workspace := d.get(workspacecore.ID(workspaceID)); workspace != nil {
+			if notices := workspace.DiagnosticNotices(20); len(notices) > 0 {
+				result["diagnostic_updates"] = notices
+			}
+		}
+	}
 	if !isStatefulModernTool(name) {
 		if err := d.persistWorkspaceIdentity(workspacecore.ID(workspaceID)); err != nil {
 			result["warnings"] = append(result["warnings"].([]string), "workspace state was not persisted: "+err.Error())
@@ -734,6 +747,29 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.symbolFind(requestID, workspace, arguments)
 	case "read":
 		return d.read(requestID, workspace, arguments)
+	case "diagnostics":
+		since, _ := arguments["since"].(string)
+		report, err := workspace.Diagnostics(since)
+		if err != nil {
+			return modernFailure(requestID, workspace, "diagnostic_cursor_invalid", err)
+		}
+		outcome := "ok"
+		if report.Confidence == workspacecore.ConfidenceProvisional {
+			outcome = "provisional"
+		} else if report.Confidence == workspacecore.ConfidenceUnavailable {
+			outcome = "unavailable"
+		}
+		result := modernEnvelope(requestID, workspace, outcome, "", "Diagnostic evidence retrieved from the durable workspace inbox", map[string]any{"diagnostics": report})
+		result["evidence"] = map[string]any{"ids": report.EvidenceIDs, "truncated": false}
+		return result
+	case "evidence_get":
+		evidence, err := workspace.Evidence(fmt.Sprint(arguments["evidence_id"]))
+		if err != nil {
+			return modernFailure(requestID, workspace, "evidence_not_found", err)
+		}
+		result := modernEnvelope(requestID, workspace, "ok", "", "Detailed diagnostic evidence retrieved", map[string]any{"evidence": evidence})
+		result["evidence"] = map[string]any{"ids": []string{evidence.ID}, "truncated": false}
+		return result
 	case "edit_apply":
 		return d.edit(requestID, workspace, arguments)
 	case "change_plan":
@@ -1012,14 +1048,14 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 	}
 	content, _ := operation["content"].(string)
 	var change workspacecore.TextChange
-	if preview, _ := arguments["preview_only"].(bool); preview {
+	var after workspacecore.DocumentSnapshot
+	preview, _ := arguments["preview_only"].(bool)
+	if preview {
 		change, err = workspace.PreviewReplace(workspace.Identity().ID, handle, []byte(content))
 	} else {
-		var after workspacecore.DocumentSnapshot
 		change, after, err = workspace.ApplyReplace(workspace.Identity().ID, handle, []byte(content))
 		if err == nil {
 			change.Workspace = workspace.Identity()
-			_ = after
 		}
 	}
 	if err != nil {
@@ -1029,14 +1065,28 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		}
 		return modernFailure(requestID, workspace, "edit_failed", err)
 	}
-	summary := "Guarded range preview is ready; canonical bytes unchanged"
-	if preview, _ := arguments["preview_only"].(bool); !preview {
-		summary = "Guarded range edit applied"
+	summary, outcome := "Guarded range preview is ready; canonical bytes unchanged", "ok"
+	data := map[string]any{"change": change, "resolution": resolution, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}}}
+	var evidenceIDs []string
+	if !preview {
+		report, evidenceErr := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+			Kind: workspacecore.EvidencePush, ProviderID: "native_text", Producer: "native_text_core",
+			Document: handle.Path, DocumentRevision: string(after.Revision), TimedOut: true, Selected: true,
+			Dimension: "edited_documents",
+		})
+		outcome = "provisional"
+		if evidenceErr != nil {
+			summary = "Guarded range edit applied; diagnostic evidence could not be persisted"
+			data["verification"] = map[string]any{"confidence": "unavailable", "error": evidenceErr.Error()}
+		} else {
+			summary = "Guarded range edit applied; semantic diagnostic coverage is provisional"
+			data["verification"] = report
+			evidenceIDs = report.EvidenceIDs
+		}
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{
-		"change": change, "resolution": resolution, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
-		"verification": map[string]any{"confidence": "provisional", "coverage": map[string]any{"edited_documents": "complete", "semantic_provider": "unavailable"}},
-	})
+	result := modernEnvelope(requestID, workspace, outcome, "", summary, data)
+	result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
+	return result
 }
 
 func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1051,6 +1101,16 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	planResult := func(summary string, plan workspacecore.PlanRecord) map[string]any {
 		result := modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{"plan": plan})
 		result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
+		if plan.Preparation != nil {
+			var evidenceIDs []string
+			for _, stage := range plan.Preparation.Verification {
+				evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
+			}
+			result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
+		}
+		if plan.State == workspacecore.PlanProvisional {
+			result["outcome"] = "provisional"
+		}
 		if plan.Preview != nil && plan.Preview.Outcome == "conflict" {
 			result["outcome"] = "conflict"
 			result["code"] = "plan_validation_conflicts"
@@ -1232,7 +1292,22 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 			var policy workspacecore.PipelinePolicy
 			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
 			if filesErr == nil {
-				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+				var diagnosticProvider provider.Provider
+				if slices.Contains(stages, "diagnostics") {
+					diagnosticProvider, filesErr = referenceProviders.Open(providerOpenConfig{
+						Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"), RuntimePath: shippedRuntimePath(),
+					})
+					if filesErr == nil {
+						defer diagnosticProvider.Close(context.Background())
+						request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, stageFiles []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
+							report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, stageFiles, revision, "")
+							return diagnosticVerificationStage(revision, report), evidenceErr
+						}
+					}
+				}
+				if filesErr == nil {
+					result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+				}
 			}
 		}
 		if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {

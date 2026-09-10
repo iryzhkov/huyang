@@ -128,9 +128,10 @@ type Workspace struct {
 	sectioner Sectioner
 	failures  []EnvironmentFailure
 
-	handlesMu sync.Mutex
-	handles   *handleStore
-	git       *gitState
+	handlesMu   sync.Mutex
+	handles     *handleStore
+	git         *gitState
+	diagnostics *diagnosticStore
 
 	plansMu sync.Mutex
 	plans   map[string]PlanRecord

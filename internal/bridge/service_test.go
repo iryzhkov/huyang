@@ -96,7 +96,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		},
 	}
 	applied := callModern(t, firstSession, "edit_apply", applyArguments)
-	if applied["outcome"] != "ok" || applied["idempotency_persisted"] != true {
+	if applied["outcome"] != "provisional" || applied["idempotency_persisted"] != true {
 		t.Fatalf("apply = %#v", applied)
 	}
 	closeFirst()
@@ -120,7 +120,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	secondSession, closeSecond := connectUnixOfficialClient(t, socketPath, profileEdit)
 	defer closeSecond()
 	replayed := callModern(t, secondSession, "edit_apply", applyArguments)
-	if replayed["outcome"] != "ok" || replayed["idempotency"] != "replayed" {
+	if replayed["outcome"] != "provisional" || replayed["idempotency"] != "replayed" {
 		t.Fatalf("restart replay = %#v", replayed)
 	}
 	restartedRead := callModern(t, secondSession, "read", map[string]any{

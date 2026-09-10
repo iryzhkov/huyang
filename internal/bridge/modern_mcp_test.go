@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	workspacecore "agent99/internal/workspace"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pkoukk/tiktoken-go"
 )
@@ -204,11 +206,11 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 		"operation": map[string]any{"kind": "replace_range", "target": target, "content": "gamma"},
 	}
 	applied := callModern(t, session, "edit_apply", applyArguments)
-	if applied["outcome"] != "ok" || applied["idempotency"] != "created" {
+	if applied["outcome"] != "provisional" || applied["idempotency"] != "created" {
 		t.Fatalf("apply = %#v", applied)
 	}
 	replayed := callModern(t, session, "edit_apply", applyArguments)
-	if replayed["outcome"] != "ok" || replayed["idempotency"] != "replayed" ||
+	if replayed["outcome"] != "provisional" || replayed["idempotency"] != "replayed" ||
 		replayed["request_id"] == applied["request_id"] {
 		t.Fatalf("replay = %#v after %#v", replayed, applied)
 	}
@@ -231,6 +233,56 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	})
 	if content := read["data"].(map[string]any)["content"]; content != "alpha gamma\n" {
 		t.Fatalf("read content = %#v", content)
+	}
+}
+
+func TestModernDiagnosticInboxNoticesAndEvidenceRetrieval(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "main.go")
+	if err := os.WriteFile(file, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	direct := newDirectWorkspaces(t.TempDir())
+	session, cleanup := connectOfficialClient(t, profileOrient, direct)
+	defer cleanup()
+	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	version := int64(1)
+	report, err := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+		Kind: workspacecore.EvidencePush, ProviderID: "gopls#1", Producer: "gopls",
+		Document: file, DocumentRevision: "rev_1", DocumentVersion: &version, ExpectedVersion: &version,
+		Complete: true, Selected: true, Findings: []workspacecore.DiagnosticFinding{{
+			Range: workspacecore.DiagnosticRange{StartLine: 1, EndLine: 1}, Severity: 1, Message: "undefined: x",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection := callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID, "view": "status"})
+	if updates, ok := inspection["diagnostic_updates"].([]any); !ok || len(updates) != 1 {
+		t.Fatalf("same-workspace notice = %#v", inspection)
+	}
+	diagnostics := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})
+	diagnosticData, ok := diagnostics["data"].(map[string]any)
+	if !ok || diagnosticData["diagnostics"] == nil {
+		t.Fatalf("diagnostics response = %#v", diagnostics)
+	}
+	data := diagnosticData["diagnostics"].(map[string]any)
+	if data["confidence"] != "authoritative" || len(data["new"].([]any)) != 1 {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	evidence := callModern(t, session, "evidence_get", map[string]any{
+		"workspace_id": workspaceID, "evidence_id": report.EvidenceIDs[0],
+	})
+	if evidence["outcome"] != "ok" {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+	cursor := data["cursor"].(string)
+	acknowledged := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID, "since": cursor})
+	acknowledgedData := acknowledged["data"].(map[string]any)["diagnostics"].(map[string]any)
+	if notices, ok := acknowledgedData["notices"].([]any); ok && len(notices) != 0 {
+		t.Fatalf("acknowledged notices remain: %#v", acknowledged)
 	}
 }
 
@@ -371,7 +423,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 		"workspace_id": workspaceID, "idempotency_key": "opaque-apply",
 		"operation": map[string]any{"kind": "replace_range", "target": map[string]any{"handle": opaque}, "content": "delta"},
 	})
-	if applied["outcome"] != "ok" {
+	if applied["outcome"] != "provisional" {
 		t.Fatalf("handle edit = %#v", applied)
 	}
 	content, err := os.ReadFile(first)

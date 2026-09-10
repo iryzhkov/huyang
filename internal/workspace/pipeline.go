@@ -78,6 +78,7 @@ type VerificationRequest struct {
 	Transform                bool
 	TestScope                string
 	ApplyConfiguredTransform bool
+	DiagnosticVerifier       func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
 }
 
 type VerificationStage struct {
@@ -92,6 +93,7 @@ type VerificationStage struct {
 	Status          VerificationStatus `json:"status"`
 	DurationMS      int64              `json:"duration_ms"`
 	Coverage        Coverage           `json:"coverage"`
+	EvidenceIDs     []string           `json:"evidence_ids,omitempty"`
 }
 
 type ToolDelta struct {
@@ -626,7 +628,15 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 				return result, errors.New("parser verification failed")
 			}
 		case "diagnostics":
-			result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"authoritative_diagnostics_are_s17"}}})
+			if request.DiagnosticVerifier == nil {
+				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "provider", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"diagnostic_provider_unavailable"}, Semantic: string(ConfidenceUnavailable)}})
+				continue
+			}
+			stage, err := request.DiagnosticVerifier(ctx, request.Revision, result.PreparedFiles)
+			result.Stages = append(result.Stages, stage)
+			if err != nil {
+				return result, err
+			}
 		case "check":
 			if len(policy.Check) == 0 {
 				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})

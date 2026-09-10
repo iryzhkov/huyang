@@ -52,8 +52,8 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 		"workspace_id": workspaceID, "idempotency_key": "prepare", "action": "prepare",
 		"plan_id": planID, "plan_revision": planRevision,
 	})
-	if prepared["outcome"] != "ok" || prepared["transaction"].(map[string]any)["state"] != "READY" {
-		t.Fatalf("prepare = %#v", prepared)
+	if prepared["outcome"] != "provisional" || prepared["transaction"].(map[string]any)["state"] != "PROVISIONAL" {
+		t.Fatalf("silent text provider must remain provisional: %#v", prepared)
 	}
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, original) {
 		t.Fatalf("prepare changed canonical disk: %q, %v", current, err)
@@ -93,6 +93,17 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	t.Setenv("AGENT99_RUNTIME_PATH", runtimeRoot)
 	t.Setenv("AGENT99_HEADLESS_INIT", filepath.Join(runtimeRoot, "tests", "minimal_init.lua"))
 	root, stateDir := t.TempDir(), t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	if err := os.MkdirAll(filepath.Join(configHome, "huyang"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configHome, "huyang", "config.toml"), []byte("[trust]\nroots = [\""+root+"\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".huyang.toml"), []byte("version = 1\n[[check]]\ncommand = [\"go\", \"version\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	file := filepath.Join(root, "note.txt")
 	if err := os.WriteFile(file, []byte("alpha beta gamma\n"), 0o600); err != nil {
 		t.Fatal(err)

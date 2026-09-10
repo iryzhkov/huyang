@@ -962,6 +962,110 @@ local function progress_since(names, since)
     return false
 end
 
+-- Structured diagnostic evidence for Huyang's modern barrier. Unlike the
+-- compatibility diagnostics renderer, this keeps each LSP producer separate
+-- and returns the version stamp recovered by wrap_publish_handler.
+function M.diagnostic_evidence(args)
+    args = args or {}
+    local paths = args.files or { args.file }
+    local transaction_id = args.transaction_id
+    local revision = args.revision
+    local batches = {}
+
+    local function finding(d)
+        local range = d.range or {}
+        local start = range.start or { line = d.lnum or 0, character = d.col or 0 }
+        local finish = range["end"] or {
+            line = d.end_lnum or d.lnum or 0,
+            character = d.end_col or d.col or 0
+        }
+        return {
+            range = {
+                start_line = (start.line or 0) + 1,
+                start_character = (start.character or 0) + 1,
+                end_line = (finish.line or 0) + 1,
+                end_character = (finish.character or 0) + 1,
+            },
+            severity = d.severity or 0,
+            code = d.code and tostring(d.code) or nil,
+            source = d.source,
+            message = d.message or "",
+        }
+    end
+
+    local function version_string(client)
+        local info = client.version_info or {}
+        return info.version or info.name or ""
+    end
+
+    for _, path in ipairs(paths) do
+        if path and path ~= "" then
+            local bufnr = load_buf(path)
+            local clients = vim.lsp.get_clients({ bufnr = bufnr })
+            local attach_deadline = vim.uv.now() + math.max(500, args.wait_ms or 1500)
+            while #clients == 0 and vim.uv.now() < attach_deadline do
+                sleep(50)
+                clients = vim.lsp.get_clients({ bufnr = bufnr })
+            end
+            local expected = vim.api.nvim_buf_get_changedtick(bufnr)
+            for _, client in ipairs(clients) do
+                wrap_publish_handler(client)
+                local namespace = vim.lsp.diagnostic.get_namespace(client.id, false)
+                local diagnostics = {}
+                for _, d in ipairs(vim.diagnostic.get(bufnr, { namespace = namespace })) do
+                    diagnostics[#diagnostics + 1] = finding(d)
+                end
+                local published = published_for[client.name]
+                    and published_for[client.name][vim.api.nvim_buf_get_name(bufnr)] == true
+                batches[#batches + 1] = {
+                    kind = "lsp_push",
+                    provider_id = client.name .. "#" .. client.id,
+                    producer = client.name,
+                    producer_version = version_string(client),
+                    document = vim.api.nvim_buf_get_name(bufnr),
+                    document_revision = revision,
+                    document_version = (publish_version[bufnr] or {})[client.name],
+                    expected_version = expected,
+                    transaction_id = transaction_id,
+                    complete = published,
+                    progress_pending = progress_since({ client.name }, 0),
+                    selected = true,
+                    dimension = "edited_documents",
+                    findings = diagnostics,
+                }
+
+                if client:supports_method("textDocument/diagnostic", bufnr) then
+                    local ok, pulled = pcall(request, client, bufnr, "textDocument/diagnostic", {
+                        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+                    })
+                    if ok and type(pulled) == "table" then
+                        local items = {}
+                        for _, d in ipairs(pulled.items or {}) do
+                            items[#items + 1] = finding(d)
+                        end
+                        batches[#batches + 1] = {
+                            kind = "lsp_pull",
+                            provider_id = client.name .. "#" .. client.id,
+                            producer = client.name,
+                            producer_version = version_string(client),
+                            document = vim.api.nvim_buf_get_name(bufnr),
+                            document_revision = revision,
+                            result_id = pulled.resultId,
+                            transaction_id = transaction_id,
+                            complete = pulled.kind == "full" or pulled.items ~= nil,
+                            progress_pending = progress_since({ client.name }, 0),
+                            selected = true,
+                            dimension = "edited_documents",
+                            findings = items,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return { batches = batches }
+end
+
 local function client_names_of(diags)
     local names = {}
     for _, d in ipairs(diags or {}) do

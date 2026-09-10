@@ -141,6 +141,10 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 	if err != nil {
 		return workspacecore.VerificationResult{}, err
 	}
+	request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, files []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
+		report, evidenceErr := recordProviderDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
+		return diagnosticVerificationStage(revision, report), evidenceErr
+	}
 	result, err := workspacecore.RunVerificationPipeline(ctx, s.sandbox, policy, request, s.prepared.Files)
 	if len(result.Stages) > 0 {
 		s.verification.Stages = append(s.verification.Stages, result.Stages...)
@@ -234,6 +238,15 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			workspaceID: s.workspace.Identity().ID, provider: replacement, epoch: replacement.Descriptor().Epoch,
 		}
 	}
+	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, s.provider, request.Files, s.baseRevision, s.planID)
+	if err != nil {
+		return err
+	}
+	diagnosticReport, err = corroborateDiagnosticsWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
+	if err != nil {
+		return err
+	}
+	verification.Stages = append(verification.Stages, diagnosticVerificationStage(s.baseRevision, diagnosticReport))
 	s.prepared, s.verification = request, verification
 	return nil
 }
