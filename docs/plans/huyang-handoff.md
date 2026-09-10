@@ -274,5 +274,5 @@ Run from /home/igor/Work/huyang on 2026-09-10:
   guide now describe Huyang's modern revision/transaction/evidence workflow.
 - Exact deployment evidence and recovery state are in
   `docs/plans/huyang-rollout-2026-09-10.md`.
-- Remaining work: laptop rollout. The laptop deliberately has no inbound SSH path and Normandy
-  has no steward host alias for it, so no safe successor could be queued from this host.
+- Laptop is explicitly deferred at the user's direction. It remains unchanged and is outside
+  this completed rollout; no successor is queued.

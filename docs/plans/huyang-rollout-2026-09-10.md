@@ -26,7 +26,7 @@ The original Agent99 upstream was retained as historical source and was not rewr
 | normandy | commit `4f87241` | enabled, active | Huyang 0.4.0, 17 tools | Claude, Codex, OpenCode | removed |
 | homelab | commit `4f87241` | enabled, active | Huyang 0.4.0, 17 tools | Claude, Codex, OpenCode | removed |
 | gaming-pc | commit `4f87241` | enabled, active | Huyang 0.4.0, 17 tools | Claude, Codex, OpenCode | removed |
-| laptop | blocked from Normandy | not changed | not run | not changed | not changed |
+| laptop | explicitly deferred | not changed | not run | not changed | not changed |
 
 Each completed host uses `~/.local/share/huyang/bin/huyang mcp --profile full`. The
 `agent99` MCP registration is absent from all three harness configurations. Claude marks
@@ -55,9 +55,9 @@ to the desktop trash after successful verification.
 - Neovim configuration: `bash -n setup.sh`, headless config load, and
   `git diff --check` exited 0 before commit.
 
-## Remaining blocker
+## Deferred host
 
 The laptop deliberately accepts no inbound SSH from Normandy, Homelab, or Gaming PC, and
-Normandy has no laptop SSH alias for `t3-backlog --host`. No safe remote execution route
-was available, so no laptop task was queued. Run the same rollout locally on the laptop or
-provide a steward/SSH host alias reachable from Normandy.
+Normandy has no laptop SSH alias for `t3-backlog --host`. On 2026-09-10 the user explicitly
+directed that Laptop be skipped for now. It remains on Agent99 and is outside this completed
+rollout; no laptop task was queued.
