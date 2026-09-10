@@ -123,6 +123,68 @@ func statefulProperties() map[string]any {
 	}
 }
 
+func planOperationSchema(operationKinds []string) map[string]any {
+	return schemaObject(map[string]any{
+		"op_id":                   stringSchema("Stable operation identifier unique within the plan."),
+		"kind":                    enumSchema(operationKinds...),
+		"target":                  targetSchema(),
+		"content":                 stringSchema("Exact UTF-8 content for the declared operation."),
+		"path":                    stringSchema("Workspace path for create_file or delete_file."),
+		"from":                    stringSchema("Source path for move_file."),
+		"to":                      stringSchema("Destination path for move_file."),
+		"revision_id":             stringSchema("Expected source or path document revision."),
+		"destination_revision_id": stringSchema("Expected destination document revision for move_file."),
+		"depends_on":              map[string]any{"type": "array", "items": stringSchema("Predecessor op_id.")},
+	}, "op_id", "kind")
+}
+
+func changePlanSchema(stateful map[string]any, operationKinds []string) map[string]any {
+	operation := planOperationSchema(operationKinds)
+	operations := map[string]any{"type": "array", "items": operation}
+	base := func(extra map[string]any) map[string]any {
+		properties := map[string]any{
+			"workspace_id":    stateful["workspace_id"],
+			"idempotency_key": stateful["idempotency_key"],
+		}
+		for key, value := range extra {
+			properties[key] = value
+		}
+		return properties
+	}
+	create := schemaObject(base(map[string]any{
+		"action": enumSchema("create"), "operations": operations,
+	}), "workspace_id", "idempotency_key", "action")
+	edit := schemaObject(base(map[string]any{
+		"action": enumSchema("edit"), "plan_id": stringSchema("Opaque plan identifier."),
+		"plan_revision": map[string]any{"type": "integer", "minimum": 1},
+		"edit": schemaObject(map[string]any{
+			"mode":       enumSchema("add", "update", "remove", "reorder", "replace_all"),
+			"operations": operations,
+			"op_ids":     map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
+		}, "mode"),
+	}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision", "edit")
+	planAction := func(action string) map[string]any {
+		return schemaObject(base(map[string]any{
+			"action": enumSchema(action), "plan_id": stringSchema("Opaque plan identifier."),
+			"plan_revision": map[string]any{"type": "integer", "minimum": 1},
+		}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision")
+	}
+	prepareInline := schemaObject(base(map[string]any{
+		"action": enumSchema("prepare"), "operations": operations,
+	}), "workspace_id", "idempotency_key", "action", "operations")
+	apply := schemaObject(base(map[string]any{
+		"action": enumSchema("apply"), "plan_id": stringSchema("Opaque plan identifier."),
+		"plan_revision":     map[string]any{"type": "integer", "minimum": 1},
+		"prepared_revision": stringSchema("Exact prepared revision."),
+	}), "workspace_id", "idempotency_key", "action", "plan_id", "plan_revision", "prepared_revision")
+	schema := schemaObject(map[string]any{})
+	schema["oneOf"] = []any{
+		create, edit, planAction("preview"), planAction("inspect"), planAction("discard"),
+		planAction("prepare"), prepareInline, apply,
+	}
+	return schema
+}
+
 func buildModernTools() []modernTool {
 	orient := []mcpProfile{profileFull, profileOrient, profileEdit, profileDebug}
 	edit := []mcpProfile{profileFull, profileEdit}
@@ -186,9 +248,7 @@ func buildModernTools() []modernTool {
 				"kind": enumSchema(operationKinds...), "target": targetSchema(), "content": stringSchema("Exact replacement bytes as UTF-8 text."),
 			}, "kind", "target"),
 		}, "workspace_id", "idempotency_key", "operation")},
-		{Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"], "action": enumSchema("create", "edit", "preview", "prepare", "inspect", "apply", "discard"),
-		}, "workspace_id", "idempotency_key", "action")},
+		{Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
 		{Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"stages":   map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
@@ -254,11 +314,16 @@ func outputEnvelopeSchema() map[string]any {
 		"code":        stringSchema("Stable application outcome code."),
 		"summary":     stringSchema("Compact deterministic result summary."),
 		"workspace":   map[string]any{"type": "object"},
-		"data":        map[string]any{"type": "object", "additionalProperties": true},
-		"evidence":    schemaObject(map[string]any{"ids": map[string]any{"type": "array", "items": stringSchema("Evidence ID.")}, "truncated": map[string]any{"type": "boolean"}}, "ids", "truncated"),
-		"warnings":    map[string]any{"type": "array", "items": stringSchema("Warning.")},
-		"next":        map[string]any{"type": "array", "maxItems": 2},
-		"idempotency": enumSchema("created", "replayed"),
+		"transaction": schemaObject(map[string]any{
+			"id":    stringSchema("Opaque plan or transaction identifier."),
+			"state": enumSchema("OPEN", "PREVIEWED", "PREPARING", "CONFLICTED", "FAILED", "PROVISIONAL", "READY", "COMMITTING", "COMMITTED", "RECOVERY_REQUIRED", "ROLLING_BACK", "ROLLED_BACK", "EXPIRED", "DISCARDED"),
+		}, "id", "state"),
+		"data":                  map[string]any{"type": "object", "additionalProperties": true},
+		"evidence":              schemaObject(map[string]any{"ids": map[string]any{"type": "array", "items": stringSchema("Evidence ID.")}, "truncated": map[string]any{"type": "boolean"}}, "ids", "truncated"),
+		"warnings":              map[string]any{"type": "array", "items": stringSchema("Warning.")},
+		"next":                  map[string]any{"type": "array", "maxItems": 2},
+		"idempotency":           enumSchema("created", "replayed"),
+		"idempotency_persisted": map[string]any{"type": "boolean"},
 	}, "api_version", "request_id", "outcome", "summary", "data", "evidence", "warnings", "next")
 }
 
@@ -639,6 +704,8 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.read(requestID, workspace, arguments)
 	case "edit_apply":
 		return d.edit(requestID, workspace, arguments)
+	case "change_plan":
+		return d.changePlan(requestID, workspace, arguments)
 	default:
 		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
 			fmt.Sprintf("%s is registered but its semantic provider is not available in S07 direct mode", name),
@@ -936,6 +1003,90 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		"change": change, "resolution": resolution, "tool_delta": []any{}, "diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
 		"verification": map[string]any{"confidence": "provisional", "coverage": map[string]any{"edited_documents": "complete", "semantic_provider": "unavailable"}},
 	})
+}
+
+func (d *directWorkspaces) changePlan(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	action, _ := arguments["action"].(string)
+	decode := func(value any, target any) error {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(encoded, target)
+	}
+	planResult := func(summary string, plan workspacecore.PlanRecord) map[string]any {
+		result := modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{"plan": plan})
+		result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
+		if plan.Preview != nil && plan.Preview.Outcome == "conflict" {
+			result["outcome"] = "conflict"
+			result["code"] = "plan_validation_conflicts"
+			result["summary"] = fmt.Sprintf("Plan preview found %d conflicts; canonical workspace unchanged", len(plan.Preview.Conflicts))
+		}
+		return result
+	}
+	var plan workspacecore.PlanRecord
+	var err error
+	switch action {
+	case "create":
+		var operations []workspacecore.PlanOperation
+		if err = decode(arguments["operations"], &operations); err == nil {
+			plan, err = workspace.CreatePlan(operations)
+		}
+		if err == nil {
+			return planResult("Plan intent created; canonical workspace unchanged", plan)
+		}
+	case "edit":
+		var edit workspacecore.PlanEdit
+		if err = decode(arguments["edit"], &edit); err == nil {
+			plan, err = workspace.EditPlan(
+				fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]), edit,
+			)
+		}
+		if err == nil {
+			return planResult("Plan intent updated; canonical workspace unchanged", plan)
+		}
+	case "preview":
+		plan, err = workspace.PreviewPlan(
+			fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]),
+		)
+		if err == nil {
+			return planResult("Deterministic plan preview recorded; canonical workspace unchanged", plan)
+		}
+	case "inspect":
+		plan, err = workspace.InspectPlan(
+			fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]),
+		)
+		if err == nil {
+			return planResult("Plan inspection loaded from durable intent", plan)
+		}
+	case "discard":
+		plan, err = workspace.DiscardPlan(
+			fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]),
+		)
+		if err == nil {
+			return planResult("Plan discarded; canonical workspace unchanged", plan)
+		}
+	case "prepare", "apply":
+		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
+			fmt.Sprintf("%s belongs to a later transaction stage; S10 records intent and preview only", action),
+			map[string]any{"action": action, "canonical_changed": false})
+	default:
+		err = fmt.Errorf("unknown change_plan action %q", action)
+	}
+	if err != nil {
+		code := "plan_action_failed"
+		outcome := "failed"
+		if strings.Contains(err.Error(), "plan_revision_changed") {
+			code, outcome = "plan_revision_changed", "conflict"
+		}
+		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), map[string]any{"action": action})
+	}
+	panic("unreachable")
+}
+
+func uintArgument(value any) uint64 {
+	number, _ := value.(float64)
+	return uint64(number)
 }
 
 func decodeRangeHandle(value map[string]any) (workspacecore.RangeHandle, error) {

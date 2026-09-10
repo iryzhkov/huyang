@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -230,6 +231,96 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	})
 	if content := read["data"].(map[string]any)["content"]; content != "alpha gamma\n" {
 		t.Fatalf("read content = %#v", content)
+	}
+}
+
+func TestOfficialClientPersistsIdempotentPlanPreviewAcrossRestart(t *testing.T) {
+	root := t.TempDir()
+	stateDir := t.TempDir()
+	file := filepath.Join(root, "note.txt")
+	original := []byte("alpha beta gamma\n")
+	if err := os.WriteFile(file, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	direct := newDirectWorkspaces(stateDir)
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	opened := callModern(t, session, "workspace_open", map[string]any{
+		"kind": "documents", "files": []string{file},
+	})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+	})
+	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
+	createArguments := map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "plan-create", "action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "replace-beta", "kind": "replace_range",
+			"target": map[string]any{"file_range": hit["range"]}, "content": "delta",
+		}},
+	}
+	created := callModern(t, session, "change_plan", createArguments)
+	if created["outcome"] != "ok" || created["idempotency"] != "created" {
+		t.Fatalf("create = %#v", created)
+	}
+	replayed := callModern(t, session, "change_plan", createArguments)
+	if replayed["outcome"] != "ok" || replayed["idempotency"] != "replayed" {
+		t.Fatalf("replayed create = %#v", replayed)
+	}
+	plan := created["data"].(map[string]any)["plan"].(map[string]any)
+	planID := plan["plan_id"].(string)
+	planRevision := plan["plan_revision"].(float64)
+	previewed := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "plan-preview", "action": "preview",
+		"plan_id": planID, "plan_revision": planRevision,
+	})
+	if previewed["outcome"] != "ok" {
+		t.Fatalf("preview = %#v", previewed)
+	}
+	preview := previewed["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
+	previewRevision := preview["preview_revision"].(string)
+	if preview["canonical_changed"] != false {
+		t.Fatalf("preview claims canonical mutation: %#v", preview)
+	}
+	cleanup()
+	if current, _ := os.ReadFile(file); !bytes.Equal(current, original) {
+		t.Fatalf("preview mutated canonical bytes: %q", current)
+	}
+
+	restarted := newDirectWorkspaces(stateDir)
+	if restarted.loadErr != nil {
+		t.Fatal(restarted.loadErr)
+	}
+	session, cleanup = connectOfficialClient(t, profileEdit, restarted)
+	defer cleanup()
+	reopened := callModern(t, session, "workspace_open", map[string]any{
+		"kind": "documents", "files": []string{file},
+	})
+	if reopened["workspace"].(map[string]any)["id"] != workspaceID {
+		t.Fatalf("workspace identity changed: %#v", reopened)
+	}
+	inspected := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "plan-inspect", "action": "inspect",
+		"plan_id": planID, "plan_revision": planRevision,
+	})
+	if inspected["outcome"] != "ok" {
+		t.Fatalf("inspect after restart = %#v", inspected)
+	}
+	restoredPreview := inspected["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
+	if restoredPreview["preview_revision"] != previewRevision {
+		t.Fatalf("preview revision changed across restart: %#v", restoredPreview)
+	}
+	repreviewed := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "plan-repreview", "action": "preview",
+		"plan_id": planID, "plan_revision": planRevision,
+	})
+	repreview := repreviewed["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
+	if repreview["preview_revision"] != previewRevision {
+		t.Fatalf("repreview is nondeterministic: %#v", repreview)
+	}
+	if current, _ := os.ReadFile(file); !bytes.Equal(current, original) {
+		t.Fatalf("restart preview mutated canonical bytes: %q", current)
 	}
 }
 

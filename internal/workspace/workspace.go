@@ -131,6 +131,9 @@ type Workspace struct {
 	handlesMu sync.Mutex
 	handles   *handleStore
 	git       *gitState
+
+	plansMu sync.Mutex
+	plans   map[string]PlanRecord
 }
 
 func New(kind Kind, root string, providerEpoch uint64) (*Workspace, error) {

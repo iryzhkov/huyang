@@ -839,7 +839,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S08 — Shared service and scheduler
 - [x] S09 — Semantic handles
 - [x] S09H — Read-only Git source provenance
-- [ ] S10 — Transaction intent, validation and preview
+- [x] S10 — Transaction intent, validation and preview
 - [ ] S11 — Exclusive provider prepare
 - [ ] S12 — Journaled commit
 - [ ] S13 — Crash recovery and compensating undo

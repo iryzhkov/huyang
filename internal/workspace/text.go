@@ -262,6 +262,7 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		limits:    limits,
 		stateDir:  options.StateDir,
 		sectioner: options.Sectioner,
+		plans:     make(map[string]PlanRecord),
 	}
 	for _, name := range options.Files {
 		absolute := name
@@ -278,6 +279,9 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 			return nil, fmt.Errorf("allowlisted document %s is outside workspace root %s", absolute, canonical)
 		}
 		workspace.allowlist[absolute] = struct{}{}
+	}
+	if err := workspace.loadPlans(); err != nil {
+		return nil, err
 	}
 	return workspace, nil
 }
