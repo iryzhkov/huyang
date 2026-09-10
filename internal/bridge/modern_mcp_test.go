@@ -649,4 +649,13 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 		}
 		cleanup()
 	}
+	for _, legacyFull := range []bool{false, true} {
+		legacy := openaiTools(legacyFull)
+		compact, err := json.Marshal(legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("profile=legacy-full-%t tools=%d bytes=%d cl100k_base_tokens=%d",
+			legacyFull, len(legacy), len(compact), len(encoding.Encode(string(compact), nil, nil)))
+	}
 }

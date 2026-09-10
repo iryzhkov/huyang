@@ -15,8 +15,10 @@ import (
 )
 
 type legacyReceipt struct {
-	sandbox *workspacecore.Sandbox
-	changes []workspacecore.PlanStageFile
+	sandbox     *workspacecore.Sandbox
+	changes     []workspacecore.PlanStageFile
+	undoSession *session
+	closeUndo   func()
 }
 
 type legacyPendingAction struct {
@@ -348,6 +350,61 @@ func normalizeLegacyOutput(ses session, sandbox *workspacecore.Sandbox, out stri
 	return string(encoded)
 }
 
+func callDetachedLegacyUndo(arguments map[string]any, ses session, key string, stack []legacyReceipt, selected []legacyReceipt) (string, bool, error) {
+	if len(selected) != 1 || selected[0].undoSession == nil {
+		return "", false, nil
+	}
+	receipt := selected[0]
+	if _, err := prepareLegacyUndoChanges(ses, receipt.changes, false); err != nil {
+		return "", true, err
+	}
+	undoArguments := make(map[string]any, len(arguments)+1)
+	for name, value := range arguments {
+		undoArguments[name] = value
+	}
+	delete(undoArguments, "all")
+	undoArguments["count"] = 1
+	out, err := callTool("undo_edit", undoArguments, *receipt.undoSession)
+	if err != nil {
+		return "", true, err
+	}
+	var result struct {
+		Undone []json.RawMessage `json:"undone"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return "", true, err
+	}
+	out = strings.ReplaceAll(out, receipt.sandbox.Tree, ses.Root)
+	if len(result.Undone) == 0 {
+		return out, true, nil
+	}
+	ctx := ses.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	prepared, err := prepareLegacyUndoChanges(ses, receipt.changes, arguments["all"] == true)
+	if err != nil {
+		return "", true, err
+	}
+	transactionID, err := newLegacyTransactionID()
+	if err != nil {
+		return "", true, err
+	}
+	if _, err := ses.Workspace.CommitPreparedTransaction(ctx, transactionID, "op_undo_edit", prepared, func(ctx context.Context) error {
+		return legacyResync(ctx, ses)
+	}); err != nil {
+		return "", true, err
+	}
+	legacyWrapperState.Lock()
+	legacyWrapperState.receipts[key] = legacyWrapperState.receipts[key][:len(stack)-1]
+	legacyWrapperState.Unlock()
+	_ = receipt.sandbox.Cleanup()
+	if receipt.closeUndo != nil {
+		receipt.closeUndo()
+	}
+	return out, true, nil
+}
+
 func callLegacyUndo(arguments map[string]any, ses session) (string, bool, error) {
 	key := legacyStateKey(ses)
 	legacyWrapperState.Lock()
@@ -357,6 +414,9 @@ func callLegacyUndo(arguments map[string]any, ses session) (string, bool, error)
 	legacyWrapperState.Unlock()
 	if count == 0 {
 		return "", false, nil
+	}
+	if out, handled, err := callDetachedLegacyUndo(arguments, ses, key, stack, selected); handled {
+		return out, true, err
 	}
 	for _, receipt := range selected {
 		if _, err := prepareLegacyUndoChanges(ses, receipt.changes, false); err != nil {
@@ -428,10 +488,14 @@ func cleanupLegacyWorkspace(ses session) {
 	prefix := string(ses.Workspace.Identity().ID) + "\x00"
 	legacyWrapperState.Lock()
 	var sandboxes []*workspacecore.Sandbox
+	var closers []func()
 	for key, receipts := range legacyWrapperState.receipts {
 		if strings.HasPrefix(key, prefix) {
 			for _, receipt := range receipts {
 				sandboxes = append(sandboxes, receipt.sandbox)
+				if receipt.closeUndo != nil {
+					closers = append(closers, receipt.closeUndo)
+				}
 			}
 			delete(legacyWrapperState.receipts, key)
 		}
@@ -450,5 +514,8 @@ func cleanupLegacyWorkspace(ses session) {
 	legacyWrapperState.Unlock()
 	for _, sandbox := range sandboxes {
 		_ = sandbox.Cleanup()
+	}
+	for _, closeUndo := range closers {
+		closeUndo()
 	}
 }

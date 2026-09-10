@@ -89,7 +89,60 @@ func TestLegacyCreateWrapperMatchesDirectSnapshotAndCommitsJournal(t *testing.T)
 	}
 }
 
+func TestLegacyReplacePatternCapturesImplicitTouchedBuffersAndCommitsJournal(t *testing.T) {
+	previousFactory := referenceProviders
+	referenceProviders = configuredProviderFactory{backend: "embed"}
+	defer func() { referenceProviders = previousFactory }()
+	runtimeRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT99_RUNTIME_PATH", runtimeRoot)
+	t.Setenv("AGENT99_HEADLESS_INIT", filepath.Join(runtimeRoot, "tests", "minimal_init.lua"))
+	t.Setenv("HUYANG_LEGACY_STATE_DIR", t.TempDir())
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.lua"), []byte("local old = 1\nreturn old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	transactional := legacyTestSession(t, root, stateDir, false)
+	t.Cleanup(func() { cleanupLegacyWorkspace(transactional) })
+
+	out, err := callTool("replace_pattern", map[string]any{
+		"pattern": "old", "replacement": "new", "literal": true, "glob": "*.lua",
+	}, transactional)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == "" {
+		t.Fatal("replace_pattern returned an empty legacy result")
+	}
+	content, err := os.ReadFile(filepath.Join(root, "sample.lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "local new = 1\nreturn new\n" {
+		t.Fatalf("committed bytes = %q", content)
+	}
+	journals, err := filepath.Glob(filepath.Join(stateDir, "commit-journals", "*", "legacy_*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(journals) != 1 {
+		t.Fatalf("committed journals = %v", journals)
+	}
+}
+
 func TestLegacyWrapperEscapeFlagsRetainDirectPath(t *testing.T) {
+	for _, name := range []string{"rename_symbol", "apply_code_action", "replace_pattern", "move_symbols"} {
+		if !legacyTransactionalTools[name] {
+			t.Fatalf("%s is not registered for transactional migration", name)
+		}
+		if !legacyTransactionsEnabled(name, map[string]any{}) {
+			t.Fatalf("%s transactional path is not enabled by default", name)
+		}
+	}
 	t.Setenv("HUYANG_LEGACY_WRAPPERS", "direct")
 	if legacyTransactionsEnabled("create_file", map[string]any{}) {
 		t.Fatal("global direct escape did not disable wrapper")

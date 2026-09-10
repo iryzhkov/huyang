@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agent99/internal/provider"
 	workspacecore "agent99/internal/workspace"
 )
 
@@ -24,6 +25,10 @@ var legacyTransactionalTools = map[string]bool{
 	"create_file":          true,
 	"move_file":            true,
 	"delete_file":          true,
+	"rename_symbol":        true,
+	"apply_code_action":    true,
+	"replace_pattern":      true,
+	"move_symbols":         true,
 }
 
 func legacyTransactionsEnabled(name string, arguments map[string]any) bool {
@@ -97,13 +102,14 @@ func legacySandboxArguments(arguments map[string]any, canonicalRoot, sandboxRoot
 }
 
 var legacyFileTransactionTools = map[string]bool{
-	"create_file": true,
-	"move_file":   true,
-	"delete_file": true,
+	"create_file":  true,
+	"move_file":    true,
+	"delete_file":  true,
+	"move_symbols": true,
 }
 
-func legacyArgumentFiles(arguments map[string]any, root string) []string {
-	var files []string
+func legacyArgumentFiles(arguments map[string]any, root string) []any {
+	files := make([]any, 0)
 	for _, key := range []string{"file", "from", "to"} {
 		if value, ok := arguments[key]; ok {
 			files = append(files, resolveInRoot(root, value))
@@ -118,7 +124,10 @@ func legacyArgumentFiles(arguments map[string]any, root string) []string {
 }
 
 func captureLegacyBuffers(ctx context.Context, ses session, sandbox *workspacecore.Sandbox, arguments map[string]any) error {
-	value, err := providerCall(ses, "huyang_capture_files", map[string]any{"files": legacyArgumentFiles(arguments, ses.Root)})
+	value, err := providerCall(ses, "huyang_capture_files", map[string]any{
+		"files": legacyArgumentFiles(arguments, ses.Root),
+		"root":  ses.Root,
+	})
 	if err != nil {
 		return err
 	}
@@ -165,6 +174,11 @@ func callLegacyTransaction(name string, arguments map[string]any, ses session) (
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if legacyFileTransactionTools[name] {
+		if err := ses.Provider.Save(ctx); err != nil {
+			return "", fmt.Errorf("legacy transaction canonical flush: %w", err)
+		}
+	}
 	transactionID, err := newLegacyTransactionID()
 	if err != nil {
 		return "", err
@@ -192,16 +206,42 @@ func callLegacyTransaction(name string, arguments map[string]any, ses session) (
 	operationSession.Context = ctx
 	operationSession.LegacyDirect = true
 	operationArguments := arguments
+	var sandboxProvider provider.Provider
+	closeSandboxProvider := false
 	if legacyFileTransactionTools[name] {
 		operationSession.Root = sandbox.Tree
 		operationArguments = legacySandboxArguments(arguments, ses.Root, sandbox.Tree)
+	}
+	if name == "move_symbols" {
+		sandboxProvider, err = referenceProviders.Open(providerOpenConfig{
+			Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"), RuntimePath: shippedRuntimePath(),
+		})
+		if err != nil {
+			return "", fmt.Errorf("legacy transaction sandbox provider: %w", err)
+		}
+		closeSandboxProvider = true
+		defer func() {
+			if closeSandboxProvider {
+				_ = sandboxProvider.Close(context.Background())
+			}
+		}()
+		profile, profileErr := provider.NewAnalysisProfile("legacy-transaction", []provider.Registration{{
+			Provider: sandboxProvider, Languages: []string{"*"},
+			Capabilities: sandboxProvider.Descriptor().Capabilities, Role: provider.RolePrimary,
+		}})
+		if profileErr != nil {
+			return "", profileErr
+		}
+		operationSession.Provider = sandboxProvider
+		operationSession.Providers = profile
+		operationSession.Workspace = nil
 	}
 	out, err := callTool(name, operationArguments, operationSession)
 	if err != nil {
 		return "", err
 	}
 	if legacyFileTransactionTools[name] {
-		if err := ses.Provider.Save(ctx); err != nil {
+		if err := operationSession.Provider.Save(ctx); err != nil {
 			return "", fmt.Errorf("legacy transaction sandbox save: %w", err)
 		}
 	} else if err := captureLegacyBuffers(ctx, ses, sandbox, arguments); err != nil {
@@ -221,7 +261,15 @@ func callLegacyTransaction(name string, arguments map[string]any, ses session) (
 		return "", err
 	}
 	if legacyFileTransactionTools[name] {
-		rememberLegacyReceipt(ses, legacyReceipt{sandbox: sandbox, changes: changes})
+		receipt := legacyReceipt{sandbox: sandbox, changes: changes}
+		if name == "move_symbols" {
+			detached := operationSession
+			detached.Context = context.Background()
+			receipt.undoSession = &detached
+			receipt.closeUndo = func() { _ = sandboxProvider.Close(context.Background()) }
+			closeSandboxProvider = false
+		}
+		rememberLegacyReceipt(ses, receipt)
 		cleanup = false
 		return normalizeLegacyOutput(ses, sandbox, out), nil
 	}

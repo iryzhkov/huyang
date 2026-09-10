@@ -496,7 +496,10 @@ func (s *Sandbox) PreparedChanges(ctx context.Context) ([]PlanStageFile, error) 
 				return nil, err
 			}
 			if !sandboxEntryMatchesSnapshot(beforeEntry, change.BeforeDisk, change.Before) {
-				return nil, fmt.Errorf("sandbox_source_changed: canonical %s no longer matches the sealed base", relative)
+				return nil, fmt.Errorf(
+					"sandbox_source_changed: canonical %s no longer matches the sealed base (sealed sha256=%x mtime_ns=%d; current sha256=%x mtime_ns=%d)",
+					relative, beforeEntry.Hash, beforeEntry.MTimeNS, sha256.Sum256(change.Before), change.BeforeDisk.MTimeNS,
+				)
 			}
 		} else {
 			change.BeforeDisk = DiskSnapshot{Kind: ObjectMissing}

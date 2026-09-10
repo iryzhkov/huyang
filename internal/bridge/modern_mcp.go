@@ -568,6 +568,9 @@ type directWorkspaces struct {
 	stagers        map[workspacecore.ID]workspacecore.PlanStager
 	providers      map[workspacecore.ID]provider.Provider
 	sandboxStagers map[string]*sandboxPlanStager
+
+	verificationMu    sync.Mutex
+	verificationCache map[string]cachedVerification
 }
 
 type directReplay struct {
@@ -577,21 +580,27 @@ type directReplay struct {
 	complete      bool
 }
 
+type cachedVerification struct {
+	Result  workspacecore.VerificationResult
+	Outcome string
+}
+
 func newDirectWorkspaces(stateDir string) *directWorkspaces {
 	return newDirectWorkspacesWithQuotas(stateDir, 4, 2)
 }
 
 func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
 	direct := &directWorkspaces{
-		items:          make(map[workspacecore.ID]*workspacecore.Workspace),
-		records:        make(map[workspacecore.ID]persistedWorkspace),
-		stateDir:       stateDir,
-		replays:        make(map[string]*directReplay),
-		registryPath:   filepath.Join(stateDir, "registry.json"),
-		scheduler:      newWorkspaceScheduler(providerQuota, externalJobQuota),
-		stagers:        make(map[workspacecore.ID]workspacecore.PlanStager),
-		providers:      make(map[workspacecore.ID]provider.Provider),
-		sandboxStagers: make(map[string]*sandboxPlanStager),
+		items:             make(map[workspacecore.ID]*workspacecore.Workspace),
+		records:           make(map[workspacecore.ID]persistedWorkspace),
+		stateDir:          stateDir,
+		replays:           make(map[string]*directReplay),
+		registryPath:      filepath.Join(stateDir, "registry.json"),
+		scheduler:         newWorkspaceScheduler(providerQuota, externalJobQuota),
+		stagers:           make(map[workspacecore.ID]workspacecore.PlanStager),
+		providers:         make(map[workspacecore.ID]provider.Provider),
+		sandboxStagers:    make(map[string]*sandboxPlanStager),
+		verificationCache: make(map[string]cachedVerification),
 	}
 	direct.loadErr = direct.loadRegistry()
 	if direct.loadErr == nil {
@@ -1264,9 +1273,21 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 		stages = append(stages, stage)
 	}
+	testScope := fmt.Sprint(arguments["test_scope"])
 	request := workspacecore.VerificationRequest{
-		Stages: stages, Revision: revision, TestScope: fmt.Sprint(arguments["test_scope"]),
+		Stages: stages, Revision: revision, TestScope: testScope,
 		TestHistoryPath: filepath.Join(d.stateDir, "test-history", string(workspace.Identity().ID)+".json"),
+	}
+	cacheKey := strings.Join([]string{
+		string(workspace.Identity().ID), revision, strings.Join(stages, "\x1f"), testScope,
+	}, "\x00")
+	d.verificationMu.Lock()
+	cached, cacheHit := d.verificationCache[cacheKey]
+	d.verificationMu.Unlock()
+	if cacheHit {
+		return modernEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", map[string]any{
+			"verification": cached.Result, "cache": "revision_hit",
+		})
 	}
 	d.providerMu.Lock()
 	var stager *sandboxPlanStager
@@ -1342,7 +1363,12 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 			break
 		}
 	}
-	return modernEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", map[string]any{"verification": result})
+	d.verificationMu.Lock()
+	d.verificationCache[cacheKey] = cachedVerification{Result: result, Outcome: outcome}
+	d.verificationMu.Unlock()
+	return modernEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", map[string]any{
+		"verification": result, "cache": "revision_miss",
+	})
 }
 
 func uintArgument(value any) uint64 {

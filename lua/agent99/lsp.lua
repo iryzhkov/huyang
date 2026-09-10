@@ -1229,14 +1229,27 @@ local dispatch_table = {
         return require("agent99.transaction").status(args)
     end,
     huyang_capture_files = function(args)
-        local files = {}
-        for _, path in ipairs(args.files or {}) do
+        local files, seen = {}, {}
+        local function capture(path)
+            path = vim.fn.fnamemodify(path, ":p")
+            if seen[path] then return end
+            seen[path] = true
             local bufnr = load_buf(path)
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
             local content = table.concat(lines, "\n")
             if vim.bo[bufnr].eol then content = content .. "\n" end
             files[#files + 1] = { path = path, content = content }
         end
+        for _, path in ipairs(args.files or {}) do capture(path) end
+        local root = type(args.root) == "string" and vim.fn.fnamemodify(args.root, ":p") or nil
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            local path = vim.api.nvim_buf_get_name(bufnr)
+            if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified
+                and path ~= "" and (not root or path:sub(1, #root) == root) then
+                capture(path)
+            end
+        end
+        table.sort(files, function(a, b) return a.path < b.path end)
         return { files = files }
     end,
     huyang_workspace_resync = function()

@@ -104,6 +104,11 @@ required = true
 	if replayed["idempotency"] != "replayed" {
 		t.Fatalf("verify replay = %#v", replayed)
 	}
+	verifyArguments["idempotency_key"] = "pipeline-verify-revision-cache"
+	cached := callModern(t, session, "verify_run", verifyArguments)
+	if cached["data"].(map[string]any)["cache"] != "revision_hit" {
+		t.Fatalf("revision-keyed verification cache = %#v", cached)
+	}
 	affected := callModern(t, session, "verify_run", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-affected-verify",
 		"revision_or_transaction": preparedRevision, "stages": []string{"tests"}, "test_scope": "affected",
