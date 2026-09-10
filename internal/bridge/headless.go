@@ -15,24 +15,21 @@ package bridge
 // lost the moment the other wrote.
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"agent99/internal/provider"
 )
 
 const (
-	headlessStartTimeout = 20 * time.Second
-	headlessStopTimeout  = 3 * time.Second
 	// Each workspace is a Neovim with a full set of language servers - a
 	// gopls over a large repository is a gigabyte by itself - so how many
 	// run at once is capped rather than left to the agent.
@@ -40,11 +37,9 @@ const (
 )
 
 type headlessWorkspace struct {
-	Root   string
-	Socket string
-	cmd    *exec.Cmd
-	stderr *tailBuffer
-	done   chan struct{}
+	Root      string
+	Providers *provider.AnalysisProfile
+	Provider  provider.Provider
 	// lastUsed is when a call was last routed here, which is what the idle
 	// sweep in lifecycle.go measures. Guarded by headlessMu.
 	lastUsed time.Time
@@ -56,15 +51,12 @@ type headlessWorkspace struct {
 }
 
 func (w *headlessWorkspace) session() session {
-	return session{Root: w.Root, Socket: w.Socket, Headless: true}
+	return session{Root: w.Root, Providers: w.Providers, Provider: w.Provider, Headless: true}
 }
 
 var (
 	headlessMu sync.Mutex
 	workspaces = map[string]*headlessWorkspace{}
-	// instanceSeq numbers the instances this bridge has started, for their
-	// socket names.
-	instanceSeq atomic.Int64
 )
 
 func maxWorkspaces() int {
@@ -76,36 +68,13 @@ func maxWorkspaces() int {
 	return defaultMaxWorkspaces
 }
 
-// tailBuffer keeps the last few kilobytes written to it, for error reports.
-type tailBuffer struct {
-	mu  sync.Mutex
-	buf []byte
-}
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, p...)
-	if len(t.buf) > 4096 {
-		t.buf = t.buf[len(t.buf)-4096:]
-	}
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return strings.TrimSpace(string(t.buf))
-}
-
 // liveLocked drops the workspaces whose Neovim has exited and returns the
 // rest. An instance can die underneath the server (a crash, an OOM kill),
 // and a stale entry would route calls to a socket nobody answers on.
 func liveLocked() map[string]*headlessWorkspace {
 	for root, ws := range workspaces {
 		select {
-		case <-ws.done:
-			os.Remove(ws.Socket)
+		case <-ws.Provider.Done():
 			delete(workspaces, root)
 			forgetRoot(root)
 			// The per-client state this instance held - ledger, baselines,
@@ -171,81 +140,6 @@ func underRoot(root, path string) bool {
 		return true
 	}
 	return strings.HasPrefix(path, strings.TrimSuffix(root, string(os.PathSeparator))+string(os.PathSeparator))
-}
-
-func socketDir() (string, error) {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = os.TempDir()
-	}
-	dir := filepath.Join(base, "agent99")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
-// nvimAlive reports whether the plugin's RPC entry point answers on sock.
-func nvimAlive(sock string) bool {
-	if _, err := os.Stat(sock); err != nil {
-		return false
-	}
-	out, err := remoteExpr(sock, "luaeval('type(Agent99RpcStart)')")
-	return err == nil && strings.TrimSpace(out) == "function"
-}
-
-// socketPrefix is the leading field of the socket name openWorkspace gives an
-// instance: a hash of the root, so the sockets belonging to one tree can be
-// found without asking anyone.
-func socketPrefix(root string) string {
-	sum := sha1.Sum([]byte(root))
-	return hex.EncodeToString(sum[:6])
-}
-
-// foreignInstanceAt reports a live Neovim another bridge process has open at
-// this root, as its socket path and that bridge's pid. The "one Neovim per
-// tree" rule was enforced against this process's own map only, so two bridges
-// - one per agent on the machine - each opened the same root and each held
-// its own buffers for the same files, which is the loss the rule exists to
-// prevent. The socket directory is the only thing the two processes share, so
-// it is where the question is asked, and a socket name carries a hash of its
-// root, so this answers for the same root exactly. A foreign workspace that
-// merely overlaps this one - a root inside it, or around it - is not visible
-// here, since only the hash of the root it was opened at is in the name; that
-// half of the rule is still enforced within a process only.
-func foreignInstanceAt(root string) (string, int) {
-	dir, err := socketDir()
-	if err != nil {
-		return "", 0
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", 0
-	}
-	prefix := socketPrefix(root) + "-"
-	self := os.Getpid()
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".sock") {
-			continue
-		}
-		base := strings.TrimSuffix(name, ".sock")
-		dash := strings.LastIndexByte(base, '-')
-		if dash < 0 {
-			continue
-		}
-		pid, err := strconv.Atoi(base[dash+1:])
-		if err != nil || pid == self || !processAlive(pid) {
-			continue
-		}
-		// A live owner can still have left the file behind: only an
-		// answering socket means an instance is really there.
-		sock := filepath.Join(dir, name)
-		if nvimAlive(sock) {
-			return sock, pid
-		}
-	}
-	return "", 0
 }
 
 // usableRoot refuses the two directories that are not a project tree: the
@@ -318,13 +212,12 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 	defer headlessMu.Unlock()
 	live := liveLocked()
 	if ws := live[abs]; ws != nil {
-		if nvimAlive(ws.Socket) {
+		if ws.Provider.Health(context.Background()).State == provider.HealthHealthy {
 			noteRouted(stickyActive, abs)
 			forgetReopenableLocked(abs)
 			ws.lastUsed = time.Now()
 			return ws, nil
 		}
-		// Listening on the socket but not answering: replace it.
 		delete(workspaces, abs)
 		stopWorkspace(ws)
 		forgetRoot(abs)
@@ -338,7 +231,7 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 				abs, other, other)
 		}
 	}
-	if other, pid := foreignInstanceAt(abs); other != "" {
+	if other, pid := referenceProviders.FindForeign(abs); other != "" {
 		return nil, fmt.Errorf("%s is already open in another agent99 bridge (process %d, "+
 			"socket %s). One Neovim per tree: two instances would hold their own buffers for "+
 			"the same files, and an edit made in one is lost when the other writes. This "+
@@ -356,69 +249,35 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 			len(workspaces), strings.Join(rootsLocked(), ", "), max)
 	}
 
-	dir, err := socketDir()
+	backend, err := referenceProviders.Open(providerOpenConfig{
+		Root:     abs,
+		InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+		Debug:    debugEnabled(),
+	})
 	if err != nil {
 		return nil, err
 	}
-	// <hash of root>-<instance number>-<bridge pid>.sock. The instance
-	// number keeps the name unique across reopenings of the same root: an
-	// idle sweep unlocks before its stopWorkspace runs, and a call in that
-	// window auto-opens a new instance whose socket must not be the one the
-	// old instance is about to unlink. The pid stays last, which is where
-	// sweepStaleSockets reads it.
-	sock := filepath.Join(dir, fmt.Sprintf("%s-%d-%d.sock",
-		socketPrefix(abs), instanceSeq.Add(1), os.Getpid()))
-	os.Remove(sock)
-
-	args := []string{"--headless", "--listen", sock,
-		"--cmd", "set noswapfile shadafile=NONE"}
-	// Tests point this at a minimal config so the run does not depend on
-	// the user's plugins.
-	if init := os.Getenv("AGENT99_HEADLESS_INIT"); init != "" {
-		args = append(args, "--clean", "-u", init)
+	registration := provider.Registration{
+		Provider:     backend,
+		Languages:    []string{"*"},
+		Capabilities: backend.Descriptor().Capabilities,
+		Role:         provider.RolePrimary,
 	}
-	cmd := exec.Command("nvim", args...)
-	cmd.Dir = abs
-	tail := &tailBuffer{}
-	cmd.Stderr = tail
-	cmd.Stdout = tail
-	cmd.Stdin = nil
-	setDeathSignal(cmd)
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting nvim: %v", err)
+	profile, err := provider.NewAnalysisProfile("default", []provider.Registration{registration})
+	if err != nil {
+		_ = backend.Close(context.Background())
+		return nil, err
 	}
-	ws := &headlessWorkspace{Root: abs, Socket: sock, cmd: cmd, stderr: tail,
-		done: make(chan struct{}), lastUsed: time.Now()}
-	go func() {
-		cmd.Wait()
-		close(ws.done)
-	}()
-
-	deadline := time.Now().Add(headlessStartTimeout)
-	for time.Now().Before(deadline) {
-		select {
-		case <-ws.done:
-			os.Remove(sock)
-			return nil, fmt.Errorf("nvim exited during startup: %s", tail.String())
-		default:
-		}
-		if nvimAlive(sock) {
-			workspaces[abs] = ws
-			noteRouted(stickyActive, abs)
-			forgetReopenableLocked(abs)
-			ws.lastUsed = time.Now()
-			return ws, nil
-		}
-		time.Sleep(100 * time.Millisecond)
+	ws := &headlessWorkspace{
+		Root:      abs,
+		Providers: profile,
+		Provider:  backend,
+		lastUsed:  time.Now(),
 	}
-	cmd.Process.Kill()
-	<-ws.done
-	os.Remove(sock)
-	detail := tail.String()
-	if detail == "" {
-		detail = "the agent99 plugin never answered on the socket (is it on the runtimepath?)"
-	}
-	return nil, fmt.Errorf("nvim did not come up within %s: %s", headlessStartTimeout, detail)
+	workspaces[abs] = ws
+	noteRouted(stickyActive, abs)
+	forgetReopenableLocked(abs)
+	return ws, nil
 }
 
 // closeWorkspaces stops the workspaces with these roots and returns the ones
@@ -469,54 +328,8 @@ func closeAllWorkspaces() []string {
 // stopWorkspace ends one instance. The caller has already taken it out of
 // the map.
 func stopWorkspace(ws *headlessWorkspace) {
-	// The socket name is unique to this instance (see openWorkspace), so
-	// removing it can never unlink the socket of a newer instance that
-	// reopened the same root while this one was on its way out.
-	defer os.Remove(ws.Socket)
-	select {
-	case <-ws.done:
-		return
-	default:
-	}
-	// Ask nicely so buffers and LSP clients shut down, then force it. The
-	// asking happens off to the side: on a wedged instance each remote
-	// expression runs to its own timeout, and the kill below must still
-	// come on schedule rather than after all of them.
-	asked := make(chan struct{})
-	go func() {
-		defer close(asked)
-		// A debug session's adapter and debuggee are grandchildren of this
-		// process; end them before the instance goes, so close_workspace
-		// never leaves a program running under a debugger nobody can reach.
-		if debugEnabled() {
-			remoteExpr(ws.Socket, "luaeval('"+headlessDebugStopLua+"')")
-		}
-		remoteExpr(ws.Socket, "execute('qa!')")
-	}()
-	kill := func() {
-		ws.cmd.Process.Kill()
-		<-ws.done
-	}
-	select {
-	case <-ws.done:
-	case <-asked:
-		select {
-		case <-ws.done:
-		case <-time.After(headlessStopTimeout):
-			kill()
-		}
-	case <-time.After(remoteExprTimeout):
-		// The instance is not even answering the request to quit.
-		kill()
-	}
+	_ = ws.Provider.Close(context.Background())
 }
-
-// Lua expression that ends the agent's debug session, if any; errors are
-// swallowed because the instance is about to be killed anyway.
-var headlessDebugStopLua = strings.Join([]string{
-	`(function() pcall(function()`,
-	`require("agent99.dap").shutdown_sync() end) return "" end)()`,
-}, " ")
 
 // Edits made by the symbol tools land in buffers; with no user at the
 // keyboard they must reach disk on their own, otherwise a client reading
@@ -544,30 +357,8 @@ var editTools = map[string]bool{
 // headlessSaveAll writes every modified file buffer of the headless
 // instance and reports the first failures.
 func headlessSaveAll(ses session) error {
-	if ses.Socket == "" {
+	if ses.Provider == nil {
 		return nil
 	}
-	out, err := remoteExpr(ses.Socket, "luaeval('"+headlessSaveLua+"')")
-	if err != nil {
-		return err
-	}
-	if msg := strings.TrimSpace(out); msg != "" {
-		return fmt.Errorf("saving buffers: %s", msg)
-	}
-	return nil
+	return ses.Provider.Save(context.Background())
 }
-
-// Lua expression (single quotes are forbidden: it travels inside a
-// Vimscript string literal) returning "" or the joined write errors.
-//
-// The saving itself lives in agent99.lsp so that it goes through the same
-// disk-fingerprint check as every other write: a plain `:write` over a file
-// that changed on disk asks the user whether to overwrite it, and in a
-// headless instance that question never gets an answer - it hangs the RPC
-// channel and the edit is lost.
-var headlessSaveLua = strings.Join([]string{
-	`(function() local ok, r = pcall(function()`,
-	`return require("agent99.lsp").save_all() end)`,
-	`if not ok then return tostring(r) end`,
-	`return table.concat(r, "; ") end)()`,
-}, " ")

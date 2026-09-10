@@ -44,15 +44,12 @@ func deadPid(t *testing.T) int {
 func TestSweepStaleSocketsLeavesLiveOnesAlone(t *testing.T) {
 	runtime := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", runtime)
-	dir, err := socketDir()
-	if err != nil {
+	dir := filepath.Join(runtime, "agent99")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
 	gone := deadPid(t)
-	if processAlive(gone) {
-		t.Skip("the throwaway pid was reused; nothing to assert against")
-	}
 	files := map[string]bool{ // name -> should survive the sweep
 		"aaaa11-" + strconv.Itoa(os.Getpid()) + ".sock": true,  // this bridge's own
 		"bbbb22-" + strconv.Itoa(gone) + ".sock":        false, // a bridge that is gone

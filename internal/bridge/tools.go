@@ -120,7 +120,7 @@ func readContext(ses session, file string, line int) string {
 	if os.Getenv("AGENT99_NO_LSP") != "" || line <= 1 {
 		return ""
 	}
-	res, err := nvimCall(ses, "enclosing_symbols",
+	res, err := providerCall(ses, "enclosing_symbols",
 		map[string]any{"file": file, "lines": []any{line}})
 	if err != nil {
 		return ""
@@ -177,7 +177,7 @@ func runReadFile(ses session, args map[string]any) (string, error) {
 			// file nothing can outline (a log, a data dump, a grammar
 			// without declarations) would otherwise come back as "no
 			// outline; read it instead" from the read itself.
-			if res, err := nvimCall(ses, "skim", map[string]any{"files": []any{path}}); err == nil && skimHasOutline(res) {
+			if res, err := providerCall(ses, "skim", map[string]any{"files": []any{path}}); err == nil && skimHasOutline(res) {
 				pretty, merr := renderJSON(res)
 				if merr == nil {
 					return fmt.Sprintf(
@@ -872,7 +872,7 @@ func annotateGrepHits(ses session, lines []string, blame bool, kindFilter string
 			cols = append(cols, h.col)
 			lineNos = append(lineNos, h.line)
 		}
-		res, err := nvimCall(ses, "enclosing_symbols",
+		res, err := providerCall(ses, "enclosing_symbols",
 			map[string]any{"file": file, "lines": want, "cols": cols})
 		if err != nil {
 			if editorUnreachable(err) {
@@ -1187,7 +1187,7 @@ func callTool(name string, args map[string]any, ses session) (string, error) {
 			resolved["headless"] = true
 			args = resolved
 		}
-		result, err := nvimCall(ses, name, args)
+		result, err := providerCall(ses, name, args)
 		if err != nil {
 			return "", err
 		}
@@ -1215,7 +1215,7 @@ func callTool(name string, args map[string]any, ses session) (string, error) {
 		out, err = runReadFile(ses, args)
 		if err == nil && os.Getenv("AGENT99_NO_LSP") == "" {
 			// Let the editor's code window follow the read (best-effort).
-			nvimCall(ses, "ui_follow", map[string]any{
+			providerCall(ses, "ui_follow", map[string]any{
 				"file": resolveInRoot(root, args["path"]),
 				"line": argInt(args, "offset", 1),
 			})
@@ -1239,10 +1239,10 @@ func callTool(name string, args map[string]any, ses session) (string, error) {
 // them too, as the editor's own replies do. Best-effort: with no editor to
 // ask, or nothing owed, it adds nothing.
 func verdictCarry(ses session) string {
-	if ses.Socket == "" || os.Getenv("AGENT99_NO_LSP") != "" {
+	if ses.Provider == nil || os.Getenv("AGENT99_NO_LSP") != "" {
 		return ""
 	}
-	result, err := nvimCall(ses, "verdict_carry", map[string]any{})
+	result, err := providerCall(ses, "verdict_carry", map[string]any{})
 	if err != nil {
 		return ""
 	}

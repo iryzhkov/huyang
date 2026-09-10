@@ -14,65 +14,76 @@
 
 ## Current checkpoint
 
-- Selected stage: S01 — Mechanical package boundary
-- Starting commit: `d375d70842f5519cfe1862f0d34fd7401848203f`
-- Intended exit:
-  - bridge internals live behind an `internal/` package boundary;
-  - the compatibility binary is built from a small command entry point under `cmd/`;
-  - package ownership for the MCP adapter, workspace core, and provider transport is recorded
-    without introducing a provider interface or changing tool names, schemas, responses, or
-    runtime behavior;
-  - the S00 contract fixtures remain byte-identical;
-  - package-boundary checks, `make smoke`, `go test ./...`, `go vet ./...`, and
-    `git diff --check` pass;
-  - one S01 commit exists and the worktree is clean.
-- Status: complete pending the final S01 commit and clean-tree confirmation.
-- Next stage after successful S01: S02 — Provider seam with socket reference backend
+- Selected stage: S02 — Provider seam with socket reference backend
+- Starting commit: `5a1a0f74271b29a5d8a1412e56e907b24fe18412`
+- Exit achieved:
+  - provider request/result, health, lifecycle, identity, capability, role, and
+    analysis-profile contracts wrap the existing reference implementation;
+  - deterministic provider IDs and profile routing select one primary on the hot path while
+    modeling complementary providers and declared fallbacks;
+  - the current runtime and tests route through the provider interface without changing public
+    tool names, schemas, responses, or socket behavior;
+  - request context includes cancellation and deadline fields, and the reference backend
+    explicitly reports in-flight cancellation as unsupported;
+  - direct socket/start-poll assumptions are confined to `internal/provider/socket`;
+  - targeted provider tests, `make smoke`, `go test ./...`, `go vet ./...`, and
+    `git diff --check` pass.
+- Status: complete pending the final S02 commit and clean-tree confirmation.
+- Next stage after successful S02: S03 — Embedded provider decision spike
 
 ## Predecessor artifacts
 
-S01 reconciled and consumed these S00 artifacts completely:
+S02 reconciled and consumed these committed predecessor artifacts completely:
 
 - `docs/plans/huyang-s00-baseline.md`
 - `docs/plans/huyang-s00-model-selection.md`
+- `docs/plans/huyang-s01-package-boundary.md`
 - `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
 - `docs/plans/fixtures/huyang-v1alpha1/golden-results.json`
 - `docs/plans/fixtures/huyang-v1alpha1/multi-provider.json`
 
-The S00 commit is `d375d70842f5519cfe1862f0d34fd7401848203f`; its required gates reconcile
-with the clean starting tree and current history.
+The S01 commit is `5a1a0f74271b29a5d8a1412e56e907b24fe18412`. Its package-boundary checks,
+frozen-fixture comparison, history, and clean checkpoint reconcile with the current tree.
 
-## S01 changes
+## S02 changes
 
-- Moved the complete Go bridge runtime and its same-package tests from `bridge/` to
-  `internal/bridge/`, changing only the package declaration needed to make it importable.
-- Exported the existing process dispatcher as `bridge.Main` and added the small
-  `cmd/agent99-bridge` entry point. The built artifact and subcommands remain
-  `bin/agent99-bridge <agent|mcp|tool>`.
-- Updated the Makefile build path without changing the output path.
-- Added `docs/plans/huyang-s01-package-boundary.md`, fixing ownership and dependency direction
-  for the adapter, workspace core, provider transport, and Lua semantic kernel.
-- Added no provider interface, service behavior, workspace identity, transaction behavior,
-  schema, response, dependency, Lua, installation, or deployment change.
+- Added `internal/provider` contracts for provider descriptors, request context, results,
+  health, lifecycle, capabilities, roles, registrations, and named analysis profiles.
+- Added deterministic primary/complementary/fallback routing by language and capability;
+  ordinary legacy calls route through the configured primary rather than choosing a provider.
+- Extracted the complete Neovim socket/start-poll implementation into
+  `internal/provider/socket`, including process ownership, RPC, autosave, shutdown, foreign
+  instance detection, stale endpoint cleanup, timeouts, and Linux parent-death behavior.
+- Added a small backend composition factory so workspace, lifecycle, and routing code depend
+  only on provider contracts.
+- Routed embedded-editor, one-shot tool, agent, and standalone MCP calls through the same
+  provider request path. Legacy client injection, result rendering, autosave, socket/PID
+  compatibility fields, and timeout wording remain intact.
+- Added `docs/plans/huyang-s02-provider-seam.md` and provider/profile/backend tests.
+- Added no embedded MessagePack client, provider decision, public API, service, workspace
+  identity, transaction, dependency, Lua, installation, or deployment change.
 
 ## Verification
 
 Run from `/home/igor/Work/huyang` on 2026-09-10:
 
-- `go test ./internal/bridge ./cmd/agent99-bridge` — exit 0;
-  `ok agent99/internal/bridge 0.008s`; the command package compiled and had no tests.
-- `make build` — exit 0; built `bin/agent99-bridge` from `./cmd/agent99-bridge`.
-- `go list -f '{{.ImportPath}} {{.Name}}' ./cmd/agent99-bridge ./internal/bridge` — exit 0;
-  reported `agent99/cmd/agent99-bridge main` and `agent99/internal/bridge bridge`.
-- `git diff --exit-code d375d70842f5519cfe1862f0d34fd7401848203f --
-  docs/plans/fixtures/huyang-v1alpha1 docs/plans/huyang-tools-v1alpha1.md
-  docs/plans/huyang-s00-baseline.md docs/plans/huyang-s00-model-selection.md` — exit 0; the
-  frozen S00 contract, report, exercise, and fixtures are byte-identical.
-- `make smoke` — exit 0; ended with `debug: OK` and `smoke: OK`. The shell also printed
-  its expected background-job notice `Aborted (core dumped) echo "smoke: OK"` from the
-  deliberate SIGKILL cleanup case; the suite itself returned success.
-- `go test ./...` — exit 0; `ok agent99/internal/bridge (cached)`; the command package
-  compiled and had no tests.
+- `go test ./internal/provider/... ./internal/bridge` — exit 0;
+  `ok agent99/internal/provider`, `ok agent99/internal/provider/socket`, and
+  `ok agent99/internal/bridge`.
+- `agent99 grep(pattern="exec\\.Command.*nvim|--server|--remote-expr|Agent99Rpc(Start|Poll)|remoteExpr|\\.Socket", glob="internal/**/*.go")`
+  — every implementation hit is under `internal/provider/socket/socket.go`; no workspace-core
+  transport primitive remains.
+- `git diff --exit-code 5a1a0f74271b29a5d8a1412e56e907b24fe18412 -- docs/plans/fixtures/huyang-v1alpha1 docs/plans/huyang-tools-v1alpha1.md docs/plans/huyang-s00-baseline.md docs/plans/huyang-s00-model-selection.md docs/plans/huyang-s01-package-boundary.md`
+  — exit 0; all frozen predecessor artifacts are byte-identical.
+- First `make smoke` attempt — exit 2: one timing-sensitive delayed-diagnostic assertion
+  observed its verdict 139 ms earlier than expected; every other suite case passed.
+- Two diagnostic-only reproductions, `python3 tests/drive_headless.py verdict`, each exited 1
+  because lua_ls did not attach in the isolated group. No source or configuration was changed
+  in response to those environment/timing outcomes.
+- Final `make smoke` rerun — exit 0; ended with `debug: OK` and `smoke: OK`, including the
+  complete headless verdict, multi-workspace, and debugger suites.
+- `go test ./...` — exit 0; command package compiled, and bridge/provider/socket packages
+  passed.
 - `go vet ./...` — exit 0; no output.
 - `git diff --check` — exit 0; no output.
 
@@ -81,16 +92,22 @@ task must reconcile them rather than trusting this sentence.
 
 ## Decisions and risks
 
-- The compatibility command remains named `agent99-bridge`; renaming it to `huyang` would be
-  successor behavior and is outside this mechanical stage.
-- `internal/bridge` deliberately remains one package in S01. Splitting interdependent files
-  before the S02 provider contract would mix mechanical movement with a semantic redesign.
-- `bridge.Main` is the sole exported compatibility hook. It preserves the existing
-  `os.Args`, stdio, environment, exit-code, and subcommand behavior behind the thin command.
-- The ownership record fixes dependency direction for S02 but does not claim the socket
-  assumption has already been removed.
-- Existing S00 fixture paths containing `bridge/...` are frozen example values and were not
-  rewritten to follow the source move.
+- The provider contract is transport-independent and carries stable descriptor, health,
+  request/result, save, close, and death-notification semantics. Later stages can add evidence
+  fields without changing the call boundary.
+- Provider IDs derive from backend kind and canonical root; PID and ephemeral endpoint are
+  compatibility metadata and never identity.
+- The default profile has the reference provider as primary for all current capabilities.
+  Complementary and fallback providers are modeled and deterministically ordered, but legacy
+  calls neither aggregate them nor silently fail over.
+- Request deadlines are populated at the bridge boundary. The socket backend advertises
+  `cancellation: unsupported` because killing a polling helper cannot prove the Lua coroutine
+  stopped; S03 must test direct embedded cancellation rather than strengthening this claim.
+- The legacy SHA-1 socket filename prefix, process arguments, RPC payload, polling intervals,
+  tool timeouts, save expression, shutdown behavior, and response fields are preserved.
+- The first smoke run exposed an existing timing-sensitive delayed-verdict check; the complete
+  rerun passed without code changes. S03 should continue treating delayed diagnostic timing as
+  evidence-sensitive, not as transport completion.
 - The user-approved single-host serial bootstrap remains in effect. No install, deployment,
   live MCP/config/state mutation, push, or pull request occurred.
-- Exact next stage: S02 — Provider seam with socket reference backend.
+- Exact next stage: S03 — Embedded provider decision spike.

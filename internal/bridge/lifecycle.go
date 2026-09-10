@@ -34,9 +34,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -292,11 +290,11 @@ func workspaceIdleTimeout() time.Duration {
 // duration of one call, and endCall releases it; both also mark it as
 // used, so "idle" means what it says rather than "opened a while ago".
 // Between the two the idle sweep leaves the workspace alone, however long
-// the call runs. The socket identifies the instance (it is unique per
-// instance), so a workspace replaced underneath a call is not miscounted.
+// the call runs. Provider identity distinguishes a replacement from the
+// instance that originally received the call.
 func beginCall(ses session) {
 	headlessMu.Lock()
-	if ws := workspaces[ses.Root]; ws != nil && ws.Socket == ses.Socket {
+	if ws := workspaces[ses.Root]; ws != nil && ws.Provider == ses.Provider {
 		ws.inFlight++
 		ws.lastUsed = time.Now()
 	}
@@ -305,7 +303,7 @@ func beginCall(ses session) {
 
 func endCall(ses session) {
 	headlessMu.Lock()
-	if ws := workspaces[ses.Root]; ws != nil && ws.Socket == ses.Socket {
+	if ws := workspaces[ses.Root]; ws != nil && ws.Provider == ses.Provider {
 		if ws.inFlight > 0 {
 			ws.inFlight--
 		}
@@ -371,41 +369,5 @@ func startIdleReaper() {
 // running. A Neovim that exits normally removes its own; one that is killed
 // outright cannot, and nothing else ever cleans up after it.
 func sweepStaleSockets() {
-	dir, err := socketDir()
-	if err != nil {
-		return
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	self := os.Getpid()
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".sock") {
-			continue
-		}
-		// The name ends in -<pid of the bridge that made it>.sock (see
-		// openWorkspace), so the owner is knowable without talking to the
-		// socket - which matters, because another live bridge's socket must
-		// not be touched.
-		base := strings.TrimSuffix(name, ".sock")
-		dash := strings.LastIndexByte(base, '-')
-		if dash < 0 {
-			continue
-		}
-		pid, err := strconv.Atoi(base[dash+1:])
-		if err != nil || pid == self || processAlive(pid) {
-			continue
-		}
-		os.Remove(filepath.Join(dir, name))
-	}
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	referenceProviders.SweepStale()
 }

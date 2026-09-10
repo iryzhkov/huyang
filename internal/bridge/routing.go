@@ -20,13 +20,16 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"agent99/internal/provider"
 )
 
 // session is the Neovim instance a tool call is routed to, plus the project
 // root its relative paths resolve against.
 type session struct {
-	Root   string
-	Socket string
+	Root      string
+	Providers *provider.AnalysisProfile
+	Provider  provider.Provider
 	// Headless is true when the instance is a workspace this server
 	// started: nobody is at the keyboard, so edits are saved to disk and
 	// the tools word their replies accordingly.
@@ -35,6 +38,29 @@ type session struct {
 	// every client that opened its root, and the editor keys the undo
 	// ledger, the baselines and the disclosed-diagnostics set by it.
 	Client string
+}
+
+func attachedSession(root, endpoint string) session {
+	if endpoint == "" {
+		return session{Root: root}
+	}
+	backend := referenceProviders.Attach(root, endpoint)
+	profile, err := provider.NewAnalysisProfile("default", []provider.Registration{{
+		Provider:     backend,
+		Languages:    []string{"*"},
+		Capabilities: backend.Descriptor().Capabilities,
+		Role:         provider.RolePrimary,
+	}})
+	if err != nil {
+		return session{Root: root}
+	}
+	return session{Root: root, Providers: profile, Provider: backend}
+}
+
+func attachedClientSession(root, endpoint, client string) session {
+	ses := attachedSession(root, endpoint)
+	ses.Client = client
+	return ses
 }
 
 // Sticky pointers, so that a call with nothing to route on lands where the
@@ -230,8 +256,8 @@ func assertNamedRoot(name, root string, paths []string) error {
 // meant for the model: it says what is open and how to disambiguate.
 func resolveSession(name string, args map[string]any) (session, error) {
 	// A live editor that spawned this bridge owns the session outright.
-	if sock := os.Getenv("AGENT99_NVIM"); sock != "" {
-		return session{Root: cwd(), Socket: sock}, nil
+	if endpoint := os.Getenv("AGENT99_NVIM"); endpoint != "" {
+		return attachedSession(cwd(), endpoint), nil
 	}
 	// A workspace that died, or that the idle sweep collected, comes back
 	// here rather than turning this call into an error about open_workspace.
@@ -248,7 +274,7 @@ func resolveSession(name string, args map[string]any) (session, error) {
 		// No workspace and nothing to infer one from: the file tools still
 		// work against the working directory, and the LSP tools report that
 		// there is no Neovim.
-		return session{Root: cwd(), Socket: os.Getenv("NVIM")}, nil
+		return attachedSession(cwd(), os.Getenv("NVIM")), nil
 	}
 
 	if want, ok := args["workspace"].(string); ok && strings.TrimSpace(want) != "" {

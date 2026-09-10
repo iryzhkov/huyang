@@ -95,10 +95,11 @@ func embeddedMode() bool {
 func openWorkspaceResult(ws *headlessWorkspace, client string, wasOpen bool) map[string]any {
 	ses := ws.session()
 	ses.Client = client
+	descriptor := ws.Provider.Descriptor()
 	result := map[string]any{
 		"root":   ws.Root,
-		"socket": ws.Socket,
-		"pid":    ws.cmd.Process.Pid,
+		"socket": descriptor.Endpoint,
+		"pid":    descriptor.ProcessID,
 	}
 	// Reopening the same root is a no-op, and used to be reported as one:
 	// the full first-time reply, with nothing saying the instance was
@@ -116,7 +117,7 @@ func openWorkspaceResult(ws *headlessWorkspace, client string, wasOpen bool) map
 	}
 	// Tell the client up front which languages the instance can actually
 	// serve, instead of letting symbol tools come back quietly empty.
-	if support, err := nvimCall(ses, "workspace_support", map[string]any{"root": ws.Root}); err == nil {
+	if support, err := providerCall(ses, "workspace_support", map[string]any{"root": ws.Root}); err == nil {
 		if m, ok := support.(map[string]any); ok {
 			result["languages"] = m["languages"]
 			if note, ok := m["note"].(string); ok && note != "" {
@@ -129,7 +130,7 @@ func openWorkspaceResult(ws *headlessWorkspace, client string, wasOpen bool) map
 	// The tree is the check that the right project was opened and the hint
 	// which subdirectory to map next; it costs one wc pass, so it is cheap
 	// enough for every open.
-	if tree, err := nvimCall(ses, "workspace_tree", map[string]any{"root": ws.Root}); err == nil {
+	if tree, err := providerCall(ses, "workspace_tree", map[string]any{"root": ws.Root}); err == nil {
 		if m, ok := tree.(map[string]any); ok {
 			result["tree"] = m["tree"]
 			result["file_count"] = m["file_count"]
