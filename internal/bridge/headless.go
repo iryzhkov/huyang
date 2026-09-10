@@ -250,9 +250,10 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 	}
 
 	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root:     abs,
-		InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
-		Debug:    debugEnabled(),
+		Root:        abs,
+		InitFile:    os.Getenv("AGENT99_HEADLESS_INIT"),
+		RuntimePath: shippedRuntimePath(),
+		Debug:       debugEnabled(),
 	})
 	if err != nil {
 		return nil, err

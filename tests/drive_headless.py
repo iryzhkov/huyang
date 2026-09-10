@@ -187,8 +187,13 @@ def group_workspace(c):
         f.write(b"\x00\x01" * 64)
 
     res = b.call("open_workspace", {"root": root})
+    socket_ready = (res.get("provider_backend") == "socket"
+                    and os.path.exists(res.get("socket", "")))
+    embed_ready = (res.get("provider_backend") == "embed"
+                   and not res.get("socket")
+                   and res.get("provider_epoch", 0) >= 1)
     check("open_workspace", res.get("root") == os.path.realpath(root)
-          and os.path.exists(res.get("socket", "")), res)
+          and (socket_ready or embed_ready), res)
     c.pid = res["pid"]
     langs = {l["filetype"]: l for l in res.get("languages", [])}
     check("open_workspace reports languages",

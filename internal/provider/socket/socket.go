@@ -163,7 +163,8 @@ func descriptor(root, endpoint string, pid int) provider.Descriptor {
 		Backend:   "socket",
 		Root:      root,
 		Endpoint:  endpoint,
-		ProcessID: pid,
+		ProcessID:    pid,
+		Cancellation: provider.CancellationUnsupported,
 		Capabilities: []provider.Capability{
 			provider.CapabilityExecute,
 			provider.CapabilityNavigation,

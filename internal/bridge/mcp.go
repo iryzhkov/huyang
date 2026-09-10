@@ -97,9 +97,11 @@ func openWorkspaceResult(ws *headlessWorkspace, client string, wasOpen bool) map
 	ses.Client = client
 	descriptor := ws.Provider.Descriptor()
 	result := map[string]any{
-		"root":   ws.Root,
-		"socket": descriptor.Endpoint,
-		"pid":    descriptor.ProcessID,
+		"root":             ws.Root,
+		"socket":           descriptor.Endpoint,
+		"pid":              descriptor.ProcessID,
+		"provider_backend": descriptor.Backend,
+		"provider_epoch":   descriptor.Epoch,
 	}
 	// Reopening the same root is a no-op, and used to be reported as one:
 	// the full first-time reply, with nothing saying the instance was

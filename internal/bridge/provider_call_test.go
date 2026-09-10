@@ -28,6 +28,7 @@ func (p *recordingProvider) Done() <-chan struct{}       { return make(chan stru
 func TestProviderCallRoutesThroughProfileWithRequestContext(t *testing.T) {
 	backend := &recordingProvider{descriptor: provider.Descriptor{
 		ID:           "recording",
+		Cancellation: provider.CancellationUnsupported,
 		Capabilities: []provider.Capability{provider.CapabilityExecute},
 	}}
 	profile, err := provider.NewAnalysisProfile("default", []provider.Registration{{

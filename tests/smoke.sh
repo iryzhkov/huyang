@@ -93,8 +93,10 @@ fi
 WORK="$(mktemp -d)"
 SOCK="$WORK/nvim.sock"
 cleanup() {
-    nvim --server "$SOCK" --remote-expr 'execute("qa!")' >/dev/null 2>&1 || true
-    [ -n "${NVIM_PID:-}" ] && kill "$NVIM_PID" 2>/dev/null || true
+    if [ -n "${NVIM_PID:-}" ]; then
+        kill "$NVIM_PID" 2>/dev/null || true
+        wait "$NVIM_PID" 2>/dev/null || true
+    fi
     rm -rf "$WORK"
 }
 trap cleanup EXIT

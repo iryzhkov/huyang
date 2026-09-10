@@ -35,41 +35,77 @@ local function sweep()
     end
 end
 
+local PROTOCOL_VERSION = 1
+local RESULT_METHOD = "agent99/result"
+
+local function response_payload(ok, result)
+    local response = ok and { ok = true, result = result }
+        or { ok = false, error = tostring(result) }
+    local okj, payload = pcall(vim.json.encode, response)
+    if not okj then
+        payload = vim.json.encode({
+            ok = false,
+            error = "result not encodable as JSON: " .. tostring(payload),
+        })
+    end
+    return payload
+end
+
+local function dispatch(payload, complete)
+    local co = coroutine.create(function()
+        -- LuaJIT pcall is yield-safe, so this catches errors from any resume.
+        local ok, result = pcall(function()
+            return require("agent99.lsp").dispatch(payload.tool, payload.args)
+        end)
+        complete(response_payload(ok, result))
+    end)
+    local ok, cerr = coroutine.resume(co)
+    if not ok then
+        complete(response_payload(false, cerr))
+    end
+end
+
+function M.handshake()
+    return {
+        protocol_version = PROTOCOL_VERSION,
+        completion_method = RESULT_METHOD,
+        cancellation = "provider_restart",
+        capabilities = { "execute", "navigation", "rename", "diagnostics", "code_actions" },
+    }
+end
+
 function M.start(b64)
     sweep()
     next_id = next_id + 1
     local id = tostring(next_id)
     pending[id] = { done = false, started = vim.uv.now() }
-    local co = coroutine.create(function()
-        -- LuaJIT pcall is yield-safe, so this catches errors from any resume.
-        local ok, result = pcall(function()
-            local payload = vim.json.decode(vim.base64.decode(b64))
-            return require("agent99.lsp").dispatch(payload.tool, payload.args)
-        end)
-        local response = ok and { ok = true, result = result }
-            or { ok = false, error = tostring(result) }
-        -- A result the encoder rejects (a function value, a cycle, invalid
-        -- UTF-8) must still answer the poll, as an error rather than a
-        -- request that never completes.
-        local okj, payload = pcall(vim.json.encode, response)
-        if not okj then
-            payload = vim.json.encode({ ok = false,
-                error = "result not encodable as JSON: " .. tostring(payload) })
-        end
-        local p = pending[id]
-        if p then
-            p.done = true
-            p.payload = payload
-        end
+    local ok, payload = pcall(function()
+        return vim.json.decode(vim.base64.decode(b64))
     end)
-    local ok, cerr = coroutine.resume(co)
     if not ok then
         pending[id] = {
             done = true,
             started = vim.uv.now(),
-            payload = vim.json.encode({ ok = false, error = tostring(cerr) }),
+            payload = response_payload(false, payload),
         }
+        return id
     end
+    dispatch(payload, function(response)
+        local p = pending[id]
+        if p then
+            p.done = true
+            p.payload = response
+        end
+    end)
+    return id
+end
+
+function M.start_notify(channel, id, payload)
+    vim.schedule(function()
+        dispatch(payload, function(response)
+            vim.rpcnotify(channel, RESULT_METHOD, id, response)
+        end)
+    end)
     return id
 end
 

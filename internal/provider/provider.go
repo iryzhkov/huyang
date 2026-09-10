@@ -41,8 +41,9 @@ const (
 type CancellationSupport string
 
 const (
-	CancellationUnsupported CancellationSupport = "unsupported"
-	CancellationCooperative CancellationSupport = "cooperative"
+	CancellationUnsupported     CancellationSupport = "unsupported"
+	CancellationCooperative     CancellationSupport = "cooperative"
+	CancellationProviderRestart CancellationSupport = "provider_restart"
 )
 
 // RequestContext is the provider-visible identity and lifetime of one request.
@@ -85,6 +86,8 @@ const (
 type Health struct {
 	State        HealthState
 	Detail       string
+	FailureCode  string
+	Epoch        uint64
 	ObservedAt   time.Time
 	Cancellation CancellationSupport
 }
@@ -96,8 +99,48 @@ type Descriptor struct {
 	Root         string
 	Endpoint     string
 	ProcessID    int
+	Epoch        uint64
+	Cancellation CancellationSupport
 	Languages    []string
 	Capabilities []Capability
+}
+
+// FailureCode classifies provider lifecycle failures for recovery policy.
+type FailureCode string
+
+const (
+	FailureLaunch       FailureCode = "provider_launch_failed"
+	FailureBootstrap    FailureCode = "provider_bootstrap_failed"
+	FailureIncompatible FailureCode = "provider_incompatible"
+	FailureDied         FailureCode = "provider_died"
+	FailureCancelled    FailureCode = "provider_cancelled"
+	FailureDeadline     FailureCode = "provider_deadline_exceeded"
+	FailureProtocol     FailureCode = "provider_protocol_failed"
+)
+
+// Failure is a classified provider error with the generation that observed it.
+type Failure struct {
+	Code   FailureCode
+	Epoch  uint64
+	Detail string
+	Err    error
+}
+
+func (f *Failure) Error() string {
+	if f == nil {
+		return ""
+	}
+	if f.Detail != "" {
+		return fmt.Sprintf("%s (epoch %d): %s", f.Code, f.Epoch, f.Detail)
+	}
+	return fmt.Sprintf("%s (epoch %d)", f.Code, f.Epoch)
+}
+
+func (f *Failure) Unwrap() error {
+	if f == nil {
+		return nil
+	}
+	return f.Err
 }
 
 // Provider is the complete lifecycle and call seam used by the workspace core.
