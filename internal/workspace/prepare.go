@@ -9,9 +9,9 @@ import (
 
 // PlanStageFile is the exact provider-buffer transition predicted by a plan.
 type PlanStageFile struct {
-	Path         string `json:"path"`
-	Before       []byte `json:"before"`
-	After        []byte `json:"after"`
+	Path         string       `json:"path"`
+	Before       []byte       `json:"before"`
+	After        []byte       `json:"after"`
 	BeforeExists bool         `json:"before_exists"`
 	AfterExists  bool         `json:"after_exists"`
 	BeforeDisk   DiskSnapshot `json:"before_disk"`
@@ -20,9 +20,10 @@ type PlanStageFile struct {
 
 // PlanStageRequest is the complete, already validated batch applied under a workspace lease.
 type PlanStageRequest struct {
-	PlanID       string          `json:"plan_id"`
-	PlanRevision uint64          `json:"plan_revision"`
-	Files        []PlanStageFile `json:"files"`
+	PlanID            string          `json:"plan_id"`
+	PlanRevision      uint64          `json:"plan_revision"`
+	Files             []PlanStageFile `json:"files"`
+	RequiresFormatter bool            `json:"requires_formatter,omitempty"`
 }
 
 // PlanStager owns provider-local unsaved buffers. Stage and Rollback must be atomic from
@@ -39,20 +40,30 @@ type PlanStagerMetadata interface {
 	PreparationMetadata() (backend, baseRevision, evidencePaths string)
 }
 
+type PreparedPlanStager interface {
+	PreparedRequest() (PlanStageRequest, VerificationResult, bool)
+}
+
+type PreparedRevisionStager interface {
+	SetPreparedRevision(string)
+}
+
 // PlanPreparation records the provider-backed result and eventual canonical apply receipt.
 type PlanPreparation struct {
-	PreparedRevision    string   `json:"prepared_revision"`
-	ProviderEpoch       uint64   `json:"provider_epoch"`
-	AffectedFiles       []string `json:"affected_files"`
-	CanonicalChanged    bool     `json:"canonical_changed"`
-	CanonicalRevision   string   `json:"canonical_revision,omitempty"`
-	JournalID           string   `json:"journal_id,omitempty"`
-	Diagnostics         string   `json:"diagnostics"`
-	DiskChecks          string   `json:"disk_checks"`
-	IntermediateReports bool     `json:"intermediate_reports"`
-	SandboxBackend      string   `json:"sandbox_backend,omitempty"`
-	BaseRevision        string   `json:"base_revision,omitempty"`
-	EvidencePaths       string   `json:"evidence_paths,omitempty"`
+	PreparedRevision    string              `json:"prepared_revision"`
+	ProviderEpoch       uint64              `json:"provider_epoch"`
+	AffectedFiles       []string            `json:"affected_files"`
+	CanonicalChanged    bool                `json:"canonical_changed"`
+	CanonicalRevision   string              `json:"canonical_revision,omitempty"`
+	JournalID           string              `json:"journal_id,omitempty"`
+	Diagnostics         string              `json:"diagnostics"`
+	DiskChecks          string              `json:"disk_checks"`
+	IntermediateReports bool                `json:"intermediate_reports"`
+	SandboxBackend      string              `json:"sandbox_backend,omitempty"`
+	BaseRevision        string              `json:"base_revision,omitempty"`
+	EvidencePaths       string              `json:"evidence_paths,omitempty"`
+	Verification        []VerificationStage `json:"verification,omitempty"`
+	ToolDelta           []ToolDelta         `json:"tool_delta,omitempty"`
 }
 
 // CheckProviderAccess prevents a provider-backed call from observing an unlabeled staged view.
@@ -128,11 +139,27 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		backend, baseRevision, evidencePaths = metadata.PreparationMetadata()
 		diskChecks = "sandbox_manifest_verified"
 	}
+	preparedRequest := request
+	var verification VerificationResult
+	if source, ok := stager.(PreparedPlanStager); ok {
+		if candidate, result, available := source.PreparedRequest(); available {
+			preparedRequest, verification = candidate, result
+		}
+	}
+	preparedHash := hashBytes(fmt.Appendf(nil, "%s:%d:%s:%s", plan.Preview.PreviewRevision, stager.Epoch(), backend, baseRevision))
+	for _, file := range preparedRequest.Files {
+		preparedHash = hashBytes(fmt.Appendf(nil, "%s:%s:%t:%x", preparedHash, file.Path, file.AfterExists, file.After))
+	}
 	prepared := &PlanPreparation{
-		PreparedRevision: "prep_" + hashBytes(fmt.Appendf(nil, "%s:%d:%s:%s", plan.Preview.PreviewRevision, stager.Epoch(), backend, baseRevision)),
+		PreparedRevision: "prep_" + preparedHash,
 		ProviderEpoch:    stager.Epoch(), AffectedFiles: append([]string(nil), plan.Preview.AffectedFiles...),
 		CanonicalChanged: false, Diagnostics: "suppressed", DiskChecks: diskChecks,
 		IntermediateReports: false, SandboxBackend: backend, BaseRevision: baseRevision, EvidencePaths: evidencePaths,
+		Verification: append([]VerificationStage(nil), verification.Stages...),
+		ToolDelta:    append([]ToolDelta(nil), verification.ToolDelta...),
+	}
+	if target, ok := stager.(PreparedRevisionStager); ok {
+		target.SetPreparedRevision(prepared.PreparedRevision)
 	}
 	result, err := w.transitionPlan(planID, expected, PlanReady, "prepare", "ok", prepared)
 	if err != nil {

@@ -845,7 +845,7 @@ separately validated workflow bundle, but does not change the 23 reviewed stages
 - [x] S13 — Crash recovery and compensating undo
 - [x] S14 — Sandbox backend decision spike
 - [x] S15 — Isolated sandbox prepare
-- [ ] S16 — Repository formatting and verification pipeline
+- [x] S16 — Repository formatting and verification pipeline
 - [ ] S17 — Diagnostic evidence and provenance
 - [ ] S18 — Impact graph, targeted tests and variants
 - [ ] S19 — First legacy wrapper families

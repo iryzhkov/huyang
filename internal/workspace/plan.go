@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -71,6 +72,7 @@ type PlanOperation struct {
 	Revision            RevisionID    `json:"revision_id,omitempty"`
 	DestinationRevision RevisionID    `json:"destination_revision_id,omitempty"`
 	DependsOn           []string      `json:"depends_on,omitempty"`
+	Indentation         string        `json:"indentation,omitempty"`
 }
 
 type PlanEdit struct {
@@ -444,6 +446,15 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 			return nil, fmt.Errorf("duplicate op_id %q", operation.OpID)
 		}
 		seen[operation.OpID] = true
+		if operation.Indentation == "" {
+			operation.Indentation = "exact"
+		}
+		if operation.Indentation != "exact" && operation.Indentation != "syntax_anchor" && operation.Indentation != "formatter" {
+			return nil, fmt.Errorf("%s has invalid indentation mode %q", operation.OpID, operation.Indentation)
+		}
+		if operation.Indentation == "syntax_anchor" && (operation.Target == nil || operation.Target.Handle == "") {
+			return nil, fmt.Errorf("%s syntax_anchor requires one semantic node handle", operation.OpID)
+		}
 		switch operation.Kind {
 		case OperationReplaceSymbol, OperationDeleteSymbol, OperationInsertBefore, OperationInsertAfter, OperationReplaceRange:
 			if operation.Target == nil {
@@ -456,6 +467,9 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 				}
 				if resolution.Status == ResolutionConflicted {
 					return nil, fmt.Errorf("%s: %s", operation.OpID, resolution.Code)
+				}
+				if operation.Indentation == "syntax_anchor" && (resolution.Original.Kind == "range" || resolution.Original.Kind == "match") {
+					return nil, fmt.Errorf("%s syntax_anchor target is not one parsed node", operation.OpID)
 				}
 				handle, err := resolution.RangeHandle()
 				if err != nil {
@@ -606,6 +620,36 @@ func operationRange(operation PlanOperation) (string, int, bool) {
 	return operation.Target.FileRange.Path, operation.Target.FileRange.ByteStart, true
 }
 
+func syntaxAnchorReplacement(content []byte, start int, replacement []byte) ([]byte, error) {
+	if start < 0 || start > len(content) {
+		return nil, errors.New("syntax anchor is outside the document")
+	}
+	lineStart := bytes.LastIndexByte(content[:start], '\n') + 1
+	prefix := content[lineStart:start]
+	for _, value := range prefix {
+		if value != ' ' && value != '\t' {
+			return nil, errors.New("syntax anchor does not begin at a parsed node indentation boundary")
+		}
+	}
+	if bytes.Contains(prefix, []byte(" ")) && bytes.Contains(prefix, []byte("\t")) {
+		return nil, errors.New("syntax anchor has mixed leading whitespace")
+	}
+	lines := bytes.Split(replacement, []byte("\n"))
+	if len(lines) < 2 {
+		return append([]byte(nil), replacement...), nil
+	}
+	var result []byte
+	result = append(result, lines[0]...)
+	for _, line := range lines[1:] {
+		result = append(result, '\n')
+		if len(line) > 0 {
+			result = append(result, prefix...)
+		}
+		result = append(result, line...)
+	}
+	return result, nil
+}
+
 func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 	ordered, orderErr := orderOperations(plan.Operations)
 	preview := PlanPreview{PlanRevision: plan.PlanRevision, Outcome: "ok", CanonicalChanged: false}
@@ -681,6 +725,13 @@ func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 				start = end
 			}
 			replacement := []byte(operation.Content)
+			if operation.Indentation == "syntax_anchor" {
+				replacement, err = syntaxAnchorReplacement(content, start, replacement)
+				if err != nil {
+					conflictFor(operation, handle.Path, handle.Revision, err)
+					continue
+				}
+			}
 			nextContent := make([]byte, 0, len(content)-(end-start)+len(replacement))
 			nextContent = append(nextContent, content[:start]...)
 			nextContent = append(nextContent, replacement...)

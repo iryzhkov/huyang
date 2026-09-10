@@ -3,6 +3,7 @@ module agent99
 go 1.27
 
 require (
+	github.com/BurntSushi/toml v1.4.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/neovim/go-client v1.2.1
 	github.com/pkoukk/tiktoken-go v0.1.8

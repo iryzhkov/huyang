@@ -225,3 +225,20 @@ func TestPlanRejectsDuplicateOperationsAndDependencyCycles(t *testing.T) {
 		t.Fatal("dependency cycle accepted")
 	}
 }
+
+func TestSyntaxAnchorIndentationIsBoundedAndRejectsMixedWhitespace(t *testing.T) {
+	content := []byte("func outer() {\n\told\n}\n")
+	start := bytes.Index(content, []byte("old"))
+	got, err := syntaxAnchorReplacement(content, start, []byte("first\nsecond\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "first\n\tsecond\n" {
+		t.Fatalf("syntax-anchored replacement = %q", got)
+	}
+	mixed := []byte("func outer() {\n \told\n}\n")
+	start = bytes.Index(mixed, []byte("old"))
+	if _, err := syntaxAnchorReplacement(mixed, start, []byte("first\nsecond")); err == nil {
+		t.Fatal("mixed indentation was accepted")
+	}
+}

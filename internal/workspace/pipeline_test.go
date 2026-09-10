@@ -1,0 +1,212 @@
+package workspace
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
+
+func trustedPolicy(t *testing.T, root string) PipelinePolicy {
+	t.Helper()
+	config := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(config, []byte("[trust]\nroots = [\""+strings.ReplaceAll(root, "\\", "\\\\")+"\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadPipelinePolicy(root, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !policy.Trusted {
+		t.Fatal("project root was not trusted by explicit user policy")
+	}
+	return policy
+}
+
+func pipelineSandbox(t *testing.T, files map[string]string) (*Sandbox, []PlanStageFile) {
+	t.Helper()
+	root := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sandbox, err := MaterializeSandbox(context.Background(), root, t.TempDir(), ID("ws_0123456789abcdef0123456789abcdef"), "plan_pipeline", 1, "base_1", DefaultSandboxLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sandbox.Cleanup() })
+	var prepared []PlanStageFile
+	for name, content := range files {
+		info, err := os.Stat(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared = append(prepared, PlanStageFile{Path: name, Before: []byte(content), After: []byte(content), BeforeExists: true, AfterExists: true, AfterDisk: DiskSnapshot{Kind: ObjectRegularText, Mode: uint32(info.Mode().Perm()), Size: int64(len(content))}})
+	}
+	return sandbox, prepared
+}
+
+func TestPipelinePolicyRequiresUserTrustAndTightensResources(t *testing.T) {
+	root := t.TempDir()
+	project := "version = 1\n[format]\nmode = \"transform\"\nscope = \"declared\"\n[format.transform]\ncommand = [\"tool\", \"--write\"]\ndeclared_writes = [\"*.go\"]\n[resource]\ntimeout_seconds = 90\n"
+	if err := os.WriteFile(filepath.Join(root, ".huyang.toml"), []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	untrusted, err := LoadPipelinePolicy(root, filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untrusted.Trusted {
+		t.Fatal("repository command trusted without user declaration")
+	}
+	user := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(user, []byte("[trust]\nroots = [\""+root+"\"]\n[resource]\ntimeout_seconds = 3\nmax_output_bytes = 1024\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trusted, err := LoadPipelinePolicy(root, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trusted.Trusted || trusted.Resource.TimeoutSeconds != 3 || trusted.Resource.MaxOutputBytes != 1024 {
+		t.Fatalf("layered policy = %+v", trusted)
+	}
+}
+
+func TestVerificationTransformCapturesCompleteToolDelta(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.go": "package p\r\n", "keep.txt": "same\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Format.Mode = "transform"
+	policy.Format.Transform = CommandPolicy{Command: []string{"sh", "-c", "printf 'package p\\n' > a.go"}, DeclaredWrites: []string{"a.go"}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Transform: true}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ToolDelta) != 1 || result.ToolDelta[0].Path != "a.go" || result.ToolDelta[0].Classification != "line_endings" {
+		t.Fatalf("tool delta = %+v", result.ToolDelta)
+	}
+	if got, err := os.ReadFile(filepath.Join(sandbox.Tree, "a.go")); err != nil || string(got) != "package p\n" {
+		t.Fatalf("prepared bytes = %q, %v", got, err)
+	}
+	var preparedGo []byte
+	for _, file := range result.PreparedFiles {
+		if file.Path == "a.go" {
+			preparedGo = file.After
+		}
+	}
+	if string(preparedGo) != "package p\n" {
+		t.Fatalf("prepared postimage = %q", preparedGo)
+	}
+}
+
+func TestVerificationUndeclaredWriteRollsBackExactly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.go": "package p\n", "keep.txt": "exact\r\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Format.Mode = "transform"
+	policy.Format.Transform = CommandPolicy{Command: []string{"sh", "-c", "printf changed > keep.txt; printf generated > new.out"}, DeclaredWrites: []string{"a.go"}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Transform: true}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "undeclared_tool_write") {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(sandbox.Tree, "keep.txt"))
+	if readErr != nil || string(got) != "exact\r\n" {
+		t.Fatalf("rollback bytes = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(sandbox.Tree, "new.out")); !os.IsNotExist(statErr) {
+		t.Fatalf("generated output survived rollback: %v", statErr)
+	}
+}
+
+func TestVerificationRejectsProtectedLiteralRewrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	original := "package p\nvar value = \"keep\"\n"
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.go": original})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Format.Mode = "transform"
+	policy.Format.Transform = CommandPolicy{Command: []string{"sh", "-c", "sed -i s/keep/changed/ a.go"}, DeclaredWrites: []string{"a.go"}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Transform: true}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "protected_literal_changed") {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+	got, _ := os.ReadFile(filepath.Join(sandbox.Tree, "a.go"))
+	if string(got) != original {
+		t.Fatalf("literal rewrite survived rollback: %q", got)
+	}
+}
+
+func TestVerificationRejectsNondeterministicFormatterAndRestoresOriginal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.txt": "one\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Format.Mode = "transform"
+	policy.Format.Transform = CommandPolicy{
+		Command:        []string{"sh", "-c", "if grep -q one a.txt; then printf two > a.txt; else printf one > a.txt; fi"},
+		DeclaredWrites: []string{"a.txt"},
+	}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Transform: true}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "formatter_nondeterministic") {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+	got, _ := os.ReadFile(filepath.Join(sandbox.Tree, "a.txt"))
+	if string(got) != "one\n" {
+		t.Fatalf("nondeterministic rollback = %q", got)
+	}
+}
+
+func TestVerificationFormatGateCannotMutateAndParserSeesPreparedBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.go": "package p\nfunc broken( {\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Format.Gate = CommandPolicy{Command: []string{"sh", "-c", "printf dirty >> a.go"}, DeclaredWrites: []string{"a.go"}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Stages: []string{"format_gate"}}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "non_mutating_stage_wrote_files") {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+	got, _ := os.ReadFile(filepath.Join(sandbox.Tree, "a.go"))
+	if string(got) != "package p\nfunc broken( {\n" {
+		t.Fatalf("gate mutation survived: %q", got)
+	}
+	result, err = RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Stages: []string{"parser"}}, prepared)
+	if err == nil || len(result.Stages) != 1 || result.Stages[0].Status != VerificationFailed {
+		t.Fatalf("parser result = %+v, %v", result, err)
+	}
+}
+
+func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.txt": "before"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.TimeoutSeconds = 1
+	policy.Format.Mode = "transform"
+	policy.Format.Transform = CommandPolicy{Command: []string{"sh", "-c", "printf after > a.txt; sleep 5"}, DeclaredWrites: []string{"a.txt"}}
+	started := time.Now()
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_1", Transform: true}, prepared)
+	if err == nil || time.Since(started) > 4*time.Second || result.Stages[0].Status != VerificationTimedOut {
+		t.Fatalf("timeout result = %+v, %v", result, err)
+	}
+	got, _ := os.ReadFile(filepath.Join(sandbox.Tree, "a.txt"))
+	if string(got) != "before" {
+		t.Fatalf("timeout rollback = %q", got)
+	}
+}

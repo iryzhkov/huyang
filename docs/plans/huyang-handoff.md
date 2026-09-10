@@ -12,19 +12,19 @@
 
 ## Current checkpoint
 
-- Completed stage: S15 — Isolated sandbox prepare.
-- Starting commit: 2d4fe9b5bf4e95aac3d6e34bf1371a9198798c3c.
+- Completed stage: S16 — Repository formatting and verification pipeline.
+- Starting commit: `5c08a65d383d7393c9e25125837d04edf2836834`.
 - Reconciliation fetched origin, confirmed a clean `feature/huyang` branch, confirmed reviewed
   base `1c5302efe9ca51e1701e73df72d903f225fefe04` in branch history, read the complete plan,
   frozen tool contract, handoff, and every predecessor/stage artifact named below, and verified
-  S15 was exactly the first incomplete checklist stage.
-- The S14 portable and intended-filesystem spike gates passed before production editing.
-- S15 exit gates are satisfied: exact stable snapshots, reflink/safe-copy fallback, quotas,
-  ownership and cleanup, per-sandbox providers, canonical path mapping, bounded parallel
-  same-workspace preparation, stable canonical reads, verified prepared bytes, and commit-time
-  canonical conflict checks are implemented and covered.
-- Only S15 is newly marked complete in the committed checklist.
-- Exact next stage: S16 — Repository formatting and verification pipeline.
+  S16 was exactly the first incomplete checklist stage.
+- S16 exit gates are satisfied: layered trust/resource policy, byte-preserving defaults,
+  explicit transforms, syntax-anchor and formatter indentation, protected-byte and formatter
+  scope enforcement, parser/configured format/check/test stages against sandbox bytes, bounded
+  whole-tree write detection, exact rollback, complete `tool_delta`, and transformed postimages
+  carried through prepared revisions and journaled canonical apply.
+- Only S16 is newly marked complete in the committed checklist.
+- Exact next stage: S17 — Diagnostic evidence and provenance.
 
 ## Predecessor and stage artifacts
 
@@ -47,90 +47,83 @@ These tracked artifacts were read completely before implementation:
 - docs/plans/fixtures/huyang-v1alpha1/contract-schema.json
 - docs/plans/fixtures/huyang-v1alpha1/golden-results.json
 - docs/plans/fixtures/huyang-v1alpha1/multi-provider.json
-
-S12 adds:
-
 - docs/plans/huyang-s12-journaled-commit.md
-
-S13 adds:
-
 - docs/plans/huyang-s13-crash-recovery.md
-
-S14 adds:
-
 - docs/plans/huyang-s14-sandbox-backend.md
 - docs/plans/fixtures/huyang-s14-sandbox-backends.json
 - internal/sandboxspike/sandbox_spike_test.go
-
-S15 adds:
-
 - docs/plans/huyang-s15-isolated-sandbox.md
 - internal/workspace/sandbox.go
 - internal/workspace/sandbox_linux.go
 - internal/workspace/sandbox_other.go
 - internal/workspace/sandbox_test.go
 
-## S15 changes
+S16 adds:
 
-- Added production exact-tree inventory and snapshot materialization with stable source hashing,
-  per-file clone-only reflinks, whole-candidate safe-copy fallback, special-file refusal,
-  cancellation, S14 quotas, and destination-manifest verification.
-- Added service-owned versioned markers, confined cleanup, and startup reaping that preserves
-  referenced or foreign directories.
-- Replaced the canonical exclusive preparation provider with one embedded provider per sandbox.
-  Prepared postimages are present and verified on sandbox disk; results expose canonical paths
-  with sandbox provenance and never expose sandbox paths as canonical locators.
-- Changed scheduling so two same-workspace preparations and four service-wide preparations can
-  run concurrently subject to provider quota. Apply and other canonical plan mutations retain
-  the canonical lane.
-- Canonical provider reads no longer block behind isolated prepared state. Existing journaled
-  apply still performs the complete canonical precondition check, so competing writers may both
-  prepare and one conflicts at apply after the other changes its base.
-- Added sandbox, parallel preparation, quota/cancellation, SDK/provider lifecycle, discard,
-  cleanup, and canonical stability coverage.
-- Added no formatter/check/test pipeline, diagnostic evidence store, installation, deployment,
-  installed-plugin update, live configuration/state change, push, or pull request.
+- docs/plans/huyang-s16-repository-pipeline.md
+- internal/workspace/pipeline.go
+- internal/workspace/pipeline_test.go
+- internal/bridge/pipeline_test.go
+
+## S16 changes
+
+- Added versioned `.huyang.toml` project declarations and layered XDG user trust/resource
+  policy. Repository commands run only for explicitly trusted resolved roots, with user ceilings
+  able to tighten project/default budgets; `workspace_inspect` exposes the effective policy.
+- Added exact, syntax-anchor, and formatter indentation policies. Syntax anchoring requires a
+  semantic-node handle and refuses mixed/ambiguous leading whitespace; formatter execution
+  requires visible project or operation policy.
+- Added sandbox-only formatter transforms plus configured non-mutating format gates, parser
+  checks, static checks, and full tests. `verify_run` implements the frozen
+  `revision_or_transaction` contract and stateful replay against live prepared sandboxes.
+- Added bounded whole-sandbox command snapshots, sanitized environments, output/time/file/byte
+  ceilings, declared-write enforcement, protected Go literal/comment checks, second-pass
+  formatter determinism, exact rollback, and structured per-stage/write results.
+- Formatter changes, including configured whole-repository changes outside the original
+  operation set, are carried into `tool_delta`, the prepared revision hash, the provider view,
+  the commit journal, and canonical apply.
+- Added no S17 durable evidence/provenance model, S18 impact graph/affected-test selection,
+  installation, deployment, installed-plugin update, live configuration/state change, push,
+  or pull request.
 
 ## Verification
 
 Run from /home/igor/Work/huyang on 2026-09-10:
 
-- `go test -v ./internal/sandboxspike -count=1` — exit 0; safe-copy fallback,
-  manifest/isolation, special-file, and capability tests passed on the temporary filesystem;
-  unsupported reflinks skipped explicitly.
-- `HUYANG_SANDBOX_SPIKE_DIR=/home/igor/Work go test -v ./internal/sandboxspike -count=1`
-  — exit 0; reflink and safe-copy paths, exact manifest/isolation, special-file refusal, and
-  capability reporting passed on the intended Btrfs filesystem.
-- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0; sandbox,
-  parallel-prepare, scheduler, provider, transaction, journal, recovery, SDK, and service
-  focused suites passed.
-- `go test ./...` — exit 0; every Go package passed.
+- `go test -race ./internal/workspace ./internal/bridge -run 'Pipeline|Verification|SyntaxAnchor' -count=1`
+  — exit 0; focused policy, formatting, parser, rollback, timeout, nondeterminism, syntax-anchor,
+  SDK, provider, prepared/canonical `verify_run`, `tool_delta`, and transformed-apply coverage passed.
+- `go test -race ./internal/workspace ./internal/bridge -count=1` — exit 0; all workspace,
+  transaction, sandbox, pipeline, provider, scheduler, SDK, commit, and recovery tests passed.
 - `make smoke` — exit 0; both binaries built and unit_edit, unit_testrun, unit_check,
   unit_index, headless, multi-workspace, debug, and final smoke markers reported OK.
+- `go test ./...` — exit 0; every Go package passed.
 - `go vet ./...` — exit 0 with no output.
-- `git diff --check` — exit 0 after final code, tests, artifact, checklist, and handoff
-  updates.
+- `git diff --check` — exit 0 after final code, tests, artifact, checklist, and handoff updates.
 
 ## Decisions and risks
 
-- Exact-by-default means ignored and in-tree Git entries are copied; no ignore convention is
-  treated as authorization to verify different bytes.
-- Reflink is capability-probed per source/destination pair. Only unsupported clone errors choose
-  safe copy; source change, quota, permission, cancellation, and special-file failures remain
-  explicit failures.
-- Safe copy conservatively counts logical bytes toward its materialization limit. It may reject
-  a very large sparse tree that a future allocation-aware implementation could admit, but cannot
-  exceed the configured copy limit silently.
-- Each sandbox has a separate provider and transaction-local serialization. The fixed two/four
-  sandbox caps are the reviewed S14 defaults and remain further bounded by provider quota.
-- Prepared sandbox files are exact postimages. The provider retains its semantic staged buffers
-  until discard/apply, then closes before the owned tree is removed.
-- Cleanup validates the single-child resolved location and marker identity before recursive
-  removal. Invalid or foreign directories are retained rather than guessed safe.
-- Startup currently reaps all unreferenced valid sandbox markers because restored plan loading
-  invalidates process-local prepared providers. Referenced directories and foreign entries stay.
-- Trusted configured exclusions, formatting, checks, tests, generator write-set enforcement,
-  and full tool delta belong to S16; diagnostic provenance/evidence storage belongs to S17.
+- Project configuration declares argv; Huyang never inserts a shell. Trust is user-owned and
+  resolved-root based, and command environments are sanitized.
+- Rollback snapshots default to 64 MiB and fail closed before command launch when the configured
+  surface is too large. Project policy may raise the ceiling; user policy can only tighten it.
+- Parser coverage in S16 is exact UTF-8 plus built-in Go and JSON parsing. Other parser/provider
+  dimensions remain explicit coverage gaps rather than false success.
+- Protected literal/comment comparison is syntax-aware for Go formatter transforms. Other
+  languages retain exact delta, scope, idempotency, and rollback enforcement without claiming
+  syntax-aware literal protection.
+- Declared formatter scope is currently enforced at file granularity. Complete within-file bytes
+  remain visible in `tool_delta`; later language adapters may tighten this to parser-declared
+  syntactic envelopes.
+- Non-mutating stages are rolled back and fail if they write. Transform stages must be
+  second-pass stable; cancellation, timeout, non-zero exit, undeclared/special-file writes, quota
+  breaches, and protected-byte changes restore the exact pre-command sandbox tree.
+- Whole-repository formatter changes are accepted only through the exact inspected
+  `prepared_revision`; every resulting path is journaled rather than silently omitted.
+- `verify_run` accepts prepared transaction IDs/revisions and the exact current canonical
+  workspace revision; canonical runs use temporary exact snapshots and stale revisions conflict.
+  Durable work/evidence IDs and restart-surviving command evidence belong to S17.
+- Affected-test selection returns an explicit S18 coverage gap; full configured tests run in S16.
 - No deployment, installation, live-service/configuration mutation, installed-plugin update,
   push, or pull request occurred.
-- Exact next stage: S16 — Repository formatting and verification pipeline.
+- Exact next stage: S17 — Diagnostic evidence and provenance.

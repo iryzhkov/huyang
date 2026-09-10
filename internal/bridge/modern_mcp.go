@@ -136,6 +136,7 @@ func planOperationSchema(operationKinds []string) map[string]any {
 		"revision_id":             stringSchema("Expected source or path document revision."),
 		"destination_revision_id": stringSchema("Expected destination document revision for move_file."),
 		"depends_on":              map[string]any{"type": "array", "items": stringSchema("Predecessor op_id.")},
+		"indentation":             enumSchema("exact", "syntax_anchor", "formatter"),
 	}, "op_id", "kind")
 }
 
@@ -252,9 +253,10 @@ func buildModernTools() []modernTool {
 		{Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
 		{Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
-			"stages":   map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
-			"revision": stringSchema("Canonical or prepared revision."),
-		}, "workspace_id", "idempotency_key", "stages", "revision")},
+			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
+			"revision_or_transaction": stringSchema("Canonical revision, prepared revision, or transaction ID."),
+			"test_scope":              enumSchema("affected", "full"),
+		}, "workspace_id", "idempotency_key", "stages", "revision_or_transaction")},
 		{Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "from_revision": stringSchema("Earlier revision."), "to_revision_or_current": stringSchema("Later revision or current."),
 		}, "workspace_id", "from_revision", "to_revision_or_current")},
@@ -710,17 +712,21 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	switch name {
 	case "workspace_inspect":
 		inspection := workspace.Inspect()
+		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
+		if policyErr != nil {
+			return modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
+		}
 		if arguments["view"] == "map" {
 			orientation, err := workspace.Orient()
 			if err != nil {
 				return modernFailure(requestID, workspace, "workspace_map_failed", err)
 			}
 			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), map[string]any{
-				"inspection": inspection, "overview": orientation, "scheduler": d.scheduler.description(),
+				"inspection": inspection, "overview": orientation, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
 			})
 		}
 		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", map[string]any{
-			"inspection": inspection, "scheduler": d.scheduler.description(),
+			"inspection": inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
 		})
 	case "search":
 		return d.search(requestID, workspace, arguments)
@@ -732,6 +738,8 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.edit(requestID, workspace, arguments)
 	case "change_plan":
 		return d.changePlan(ctx, requestID, workspace, arguments)
+	case "verify_run":
+		return d.verify(ctx, requestID, workspace, arguments)
 	default:
 		return modernEnvelope(requestID, workspace, "unavailable", "capability_not_implemented",
 			fmt.Sprintf("%s is registered but its semantic provider is not available in S07 direct mode", name),
@@ -1170,6 +1178,81 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
 	}
 	panic("unreachable")
+}
+
+func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	revision := fmt.Sprint(arguments["revision_or_transaction"])
+	var stages []string
+	for _, value := range anySlice(arguments["stages"]) {
+		stage, ok := value.(string)
+		if !ok {
+			return modernFailure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
+		}
+		stages = append(stages, stage)
+	}
+	request := workspacecore.VerificationRequest{
+		Stages: stages, Revision: revision, TestScope: fmt.Sprint(arguments["test_scope"]),
+	}
+	d.providerMu.Lock()
+	var stager *sandboxPlanStager
+	for planID, candidate := range d.sandboxStagers {
+		if planID == revision {
+			stager = candidate
+			break
+		}
+		if _, result, available := candidate.PreparedRequest(); available && result.Revision == revision {
+			stager = candidate
+			break
+		}
+	}
+	d.providerMu.Unlock()
+
+	var result workspacecore.VerificationResult
+	var err error
+	if stager != nil {
+		result, err = stager.Verify(ctx, request)
+	} else {
+		identity := workspace.Identity()
+		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
+		if revision != current {
+			return modernEnvelope(requestID, workspace, "conflict", "revision_changed",
+				"Requested canonical revision is not current", map[string]any{
+					"revision_or_transaction": revision, "current_revision": current,
+				})
+		}
+		sandbox, materializeErr := workspacecore.MaterializeSandbox(
+			ctx, identity.Root, filepath.Join(d.stateDir, "sandboxes"), identity.ID,
+			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
+		)
+		if materializeErr != nil {
+			return modernFailure(requestID, workspace, "verification_sandbox_failed", materializeErr)
+		}
+		files, filesErr := sandbox.BaseStageFiles()
+		if filesErr == nil {
+			var policy workspacecore.PipelinePolicy
+			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
+			if filesErr == nil {
+				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+			}
+		}
+		if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {
+			err = cleanupErr
+		}
+		if filesErr != nil {
+			err = filesErr
+		}
+	}
+	if err != nil {
+		return modernEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), map[string]any{"verification": result})
+	}
+	outcome := "ok"
+	for _, stage := range result.Stages {
+		if stage.Status == workspacecore.VerificationSkipped {
+			outcome = "partial"
+			break
+		}
+	}
+	return modernEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", map[string]any{"verification": result})
 }
 
 func uintArgument(value any) uint64 {

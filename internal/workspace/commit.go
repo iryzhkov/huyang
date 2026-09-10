@@ -28,7 +28,7 @@ const (
 type CommitPathProgress string
 
 const (
-	CommitPathPending CommitPathProgress = "pending"
+	CommitPathPending  CommitPathProgress = "pending"
 	CommitPathApplied  CommitPathProgress = "applied"
 	CommitPathRestored CommitPathProgress = "restored"
 )
@@ -100,6 +100,9 @@ func (w *Workspace) planStageRequest(plan PlanRecord) (PlanStageRequest, error) 
 		return &request.Files[index]
 	}
 	for _, operation := range plan.Operations {
+		if operation.Indentation == "formatter" {
+			request.RequiresFormatter = true
+		}
 		switch operation.Kind {
 		case OperationCreateFile:
 			if file := fileFor(operation.Path); file != nil {
@@ -319,6 +322,11 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	request, err := w.planStageRequest(plan)
 	if err != nil {
 		return PlanRecord{}, err
+	}
+	if source, ok := stager.(PreparedPlanStager); ok {
+		if prepared, _, available := source.PreparedRequest(); available {
+			request = prepared
+		}
 	}
 	now := time.Now().UTC()
 	journal := CommitJournal{

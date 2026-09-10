@@ -49,12 +49,15 @@ type SandboxMarker struct {
 }
 
 type sandboxEntry struct {
-	Path   string
-	Kind   ObjectKind
-	Mode   fs.FileMode
-	Size   int64
-	Target string
-	Hash   [sha256.Size]byte
+	Path    string
+	Kind    ObjectKind
+	Mode    fs.FileMode
+	Size    int64
+	Target  string
+	Hash    [sha256.Size]byte
+	Device  uint64
+	Inode   uint64
+	MTimeNS int64
 }
 
 type Sandbox struct {
@@ -196,7 +199,7 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 	if err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(copied, manifest) {
+	if !equalSandboxContent(copied, manifest) {
 		return nil, errors.New("sandbox_manifest_mismatch: destination does not equal canonical base")
 	}
 	if err := sandbox.writeMarker("sealed"); err != nil {
@@ -230,7 +233,8 @@ func inventorySandboxTree(ctx context.Context, root string, limits SandboxLimits
 		if err != nil {
 			return err
 		}
-		entry := sandboxEntry{Path: filepath.ToSlash(relative), Mode: info.Mode(), Size: info.Size()}
+		device, inode := fileIdentity(info)
+		entry := sandboxEntry{Path: filepath.ToSlash(relative), Mode: info.Mode(), Size: info.Size(), Device: device, Inode: inode, MTimeNS: info.ModTime().UnixNano()}
 		switch {
 		case info.Mode().IsDir():
 			entry.Kind = ObjectDirectory
@@ -261,6 +265,21 @@ func inventorySandboxTree(ctx context.Context, root string, limits SandboxLimits
 		return entries[i].Path < entries[j].Path
 	})
 	return entries, logical, err
+}
+
+func equalSandboxContent(left, right []sandboxEntry) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		a, b := left[index], right[index]
+		a.Device, a.Inode, a.MTimeNS = 0, 0, 0
+		b.Device, b.Inode, b.MTimeNS = 0, 0, 0
+		if !reflect.DeepEqual(a, b) {
+			return false
+		}
+	}
+	return true
 }
 
 func stableFileHash(path string, before os.FileInfo) ([sha256.Size]byte, error) {
@@ -376,6 +395,64 @@ func (s *Sandbox) ApplyPrepared(request PlanStageRequest) error {
 		}
 	}
 	return s.writeMarker("prepared")
+}
+
+func (s *Sandbox) StageFileForToolDelta(delta ToolDelta) (PlanStageFile, error) {
+	if delta.Path == "" || filepath.IsAbs(delta.Path) || strings.HasPrefix(filepath.Clean(delta.Path), "..") {
+		return PlanStageFile{}, errors.New("sandbox_path_escape")
+	}
+	before := DiskSnapshot{Kind: ObjectMissing}
+	for _, entry := range s.baseManifest {
+		if entry.Path != filepath.ToSlash(delta.Path) {
+			continue
+		}
+		before = DiskSnapshot{
+			Kind: entry.Kind, Device: entry.Device, Inode: entry.Inode, Size: entry.Size,
+			MTimeNS: entry.MTimeNS, Mode: uint32(entry.Mode.Perm()), SymlinkTarget: entry.Target,
+		}
+		break
+	}
+	if before.Kind != ObjectMissing && before.Kind != ObjectRegularText && before.Kind != ObjectBinary {
+		return PlanStageFile{}, fmt.Errorf("tool delta for %s has unsupported preimage kind %s", delta.Path, before.Kind)
+	}
+	after := DiskSnapshot{Kind: ObjectMissing}
+	if delta.AfterExists {
+		if delta.AfterKind != ObjectRegularText && delta.AfterKind != ObjectBinary {
+			return PlanStageFile{}, fmt.Errorf("tool delta for %s has unsupported postimage kind %s", delta.Path, delta.AfterKind)
+		}
+		after = DiskSnapshot{Kind: delta.AfterKind, Size: int64(len(delta.After)), Mode: delta.AfterMode}
+		if after.Mode == 0 {
+			after.Mode = 0o644
+		}
+	}
+	return PlanStageFile{
+		Path: delta.Path, Before: append([]byte(nil), delta.Before...), After: append([]byte(nil), delta.After...),
+		BeforeExists: delta.BeforeExists, AfterExists: delta.AfterExists, BeforeDisk: before, AfterDisk: after,
+	}, nil
+}
+
+func (s *Sandbox) BaseStageFiles() ([]PlanStageFile, error) {
+	var files []PlanStageFile
+	for _, entry := range s.baseManifest {
+		if entry.Kind != ObjectRegularText {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(s.Tree, filepath.FromSlash(entry.Path)))
+		if err != nil {
+			return nil, err
+		}
+		before := DiskSnapshot{
+			Kind: entry.Kind, Device: entry.Device, Inode: entry.Inode, Size: entry.Size,
+			MTimeNS: entry.MTimeNS, Mode: uint32(entry.Mode.Perm()),
+		}
+		after := before
+		after.Device, after.Inode, after.MTimeNS = 0, 0, 0
+		files = append(files, PlanStageFile{
+			Path: entry.Path, Before: append([]byte(nil), content...), After: append([]byte(nil), content...),
+			BeforeExists: true, AfterExists: true, BeforeDisk: before, AfterDisk: after,
+		})
+	}
+	return files, nil
 }
 
 func (s *Sandbox) writeMarker(state string) error {

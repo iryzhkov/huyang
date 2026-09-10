@@ -66,16 +66,19 @@ func (s *providerPlanStager) call(ctx context.Context, operation, planID string,
 }
 
 type sandboxPlanStager struct {
-	mu           sync.Mutex
-	workspace    *workspacecore.Workspace
-	sandboxBase  string
-	planID       string
-	planRevision uint64
-	baseRevision string
-	sandbox      *workspacecore.Sandbox
-	provider     provider.Provider
-	stager       *providerPlanStager
-	done         bool
+	mu               sync.Mutex
+	workspace        *workspacecore.Workspace
+	sandboxBase      string
+	planID           string
+	planRevision     uint64
+	baseRevision     string
+	sandbox          *workspacecore.Sandbox
+	provider         provider.Provider
+	stager           *providerPlanStager
+	prepared         workspacecore.PlanStageRequest
+	verification     workspacecore.VerificationResult
+	preparedRevision string
+	done             bool
 }
 
 func (s *sandboxPlanStager) Epoch() uint64 {
@@ -94,6 +97,55 @@ func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
 		return "", s.baseRevision, "canonical"
 	}
 	return s.sandbox.Backend, s.baseRevision, "canonical"
+}
+
+func (s *sandboxPlanStager) PreparedRequest() (workspacecore.PlanStageRequest, workspacecore.VerificationResult, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sandbox == nil || len(s.prepared.Files) == 0 {
+		return workspacecore.PlanStageRequest{}, workspacecore.VerificationResult{}, false
+	}
+	request := s.prepared
+	request.Files = append([]workspacecore.PlanStageFile(nil), s.prepared.Files...)
+	for index := range request.Files {
+		request.Files[index].Before = append([]byte(nil), request.Files[index].Before...)
+		request.Files[index].After = append([]byte(nil), request.Files[index].After...)
+	}
+	result := s.verification
+	result.Stages = append([]workspacecore.VerificationStage(nil), result.Stages...)
+	result.ToolDelta = append([]workspacecore.ToolDelta(nil), result.ToolDelta...)
+	for index := range result.ToolDelta {
+		result.ToolDelta[index].Before = append([]byte(nil), result.ToolDelta[index].Before...)
+		result.ToolDelta[index].After = append([]byte(nil), result.ToolDelta[index].After...)
+	}
+	if s.preparedRevision != "" {
+		result.Revision = s.preparedRevision
+	}
+	return request, result, true
+}
+
+func (s *sandboxPlanStager) SetPreparedRevision(revision string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.preparedRevision = revision
+	s.verification.Revision = revision
+}
+
+func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sandbox == nil || s.done {
+		return workspacecore.VerificationResult{}, errors.New("prepared sandbox is not available")
+	}
+	policy, err := workspacecore.LoadPipelinePolicy(s.workspace.Identity().Root, "")
+	if err != nil {
+		return workspacecore.VerificationResult{}, err
+	}
+	result, err := workspacecore.RunVerificationPipeline(ctx, s.sandbox, policy, request, s.prepared.Files)
+	if len(result.Stages) > 0 {
+		s.verification.Stages = append(s.verification.Stages, result.Stages...)
+	}
+	return result, err
 }
 
 func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
@@ -139,6 +191,50 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		s.provider, s.stager, s.sandbox = nil, nil, nil
 		return err
 	}
+	policy, err := workspacecore.LoadPipelinePolicy(s.workspace.Identity().Root, "")
+	if err != nil {
+		return err
+	}
+	verification, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, workspacecore.VerificationRequest{
+		Stages: []string{"format_gate", "parser", "check", "tests"}, Revision: s.baseRevision,
+		Transform: request.RequiresFormatter, ApplyConfiguredTransform: true,
+	}, request.Files)
+	if err != nil {
+		return err
+	}
+	if len(verification.ToolDelta) > 0 {
+		request.Files = verification.PreparedFiles
+		known := make(map[string]bool, len(request.Files))
+		for _, file := range request.Files {
+			known[file.Path] = true
+		}
+		for _, delta := range verification.ToolDelta {
+			if known[delta.Path] {
+				continue
+			}
+			file, fileErr := sandbox.StageFileForToolDelta(delta)
+			if fileErr != nil {
+				return fileErr
+			}
+			request.Files = append(request.Files, file)
+			known[delta.Path] = true
+		}
+		if err := backend.Close(context.Background()); err != nil {
+			return err
+		}
+		replacement, err := referenceProviders.Open(providerOpenConfig{
+			Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+			RuntimePath: shippedRuntimePath(), Debug: false,
+		})
+		if err != nil {
+			return err
+		}
+		s.provider = replacement
+		s.stager = &providerPlanStager{
+			workspaceID: s.workspace.Identity().ID, provider: replacement, epoch: replacement.Descriptor().Epoch,
+		}
+	}
+	s.prepared, s.verification = request, verification
 	return nil
 }
 
