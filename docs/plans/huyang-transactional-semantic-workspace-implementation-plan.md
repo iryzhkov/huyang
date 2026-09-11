@@ -2,7 +2,7 @@
 
 Status: reviewed architecture; implementation approved through the temporary serial bootstrap chain
 Prepared: 2026-09-10
-Planning brief: `/home/igor/Work/agent99-transactional-semantic-workspace-brief.md`
+Planning brief: `/home/igor/Work/plans/agent99-transactional-semantic-workspace-brief.md`
 Tool contract: `docs/plans/huyang-tools-v1alpha1.md`
 Authoritative repository inspected: `https://github.com/iryzhkov/agent99` `main` at `947f5b1`
 Installed dogfood checkout observed at `f9a372e`; it is not the planning baseline and was not modified
