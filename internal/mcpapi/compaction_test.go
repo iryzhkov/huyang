@@ -83,3 +83,22 @@ func TestCompactRevisionDiffOmitsEndpointBodies(t *testing.T) {
 		}
 	}
 }
+
+// A finding that was announced as new and has since gone stale is counted
+// under stale_count and left out of new; the report's stale count is
+// surfaced as is.
+func TestCompactDiagnosticReportSeparatesStaleFromNew(t *testing.T) {
+	report := workspacecore.DiagnosticReport{
+		Confidence: workspacecore.ConfidenceAuthoritative,
+		New: []workspacecore.DiagnosticItem{
+			{ID: "diag_current", Status: workspacecore.DiagnosticStatusCurrent, Finding: workspacecore.DiagnosticFinding{Message: "current"}},
+			{ID: "diag_stale", Status: workspacecore.DiagnosticStatusStale, Finding: workspacecore.DiagnosticFinding{Message: "stale"}},
+		},
+		StaleCount: 3, Cursor: "diagcur_7",
+	}
+	compact := CompactDiagnosticReport(report, "ok", false)["diagnostics"].(map[string]any)
+	items := compact["new"].([]map[string]any)
+	if compact["stale_count"] != 3 || compact["new_count"] != 1 || len(items) != 1 || items[0]["id"] != "diag_current" {
+		t.Fatalf("compact report = %#v", compact)
+	}
+}

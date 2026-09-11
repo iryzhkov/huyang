@@ -434,3 +434,64 @@ func TestServiceRejectsNonLoopbackHTTPAndProtectsSocketPath(t *testing.T) {
 		t.Fatalf("protected socket path content = %q, err = %v", content, err)
 	}
 }
+
+// clientHeaderTransport adds the bearer token and, when set, the client
+// identity header to every HTTP request.
+type clientHeaderTransport struct {
+	token, client string
+	base          http.RoundTripper
+}
+
+func (t clientHeaderTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	clone.Header.Set("Authorization", "Bearer "+t.token)
+	if t.client != "" {
+		clone.Header.Set(clientIdentityHeader, t.client)
+	}
+	return t.base.RoundTrip(clone)
+}
+
+// Over the stateless HTTP transport a request that names its client with
+// X-Huyang-Client receives each diagnostic notice once; a request without
+// the header is a new session and receives the pending notices again.
+func TestHTTPClientHeaderMakesDiagnosticUpdatesADelta(t *testing.T) {
+	base := t.TempDir()
+	service, stop := startTestHuyangService(t, filepath.Join(base, "state"), filepath.Join(base, "control.sock"), "127.0.0.1:0")
+	defer stop()
+	endpoint := "http://" + service.httpListener.Addr().String() + "/mcp"
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opened := service.direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
+	identity := opened["workspace"].(workspacecore.Identity)
+	workspace := service.direct.get(identity.ID)
+	recordTestFinding(t, workspace, filepath.Join(root, "main.go"), 0)
+
+	inspect := func(client string) map[string]any {
+		t.Helper()
+		httpClient := &http.Client{Transport: clientHeaderTransport{token: service.httpToken, client: client, base: http.DefaultTransport}}
+		mcpClient := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
+		session, err := mcpClient.Connect(context.Background(), &mcp.StreamableClientTransport{
+			Endpoint: endpoint, HTTPClient: httpClient, DisableStandaloneSSE: true,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		return callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": string(identity.ID), "view": "status"})
+	}
+	if first := inspect("agent-a"); first["diagnostic_updates"] == nil {
+		t.Fatalf("first request with a client header saw no notices: %#v", first)
+	}
+	if second := inspect("agent-a"); second["diagnostic_updates"] != nil {
+		t.Fatalf("second request with the same client header saw the notices again: %#v", second["diagnostic_updates"])
+	}
+	if other := inspect("agent-b"); other["diagnostic_updates"] == nil {
+		t.Fatalf("a different client did not receive the pending notices: %#v", other)
+	}
+	if anonymous := inspect(""); anonymous["diagnostic_updates"] == nil {
+		t.Fatalf("a request without the header did not receive the pending notices: %#v", anonymous)
+	}
+}

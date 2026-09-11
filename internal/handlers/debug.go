@@ -251,6 +251,10 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 	switch provider.ErrorCode(err) {
 	case "workspace_busy", "provider_cancelled":
 		return modernProviderFailure(requestID, workspace, "debugger_failed", err)
+	case "dap_runtime_unavailable":
+		// The kernel found no nvim-dap on the host Neovim; its Detail names
+		// the locations searched and the override variable.
+		return debugUnavailable(requestID, workspace, "debugger_unavailable", err)
 	}
 	var failure *provider.Failure
 	if errors.As(err, &failure) {
@@ -272,12 +276,19 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 func debugUnavailable(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
 	detail := strings.ReplaceAll(err.Error(), "agent99", "Huyang")
 	summary := "Debugger unavailable; install or configure the requested DAP adapter and language runtime, then retry"
+	repair := map[string]any{
+		"action": "install_or_configure_dap_adapter", "detail": detail,
+		"supported_adapters": []string{"delve", "debugpy", "codelldb", "lldb-dap", "gdb", "js-debug", "java"},
+	}
+	var operation *provider.ProviderError
+	if errors.As(err, &operation) && operation.Detail != "" {
+		// The structured detail of a kernel error, for dap_runtime_unavailable
+		// the locations searched for nvim-dap and the override variable.
+		repair["searched"] = operation.Detail
+	}
 	result := mcpapi.Envelope(requestID, workspace, "unavailable", code, summary, map[string]any{
 		"coverage": map[string]any{"complete": false, "unavailable": []string{"debug_adapter_or_runtime"}},
-		"repair": map[string]any{
-			"action": "install_or_configure_dap_adapter", "detail": detail,
-			"supported_adapters": []string{"delve", "debugpy", "codelldb", "lldb-dap", "gdb", "js-debug", "java"},
-		},
+		"repair":   repair,
 	})
 	result["warnings"] = []string{detail}
 	result["next"] = []any{

@@ -78,7 +78,7 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		config := serviceConfig{}
 		flags.StringVar(&config.SocketPath, "socket", defaultHuyangSocket(), "private Unix control socket")
 		flags.StringVar(&config.StateDir, "state-dir", defaultHuyangStateDir(), "durable service state directory")
-		flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address")
+		flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address; a request may carry an X-Huyang-Client header so diagnostic_updates is a per-client delta across its stateless requests")
 		flags.StringVar(&config.PprofAddress, "pprof", "", "optional loopback address serving net/http/pprof profiles behind the HTTP bearer token, for heap and goroutine investigation")
 		flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
 		flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
@@ -86,7 +86,7 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N] [--external-job-quota N]")
+			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N] [--external-job-quota N]; HTTP requests may set X-Huyang-Client to receive diagnostic_updates as a per-client delta")
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 		defer stop()

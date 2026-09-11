@@ -278,3 +278,25 @@ func TestDebuggerUnavailableNamesHuyangAndGivesRepairStep(t *testing.T) {
 		t.Fatalf("debugger recovery is obsolete or not actionable: %#v", result)
 	}
 }
+
+// A kernel that found no nvim-dap answers dap_runtime_unavailable; the
+// handler maps it to the debugger_unavailable outcome by code, not by a
+// keyword in the message, and surfaces the searched locations in the
+// repair section.
+func TestMissingDapRuntimeIsUnavailableWithSearchedLocations(t *testing.T) {
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: t.TempDir(), StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := &provider.ProviderError{
+		Code: "dap_runtime_unavailable", Message: "nvim-dap is not available to the host Neovim",
+		Detail: "no nvim-dap module; searched: /a/pack, /b/site; override with HUYANG_NVIM_DAP_PATH",
+	}
+	result := debugProviderFailure("req_dap", workspace, failure)
+	repair := result["data"].(map[string]any)["repair"].(map[string]any)
+	if result["outcome"] != "unavailable" || result["code"] != "debugger_unavailable" || repair["searched"] != failure.Detail {
+		t.Fatalf("dap_runtime_unavailable mapping = %#v", result)
+	}
+}

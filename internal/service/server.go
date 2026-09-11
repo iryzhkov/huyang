@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/handlers"
@@ -74,11 +75,26 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 	})
 }
 
-// sessionIdentity keys per-client delivery state by the MCP session. Stateless
-// HTTP transports produce a fresh session per request and therefore receive
-// every pending notice again; the Unix proxy keeps one session per adapter.
+// clientIdentityHeader names the HTTP client for diagnostic_updates. The
+// Streamable HTTP transport is stateless, so without it every request is a
+// new session and receives every pending notice again.
+const clientIdentityHeader = "X-Huyang-Client"
+
+// sessionIdentity keys per-client delivery state. An HTTP request that
+// carries X-Huyang-Client is keyed by that value so diagnostic_updates is a
+// delta across its requests; otherwise the MCP session is the key, which
+// the Unix proxy keeps for the life of the adapter and a stateless HTTP
+// transport renews on every request.
 func sessionIdentity(request *mcp.CallToolRequest) string {
-	if request == nil || request.Session == nil {
+	if request == nil {
+		return ""
+	}
+	if request.Extra != nil && request.Extra.Header != nil {
+		if client := strings.TrimSpace(request.Extra.Header.Get(clientIdentityHeader)); client != "" {
+			return "client:" + client
+		}
+	}
+	if request.Session == nil {
 		return ""
 	}
 	if id := request.Session.ID(); id != "" {

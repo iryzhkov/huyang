@@ -34,14 +34,24 @@ func CompactDiagnosticReport(report workspacecore.DiagnosticReport, outcome stri
 	for _, item := range report.Resolved {
 		resolvedIDs = append(resolvedIDs, item.ID)
 	}
+	// A finding announced as new and since marked stale (its document
+	// changed underneath it) is not current evidence; it is counted under
+	// stale_count rather than listed as new.
+	current := make([]workspacecore.DiagnosticItem, 0, len(report.New))
+	for _, item := range report.New {
+		if item.Status != workspacecore.DiagnosticStatusStale {
+			current = append(current, item)
+		}
+	}
 	compact := map[string]any{
 		"confidence": report.Confidence, "coverage": coverage, "cursor": report.Cursor,
-		"new_count": len(report.New), "resolved_count": len(report.Resolved), "resolved_ids": resolvedIDs,
+		"new_count": len(current), "resolved_count": len(report.Resolved), "resolved_ids": resolvedIDs,
+		"stale_count":       report.StaleCount,
 		"preexisting_count": report.PreexistingCount, "provisional_reasons": NonNilStrings(report.ProvisionalReasons),
 	}
 	if outcome != "unavailable" {
-		items := make([]map[string]any, 0, len(report.New))
-		for _, item := range report.New {
+		items := make([]map[string]any, 0, len(current))
+		for _, item := range current {
 			items = append(items, compactDiagnosticItem(item))
 		}
 		compact["new"] = items
