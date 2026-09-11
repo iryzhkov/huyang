@@ -1,27 +1,32 @@
 # Huyang model-facing tool contract
 
-Status: S00-reviewed and frozen v1alpha1 surface
+Status: S00-reviewed v1alpha1 surface, amended by S20b and re-frozen (see the amendment at the end)
 Prepared: 2026-09-10
+Amended: 2026-09-11
 Upstream inspected: `iryzhkov/agent99@947f5b1`
-Implementation status: none
+Implementation status: implemented in `internal/bridge/modern_mcp.go`; the catalog test
+`TestModernRegistryMatchesFrozenProfiles` holds the code to `fixtures/huyang-v1alpha1/contract-schema.json`
 
 ## Decision
 
 Huyang keeps agent99's useful capabilities but does not expose its accumulated one-tool-
 per-mechanism roster as the modern default. The modern API has a compact set of intent-
 named tools, a common workspace/revision/result envelope, and one transaction operation
-schema shared by one-shot and multi-step edits. Existing agent99 names remain available
-through a legacy compatibility profile during migration.
+schema shared by one-shot and multi-step edits. No legacy surface ships: the agent99 names
+are not advertised by any profile, endpoint, or environment switch, and the compatibility
+window the S20 release candidate described was voided by the repository split and removed
+outright in S20b.
 
 The inspected standalone agent99 roster advertises 38 ordinary tools by default and 51
 when debugging is enabled. Several differ only by navigation relation or edit target shape;
 their individual schemas are useful compatibility contracts but too much simultaneous
 choice for the new default.
 
-The complete modern coding catalog targets 17 tools: 13 shared orientation/editing tools and
-four debugging tools. Its portable default is `full`, so an agent can move through orientation,
-editing and debugging without a harness-specific capability. Optional fixed `orient`, `edit`
-and `debug` launch profiles reduce context when an orchestrator already knows the session's
+The complete modern coding catalog is 19 tools: 13 shared orientation/editing tools, two
+language-server administration tools added after the S00 freeze, and four debugging tools.
+Its portable default is `full`, so an agent can move through orientation, editing and
+debugging without a harness-specific capability. Optional fixed `orient`, `edit` and
+`debug` launch profiles reduce context when an orchestrator already knows the session's
 job. Profiles filter presentation only; they are not permissions or separate implementations.
 A large-change plan is part of editing, not a fourth mode.
 
@@ -87,8 +92,9 @@ from the model-facing roster. The adapter releases its lease on clean disconnect
 - `debug`: the orientation foundation plus the four-tool debug roster described
   below. Once the cause is understood, a new edit-profile connection may reuse the same
   service workspace ID and revision-bound handles.
-- `full` (portable default): all 17 modern coding tools, allowing one session to move among
-  all three workflows.
+- `full` (portable default): all 19 tools, allowing one session to move among all three
+  workflows. It is the only profile that carries `language_server_status` and
+  `language_server_setup`.
 
 The profile is selected by a fixed server startup argument or HTTP endpoint, not a custom MCP
 negotiation. Switching profile is a client/session boundary, never a hidden server-side mode
@@ -97,21 +103,29 @@ budgets are measured independently: first useful orientation, guarded edit throu
 and fault localization from a reproducible stop.
 
 Profiles must not be required for correctness. Harnesses with deferred tool discovery may
-defer non-current tools, but Huyang never assumes that facility exists. Legacy and machine-
-administration surfaces remain separately opt-in because they are compatibility/configuration
-interfaces, not missing modern coding capability.
+defer non-current tools, but Huyang never assumes that facility exists. Machine
+administration beyond the two language-server tools (trust changes, recovery, service
+maintenance) stays outside the catalog because it is configuration, not missing modern
+coding capability.
 
 ## Optional rosters
 
-- **Legacy compatibility:** existing agent99 names and response rendering. Not advertised to
-  modern clients unless they request the legacy profile or negotiate an old API.
+- **Language servers in the `full` profile:** `language_server_status` probes the owned
+  Neovim provider and reports, per language in the workspace, the parser and language-server
+  attachment state and the install options available; `language_server_setup` installs or
+  restarts a language server or parser through the provider with an explicit `action`,
+  `language`, optional `server` and `parser`. Both were added after the S00 freeze (see the
+  amendment). They are the one administration surface in the catalog, because an agent that
+  finds semantic coverage missing needs a way to repair it that is visible, keyed by
+  idempotency key and never triggered by an ordinary read or edit.
 - **Debug in the `full` and `debug` profiles:** four cohesive tools: `debug_session` for
   start/attach/restart/stop,
   `debug_breakpoints` for breakpoint state, `debug_control` for continue/pause/step/run-to,
   and `debug_inspect` for threads/stacks/scopes/variables/evaluate. Each uses a discriminated
   action union. Debug session state is orthogonal to workspace edit plans.
-- **Administration:** language/debugger installation, trust changes, recovery and service
-  maintenance. These mutate machine configuration and are never ordinary coding tools.
+- **Administration:** debugger-adapter installation, trust changes, recovery and service
+  maintenance. These mutate machine configuration and are never ordinary coding tools; they
+  are CLI and configuration-file operations, not MCP tools.
 
 ## Shared operation schema
 
@@ -434,10 +448,12 @@ revision-current, complete and non-overlapping.
 - Empty results distinguish `no_match`, `invalid_scope`, `unsupported_classification`
   and `incomplete_search`.
 
-Structural Tree-sitter queries use `search.mode=structure` as a closed discriminated branch
-with `language`, query and capture fields; literal/regex schemas do not expose those fields.
-It is capability-gated and omitted from the lean schema description when no parser can use
-it. There is no separate `syntax_query` tool in v1alpha1.
+Structural Tree-sitter queries were designed as a `search.mode=structure` closed
+discriminated branch with `language`, query and capture fields; literal/regex schemas would
+not expose those fields, and there is no separate `syntax_query` tool in v1alpha1. That
+branch is not implemented: the shipped `search` schema accepts `mode=literal|regex` only.
+The design is deferred, not withdrawn; adding the branch is a compatible v1alpha1 change
+because it introduces a new enum value and fields that are absent today.
 
 ### Compact text fallback
 
@@ -530,8 +546,6 @@ inbox:
 - `diagnostics(since=cursor)` or `change_plan(action="inspect")` retrieves the structured update.
   Clients supporting notifications/subscriptions receive the same signal immediately; the
   response inbox remains the reliable fallback.
-- Legacy wrappers may retain agent99's prose rendering during the compatibility window, but
-  it must use the same revision-bound inbox identity underneath.
 
 ### Culprit attribution
 
@@ -558,7 +572,8 @@ use the diagnostic and coverage evidence itself, not the attribution guess.
 
 ## Compatibility mapping
 
-The legacy adapters map as follows:
+For readers who know the agent99 roster, its names map as follows. No adapter for those
+names ships; this table is a reading aid, not a promise.
 
 - `workspace_tree`, `workspace_map` → `workspace_inspect`
 - `skim`, `document_symbols`, `buffer_lines`, `read_file` → `read`
@@ -569,8 +584,7 @@ The legacy adapters map as follows:
 - `run_tests`, `check_project` → `verify_run`
 - `undo_edit` → discard before apply, or a compensating plan after apply
 
-Compatibility is behavioral, not a requirement that modern schemas repeat every historical
-parameter. The adapter is responsible for translating old defaults and text rendering.
+The mapping is behavioral: modern schemas do not repeat every historical parameter.
 
 ## Pre-implementation usability requirements
 
@@ -900,11 +914,115 @@ durability protocol when the context cannot be confused with Git.
 3. Search's compact fallback is the fixed file-grouped rendering specified above.
 4. Portable stdio launch is `huyang mcp --profile full|orient|edit|debug`, defaulting to
    `full`. Streamable HTTP routes are `/mcp`, `/mcp/orient`, `/mcp/edit` and `/mcp/debug`,
-   with `/mcp` equal to `full`. These are fixed catalogs, not protocol negotiation. Legacy is
-   a separately named compatibility endpoint; administration remains CLI/separately opt-in.
+   with `/mcp` equal to `full`. These are fixed catalogs, not protocol negotiation. There is
+   no legacy endpoint; administration beyond the two language-server tools remains CLI and
+   configuration.
 5. Debugger evaluate is potentially side-effecting unless the adapter/runtime enforces
    read-only execution. Lack of that proof requires explicit per-call side-effect policy.
 
 S00 conformance/model-selection review found no measurable ambiguity or portability failure.
 These decisions are frozen for v1alpha1; later implementation stages do not casually redesign
-the surface.
+the surface. The amendment below records the one stage that did change it, and re-freezes.
+
+## v1alpha1 amendment (S20b, 2026-09-11)
+
+The S20b structural consolidation (`docs/plans/huyang-s20b-structural-consolidation.md`)
+changed the shipped v1alpha1 surface in the ways listed here. Every change is additive or
+compacting: no tool was renamed, no field changed meaning, no mutation precondition was
+weakened and no non-executing call became executing. Everything below is taken from
+`internal/bridge/modern_mcp.go`, `compaction.go`, `receipts.go`, `provider_call.go` and
+`internal/workspace/errors.go` at the merge commit named at the end.
+
+### Tools added after the S00 freeze
+
+`language_server_status` (read-only, idempotent, scheduler class provider read) and
+`language_server_setup` (destructive, requires `idempotency_key`, scheduler class canonical
+write) were added during the post-rollout hardening rounds and are in the `full` profile
+only. The catalog is therefore 19 tools in `full`, 8 in `orient`, 13 in `edit` and 12 in
+`debug`; `validateModernRegistry` refuses to start a service whose catalog differs from those
+counts, and every descriptor must declare a scheduler class.
+
+### Input additions
+
+- `change_plan.accept_provisional` (boolean): with `action=apply`, commit a `PROVISIONAL`
+  plan by explicitly accepting its incomplete diagnostic evidence. Without it, applying a
+  `PROVISIONAL` plan is refused with `provisional_not_accepted`. Only `READY` commits by
+  default.
+- `diagnostics.full` (boolean): return the complete report including finding bodies and
+  per-dimension evidence IDs. The default report is the compact shape described below.
+- `search.include_ranges` (boolean): return `byte_start`, `byte_end` and `range` on every
+  hit. The default hit carries only `path`, `line`, `column`, `match` and the editable
+  `handle`.
+- `workspace_open.overview` (`compact|full`): `compact` (the default) summarises the tree by
+  top-level entry; `full` returns the complete entry listing.
+
+### Output changes
+
+- Envelope `diagnostic_updates` is a per-client delta: it carries only the diagnostic
+  notices this MCP session has not seen, at most 20 (`maxDiagnosticUpdates`), and is omitted
+  when there are none. `diagnostic_updates_truncated: true` marks a reply whose delta was
+  cut at that cap. Acknowledgement through `diagnostics(since=cursor)` prunes notices for
+  every client.
+- Envelope `next` holds at most two entries (`maxNextEntries`); the finaliser keeps the
+  earliest ones. The advertised output schema declares `maxItems: 2`.
+- `diagnostics` data is compact by default: `confidence`, per-dimension `coverage` with
+  `state`, `confidence` and `reasons`, `cursor`, `new_count`, `resolved_count`,
+  `resolved_ids`, `preexisting_count`, `provisional_reasons`, and `new` items with `id`,
+  `document`, `producer`, `severity`, `range`, `message`, `attribution` and, when present,
+  `code`, `source`, `document_revision` and `transaction_id`. Resolved findings collapse to
+  their IDs. `full=true` returns the raw report.
+- `search` hits are the compact shape above; anchors appear only with `include_ranges`.
+- `workspace_open` returns the compact overview (`entry_count`, `top_level` with per-entry
+  `path`, `kind`, `bytes` and directory `files`, `top_level_count`,
+  `top_level_truncated`) and compact `recent_commits` (`handle`, `abbreviated_id`,
+  `subject`) unless `overview=full`.
+- `language_server_status` replaces each language's inline `install_options` list with an
+  `install_options_key` naming the entry under the report's single `install_options` map.
+- `change_plan(action=apply)` data carries `provisional_accepted` (the dimensions the caller
+  accepted) and `missing_coverage` (the verification gaps) when a `PROVISIONAL` plan was
+  committed; a refused apply returns `missing_coverage` and offers `accept_provisional` in
+  `next`.
+- `transaction.state` may now be `CONFLICTED` or `EXPIRED`.
+
+### Codes and warnings added
+
+- `provisional_not_accepted`: apply of a `PROVISIONAL` plan without `accept_provisional`.
+- `plan_state_invalid`: an action that the plan state machine does not permit from the
+  plan's current state, including an edit of a plan that retention compacted.
+- `idempotency_receipt_evicted`: the receipt for this idempotency key was evicted by the
+  retention caps; the call is neither replayed nor re-executed.
+- `request_cancelled`: the request's context was cancelled, including by the client.
+- `workspace_busy` (outcome `conflict`): the kernel refused the request because the
+  workspace's provider is occupied.
+- Warning `The replayed receipt was trimmed to its provenance fields by retention; evidence
+  detail is available through evidence_get`, with `data.receipt_trimmed: true`, on a replay
+  older than the receipt payload window.
+
+The workspace lifecycle codes `commit_precondition_changed`, `commit_recovery_required`,
+`workspace_epoch_changed`, `prepared_revision_changed`, `plan_revision_changed`,
+`plan_validation_conflicts` and `provider_unavailable` are now typed (`CodedError` in
+`internal/workspace/errors.go`) and classified by the bridge with `errors.As`, never by
+substring; their text keeps the `code: detail` shape.
+
+### Not implemented
+
+`search.mode=structure` is not implemented and is deferred, as stated in the search
+contract above.
+
+### Fixtures
+
+`fixtures/huyang-v1alpha1/contract-schema.json` is exercised by
+`TestModernRegistryMatchesFrozenProfiles` in `internal/bridge/modern_mcp_test.go`, which
+holds the four profile catalogs to the fixture's `catalogs` object and checks that catalog
+generation is deterministic; its `tools` object was extended with the two language-server
+tools in this amendment. `fixtures/huyang-v1alpha1/golden-results.json` and
+`fixtures/huyang-v1alpha1/multi-provider.json` are S00 design artifacts: no test reads them
+and their shapes (grouped search results with `excerpt` and `spans`, named analysis
+profiles) describe the intended contract, not the compact output the code emits today.
+
+### Re-freeze
+
+The amended v1alpha1 contract is frozen from the S20b merge commit
+`fe143fe97dc7ac0060489c0d0840086a6c93122d` on `feature/huyang`. A later compatible change
+may add optional inputs, optional result fields or new stable codes; anything else is a new
+API version with a separately named catalog.
