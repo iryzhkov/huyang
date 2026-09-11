@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
@@ -41,7 +42,7 @@ func startTestHuyangService(t *testing.T, stateDir, socketPath, httpAddress stri
 	return service, stop
 }
 
-func connectUnixOfficialClient(t *testing.T, socketPath string, profile mcpProfile) (*mcp.ClientSession, func()) {
+func connectUnixOfficialClient(t *testing.T, socketPath string, profile mcpapi.Profile) (*mcp.ClientSession, func()) {
 	t.Helper()
 	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
@@ -75,7 +76,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	}
 
 	firstService, stopFirst := startTestHuyangService(t, stateDir, socketPath, "")
-	firstSession, closeFirst := connectUnixOfficialClient(t, socketPath, profileEdit)
+	firstSession, closeFirst := connectUnixOfficialClient(t, socketPath, mcpapi.ProfileEdit)
 	opened := callModern(t, firstSession, "workspace_open", map[string]any{
 		"kind": "documents", "files": []string{document},
 	})
@@ -106,7 +107,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	}
 	closeFirst()
 
-	reconnected, closeReconnected := connectUnixOfficialClient(t, socketPath, profileOrient)
+	reconnected, closeReconnected := connectUnixOfficialClient(t, socketPath, mcpapi.ProfileOrient)
 	read := callModern(t, reconnected, "read", map[string]any{
 		"workspace_id": workspaceID,
 		"target":       displayRangeTarget(document),
@@ -122,7 +123,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 
 	secondService, stopSecond := startTestHuyangService(t, stateDir, socketPath, "")
 	defer stopSecond()
-	secondSession, closeSecond := connectUnixOfficialClient(t, socketPath, profileEdit)
+	secondSession, closeSecond := connectUnixOfficialClient(t, socketPath, mcpapi.ProfileEdit)
 	defer closeSecond()
 	replayed := callModern(t, secondSession, "edit_apply", applyArguments)
 	if replayed["outcome"] != "provisional" || replayed["idempotency"] != "replayed" {

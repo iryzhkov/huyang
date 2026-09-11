@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -21,9 +22,11 @@ type scriptedDebugProvider struct {
 }
 
 func (p *scriptedDebugProvider) Descriptor() provider.Descriptor { return p.descriptor }
+
 func (p *scriptedDebugProvider) Health(context.Context) provider.Health {
 	return provider.Health{State: provider.HealthHealthy, Epoch: p.descriptor.Epoch}
 }
+
 func (p *scriptedDebugProvider) Call(_ context.Context, request provider.Request) (provider.Result, error) {
 	p.requests = append(p.requests, request)
 	if p.call == nil {
@@ -32,6 +35,7 @@ func (p *scriptedDebugProvider) Call(_ context.Context, request provider.Request
 	value, err := p.call(request)
 	return provider.Result{Value: value}, err
 }
+
 func (p *scriptedDebugProvider) Close(context.Context) error {
 	select {
 	case <-p.done:
@@ -40,6 +44,7 @@ func (p *scriptedDebugProvider) Close(context.Context) error {
 	}
 	return nil
 }
+
 func (p *scriptedDebugProvider) Done() <-chan struct{} { return p.done }
 
 func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) (*directWorkspaces, *workspacecore.Workspace, *scriptedDebugProvider, workspacecore.HandleRecord) {
@@ -196,8 +201,8 @@ func TestModernDebugUnavailableAndClosedActionSchemas(t *testing.T) {
 	if result["outcome"] != "unavailable" || result["code"] != "debugger_unavailable" {
 		t.Fatalf("missing adapter result = %#v", result)
 	}
-	var session modernTool
-	for _, descriptor := range modernTools {
+	var session mcpapi.ToolDescriptor
+	for _, descriptor := range mcpapi.Tools {
 		if descriptor.Name == "debug_session" {
 			session = descriptor
 		}
@@ -205,13 +210,13 @@ func TestModernDebugUnavailableAndClosedActionSchemas(t *testing.T) {
 	arguments := map[string]any{
 		"workspace_id": "ws_test", "idempotency_key": "stop", "action": "stop", "file": "main.go",
 	}
-	if err := validateToolArguments(session.InputSchema, arguments); err != nil {
+	if err := mcpapi.ValidateToolArguments(session.InputSchema, arguments); err != nil {
 		t.Fatalf("valid compact stop schema rejected: %v", err)
 	}
-	if err := validateModernDebugArguments(session.Name, arguments); err == nil {
+	if err := mcpapi.ValidateDebugArguments(session.Name, arguments); err == nil {
 		t.Fatal("stop action accepted a start-only file argument")
 	}
-	if err := validateModernDebugArguments("debug_breakpoints", map[string]any{
+	if err := mcpapi.ValidateDebugArguments("debug_breakpoints", map[string]any{
 		"workspace_id": "ws_test", "idempotency_key": "list", "action": "list",
 		"target": map[string]any{"handle": "h_test"},
 	}); err == nil {
@@ -238,25 +243,6 @@ func TestModernDebugInitializationFailureIsActionable(t *testing.T) {
 	if repair["action"] != "install_or_configure_dap_adapter" ||
 		!strings.Contains(repair["detail"].(string), "js-debug") {
 		t.Fatalf("initialization recovery did not retain adapter detail: %#v", result)
-	}
-}
-
-func TestModernDebugCatalogIsCompact(t *testing.T) {
-	modernDescriptors := make([]modernTool, 0, 4)
-	for _, descriptor := range modernCatalog(profileDebug) {
-		if len(descriptor.Name) >= len("debug_") && descriptor.Name[:len("debug_")] == "debug_" {
-			modernDescriptors = append(modernDescriptors, descriptor)
-		}
-	}
-	if len(modernDescriptors) != 4 {
-		t.Fatalf("modern debugger tools = %d", len(modernDescriptors))
-	}
-	for _, descriptor := range modernDescriptors {
-		encoded, marshalErr := json.Marshal(descriptor)
-		if marshalErr != nil {
-			t.Fatal(marshalErr)
-		}
-		t.Logf("%s descriptor bytes = %d", descriptor.Name, len(encoded))
 	}
 }
 

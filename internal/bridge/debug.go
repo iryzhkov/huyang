@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -22,7 +23,7 @@ func (h *toolHandlers) debug(ctx context.Context, requestID, name string, worksp
 			policy = "read_only"
 		}
 		if policy != "allow_side_effects" {
-			result := modernEnvelope(requestID, workspace, "unavailable", "approval_required",
+			result := mcpapi.Envelope(requestID, workspace, "unavailable", "approval_required",
 				"Evaluation was not executed because the debugger cannot enforce read-only expressions",
 				map[string]any{"debug": map[string]any{"action": action, "executed": false, "policy": "read_only"},
 					"coverage": map[string]any{"complete": false, "unavailable": []string{"enforceable_read_only_evaluation"}}})
@@ -41,15 +42,15 @@ func (h *toolHandlers) debug(ctx context.Context, requestID, name string, worksp
 	}
 	operation, providerArguments, err := h.debugOperation(workspace, name, action, arguments)
 	if err != nil {
-		return modernFailure(requestID, workspace, "debug_target_invalid", err)
+		return mcpapi.Failure(requestID, workspace, "debug_target_invalid", err)
 	}
-	if initial := anySlice(arguments["initial_breakpoints"]); name == "debug_session" && (action == "start" || action == "attach") {
+	if initial := mcpapi.AnySlice(arguments["initial_breakpoints"]); name == "debug_session" && (action == "start" || action == "attach") {
 		for _, item := range initial {
 			breakpoint, _ := item.(map[string]any)
 			target, _ := breakpoint["target"].(map[string]any)
 			resolved, resolveErr := h.debugTargetArguments(workspace, target, breakpoint)
 			if resolveErr != nil {
-				return modernFailure(requestID, workspace, "debug_target_invalid", resolveErr)
+				return mcpapi.Failure(requestID, workspace, "debug_target_invalid", resolveErr)
 			}
 			for _, key := range []string{"condition", "hit_condition", "log_message"} {
 				if value, ok := breakpoint[key]; ok {
@@ -78,7 +79,7 @@ func (h *toolHandlers) debug(ctx context.Context, requestID, name string, worksp
 		data["evaluation"] = map[string]any{"executed": true, "policy": "allow_side_effects", "debuggee_state_may_have_changed": true}
 	}
 	summary := debugSummary(action, data)
-	result := modernEnvelope(requestID, workspace, outcome, "", summary, map[string]any{"debug": data, "coverage": debugCoverage(complete)})
+	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"debug": data, "coverage": debugCoverage(complete)})
 	result["next"] = debugNext(workspace, name, action, data)
 	return result
 }
@@ -253,7 +254,7 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 	var failure *provider.Failure
 	if errors.As(err, &failure) {
 		if failure.Code == provider.FailureCancelled || failure.Code == provider.FailureDeadline {
-			return modernFailure(requestID, workspace, string(failure.Code), err)
+			return mcpapi.Failure(requestID, workspace, string(failure.Code), err)
 		}
 		return debugUnavailable(requestID, workspace, string(failure.Code), err)
 	}
@@ -264,13 +265,13 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 		strings.Contains(lower, "source map") || strings.Contains(lower, "runtime") {
 		return debugUnavailable(requestID, workspace, "debugger_unavailable", err)
 	}
-	return modernFailure(requestID, workspace, "debugger_failed", err)
+	return mcpapi.Failure(requestID, workspace, "debugger_failed", err)
 }
 
 func debugUnavailable(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
 	detail := strings.ReplaceAll(err.Error(), "agent99", "Huyang")
 	summary := "Debugger unavailable; install or configure the requested DAP adapter and language runtime, then retry"
-	result := modernEnvelope(requestID, workspace, "unavailable", code, summary, map[string]any{
+	result := mcpapi.Envelope(requestID, workspace, "unavailable", code, summary, map[string]any{
 		"coverage": map[string]any{"complete": false, "unavailable": []string{"debug_adapter_or_runtime"}},
 		"repair": map[string]any{
 			"action": "install_or_configure_dap_adapter", "detail": detail,

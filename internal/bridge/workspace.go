@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -17,29 +18,29 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 	case "project":
 		options.Root, _ = arguments["root"].(string)
 	case "documents":
-		for _, value := range anySlice(arguments["files"]) {
+		for _, value := range mcpapi.AnySlice(arguments["files"]) {
 			if name, ok := value.(string); ok {
 				absolute, err := filepath.Abs(name)
 				if err != nil {
-					return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
+					return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 				}
 				options.Files = append(options.Files, filepath.Clean(absolute))
 			}
 		}
 		sort.Strings(options.Files)
 	default:
-		return modernEnvelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
 	}
 	opened, err := workspacecore.Open(options)
 	if err != nil {
-		return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 	}
 	opened, created, err := h.registry.adopt(opened, options.Files)
 	if err != nil {
-		return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
 	}
 	if err := opened.PrimeDocuments(); err != nil {
-		return modernFailure(requestID, opened, "workspace_baseline_failed", err)
+		return mcpapi.Failure(requestID, opened, "workspace_baseline_failed", err)
 	}
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && shippedRuntimePath() != "" {
@@ -47,7 +48,7 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 	}
 	orientation, err := opened.Orient()
 	if err != nil {
-		return modernFailure(requestID, opened, "workspace_overview_failed", err)
+		return mcpapi.Failure(requestID, opened, "workspace_overview_failed", err)
 	}
 	recent, recentErr := opened.RecentCommits(3)
 	if recentErr != nil {
@@ -67,16 +68,16 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 	if !created {
 		action = "Reopened"
 	}
-	var overview any = compactOrientation(orientation)
+	var overview any = mcpapi.CompactOrientation(orientation)
 	if mode, _ := arguments["overview"].(string); mode == "full" {
 		overview = orientation
 	}
-	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
+	return mcpapi.Envelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
 		"revision":     fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities": capabilities, "semantic_provider": semanticProvider,
 		"service_limits": map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
 		"overview":       overview,
-		"recent_commits": compactRecentCommits(recent, 3),
+		"recent_commits": mcpapi.CompactRecentCommits(recent, 3),
 		"registry":       map[string]any{"persistent": true, "reused": !created},
 	})
 }

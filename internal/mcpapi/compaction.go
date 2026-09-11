@@ -1,4 +1,4 @@
-package bridge
+package mcpapi
 
 import (
 	"crypto/sha256"
@@ -15,11 +15,11 @@ import (
 // summarises directories, and diagnostic notices are delivered once per
 // client.
 
-// compactDiagnosticReport shapes the diagnostics tool result. Evidence IDs
+// CompactDiagnosticReport shapes the diagnostics tool result. Evidence IDs
 // are reported once, on the envelope, so the report itself carries none;
 // resolved findings collapse to their IDs; when no evidence exists only the
 // reasons and counts are returned. full restores the raw report.
-func compactDiagnosticReport(report workspacecore.DiagnosticReport, outcome string, full bool) map[string]any {
+func CompactDiagnosticReport(report workspacecore.DiagnosticReport, outcome string, full bool) map[string]any {
 	if full {
 		return map[string]any{"diagnostics": report}
 	}
@@ -27,7 +27,7 @@ func compactDiagnosticReport(report workspacecore.DiagnosticReport, outcome stri
 	for name, dimension := range report.Coverage {
 		coverage[name] = map[string]any{
 			"state": dimension.State, "confidence": dimension.Confidence,
-			"reasons": nonNilStrings(dimension.Reasons),
+			"reasons": NonNilStrings(dimension.Reasons),
 		}
 	}
 	resolvedIDs := make([]string, 0, len(report.Resolved))
@@ -37,7 +37,7 @@ func compactDiagnosticReport(report workspacecore.DiagnosticReport, outcome stri
 	compact := map[string]any{
 		"confidence": report.Confidence, "coverage": coverage, "cursor": report.Cursor,
 		"new_count": len(report.New), "resolved_count": len(report.Resolved), "resolved_ids": resolvedIDs,
-		"preexisting_count": report.PreexistingCount, "provisional_reasons": nonNilStrings(report.ProvisionalReasons),
+		"preexisting_count": report.PreexistingCount, "provisional_reasons": NonNilStrings(report.ProvisionalReasons),
 	}
 	if outcome != "unavailable" {
 		items := make([]map[string]any, 0, len(report.New))
@@ -70,10 +70,10 @@ func compactDiagnosticItem(item workspacecore.DiagnosticItem) map[string]any {
 	return compact
 }
 
-// compactSearchHits returns the bounded hit list. The default hit carries
+// CompactSearchHits returns the bounded hit list. The default hit carries
 // path, line, column, match and the editable handle; the exact byte anchors
 // are added only with include_ranges.
-func compactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges bool) ([]map[string]any, bool) {
+func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges bool) ([]map[string]any, bool) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -97,10 +97,10 @@ func compactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges 
 	return compact, len(hits) > len(returned)
 }
 
-// compactOrientation summarises a workspace overview by top-level entry:
+// CompactOrientation summarises a workspace overview by top-level entry:
 // directories carry their file count and byte total, files their kind and
 // size. The full entry listing stays behind overview=full.
-func compactOrientation(orientation workspacecore.Orientation) map[string]any {
+func CompactOrientation(orientation workspacecore.Orientation) map[string]any {
 	type summary struct {
 		path  string
 		kind  string
@@ -126,9 +126,9 @@ func compactOrientation(orientation workspacecore.Orientation) map[string]any {
 		item.bytes += entry.Size
 	}
 	sort.Strings(order)
-	truncated := len(order) > maxStructuredEntries
+	truncated := len(order) > MaxStructuredEntries
 	if truncated {
-		order = order[:maxStructuredEntries]
+		order = order[:MaxStructuredEntries]
 	}
 	topLevel := make([]map[string]any, 0, len(order))
 	for _, name := range order {
@@ -146,9 +146,9 @@ func compactOrientation(orientation workspacecore.Orientation) map[string]any {
 	}
 }
 
-// compactRecentCommits keeps the handle, abbreviated ID and subject of each
+// CompactRecentCommits keeps the handle, abbreviated ID and subject of each
 // commit; the full summary is available through read view=changes.
-func compactRecentCommits(list workspacecore.CommitList, limit int) map[string]any {
+func CompactRecentCommits(list workspacecore.CommitList, limit int) map[string]any {
 	commits := make([]map[string]any, 0, min(len(list.Commits), limit))
 	for _, commit := range list.Commits[:min(len(list.Commits), limit)] {
 		commits = append(commits, map[string]any{
@@ -158,12 +158,12 @@ func compactRecentCommits(list workspacecore.CommitList, limit int) map[string]a
 	return map[string]any{"commits": commits, "coverage": list.Coverage}
 }
 
-// compactLanguageSupport removes the per-language install option lists from
+// CompactLanguageSupport removes the per-language install option lists from
 // the provider's support report and replaces each with the key under which
 // the same options appear once in install_options.
-func compactLanguageSupport(support map[string]any) map[string]any {
-	compact := cloneEnvelope(support)
-	languages := anySlice(support["languages"])
+func CompactLanguageSupport(support map[string]any) map[string]any {
+	compact := CloneEnvelope(support)
+	languages := AnySlice(support["languages"])
 	entries := make([]any, 0, len(languages))
 	for _, raw := range languages {
 		entry, ok := raw.(map[string]any)
@@ -171,8 +171,8 @@ func compactLanguageSupport(support map[string]any) map[string]any {
 			entries = append(entries, raw)
 			continue
 		}
-		copied := cloneEnvelope(entry)
-		if options := anySlice(entry["install_options"]); len(options) > 0 {
+		copied := CloneEnvelope(entry)
+		if options := AnySlice(entry["install_options"]); len(options) > 0 {
 			copied["install_options_key"] = fmt.Sprint(entry["filetype"])
 		}
 		delete(copied, "install_options")
@@ -182,11 +182,11 @@ func compactLanguageSupport(support map[string]any) map[string]any {
 	return compact
 }
 
-func compactTextEnvelope(envelope map[string]any) map[string]any {
+func CompactTextEnvelope(envelope map[string]any) map[string]any {
 	compact := map[string]any{
 		"api_version": envelope["api_version"], "request_id": envelope["request_id"],
 		"outcome": envelope["outcome"], "summary": envelope["summary"],
-		"data": compactTextData(envelope["data"]), "evidence": envelope["evidence"],
+		"data": CompactTextData(envelope["data"]), "evidence": envelope["evidence"],
 		"warnings": envelope["warnings"], "next": envelope["next"],
 	}
 	for _, key := range []string{"code", "workspace", "transaction", "idempotency", "idempotency_persisted"} {
@@ -197,7 +197,7 @@ func compactTextEnvelope(envelope map[string]any) map[string]any {
 	return compact
 }
 
-func compactTextData(value any) any {
+func CompactTextData(value any) any {
 	compacted := compactStructuredData(value)
 	data, ok := compacted.(map[string]any)
 	if !ok {
@@ -213,10 +213,10 @@ func compactTextData(value any) any {
 	return data
 }
 
-const maxStructuredEntries = 100
+const MaxStructuredEntries = 100
 
-func compactStructuredEnvelope(envelope map[string]any) map[string]any {
-	compact := cloneEnvelope(envelope)
+func CompactStructuredEnvelope(envelope map[string]any) map[string]any {
+	compact := CloneEnvelope(envelope)
 	compact["data"] = compactStructuredData(envelope["data"])
 	return compact
 }
@@ -231,9 +231,9 @@ func compactStructuredData(value any) any {
 		switch typed := item.(type) {
 		case workspacecore.Orientation:
 			entries := typed.Entries
-			truncated := len(entries) > maxStructuredEntries
+			truncated := len(entries) > MaxStructuredEntries
 			if truncated {
-				entries = entries[:maxStructuredEntries]
+				entries = entries[:MaxStructuredEntries]
 			}
 			compact[key] = map[string]any{
 				"workspace": typed.Workspace, "coverage": typed.Coverage,
@@ -319,10 +319,10 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 	return result
 }
 
-// compactRevisionDiff keeps the default revision history response bounded by
+// CompactRevisionDiff keeps the default revision history response bounded by
 // omitting complete endpoint bodies. The patch and endpoint hashes retain exact,
 // independently checkable evidence without JSON's base64 expansion of []byte.
-func compactRevisionDiff(value any) any {
+func CompactRevisionDiff(value any) any {
 	switch diff := value.(type) {
 	case workspacecore.ExactDiff:
 		return map[string]any{"path": diff.Path, "before_sha256": diff.BeforeSHA256, "after_sha256": diff.AfterSHA256, "patch": diff.Patch}
@@ -333,7 +333,7 @@ func compactRevisionDiff(value any) any {
 	}
 }
 
-func compactTextChange(change workspacecore.TextChange) map[string]any {
+func CompactTextChange(change workspacecore.TextChange) map[string]any {
 	return map[string]any{
 		"workspace":    change.Workspace,
 		"before":       change.Before,
@@ -347,16 +347,18 @@ func compactTextChange(change workspacecore.TextChange) map[string]any {
 	}
 }
 
+// VerificationListLimit and VerificationOutputLimit bound the lists and the
+// command output a compacted verification result carries per stage.
 const (
-	modernVerificationListLimit   = 20
-	modernVerificationOutputLimit = 4096
+	VerificationListLimit   = 20
+	VerificationOutputLimit = 4096
 )
 
 func boundedVerificationStrings(values []string) ([]string, bool) {
-	if len(values) <= modernVerificationListLimit {
-		return nonNilStrings(values), false
+	if len(values) <= VerificationListLimit {
+		return NonNilStrings(values), false
 	}
-	return append([]string(nil), values[:modernVerificationListLimit]...), true
+	return append([]string(nil), values[:VerificationListLimit]...), true
 }
 
 func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any, bool) {
@@ -380,39 +382,39 @@ func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any
 		"affected_without_tests_truncated": untestedTruncated,
 		"node_count":                       len(graph.Nodes), "edge_count": len(graph.Edges),
 		"risk_count": len(graph.Risks), "risk_kind_counts": riskKinds,
-		"coverage": graph.Coverage, "adapters": nonNilStrings(graph.Adapters),
-		"variants_included": nonNilStrings(graph.Included), "variants_omitted": nonNilStrings(graph.Omitted),
+		"coverage": graph.Coverage, "adapters": NonNilStrings(graph.Adapters),
+		"variants_included": NonNilStrings(graph.Included), "variants_omitted": NonNilStrings(graph.Omitted),
 		"recommend_full": graph.RecommendFull, "details_truncated": truncated,
 	}, truncated
 }
 
-func compactVerificationResult(result workspacecore.VerificationResult) (map[string]any, []string) {
+func CompactVerificationResult(result workspacecore.VerificationResult) (map[string]any, []string) {
 	compacted := map[string]any{"revision": result.Revision}
 	var evidenceIDs []string
 	detailsTruncated := false
 	stages := make([]any, 0, len(result.Stages))
 	for _, stage := range result.Stages {
 		output := stage.Output
-		outputTruncated := len(output) > modernVerificationOutputLimit
+		outputTruncated := len(output) > VerificationOutputLimit
 		if outputTruncated {
-			output = output[:modernVerificationOutputLimit]
+			output = output[:VerificationOutputLimit]
 			detailsTruncated = true
 		}
 		scope, scopeTruncated := boundedVerificationStrings(stage.Scope)
 		writes, writesTruncated := boundedVerificationStrings(stage.Writes)
 		executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
-		selected := make([]any, 0, min(len(stage.SelectedTests), modernVerificationListLimit))
-		for _, test := range stage.SelectedTests[:min(len(stage.SelectedTests), modernVerificationListLimit)] {
+		selected := make([]any, 0, min(len(stage.SelectedTests), VerificationListLimit))
+		for _, test := range stage.SelectedTests[:min(len(stage.SelectedTests), VerificationListLimit)] {
 			selected = append(selected, map[string]any{
-				"name": test.Name, "reasons": nonNilStrings(test.Reasons), "variants": nonNilStrings(test.Variants),
+				"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
 			})
 		}
-		selectedTruncated := len(stage.SelectedTests) > modernVerificationListLimit
+		selectedTruncated := len(stage.SelectedTests) > VerificationListLimit
 		detailsTruncated = detailsTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
 		stageData := map[string]any{
 			"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
 			"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
-			"coverage": stage.Coverage, "evidence_ids": nonNilStrings(stage.EvidenceIDs),
+			"coverage": stage.Coverage, "evidence_ids": NonNilStrings(stage.EvidenceIDs),
 			"scope": scope, "scope_count": len(stage.Scope), "scope_truncated": scopeTruncated,
 			"writes": writes, "writes_count": len(stage.Writes), "writes_truncated": writesTruncated,
 			"output": output, "output_bytes": len(stage.Output), "output_truncated": outputTruncated,
@@ -432,14 +434,14 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 		detailsTruncated = detailsTruncated || truncated
 	}
 	if result.Targeted != nil {
-		selected := make([]any, 0, min(len(result.Targeted.Selected), modernVerificationListLimit))
-		for _, test := range result.Targeted.Selected[:min(len(result.Targeted.Selected), modernVerificationListLimit)] {
+		selected := make([]any, 0, min(len(result.Targeted.Selected), VerificationListLimit))
+		for _, test := range result.Targeted.Selected[:min(len(result.Targeted.Selected), VerificationListLimit)] {
 			selected = append(selected, map[string]any{
-				"name": test.Name, "reasons": nonNilStrings(test.Reasons), "variants": nonNilStrings(test.Variants),
+				"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
 			})
 		}
 		executed, executedTruncated := boundedVerificationStrings(result.Targeted.Executed)
-		selectedTruncated := len(result.Targeted.Selected) > modernVerificationListLimit
+		selectedTruncated := len(result.Targeted.Selected) > VerificationListLimit
 		compacted["targeted_tests"] = map[string]any{
 			"status": result.Targeted.Status, "selected": selected,
 			"selected_count": len(result.Targeted.Selected), "selected_truncated": selectedTruncated,
@@ -451,8 +453,8 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 			len(result.Targeted.Graph.Edges) > 0 || len(result.Targeted.Graph.Risks) > 0
 	}
 	if len(result.ToolDelta) > 0 {
-		deltas := make([]any, 0, min(len(result.ToolDelta), modernVerificationListLimit))
-		for _, delta := range result.ToolDelta[:min(len(result.ToolDelta), modernVerificationListLimit)] {
+		deltas := make([]any, 0, min(len(result.ToolDelta), VerificationListLimit))
+		for _, delta := range result.ToolDelta[:min(len(result.ToolDelta), VerificationListLimit)] {
 			deltas = append(deltas, map[string]any{
 				"path": delta.Path, "classification": delta.Classification,
 				"before_exists": delta.BeforeExists, "after_exists": delta.AfterExists,
@@ -464,7 +466,7 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 		}
 		compacted["tool_delta"] = deltas
 		compacted["tool_delta_count"] = len(result.ToolDelta)
-		compacted["tool_delta_truncated"] = len(result.ToolDelta) > modernVerificationListLimit
+		compacted["tool_delta_truncated"] = len(result.ToolDelta) > VerificationListLimit
 		detailsTruncated = true
 	}
 	if result.FullTestGate != "" {
@@ -472,5 +474,5 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 	}
 	compacted["details_truncated"] = detailsTruncated
 	sort.Strings(evidenceIDs)
-	return compacted, nonNilStrings(uniqueStrings(evidenceIDs))
+	return compacted, NonNilStrings(UniqueStrings(evidenceIDs))
 }

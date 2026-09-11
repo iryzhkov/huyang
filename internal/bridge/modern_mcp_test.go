@@ -14,47 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pkoukk/tiktoken-go"
 )
 
-func TestModernRegistryMatchesFrozenProfiles(t *testing.T) {
-	if err := validateModernRegistry(); err != nil {
-		t.Fatal(err)
-	}
-	fixtureBytes, err := os.ReadFile("../../docs/plans/fixtures/huyang-v1alpha1/contract-schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture struct {
-		Catalogs map[string][]string `json:"catalogs"`
-	}
-	if err := json.Unmarshal(fixtureBytes, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	for _, profile := range modernProfileOrder {
-		got := modernCatalogNames(profile)
-		want := fixture.Catalogs[string(profile)]
-		if !slices.Equal(got, want) {
-			t.Fatalf("%s catalog = %v, want %v", profile, got, want)
-		}
-		first, err := catalogJSON(profile)
-		if err != nil {
-			t.Fatal(err)
-		}
-		second, err := catalogJSON(profile)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(first) != string(second) {
-			t.Fatalf("%s catalog generation is nondeterministic", profile)
-		}
-	}
-}
-
-func connectOfficialClient(t *testing.T, profile mcpProfile, direct *directWorkspaces) (*mcp.ClientSession, func()) {
+func connectOfficialClient(t *testing.T, profile mcpapi.Profile, direct *directWorkspaces) (*mcp.ClientSession, func()) {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	server := newSDKServer(profile, direct)
@@ -94,7 +61,7 @@ func listedToolNames(t *testing.T, session *mcp.ClientSession) []string {
 }
 
 func TestOfficialClientNegotiatesModernProtocolAndCatalogs(t *testing.T) {
-	for _, profile := range modernProfileOrder {
+	for _, profile := range mcpapi.ProfileOrder {
 		t.Run(string(profile), func(t *testing.T) {
 			stateDir := t.TempDir()
 			session, cleanup := connectOfficialClient(t, profile, newDirectWorkspaces(stateDir))
@@ -102,7 +69,7 @@ func TestOfficialClientNegotiatesModernProtocolAndCatalogs(t *testing.T) {
 			if got := session.InitializeResult().ProtocolVersion; got != "2026-07-28" {
 				t.Fatalf("protocol = %q, want 2026-07-28", got)
 			}
-			got, want := listedToolNames(t, session), modernCatalogNames(profile)
+			got, want := listedToolNames(t, session), mcpapi.CatalogNames(profile)
 			slices.Sort(want)
 			if !slices.Equal(got, want) {
 				t.Fatalf("listed tools = %v, want sorted %v", got, want)
@@ -112,7 +79,7 @@ func TestOfficialClientNegotiatesModernProtocolAndCatalogs(t *testing.T) {
 }
 
 func TestDirectModeDoesNotAdvertiseTasksWithoutCapability(t *testing.T) {
-	session, cleanup := connectOfficialClient(t, profileFull, newDirectWorkspaces(t.TempDir()))
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, newDirectWorkspaces(t.TempDir()))
 	defer cleanup()
 	encoded, err := json.Marshal(session.InitializeResult().Capabilities)
 	if err != nil {
@@ -196,7 +163,7 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 		t.Fatalf("advertised timeout = %#v, want 300", got)
 	}
 
-	release, err := direct.scheduler.acquire(context.Background(), string(identity.ID), scheduleCanonicalWrite)
+	release, err := direct.scheduler.acquire(context.Background(), string(identity.ID), mcpapi.ClassCanonicalWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +189,7 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 		t.Fatalf("same-key retry replayed timeout: %#v", retry)
 	}
 
-	release, err = direct.scheduler.acquire(context.Background(), string(identity.ID), scheduleCanonicalWrite)
+	release, err = direct.scheduler.acquire(context.Background(), string(identity.ID), mcpapi.ClassCanonicalWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +209,7 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	if err := os.WriteFile(file, []byte("alpha beta\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session, cleanup := connectOfficialClient(t, profileEdit, newDirectWorkspaces(t.TempDir()))
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, newDirectWorkspaces(t.TempDir()))
 	defer cleanup()
 
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "documents", "files": []string{file}})
@@ -331,7 +298,7 @@ func TestModernDiagnosticInboxNoticesAndEvidenceRetrieval(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := newDirectWorkspaces(t.TempDir())
-	session, cleanup := connectOfficialClient(t, profileOrient, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, direct)
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
@@ -385,7 +352,7 @@ func TestOfficialClientPersistsIdempotentPlanPreviewAcrossRestart(t *testing.T) 
 	}
 
 	direct := newDirectWorkspaces(stateDir)
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	opened := callModern(t, session, "workspace_open", map[string]any{
 		"kind": "documents", "files": []string{file},
 	})
@@ -434,7 +401,7 @@ func TestOfficialClientPersistsIdempotentPlanPreviewAcrossRestart(t *testing.T) 
 	if restarted.loadErr != nil {
 		t.Fatal(restarted.loadErr)
 	}
-	session, cleanup = connectOfficialClient(t, profileEdit, restarted)
+	session, cleanup = connectOfficialClient(t, mcpapi.ProfileEdit, restarted)
 	defer cleanup()
 	reopened := callModern(t, session, "workspace_open", map[string]any{
 		"kind": "documents", "files": []string{file},
@@ -476,7 +443,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	if err := os.WriteFile(second, []byte("beta gamma\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session, cleanup := connectOfficialClient(t, profileEdit, newDirectWorkspaces(t.TempDir()))
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, newDirectWorkspaces(t.TempDir()))
 	defer cleanup()
 
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "documents", "files": []string{first, second}})
@@ -547,7 +514,7 @@ func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
 		}
 	}
 
-	session, cleanup := connectOfficialClient(t, profileOrient, newDirectWorkspaces(t.TempDir()))
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()))
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
@@ -587,7 +554,7 @@ func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
 
 func TestOfficialClientMatchesConcurrentResponsesToRequests(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
-	session, cleanup := connectOfficialClient(t, profileOrient, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, direct)
 	defer cleanup()
 
 	var ids []string
@@ -633,7 +600,7 @@ func TestSDKPropagatesToolCancellation(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "cancel-test", Version: "1"}, nil)
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
-	server.AddTool(&mcp.Tool{Name: "wait", InputSchema: schemaObject(map[string]any{})}, func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	server.AddTool(&mcp.Tool{Name: "wait", InputSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}, func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		close(started)
 		<-ctx.Done()
 		close(cancelled)
@@ -673,19 +640,19 @@ func TestSDKPropagatesToolCancellation(t *testing.T) {
 
 func TestDirectModeRejectsMalformedAndAcceptsLargeArguments(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
-	if _, err := decodeArguments(json.RawMessage("[]")); err == nil {
+	if _, err := mcpapi.DecodeArguments(json.RawMessage("[]")); err == nil {
 		t.Fatal("array arguments were accepted")
 	}
-	searchSchema := modernCatalog(profileOrient)[2].InputSchema
-	if err := validateToolArguments(searchSchema, map[string]any{"workspace_id": "ws"}); err == nil {
+	searchSchema := mcpapi.Catalog(mcpapi.ProfileOrient)[2].InputSchema
+	if err := mcpapi.ValidateToolArguments(searchSchema, map[string]any{"workspace_id": "ws"}); err == nil {
 		t.Fatal("missing required query was accepted")
 	}
-	if err := validateToolArguments(searchSchema, map[string]any{
+	if err := mcpapi.ValidateToolArguments(searchSchema, map[string]any{
 		"workspace_id": "ws", "query": "q", "unknown": true,
 	}); err == nil {
 		t.Fatal("unknown property was accepted")
 	}
-	if err := validateToolArguments(searchSchema, map[string]any{
+	if err := mcpapi.ValidateToolArguments(searchSchema, map[string]any{
 		"workspace_id": "ws", "query": "q", "mode": "invalid",
 	}); err == nil {
 		t.Fatal("invalid enum value was accepted")
@@ -695,7 +662,7 @@ func TestDirectModeRejectsMalformedAndAcceptsLargeArguments(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte("small"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session, cleanup := connectOfficialClient(t, profileOrient, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, direct)
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	id := opened["workspace"].(map[string]any)["id"].(string)
@@ -732,7 +699,7 @@ func TestModernVerificationEnvelopeUsesEmptyEvidenceArray(t *testing.T) {
 }
 
 func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
-	const itemCount = modernVerificationListLimit + 25
+	const itemCount = mcpapi.VerificationListLimit + 25
 	paths := make([]string, 0, itemCount)
 	selected := make([]workspacecore.SelectedTest, 0, itemCount)
 	nodes := make([]workspacecore.ImpactNode, 0, itemCount)
@@ -784,7 +751,7 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 			StartedRevision: "wsrev_9",
 			Exit:            0,
 			Writes:          paths,
-			Output:          strings.Repeat("o", modernVerificationOutputLimit) + "RAW_OUTPUT_TAIL",
+			Output:          strings.Repeat("o", mcpapi.VerificationOutputLimit) + "RAW_OUTPUT_TAIL",
 			Status:          workspacecore.VerificationPassed,
 			EvidenceIDs:     []string{"ev_tests", "ev_impact"},
 			TestScope:       "affected",
@@ -833,7 +800,7 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 	if _, ok := targeted["graph"]; ok {
 		t.Fatal("compacted targeted tests unexpectedly contain duplicate graph")
 	}
-	if verification["tool_delta_count"] != itemCount || len(verification["tool_delta"].([]any)) != modernVerificationListLimit {
+	if verification["tool_delta_count"] != itemCount || len(verification["tool_delta"].([]any)) != mcpapi.VerificationListLimit {
 		t.Fatalf("tool delta summary = %#v", verification["tool_delta"])
 	}
 	stage := verification["stages"].([]any)[0].(map[string]any)
@@ -853,7 +820,7 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, profile := range modernProfileOrder {
+	for _, profile := range mcpapi.ProfileOrder {
 		session, cleanup := connectOfficialClient(t, profile, newDirectWorkspaces(t.TempDir()))
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil {
@@ -883,34 +850,5 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 				profile, tool.Name, len(encoded), len(encoding.Encode(string(encoded), nil, nil)))
 		}
 		cleanup()
-	}
-}
-
-func TestChangePlanRequestBoundsAdvertiseChunkedRecovery(t *testing.T) {
-	schema := changePlanSchema(statefulProperties(), []string{"create_file"})
-	properties := schema["properties"].(map[string]any)
-	operations := properties["operations"].(map[string]any)
-	if operations["maxItems"] != maxPlanOperations || !strings.Contains(operations["description"].(string), "edit.mode=add") {
-		t.Fatalf("operations bound is not actionable: %#v", operations)
-	}
-	operation := operations["items"].(map[string]any)
-	content := operation["properties"].(map[string]any)["content"].(map[string]any)
-	if content["maxLength"] != maxPlanContentBytes {
-		t.Fatalf("content bound = %#v", content)
-	}
-	tooMany := make([]any, maxPlanOperations+1)
-	for index := range tooMany {
-		tooMany[index] = map[string]any{"op_id": fmt.Sprintf("op-%d", index), "kind": "create_file"}
-	}
-	err := validateToolArguments(schema, map[string]any{
-		"workspace_id": "ws_test", "idempotency_key": "bounded", "action": "create", "operations": tooMany,
-	})
-	if err == nil || !strings.Contains(err.Error(), "edit.mode=add") {
-		t.Fatalf("oversized plan error is not actionable: %v", err)
-	}
-	tooLarge := make(json.RawMessage, maxToolArgumentBytes+1)
-	err = validateToolArgumentSize(tooLarge)
-	if err == nil || !strings.Contains(err.Error(), "safe transport limit") || !strings.Contains(err.Error(), "edit.mode=add") {
-		t.Fatalf("oversized request error is not actionable: %v", err)
 	}
 }

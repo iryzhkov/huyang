@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if source, ok := arguments["git_history"].(map[string]any); ok {
 		fields := make([]string, 0)
-		for _, value := range anySlice(source["fields"]) {
+		for _, value := range mcpapi.AnySlice(source["fields"]) {
 			if field, ok := value.(string); ok {
 				fields = append(fields, field)
 			}
@@ -22,13 +23,13 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 			Query: query, Fields: fields, Ref: ref, Limit: argInt(source, "limit", 20),
 		})
 		if err != nil {
-			return modernFailure(requestID, workspace, "git_history_search_failed", err)
+			return mcpapi.Failure(requestID, workspace, "git_history_search_failed", err)
 		}
 		noun := "matches"
 		if len(result.Hits) == 1 {
 			noun = "match"
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
+		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
 	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
 		refine, _ := arguments["refine"].(map[string]any)
@@ -42,14 +43,14 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 		if err != nil {
 			var conflict *workspacecore.Conflict
 			if errors.As(err, &conflict) {
-				return modernEnvelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"result_set_handle": parent})
+				return mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"result_set_handle": parent})
 			}
-			return modernFailure(requestID, workspace, "search_refinement_failed", err)
+			return mcpapi.Failure(requestID, workspace, "search_refinement_failed", err)
 		}
 		limit := argInt(arguments, "limit", 50)
 		includeRanges, _ := arguments["include_ranges"].(bool)
-		hits, truncated := compactSearchHits(result.Matches, limit, includeRanges)
-		envelope := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
+		hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges)
+		envelope := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
 			"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
 		})
 		if truncated {
@@ -66,7 +67,7 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 	result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
 	if err != nil {
 		code := "search_failed"
-		failure := modernFailure(requestID, workspace, code, err)
+		failure := mcpapi.Failure(requestID, workspace, code, err)
 		if mode == workspacecore.SearchRegex {
 			failure["code"] = "invalid_regex"
 			failure["summary"] = "The regular expression is invalid: " + err.Error()
@@ -78,7 +79,7 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 	}
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
-	hits, truncated := compactSearchHits(result.Hits, limit, includeRanges)
+	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges)
 	summary := fmt.Sprintf("%d matches", len(result.Hits))
 	if len(result.Hits) == 1 {
 		summary = "1 match"
@@ -90,7 +91,7 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 		"workspace": result.Workspace, "hits": hits, "returned": len(hits), "total": len(result.Hits),
 		"coverage": result.Coverage, "query": result.Query, "mode": result.Mode, "result_set": result.ResultSet,
 	}
-	envelope := modernEnvelope(requestID, workspace, "ok", "", summary, data)
+	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 	if truncated {
 		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d matches", len(hits), len(result.Hits))}
 		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.ResultSet.Handle}}
@@ -104,7 +105,7 @@ func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspa
 	query, _ := arguments["query"].(string)
 	records, coverage, err := workspace.FindSymbols(query)
 	if err != nil {
-		return modernFailure(requestID, workspace, "symbol_find_failed", err)
+		return mcpapi.Failure(requestID, workspace, "symbol_find_failed", err)
 	}
 	providerEvidence := any(nil)
 	providerWarning := ""
@@ -119,8 +120,8 @@ func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspa
 			providerWarning = "Embedded semantic provider fallback failed: " + providerErr.Error()
 		} else {
 			value, _ := providerEvidence.(map[string]any)
-			providerRecords := make([]workspacecore.HandleRecord, 0, len(anySlice(value["matches"])))
-			for _, raw := range anySlice(value["matches"]) {
+			providerRecords := make([]workspacecore.HandleRecord, 0, len(mcpapi.AnySlice(value["matches"])))
+			for _, raw := range mcpapi.AnySlice(value["matches"]) {
 				match, _ := raw.(map[string]any)
 				path, name, kind := fmt.Sprint(match["file"]), fmt.Sprint(match["name_path"]), fmt.Sprint(match["kind"])
 				read, readErr := workspace.Read(path)
@@ -168,7 +169,7 @@ func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspa
 	if providerEvidence != nil {
 		data["provider_evidence"] = providerEvidence
 	}
-	result := modernEnvelope(requestID, workspace, outcome, code, summary, data)
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, data)
 	if providerWarning != "" {
 		result["warnings"] = []string{providerWarning}
 	}

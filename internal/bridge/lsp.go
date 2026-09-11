@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -43,7 +44,7 @@ func languageServerAttachmentConfirmed(value any) bool {
 func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
 	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
-		result := modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
+		result := mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
 		return result
 	}
@@ -60,7 +61,7 @@ func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID strin
 	seenServers := map[string]struct{}{}
 	attachedServers := []string{}
 	installOptions := map[string][]string{}
-	for _, raw := range anySlice(support["languages"]) {
+	for _, raw := range mcpapi.AnySlice(support["languages"]) {
 		entry, _ := raw.(map[string]any)
 		reconcileParserSupport(entry)
 		language := fmt.Sprint(entry["filetype"])
@@ -79,7 +80,7 @@ func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID strin
 			if strings.HasPrefix(lsp, "none (configured:") {
 				failedAttachments = append(failedAttachments, language)
 			}
-			for _, rawOption := range anySlice(entry["install_options"]) {
+			for _, rawOption := range mcpapi.AnySlice(entry["install_options"]) {
 				if option := strings.TrimSpace(fmt.Sprint(rawOption)); option != "" {
 					duplicate := false
 					for _, existing := range installOptions[language] {
@@ -104,8 +105,8 @@ func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID strin
 		outcome, code = "partial", "language_server_attachment_incomplete"
 		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(attachedServers), strings.Join(failedAttachments, ", "))
 	}
-	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
-		"provider": canonicalProviderStatus(ctx, backend), "language_servers": compactLanguageSupport(support),
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{
+		"provider": canonicalProviderStatus(ctx, backend), "language_servers": mcpapi.CompactLanguageSupport(support),
 		"attached_language_count": attachedLanguages, "attached_server_count": len(attachedServers),
 		"attached_servers": attachedServers, "missing_languages": missing,
 		"failed_attachment_languages": failedAttachments, "install_options": installOptions,
@@ -150,7 +151,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		before := h.languageServerStatus(ctx, requestID, workspace)
 		previouslyAttached := []string{}
 		if beforeData, _ := before["data"].(map[string]any); beforeData != nil {
-			for _, server := range anySlice(beforeData["attached_servers"]) {
+			for _, server := range mcpapi.AnySlice(beforeData["attached_servers"]) {
 				if name := strings.TrimSpace(fmt.Sprint(server)); name != "" {
 					previouslyAttached = append(previouslyAttached, name)
 				}
@@ -158,7 +159,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		}
 		backend, err := h.pool.restart(ctx, workspace)
 		if err != nil {
-			return modernFailure(requestID, workspace, "semantic_provider_restart_failed", err)
+			return mcpapi.Failure(requestID, workspace, "semantic_provider_restart_failed", err)
 		}
 		verified := h.languageServerStatus(ctx, requestID, workspace)
 		data, _ := verified["data"].(map[string]any)
@@ -168,7 +169,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		data["provider"] = canonicalProviderStatus(ctx, backend)
 		verified["data"] = data
 		current := map[string]bool{}
-		for _, server := range anySlice(data["attached_servers"]) {
+		for _, server := range mcpapi.AnySlice(data["attached_servers"]) {
 			current[strings.TrimSpace(fmt.Sprint(server))] = true
 		}
 		lost := []string{}
@@ -188,15 +189,15 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		return verified
 	}
 	if action != "install" {
-		return modernEnvelope(requestID, workspace, "failed", "invalid_language_server_action", "action must be install or restart", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_language_server_action", "action must be install or restart", map[string]any{})
 	}
 	language, _ := arguments["language"].(string)
 	if strings.TrimSpace(language) == "" {
-		return modernEnvelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
 	}
 	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
-		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
+		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
 	providerArguments := map[string]any{"root": workspace.Identity().Root, "language": language}
 	if server, ok := arguments["server"].(string); ok && server != "" {
@@ -215,7 +216,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
 	requestedServer := strings.TrimSpace(fmt.Sprint(arguments["server"]))
 	if requestedServer == "" && (len(serverResult) == 0 || status == "skipped" || status == "none") {
-		result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Parser support installation completed for %s; no language server was requested", language), data)
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Parser support installation completed for %s; no language server was requested", language), data)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_parser"}}
 		return result
 	}
@@ -228,7 +229,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		if strings.Contains(strings.ToLower(note), "cargo not found") {
 			requirement = "Install the Rust toolchain so cargo is executable in the Huyang user service PATH, then restart the provider."
 		}
-		result := modernEnvelope(requestID, workspace, "provisional", "language_server_not_attached",
+		result := mcpapi.Envelope(requestID, workspace, "provisional", "language_server_not_attached",
 			fmt.Sprintf("Language support was installed for %s, but its server did not attach: %s", language, note), data)
 		result["warnings"] = []string{requirement}
 		result["next"] = []any{
@@ -242,7 +243,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		if note == "" {
 			note = "the provider did not supply installation diagnostics"
 		}
-		result := modernEnvelope(requestID, workspace, "failed", "language_server_install_failed",
+		result := mcpapi.Envelope(requestID, workspace, "failed", "language_server_install_failed",
 			fmt.Sprintf("Language support installation failed for %s: %s", language, note), data)
 		result["warnings"] = []string{note}
 		result["next"] = failedLanguageServerInstallNext(status, language, requestedServer)
@@ -253,13 +254,13 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 		if note == "" || note == "<nil>" {
 			note = "the provider did not positively confirm attachment"
 		}
-		result := modernEnvelope(requestID, workspace, "provisional", "language_server_attachment_unconfirmed",
+		result := mcpapi.Envelope(requestID, workspace, "provisional", "language_server_attachment_unconfirmed",
 			fmt.Sprintf("Language support was installed for %s, but server attachment is unconfirmed: %s", language, note), data)
 		result["warnings"] = []string{note}
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
 		return result
 	}
-	result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)
 	result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
 	return result
 }
@@ -269,11 +270,11 @@ func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, w
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {
-		return modernFailure(requestID, workspace, "semantic_target_invalid", err)
+		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
 	}
 	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
-		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
+		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, relation, providerArguments)
 	if err != nil {
@@ -283,7 +284,7 @@ func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, w
 	}
 	navigation, _ := value.(map[string]any)
 	if count, present := navigation["count"]; present && fmt.Sprint(count) == "0" {
-		result := modernEnvelope(requestID, workspace, "partial", "navigation_not_found",
+		result := mcpapi.Envelope(requestID, workspace, "partial", "navigation_not_found",
 			fmt.Sprintf("The workspace language server returned no %s location", relation), map[string]any{
 				"navigation": value, "provider": canonicalProviderStatus(ctx, backend),
 				"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
@@ -294,7 +295,7 @@ func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, w
 		}
 		return result
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the workspace language server", relation), map[string]any{
+	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the workspace language server", relation), map[string]any{
 		"navigation": value, "provider": canonicalProviderStatus(ctx, backend),
 		"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
 	})
@@ -304,11 +305,11 @@ func (h *toolHandlers) codeActionsProvider(ctx context.Context, requestID string
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {
-		return modernFailure(requestID, workspace, "semantic_target_invalid", err)
+		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
 	}
 	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
-		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
+		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "code_actions", providerArguments)
 	if err != nil {
@@ -316,5 +317,5 @@ func (h *toolHandlers) codeActionsProvider(ctx context.Context, requestID string
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": canonicalProviderStatus(ctx, backend)})
+	return mcpapi.Envelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": canonicalProviderStatus(ctx, backend)})
 }

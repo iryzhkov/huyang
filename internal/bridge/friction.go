@@ -34,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 // frictionSource names this tool's directory in the spool. Every tool that
@@ -160,7 +162,7 @@ func randomID() string {
 func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return serverVersion
+		return mcpapi.ServerVersion
 	}
 	revision, modified := "", false
 	for _, setting := range info.Settings {
@@ -172,7 +174,7 @@ func buildVersion() string {
 		}
 	}
 	if revision == "" {
-		return serverVersion
+		return mcpapi.ServerVersion
 	}
 	if len(revision) > 12 {
 		revision = revision[:12]
@@ -180,7 +182,7 @@ func buildVersion() string {
 	if modified {
 		revision += "+dirty"
 	}
-	return serverVersion + "/" + revision
+	return mcpapi.ServerVersion + "/" + revision
 }
 
 var (

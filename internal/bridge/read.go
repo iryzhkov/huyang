@@ -5,25 +5,26 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, ok := arguments["target"].(map[string]any)
 	if !ok {
-		return modernEnvelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
 	}
 	view, _ := arguments["view"].(string)
 	opaque, _ := target["handle"].(string)
 	if view == "changes" {
 		if opaque == "" {
-			return modernEnvelope(requestID, workspace, "failed", "commit_handle_required", "changes view requires an opaque commit handle", map[string]any{})
+			return mcpapi.Envelope(requestID, workspace, "failed", "commit_handle_required", "changes view requires an opaque commit handle", map[string]any{})
 		}
 		changes, err := workspace.CommitChanges(workspacecore.CommitHandle(opaque), argInt(arguments, "limit", 20))
 		if err != nil {
-			return modernFailure(requestID, workspace, "commit_changes_failed", err)
+			return mcpapi.Failure(requestID, workspace, "commit_changes_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d changed paths", len(changes.Changes)), changes)
+		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d changed paths", len(changes.Changes)), changes)
 	}
 
 	var path string
@@ -31,28 +32,28 @@ func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *wo
 	if opaque != "" {
 		resolution, err := workspace.ResolveHandle(workspacecore.HandleID(opaque))
 		if err != nil {
-			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
+			return mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
 		}
 		if resolution.Status == workspacecore.ResolutionConflicted {
 			return modernHandleConflict(requestID, workspace, resolution)
 		}
 		resolved, err := resolution.RangeHandle()
 		if err != nil {
-			return modernFailure(requestID, workspace, "handle_resolve_failed", err)
+			return mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
 		}
 		path = resolved.Path
 		read, err := workspace.Read(path)
 		if err != nil {
-			return modernFailure(requestID, workspace, "read_failed", err)
+			return mcpapi.Failure(requestID, workspace, "read_failed", err)
 		}
 		if resolved.ByteStart < 0 || resolved.ByteEnd > len(read.Content) || resolved.ByteEnd < resolved.ByteStart {
-			return modernEnvelope(requestID, workspace, "conflict", "target_deleted", "Resolved handle range is no longer readable", resolution)
+			return mcpapi.Envelope(requestID, workspace, "conflict", "target_deleted", "Resolved handle range is no longer readable", resolution)
 		}
 		if view == "history" {
 			startLine = bytes.Count(read.Content[:resolved.ByteStart], []byte("\n")) + 1
 			endLine = bytes.Count(read.Content[:resolved.ByteEnd], []byte("\n")) + 1
 		} else if startLine == 0 && endLine == 0 {
-			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
+			return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
 				"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
 				"coverage": read.Coverage, "resolution": resolution,
 			})
@@ -65,7 +66,7 @@ func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *wo
 			name, _ := symbol["name_path"].(string)
 			matches, coverage, findErr := workspace.FindSymbols(name)
 			if findErr != nil {
-				return modernFailure(requestID, workspace, "symbol_read_failed", findErr)
+				return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
 			}
 			var exact []workspacecore.HandleRecord
 			for _, match := range matches {
@@ -88,59 +89,59 @@ func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *wo
 				if !coverage.Complete {
 					outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
 				}
-				result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
+				result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
 				result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": name, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
 				return result
 			}
 			resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
 			if resolveErr != nil || resolved.Current == nil {
 				if resolveErr != nil {
-					return modernFailure(requestID, workspace, "symbol_read_failed", resolveErr)
+					return mcpapi.Failure(requestID, workspace, "symbol_read_failed", resolveErr)
 				}
 				return modernHandleConflict(requestID, workspace, resolved)
 			}
 			read, readErr := workspace.Read(path)
 			if readErr != nil {
-				return modernFailure(requestID, workspace, "read_failed", readErr)
+				return mcpapi.Failure(requestID, workspace, "read_failed", readErr)
 			}
 			current := resolved.Current
-			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
+			return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
 				"path": path, "content": string(read.Content[current.ByteStart:current.ByteEnd]), "snapshot": read.Snapshot,
 				"coverage": coverage, "resolution": resolved,
 			})
 		} else if fileRange, present := target["file_range"].(map[string]any); present {
 			path, _ = fileRange["path"].(string)
 		} else {
-			return modernEnvelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
+			return mcpapi.Envelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
 		}
 	}
 	if view == "history" {
 		history, err := workspace.FileHistory(workspacecore.HistoryRequest{Path: path, StartLine: startLine, EndLine: endLine, Limit: argInt(arguments, "limit", 20)})
 		if err != nil {
-			return modernFailure(requestID, workspace, "git_history_read_failed", err)
+			return mcpapi.Failure(requestID, workspace, "git_history_read_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d provenance spans", len(history.Spans)), history)
+		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d provenance spans", len(history.Spans)), history)
 	}
 	if view == "outline" {
 		outline, err := workspace.Outline(path)
 		if err != nil {
-			return modernFailure(requestID, workspace, "read_failed", err)
+			return mcpapi.Failure(requestID, workspace, "read_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", "Outline read", outline)
+		return mcpapi.Envelope(requestID, workspace, "ok", "", "Outline read", outline)
 	}
 	read, err := workspace.Read(path)
 	if err != nil {
-		return modernFailure(requestID, workspace, "read_failed", err)
+		return mcpapi.Failure(requestID, workspace, "read_failed", err)
 	}
 	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, startLine, endLine)
 	if rangeErr != nil {
-		return modernFailure(requestID, workspace, "invalid_line_range", rangeErr)
+		return mcpapi.Failure(requestID, workspace, "invalid_line_range", rangeErr)
 	}
 	data := map[string]any{"path": read.Path, "content": string(content), "snapshot": read.Snapshot, "coverage": read.Coverage}
 	if startLine != 0 || endLine != 0 {
 		data["start_line"], data["end_line"] = actualStart, actualEnd
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
+	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
 }
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the
@@ -169,7 +170,7 @@ func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, 
 	case workspacecore.ConflictDocumentChanged:
 		summary = "The target document changed since this handle was issued"
 	}
-	result := modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), summary, resolution)
+	result := mcpapi.Envelope(requestID, workspace, "conflict", string(resolution.Code), summary, resolution)
 	path := resolution.Original.Path
 	next := []any{}
 	if resolution.Code != workspacecore.ConflictTargetDeleted {

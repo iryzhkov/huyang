@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -76,7 +77,7 @@ type toolHandlers struct {
 // a registered one.
 func (h *toolHandlers) execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
 	if err := ctx.Err(); err != nil {
-		return modernEnvelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
 	if name == "workspace_open" {
 		return h.open(ctx, requestID, arguments)
@@ -86,7 +87,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		target, _ := arguments["target"].(map[string]any)
 		path, _ := target["path"].(string)
 		if strings.TrimSpace(path) == "" {
-			return modernEnvelope(requestID, nil, "failed", "workspace_required", "workspace_id is required for handle, range, symbol, history, and changes reads", map[string]any{})
+			return mcpapi.Envelope(requestID, nil, "failed", "workspace_required", "workspace_id is required for handle, range, symbol, history, and changes reads", map[string]any{})
 		}
 		opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}})
 		if opened["outcome"] != "ok" {
@@ -95,7 +96,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		identity, _ := opened["workspace"].(workspacecore.Identity)
 		implicitID := strings.TrimSpace(string(identity.ID))
 		if implicitID == "" {
-			return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
+			return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
 		}
 		arguments["workspace_id"] = implicitID
 		result := h.execute(ctx, requestID, name, arguments)
@@ -107,7 +108,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 	}
 	workspace := h.registry.lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
-		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
 	// Provider-touching calls are serialised by the scheduler lanes in
 	// executeScheduled, and plans stage in isolated sandboxes with their own
@@ -127,7 +128,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		return h.codeActionsProvider(ctx, requestID, workspace, arguments)
 	case "workspace_inspect":
 		if _, refreshErr := workspace.RefreshKnownDocuments(); refreshErr != nil {
-			return modernFailure(requestID, workspace, "workspace_refresh_failed", refreshErr)
+			return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", refreshErr)
 		}
 		inspection := workspace.Inspect()
 		var semanticProvider map[string]any
@@ -138,7 +139,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		}
 		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
 		if policyErr != nil {
-			result := modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
+			result := mcpapi.Failure(requestID, workspace, "workspace_policy_invalid", policyErr)
 			result["next"] = []any{map[string]any{
 				"tool": "workspace_inspect", "action": "repair_pipeline_configuration",
 				"project_config": filepath.Join(workspace.Identity().Root, ".huyang.toml"),
@@ -173,12 +174,12 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		if view == "overview" || view == "map" {
 			orientation, err := workspace.Orient()
 			if err != nil {
-				return modernFailure(requestID, workspace, "workspace_map_failed", err)
+				return mcpapi.Failure(requestID, workspace, "workspace_map_failed", err)
 			}
 			base["overview"] = orientation
 			summary = fmt.Sprintf("%d workspace entries", len(orientation.Entries))
 		}
-		result := modernEnvelope(requestID, workspace, "ok", "", summary, base)
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, base)
 		if pipelineState == "configured_untrusted" {
 			result["warnings"] = []string{pipelineReason}
 			result["next"] = []any{map[string]any{
@@ -197,7 +198,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		since, _ := arguments["since"].(string)
 		report, err := workspace.Diagnostics(since)
 		if err != nil {
-			return modernFailure(requestID, workspace, "diagnostic_cursor_invalid", err)
+			return mcpapi.Failure(requestID, workspace, "diagnostic_cursor_invalid", err)
 		}
 		outcome := "ok"
 		summary := "Diagnostic evidence retrieved from the durable workspace inbox"
@@ -209,10 +210,10 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 			summary = "Diagnostic evidence is unavailable for this workspace"
 		}
 		full, _ := arguments["full"].(bool)
-		result := modernEnvelope(requestID, workspace, outcome, "", summary, compactDiagnosticReport(report, outcome, full))
+		result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, mcpapi.CompactDiagnosticReport(report, outcome, full))
 		ids := append([]string(nil), report.EvidenceIDs...)
 		sort.Strings(ids)
-		result["evidence"] = map[string]any{"ids": nonNilStrings(uniqueStrings(ids)), "truncated": false}
+		result["evidence"] = map[string]any{"ids": mcpapi.NonNilStrings(mcpapi.UniqueStrings(ids)), "truncated": false}
 		if outcome == "unavailable" {
 			result["next"] = []any{
 				map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status"},
@@ -223,9 +224,9 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 	case "evidence_get":
 		evidence, err := workspace.Evidence(fmt.Sprint(arguments["evidence_id"]))
 		if err != nil {
-			return modernFailure(requestID, workspace, "evidence_not_found", err)
+			return mcpapi.Failure(requestID, workspace, "evidence_not_found", err)
 		}
-		result := modernEnvelope(requestID, workspace, "ok", "", "Detailed diagnostic evidence retrieved", map[string]any{"evidence": evidence})
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", "Detailed diagnostic evidence retrieved", map[string]any{"evidence": evidence})
 		result["evidence"] = map[string]any{"ids": []string{evidence.ID}, "truncated": false}
 		return result
 	case "edit_apply":
@@ -239,7 +240,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 	case "debug_session", "debug_breakpoints", "debug_control", "debug_inspect":
 		return h.debug(ctx, requestID, name, workspace, arguments)
 	default:
-		result := modernEnvelope(requestID, workspace, "unavailable", "semantic_provider_unavailable",
+		result := mcpapi.Envelope(requestID, workspace, "unavailable", "semantic_provider_unavailable",
 			fmt.Sprintf("%s requires a semantic provider that is not available for this workspace", name),
 			map[string]any{"tool": name, "coverage": map[string]any{"complete": false, "unavailable": []string{"semantic_provider"}}})
 		result["next"] = []any{

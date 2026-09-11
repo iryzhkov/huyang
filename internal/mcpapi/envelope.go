@@ -1,4 +1,4 @@
-package bridge
+package mcpapi
 
 import (
 	"encoding/json"
@@ -6,30 +6,30 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// modernAPIVersion is the contract revision every envelope declares.
-const modernAPIVersion = "huyang.workspace/v1alpha1"
+// APIVersion is the contract revision every envelope declares.
+const APIVersion = "huyang.workspace/v1alpha1"
 
-// maxNextEntries bounds the next array the output schema advertises.
-const maxNextEntries = 2
+// MaxNextEntries bounds the next array the output schema advertises.
+const MaxNextEntries = 2
 
 // envelopeAudit, when set, observes every finalised envelope. Production
 // never sets it: the output schema is enforced structurally by
-// finalizeEnvelope, and full validation against the schema is test-only. The
-// test suites install validateModernOutput here through setEnvelopeAudit so
+// FinalizeEnvelope, and full validation against the schema is test-only. The
+// test suites install ValidateOutput here through SetEnvelopeAudit so
 // every envelope produced by any package is checked.
 var envelopeAudit func(tool string, envelope map[string]any)
 
-// setEnvelopeAudit installs the envelope observer. It exists for the test
+// SetEnvelopeAudit installs the envelope observer. It exists for the test
 // suites; see envelopeAudit.
-func setEnvelopeAudit(audit func(tool string, envelope map[string]any)) {
+func SetEnvelopeAudit(audit func(tool string, envelope map[string]any)) {
 	envelopeAudit = audit
 }
 
-// validateModernOutput checks an envelope against the advertised output
+// ValidateOutput checks an envelope against the advertised output
 // schema after a JSON round trip, exactly as a client would see it. It is
 // the test-only half of output-schema validation: production relies on
-// finalizeEnvelope and never validates its own results.
-func validateModernOutput(value map[string]any) error {
+// FinalizeEnvelope and never validates its own results.
+func ValidateOutput(value map[string]any) error {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -38,19 +38,19 @@ func validateModernOutput(value map[string]any) error {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		return err
 	}
-	return validateSchemaValue(outputEnvelopeSchema(), decoded, "result")
+	return validateSchemaValue(OutputEnvelopeSchema(), decoded, "result")
 }
 
-// finalizeEnvelope is the single place every tool result passes through
+// FinalizeEnvelope is the single place every tool result passes through
 // before it leaves the service. It enforces the invariants the output schema
 // declares: the required keys exist with their declared types and next holds
-// at most maxNextEntries entries, keeping the earliest, most specific ones.
-func finalizeEnvelope(tool string, result map[string]any) map[string]any {
+// at most MaxNextEntries entries, keeping the earliest, most specific ones.
+func FinalizeEnvelope(tool string, result map[string]any) map[string]any {
 	if result == nil {
 		result = map[string]any{}
 	}
 	if _, ok := result["api_version"]; !ok {
-		result["api_version"] = modernAPIVersion
+		result["api_version"] = APIVersion
 	}
 	if _, ok := result["warnings"].([]string); !ok {
 		result["warnings"] = []string{}
@@ -65,13 +65,13 @@ func finalizeEnvelope(tool string, result map[string]any) map[string]any {
 	case nil:
 		result["next"] = []any{}
 	case []any:
-		if len(next) > maxNextEntries {
-			result["next"] = next[:maxNextEntries]
+		if len(next) > MaxNextEntries {
+			result["next"] = next[:MaxNextEntries]
 		}
 	case []map[string]any:
-		bounded := make([]any, 0, maxNextEntries)
+		bounded := make([]any, 0, MaxNextEntries)
 		for _, item := range next {
-			if len(bounded) == maxNextEntries {
+			if len(bounded) == MaxNextEntries {
 				break
 			}
 			bounded = append(bounded, item)
@@ -84,7 +84,7 @@ func finalizeEnvelope(tool string, result map[string]any) map[string]any {
 	return result
 }
 
-func cloneEnvelope(source map[string]any) map[string]any {
+func CloneEnvelope(source map[string]any) map[string]any {
 	clone := make(map[string]any, len(source))
 	for key, value := range source {
 		clone[key] = value
@@ -92,7 +92,7 @@ func cloneEnvelope(source map[string]any) map[string]any {
 	return clone
 }
 
-func uniqueStrings(values []string) []string {
+func UniqueStrings(values []string) []string {
 	if len(values) < 2 {
 		return values
 	}
@@ -105,20 +105,20 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-func nonNilStrings(values []string) []string {
+func NonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
 	}
 	return values
 }
 
-func modernFailure(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
-	return modernEnvelope(requestID, workspace, "failed", code, err.Error(), map[string]any{})
+func Failure(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
+	return Envelope(requestID, workspace, "failed", code, err.Error(), map[string]any{})
 }
 
-func modernEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary string, data any) map[string]any {
+func Envelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary string, data any) map[string]any {
 	result := map[string]any{
-		"api_version": modernAPIVersion, "request_id": requestID, "outcome": outcome,
+		"api_version": APIVersion, "request_id": requestID, "outcome": outcome,
 		"summary": summary, "data": data,
 		"evidence": map[string]any{"ids": []string{}, "truncated": false},
 		"warnings": []string{}, "next": []any{},
@@ -132,7 +132,7 @@ func modernEnvelope(requestID string, workspace *workspacecore.Workspace, outcom
 	return result
 }
 
-func anySlice(value any) []any {
+func AnySlice(value any) []any {
 	if values, ok := value.([]any); ok {
 		return values
 	}

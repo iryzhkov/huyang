@@ -5,26 +5,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newSDKServer(profile mcpProfile, direct *directWorkspaces) *mcp.Server {
+func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
-		Name: "huyang", Title: "Huyang", Version: serverVersion,
+		Name: "huyang", Title: "Huyang", Version: mcpapi.ServerVersion,
 		Description: "Transactional semantic workspace for coding agents.",
 	}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{}})
-	for _, descriptor := range modernCatalog(profile) {
+	for _, descriptor := range mcpapi.Catalog(profile) {
 		registerModernTool(server, descriptor, direct)
 	}
 	return server
 }
 
-func registerModernTool(server *mcp.Server, descriptor modernTool, direct *directWorkspaces) {
+func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, direct *directWorkspaces) {
 	server.AddTool(&mcp.Tool{
 		Name: descriptor.Name, Description: descriptor.Description,
-		InputSchema: descriptor.InputSchema, OutputSchema: outputEnvelopeSchema(),
+		InputSchema: descriptor.InputSchema, OutputSchema: mcpapi.OutputEnvelopeSchema(),
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    descriptor.ReadOnly,
 			DestructiveHint: boolPointer(descriptor.Destructive),
@@ -34,20 +35,20 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		started := time.Now()
 		client := modernClientName(request)
-		if err := validateToolArgumentSize(request.Params.Arguments); err != nil {
+		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
 			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
-		arguments, err := decodeArguments(request.Params.Arguments)
+		arguments, err := mcpapi.DecodeArguments(request.Params.Arguments)
 		if err != nil {
 			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
-		if err := validateToolArguments(descriptor.InputSchema, arguments); err != nil {
+		if err := mcpapi.ValidateToolArguments(descriptor.InputSchema, arguments); err != nil {
 			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
-		if err := validateModernDebugArguments(descriptor.Name, arguments); err != nil {
+		if err := mcpapi.ValidateDebugArguments(descriptor.Name, arguments); err != nil {
 			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
@@ -60,13 +61,13 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
-		pretty, renderErr := renderJSON(compactTextEnvelope(envelope))
+		pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))
 		if renderErr != nil {
 			return nil, renderErr
 		}
 		return &mcp.CallToolResult{
 			Content:           []mcp.Content{&mcp.TextContent{Text: string(pretty)}},
-			StructuredContent: compactStructuredEnvelope(envelope),
+			StructuredContent: mcpapi.CompactStructuredEnvelope(envelope),
 			IsError:           isError,
 		}, nil
 	})
@@ -115,3 +116,5 @@ func modernFrictionRoot(direct *directWorkspaces, tool string, arguments map[str
 	}
 	return ""
 }
+
+func boolPointer(value bool) *bool { return &value }

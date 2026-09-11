@@ -1,4 +1,4 @@
-package bridge
+package mcpapi
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func validateToolArguments(schema map[string]any, arguments map[string]any) error {
+func ValidateToolArguments(schema map[string]any, arguments map[string]any) error {
 	return validateSchemaValue(schema, arguments, "arguments")
 }
 
@@ -115,7 +115,7 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 	return nil
 }
 
-func decodeArguments(raw json.RawMessage) (map[string]any, error) {
+func DecodeArguments(raw json.RawMessage) (map[string]any, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return map[string]any{}, nil
 	}
@@ -129,10 +129,10 @@ func decodeArguments(raw json.RawMessage) (map[string]any, error) {
 	return arguments, nil
 }
 
-func validateToolArgumentSize(raw json.RawMessage) error {
-	if len(raw) <= maxToolArgumentBytes {
+func ValidateToolArgumentSize(raw json.RawMessage) error {
+	if len(raw) <= MaxToolArgumentBytes {
 		return nil
 	}
 	return fmt.Errorf("tool arguments are %d bytes, exceeding the %d-byte safe transport limit; split a large change plan into batches of at most %d operations using action=edit and edit.mode=add",
-		len(raw), maxToolArgumentBytes, maxPlanOperations)
+		len(raw), MaxToolArgumentBytes, MaxPlanOperations)
 }

@@ -3,6 +3,8 @@ package bridge
 import (
 	"strings"
 	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 // With no evidence recorded, diagnostics answers unavailable, does not claim
@@ -10,7 +12,7 @@ import (
 // evidence.
 func TestDiagnosticsWithoutEvidenceIsUnavailableWithRecovery(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "only once\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 
 	diagnostics := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})

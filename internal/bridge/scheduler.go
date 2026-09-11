@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 type workspaceScheduler struct {
@@ -38,11 +40,11 @@ func newWorkspaceScheduler(providerQuota, externalJobQuota int) *workspaceSchedu
 func (s *workspaceScheduler) description() map[string]any {
 	return map[string]any{
 		"classes": []string{
-			string(schedulePureRead),
-			string(scheduleProviderRead),
-			string(scheduleCanonicalWrite),
-			string(scheduleSandboxWrite),
-			string(scheduleExternalJob),
+			string(mcpapi.ClassPureRead),
+			string(mcpapi.ClassProviderRead),
+			string(mcpapi.ClassCanonicalWrite),
+			string(mcpapi.ClassSandboxWrite),
+			string(mcpapi.ClassExternalJob),
 		},
 		"provider_quota":          s.providerQuota,
 		"external_job_quota":      s.externalQuota,
@@ -51,11 +53,11 @@ func (s *workspaceScheduler) description() map[string]any {
 	}
 }
 
-func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, class schedulerClass) (func(), error) {
+func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, class mcpapi.SchedulerClass) (func(), error) {
 	switch class {
-	case schedulePureRead:
+	case mcpapi.ClassPureRead:
 		return func() {}, nil
-	case scheduleProviderRead:
+	case mcpapi.ClassProviderRead:
 		releaseProvider, err := acquireSlot(ctx, s.providerSlots)
 		if err != nil {
 			return nil, err
@@ -69,9 +71,9 @@ func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, cl
 			releaseLane()
 			releaseProvider()
 		}, nil
-	case scheduleCanonicalWrite:
+	case mcpapi.ClassCanonicalWrite:
 		return acquireSlot(ctx, s.lane(workspaceID))
-	case scheduleSandboxWrite:
+	case mcpapi.ClassSandboxWrite:
 		releaseProvider, err := acquireSlot(ctx, s.providerSlots)
 		if err != nil {
 			return nil, err
@@ -92,7 +94,7 @@ func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, cl
 			releaseService()
 			releaseProvider()
 		}, nil
-	case scheduleExternalJob:
+	case mcpapi.ClassExternalJob:
 		return acquireSlot(ctx, s.externalSlots)
 	default:
 		return nil, fmt.Errorf("unknown scheduler class %q", class)

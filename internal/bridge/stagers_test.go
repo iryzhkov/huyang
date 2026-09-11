@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -28,7 +29,7 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	}
 	direct := newDirectWorkspaces(stateDir)
 	defer direct.closeProviders()
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{
 		"kind": "documents", "files": []string{file},
@@ -111,7 +112,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	}
 	direct := newDirectWorkspaces(stateDir)
 	defer direct.closeProviders()
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{
 		"kind": "documents", "files": []string{file},
@@ -195,7 +196,7 @@ func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.
 	root, stateDir := t.TempDir(), t.TempDir()
 	direct := newDirectWorkspaces(stateDir)
 	defer direct.closeProviders()
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 
 	opened := callModern(t, session, "workspace_open", map[string]any{

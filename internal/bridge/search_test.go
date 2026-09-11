@@ -1,12 +1,16 @@
 package bridge
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
+)
 
 // A single hit is summarised in the singular, and an invalid regular
 // expression names its code and offers a literal retry.
 func TestSearchSummarisesSingleHitAndRecoversInvalidRegex(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "only once\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 
 	singular := callModern(t, session, "search", map[string]any{

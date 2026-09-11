@@ -1,4 +1,4 @@
-package bridge
+package mcpapi
 
 import (
 	"errors"
@@ -64,7 +64,7 @@ func debugTargetOptions() map[string]any {
 	}
 }
 
-func modernDebugSessionTool(profiles []mcpProfile) modernTool {
+func modernDebugSessionTool(profiles []Profile) ToolDescriptor {
 	properties := debugStatefulProperties()
 	for key, value := range map[string]any{
 		"file":          map[string]any{"type": "string"},
@@ -89,42 +89,42 @@ func modernDebugSessionTool(profiles []mcpProfile) modernTool {
 		"type":  "array",
 		"items": schemaObject(debugTargetOptions(), "target"),
 	}
-	return modernTool{
-		Class: scheduleProviderRead, Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
+	return ToolDescriptor{
+		Class: ClassProviderRead, Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
 		Profiles: profiles, Destructive: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
 			"start", "attach", "restart", "stop"),
 	}
 }
 
-func modernDebugBreakpointsTool(profiles []mcpProfile) modernTool {
+func modernDebugBreakpointsTool(profiles []Profile) ToolDescriptor {
 	properties := debugStatefulProperties()
 	for key, value := range debugTargetOptions() {
 		properties[key] = value
 	}
-	return modernTool{
-		Class: scheduleProviderRead, Name: "debug_breakpoints", Description: "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
+	return ToolDescriptor{
+		Class: ClassProviderRead, Name: "debug_breakpoints", Description: "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
 		Profiles: profiles, Destructive: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
 			"list", "set", "remove", "clear"),
 	}
 }
 
-func modernDebugControlTool(profiles []mcpProfile) modernTool {
+func modernDebugControlTool(profiles []Profile) ToolDescriptor {
 	properties := debugStatefulProperties()
 	properties["wait_ms"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 240000}
 	properties["count"] = map[string]any{"type": "integer", "minimum": 1, "maximum": 50}
 	properties["target"] = modernDebugTargetSchema()
 	properties["line_offset"] = map[string]any{"type": "integer", "minimum": 1}
-	return modernTool{
-		Class: scheduleProviderRead, Name: "debug_control", Description: "Continue, pause, step, or run to a revision-bound source target.",
+	return ToolDescriptor{
+		Class: ClassProviderRead, Name: "debug_control", Description: "Continue, pause, step, or run to a revision-bound source target.",
 		Profiles: profiles, Destructive: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
 			"continue", "pause", "step_over", "step_into", "step_out", "run_to"),
 	}
 }
 
-func modernDebugInspectTool(profiles []mcpProfile) modernTool {
+func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 	properties := debugReadProperties()
 	for key, value := range map[string]any{
 		"thread":     map[string]any{"type": "integer"},
@@ -140,15 +140,15 @@ func modernDebugInspectTool(profiles []mcpProfile) modernTool {
 	} {
 		properties[key] = value
 	}
-	return modernTool{
-		Class: scheduleProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
+	return ToolDescriptor{
+		Class: ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
 		Profiles: profiles, ReadOnly: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "action"},
 			"threads", "stack", "scopes", "variables", "evaluate"),
 	}
 }
 
-func validateModernDebugArguments(name string, arguments map[string]any) error {
+func ValidateDebugArguments(name string, arguments map[string]any) error {
 	action, _ := arguments["action"].(string)
 	baseStateful := map[string]bool{"workspace_id": true, "idempotency_key": true, "transaction_id": true, "action": true}
 	baseRead := map[string]bool{"workspace_id": true, "transaction_id": true, "action": true}

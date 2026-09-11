@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operation, ok := arguments["operation"].(map[string]any)
 	if !ok || operation["kind"] != "replace_range" {
-		return modernEnvelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})
 	}
 	target, _ := operation["target"].(map[string]any)
 	var handle workspacecore.RangeHandle
@@ -20,7 +21,7 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 	if opaque, _ := target["handle"].(string); opaque != "" {
 		resolved, resolveErr := workspace.ResolveHandle(workspacecore.HandleID(opaque))
 		if resolveErr != nil {
-			result := modernFailure(requestID, workspace, "handle_resolve_failed", resolveErr)
+			result := mcpapi.Failure(requestID, workspace, "handle_resolve_failed", resolveErr)
 			result["next"] = []any{
 				map[string]any{"tool": "workspace_inspect", "view": "status", "action": "confirm_current_revision"},
 				map[string]any{"tool": "search", "action": "repeat_source_query_and_retry_with_fresh_handle", "expired_handle": opaque},
@@ -37,7 +38,7 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 		handle, err = decodeRangeHandle(fileRange)
 	}
 	if err != nil {
-		return modernFailure(requestID, workspace, "invalid_target", err)
+		return mcpapi.Failure(requestID, workspace, "invalid_target", err)
 	}
 	content, _ := operation["content"].(string)
 	var change workspacecore.TextChange
@@ -54,24 +55,24 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 	if err != nil {
 		var conflict *workspacecore.Conflict
 		if errors.As(err, &conflict) {
-			result := modernEnvelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{
+			result := mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{
 				"target": handle, "current_revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
 			})
 			result["next"] = []any{map[string]any{"tool": "read", "action": "refresh_path", "path": handle.Path}, map[string]any{"tool": "search", "action": "relocate_target", "path": handle.Path}}
 			return result
 		}
-		return modernFailure(requestID, workspace, "edit_failed", err)
+		return mcpapi.Failure(requestID, workspace, "edit_failed", err)
 	}
 	summary, outcome := "Guarded range preview is ready; canonical bytes unchanged", "ok"
 	data := map[string]any{
-		"change": compactTextChange(change), "resolution": resolution, "tool_delta": []any{},
+		"change": mcpapi.CompactTextChange(change), "resolution": resolution, "tool_delta": []any{},
 		"diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
 		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq),
 		"changed_paths":    []string{change.Diff.Path}, "canonical_changed": !preview,
 	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 	if !preview {
-		checkpoint := modernEnvelope(requestID, workspace, "provisional", "",
+		checkpoint := mcpapi.Envelope(requestID, workspace, "provisional", "",
 			"Guarded range edit applied; canonical receipt persisted before semantic diagnostics", data)
 		checkpoint["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
 		checkpoint["next"] = []any{
@@ -79,7 +80,7 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 			map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": data["revision"]},
 		}
 		if persistErr := checkpointStatefulReceipt(ctx, checkpoint); persistErr != nil {
-			result := modernEnvelope(requestID, workspace, "provisional", "mutation_receipt_persist_failed",
+			result := mcpapi.Envelope(requestID, workspace, "provisional", "mutation_receipt_persist_failed",
 				"Guarded range edit applied, but its recovery receipt could not be persisted", data)
 			result["warnings"] = []string{persistErr.Error()}
 			result["next"] = []any{map[string]any{"tool": "revision_diff", "action": "inspect_current_revision_before_retry"}}
@@ -103,7 +104,7 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 				data["diagnostic_delta"] = map[string]any{"new": report.New, "resolved": report.Resolved}
 				verification = map[string]any{
 					"confidence": report.Confidence,
-					"reasons":    nonNilStrings(report.ProvisionalReasons),
+					"reasons":    mcpapi.NonNilStrings(report.ProvisionalReasons),
 				}
 				if report.Confidence == workspacecore.ConfidenceAuthoritative || report.Confidence == workspacecore.ConfidenceCorroborated {
 					outcome = "ok"
@@ -135,8 +136,8 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 			summary = "Guarded range edit applied after safely relocating the stale target; semantic diagnostics remain incomplete"
 		}
 	}
-	result := modernEnvelope(requestID, workspace, outcome, "", summary, data)
-	result["evidence"] = map[string]any{"ids": nonNilStrings(evidenceIDs), "truncated": false}
+	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, data)
+	result["evidence"] = map[string]any{"ids": mcpapi.NonNilStrings(evidenceIDs), "truncated": false}
 	if diagnosticRecovery {
 		result["next"] = []any{
 			map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"},

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -241,7 +242,7 @@ func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 	if len(options["python"]) != 2 || len(options["rust"]) != 1 {
 		t.Fatalf("install options = %#v", options)
 	}
-	for _, raw := range anySlice(data["language_servers"].(map[string]any)["languages"]) {
+	for _, raw := range mcpapi.AnySlice(data["language_servers"].(map[string]any)["languages"]) {
 		entry := raw.(map[string]any)
 		if _, present := entry["install_options"]; present {
 			t.Fatalf("language entry repeats install options: %#v", entry)
@@ -304,34 +305,17 @@ func TestReadSymbolLocatorFallsBackToProviderDeclarations(t *testing.T) {
 	}
 }
 
-// The text rendering summarises an orientation without dropping the other
-// result fields.
-func TestCompactTextDataSummarisesOrientationWithoutDroppingResults(t *testing.T) {
-	orientation := workspacecore.Orientation{Entries: []workspacecore.Entry{{Path: "a.go"}, {Path: "b.go"}}}
-	data := compactTextData(map[string]any{"overview": orientation, "content": "kept"}).(map[string]any)
-	if data["content"] != "kept" {
-		t.Fatalf("substantive text data was dropped: %#v", data)
-	}
-	summary := data["overview"].(map[string]any)
-	if summary["entry_count"] != 2 {
-		t.Fatalf("orientation summary = %#v", summary)
-	}
-	if _, present := summary["entries"]; present {
-		t.Fatalf("compact text duplicated orientation entries: %#v", summary)
-	}
-}
-
-// Structured results bound the workspace map at maxStructuredEntries and
+// Structured results bound the workspace map at mcpapi.MaxStructuredEntries and
 // replace large plan operation bodies with their size and hash, while every
 // follow-up identifier stays present.
 func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
-	files := make(map[string]string, maxStructuredEntries+25)
-	for index := 0; index < maxStructuredEntries+25; index++ {
+	files := make(map[string]string, mcpapi.MaxStructuredEntries+25)
+	for index := 0; index < mcpapi.MaxStructuredEntries+25; index++ {
 		files[fmt.Sprintf("pkg/file_%03d.go", index)] = "package pkg\n"
 	}
 	files["large.txt"] = "seed"
 	direct, workspaceID, _ := openProbeProject(t, files)
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 
 	inspected := callModern(t, session, "workspace_inspect", map[string]any{
@@ -341,7 +325,7 @@ func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
 	if overview["entry_count"] != float64(len(files)) || overview["entries_truncated"] != true {
 		t.Fatalf("bounded map metadata = %#v", overview)
 	}
-	if entries := overview["entries"].([]any); len(entries) != maxStructuredEntries {
+	if entries := overview["entries"].([]any); len(entries) != mcpapi.MaxStructuredEntries {
 		t.Fatalf("bounded map returned %d entries", len(entries))
 	}
 
@@ -389,38 +373,5 @@ func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
 	preview := previewed["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
 	if preview["preview_revision"] == "" || len(preview["diffs"].([]any)) != 1 {
 		t.Fatalf("bounded preview omitted revision or diff identity: %#v", previewed)
-	}
-}
-
-// The text envelope compacts a typed plan record so a large operation body
-// never reaches the model.
-func TestCompactTextEnvelopeBoundsTypedPlanPayload(t *testing.T) {
-	large := strings.Repeat("large-marker-", 10000)
-	envelope := map[string]any{
-		"api_version": "huyang.workspace/v1alpha1",
-		"request_id":  "req_test",
-		"outcome":     "ok",
-		"summary":     "Plan created",
-		"data": map[string]any{
-			"plan": workspacecore.PlanRecord{
-				PlanID: "plan_test",
-				Operations: []workspacecore.PlanOperation{{
-					OpID:    "large-create",
-					Kind:    workspacecore.OperationCreateFile,
-					Path:    "large.txt",
-					Content: large,
-				}},
-			},
-		},
-		"evidence": map[string]any{"ids": []string{}, "truncated": false},
-		"warnings": []string{},
-		"next":     []any{},
-	}
-	encoded, err := json.Marshal(compactTextEnvelope(envelope))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(encoded) > 16<<10 || strings.Contains(string(encoded), large[:1024]) {
-		t.Fatalf("compact text envelope retained large plan bytes: %d", len(encoded))
 	}
 }

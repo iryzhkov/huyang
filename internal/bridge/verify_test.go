@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -69,7 +70,7 @@ func TestVerifyRunAffectedScopeCoversOnlyEditedFileAndReturnsQuickly(t *testing.
 	})
 	applied := applyLiteralProbeEdit(t, direct, workspaceID, "Changed = 1", "Changed = 3", "affected-edit")
 	revision := applied["data"].(map[string]any)["revision"].(string)
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	started := time.Now()
 	verified := callModern(t, session, "verify_run", map[string]any{

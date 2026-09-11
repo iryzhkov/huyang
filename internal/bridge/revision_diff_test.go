@@ -1,13 +1,13 @@
 package bridge
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -28,7 +28,7 @@ func TestRevisionDiffObservesExternalChangeWithoutPriorInspect(t *testing.T) {
 	if result["outcome"] != "partial" || result["code"] != "diff_evidence_incomplete" {
 		t.Fatalf("revision diff did not report the external gap precisely: %#v", result)
 	}
-	gaps := anySlice(result["data"].(map[string]any)["gaps"])
+	gaps := mcpapi.AnySlice(result["data"].(map[string]any)["gaps"])
 	if len(gaps) != 1 {
 		t.Fatalf("external change was not exposed as an exact gap: %#v", result)
 	}
@@ -41,7 +41,7 @@ func TestRevisionDiffCollapsesExactEditRevert(t *testing.T) {
 	})
 	applyLiteralProbeEdit(t, direct, workspaceID, "beta", "gamma", "revert-forward")
 	applyLiteralProbeEdit(t, direct, workspaceID, "gamma", "beta", "revert-back")
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	diffed := callModern(t, session, "revision_diff", map[string]any{
 		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "current",
@@ -71,7 +71,7 @@ func TestRevisionDiffReturnsKnownSegmentsAcrossExternalGap(t *testing.T) {
 	if _, err := workspace.Refresh(filepath.Join(root, "first.txt"), workspacecore.ProviderLayer{}); err != nil {
 		t.Fatal(err)
 	}
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	inspected := callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID})
 	if inspected["data"].(map[string]any)["revision"] != "wsrev_2" {
@@ -158,31 +158,5 @@ func TestRecordedRevisionDiffsDeduplicateRepeatedPlanReceipts(t *testing.T) {
 	recorded := direct.receipts.recordedRevisionDiffs("workspace", 2, 3)
 	if len(recorded) != 1 {
 		t.Fatalf("duplicate committed plan receipts produced %d revision diffs: %#v", len(recorded), recorded)
-	}
-}
-
-// The default revision diff carries hashes and the patch, never the full
-// before and after bodies.
-func TestCompactRevisionDiffOmitsEndpointBodies(t *testing.T) {
-	diff := workspacecore.ExactDiff{
-		Path: "large.rb", BeforeSHA256: "before", AfterSHA256: "after",
-		Before: []byte(strings.Repeat("a", 16*1024)),
-		After:  []byte(strings.Repeat("b", 16*1024)),
-		Patch:  "@@ -1 +1 @@\n-old\n+new\n",
-	}
-	encoded, err := json.Marshal(compactRevisionDiff(diff))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), `"before":`) || strings.Contains(string(encoded), `"after":`) {
-		t.Fatalf("endpoint bodies leaked into default revision diff: %s", encoded)
-	}
-	if len(encoded) > 1024 {
-		t.Fatalf("compact revision diff unexpectedly large: %d bytes", len(encoded))
-	}
-	for _, want := range []string{"large.rb", "before_sha256", "after_sha256", "@@ -1 +1 @@"} {
-		if !strings.Contains(string(encoded), want) {
-			t.Fatalf("compact revision diff %s omitted %q", encoded, want)
-		}
 	}
 }

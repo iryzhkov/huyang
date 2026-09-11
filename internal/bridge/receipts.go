@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -356,7 +357,7 @@ func (s *receiptStore) persistReceipts(workspaceID workspacecore.ID) error {
 		}
 		record := persistedReplay{Key: key, ArgumentsHash: replay.argumentsHash, CompletedAt: replay.completedAt, Evicted: replay.evicted}
 		if !replay.evicted {
-			record.Result = cloneEnvelope(replay.result)
+			record.Result = mcpapi.CloneEnvelope(replay.result)
 		}
 		receipts = append(receipts, record)
 	}

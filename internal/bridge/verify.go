@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -51,8 +52,8 @@ func fullVerificationFallback(result workspacecore.VerificationResult) map[strin
 }
 
 func modernVerificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult) map[string]any {
-	compacted, evidenceIDs := compactVerificationResult(result)
-	envelope := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
+	compacted, evidenceIDs := mcpapi.CompactVerificationResult(result)
+	envelope := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"verification": compacted, "cache": cache,
 	})
 	envelope["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
@@ -100,20 +101,20 @@ func (h *toolHandlers) verify(ctx context.Context, requestID string, workspace *
 // canonical lane because the document refresh is an external resync.
 func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) (*verifyJob, map[string]any) {
 	if err := workspace.PrimeDocuments(); err != nil {
-		return nil, modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return nil, mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
-		return nil, modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return nil, mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if err := h.registry.persistIdentity(workspace.Identity().ID); err != nil {
-		return nil, modernFailure(requestID, workspace, "service_state_persist_failed", err)
+		return nil, mcpapi.Failure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	revision := fmt.Sprint(arguments["revision_or_transaction"])
 	var stages []string
-	for _, value := range anySlice(arguments["stages"]) {
+	for _, value := range mcpapi.AnySlice(arguments["stages"]) {
 		stage, ok := value.(string)
 		if !ok {
-			return nil, modernFailure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
+			return nil, mcpapi.Failure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
 		}
 		stages = append(stages, stage)
 	}
@@ -151,7 +152,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 	if job.stager == nil {
 		recoveredStager, recoveredPlan, recoverable, recoveryErr := h.recoverPreparedStager(ctx, workspace, revision)
 		if recoveryErr != nil {
-			result := modernFailure(requestID, workspace, "prepared_revision_recovery_failed", recoveryErr)
+			result := mcpapi.Failure(requestID, workspace, "prepared_revision_recovery_failed", recoveryErr)
 			if recoveredPlan.PlanID != "" {
 				result["next"] = []any{map[string]any{
 					"tool": "change_plan", "action": "prepare", "plan_id": recoveredPlan.PlanID,
@@ -167,7 +168,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 	if job.stager == nil {
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		if revision != current {
-			result := modernEnvelope(requestID, workspace, "conflict", "revision_changed",
+			result := mcpapi.Envelope(requestID, workspace, "conflict", "revision_changed",
 				"Requested canonical revision is not current", map[string]any{
 					"revision_or_transaction": revision, "current_revision": current,
 				})
@@ -195,7 +196,7 @@ func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspac
 			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
 		)
 		if materializeErr != nil {
-			return modernFailure(requestID, workspace, "verification_sandbox_failed", materializeErr)
+			return mcpapi.Failure(requestID, workspace, "verification_sandbox_failed", materializeErr)
 		}
 		files, filesErr := sandbox.BaseStageFiles()
 		if filesErr == nil {

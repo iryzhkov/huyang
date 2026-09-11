@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 func TestErrClassFoldsOccurrencesTogether(t *testing.T) {
@@ -225,7 +227,7 @@ func TestModernToolCallsWriteFrictionEvents(t *testing.T) {
 	t.Setenv("HUYANG_FRICTION_DIR", dir)
 	t.Setenv("HUYANG_FRICTION", "1")
 
-	session, cleanup := connectOfficialClient(t, profileOrient, newDirectWorkspaces(t.TempDir()))
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()))
 	defer cleanup()
 	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 func TestOfficialClientRunsTrustedPipelineAgainstPreparedSandbox(t *testing.T) {
@@ -57,7 +59,7 @@ required = true
 	}
 	direct := newDirectWorkspaces(stateDir)
 	defer direct.closeProviders()
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)

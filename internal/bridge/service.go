@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -132,7 +133,7 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	if config.ProviderQuota < 1 || config.ExternalJobQuota < 1 {
 		return nil, errors.New("provider and external-job quotas must be positive")
 	}
-	if err := validateModernRegistry(); err != nil {
+	if err := mcpapi.ValidateRegistry(); err != nil {
 		return nil, err
 	}
 	stateDir, err := filepath.Abs(config.StateDir)
@@ -272,7 +273,7 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 	_ = newSDKServer(profile, s.direct).Run(ctx, transport)
 }
 
-func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdout io.Writer) error {
+func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, stdout io.Writer) error {
 	type envelope struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
@@ -472,9 +473,9 @@ func (s *huyangService) prepareHTTP() error {
 	s.httpToken = token
 	s.httpTokenFile = tokenFile
 	mux := http.NewServeMux()
-	profiles := map[string]mcpProfile{
-		"/mcp": profileFull, "/mcp/orient": profileOrient,
-		"/mcp/edit": profileEdit, "/mcp/debug": profileDebug,
+	profiles := map[string]mcpapi.Profile{
+		"/mcp": mcpapi.ProfileFull, "/mcp/orient": mcpapi.ProfileOrient,
+		"/mcp/edit": mcpapi.ProfileEdit, "/mcp/debug": mcpapi.ProfileDebug,
 	}
 	for route, profile := range profiles {
 		server := newSDKServer(profile, s.direct)
@@ -596,10 +597,10 @@ func listenPrivateUnix(path string) (*net.UnixListener, os.FileInfo, error) {
 	return listener, info, nil
 }
 
-func modernOnlyProfile(name string) (mcpProfile, error) {
-	profile := mcpProfile(name)
+func modernOnlyProfile(name string) (mcpapi.Profile, error) {
+	profile := mcpapi.Profile(name)
 	switch profile {
-	case profileFull, profileOrient, profileEdit, profileDebug:
+	case mcpapi.ProfileFull, mcpapi.ProfileOrient, mcpapi.ProfileEdit, mcpapi.ProfileDebug:
 		return profile, nil
 	default:
 		return "", fmt.Errorf("unknown MCP profile %q", name)

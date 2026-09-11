@@ -1,6 +1,10 @@
 package bridge
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
+)
 
 // A provider install that reports failure yields a failed tool result with
 // recovery; it is never promoted to an attached language server.
@@ -10,7 +14,7 @@ func TestLanguageServerSetupInstallFailureIsNeverReportedAttached(t *testing.T) 
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"CMakeLists.txt": "project(sample)\n"})
 	defer direct.closeProviders()
 
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	result := callModern(t, session, "language_server_setup", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "install-failure",

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -14,7 +15,7 @@ func TestReadSymbolLocatorWithoutParserIsUnavailableNotWholeFile(t *testing.T) {
 	direct, workspaceID, root := openProbeProject(t, map[string]string{
 		"main.rb": "class Widget\n  def call\n    :ok\n  end\nend\n",
 	})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	result := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID,

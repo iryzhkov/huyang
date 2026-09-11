@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 func TestApplyFailureRecommendsSafeReprepare(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "before\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "create-for-recovery", "action": "create",
@@ -41,7 +43,7 @@ func TestPreparedPlanRecoversAcrossServiceRestart(t *testing.T) {
 	}
 	stateDir := t.TempDir()
 	first := newDirectWorkspaces(stateDir)
-	session, cleanup := connectOfficialClient(t, profileEdit, first)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, first)
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	created := callModern(t, session, "change_plan", map[string]any{
@@ -65,7 +67,7 @@ func TestPreparedPlanRecoversAcrossServiceRestart(t *testing.T) {
 
 	second := newDirectWorkspaces(stateDir)
 	defer second.closeProviders()
-	restartedSession, restartedCleanup := connectOfficialClient(t, profileEdit, second)
+	restartedSession, restartedCleanup := connectOfficialClient(t, mcpapi.ProfileEdit, second)
 	defer restartedCleanup()
 	reopened := callModern(t, restartedSession, "workspace_open", map[string]any{"kind": "project", "root": root})
 	if got := reopened["workspace"].(map[string]any)["id"]; got != workspaceID {

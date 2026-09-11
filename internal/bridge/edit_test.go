@@ -3,6 +3,8 @@ package bridge
 import (
 	"strings"
 	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 // An edit addressed by a handle the service no longer knows fails with
@@ -10,7 +12,7 @@ import (
 // handle rather than guessing a range.
 func TestEditApplyUnknownHandleSuggestsFreshHandle(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "before\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	result := callModern(t, session, "edit_apply", map[string]any{
 		"workspace_id":    workspaceID,
@@ -34,7 +36,7 @@ func TestEditApplyReusesWarmCanonicalProviderForDiagnostics(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"main.go": "package main\nvar risk = 1\n"})
 	defer direct.closeProviders()
 
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	callModern(t, session, "language_server_status", map[string]any{"workspace_id": workspaceID})
 	if backend.opens != 1 {
@@ -65,7 +67,7 @@ func TestEditApplyCapturesAuthoritativeDiagnosticsFromHealthyProvider(t *testing
 	if len(applied["evidence"].(map[string]any)["ids"].([]any)) == 0 {
 		t.Fatalf("edit omitted diagnostic evidence: %#v", applied)
 	}
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	report := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})
 	if report["outcome"] != "ok" || report["data"].(map[string]any)["diagnostics"].(map[string]any)["confidence"] != "authoritative" {

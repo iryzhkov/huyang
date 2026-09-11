@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func bulkyReceipt(index int, payloadBytes int) map[string]any {
 	return map[string]any{
-		"api_version": modernAPIVersion, "request_id": fmt.Sprintf("req_%d", index), "outcome": "ok",
+		"api_version": mcpapi.APIVersion, "request_id": fmt.Sprintf("req_%d", index), "outcome": "ok",
 		"summary": "edit applied", "warnings": []string{}, "next": []any{},
 		"evidence": map[string]any{"ids": []string{fmt.Sprintf("ev_%d", index)}, "truncated": false},
 		"data": map[string]any{

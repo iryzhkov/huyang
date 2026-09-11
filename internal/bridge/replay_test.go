@@ -3,13 +3,15 @@ package bridge
 import (
 	"strings"
 	"testing"
+
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
 // A replayed stateful call says so, reports that it made no new mutation,
 // and a different request under the same key is a conflict with recovery.
 func TestIdempotentReplayIsExplicitAndKeyReuseIsAConflict(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "only once\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 
 	searched := callModern(t, session, "search", map[string]any{

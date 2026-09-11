@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -100,7 +101,7 @@ func (d *directWorkspaces) closeProviders() {
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
-	return finalizeEnvelope(name, d.callUnfinalized(ctx, name, arguments))
+	return mcpapi.FinalizeEnvelope(name, d.callUnfinalized(ctx, name, arguments))
 }
 
 func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arguments map[string]any) map[string]any {
@@ -108,7 +109,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	defer cancel()
 	requestID := fmt.Sprintf("req_%d", d.requests.Add(1))
 	if d.loadErr != nil {
-		return modernEnvelope(requestID, nil, "failed", "service_state_unavailable", d.loadErr.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "service_state_unavailable", d.loadErr.Error(), map[string]any{})
 	}
 	if !isStatefulModernTool(name) {
 		result := d.executeScheduled(ctx, requestID, name, arguments)
@@ -117,11 +118,11 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	}
 	idempotencyKey, _ := arguments["idempotency_key"].(string)
 	if idempotencyKey == "" {
-		return modernEnvelope(requestID, nil, "failed", "missing_idempotency_key", "Stateful calls require idempotency_key", map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "missing_idempotency_key", "Stateful calls require idempotency_key", map[string]any{})
 	}
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
-		return modernEnvelope(requestID, nil, "failed", "invalid_arguments", err.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "invalid_arguments", err.Error(), map[string]any{})
 	}
 	hash := sha256.Sum256(encoded)
 	argumentsHash := fmt.Sprintf("%x", hash[:])
@@ -134,14 +135,14 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 		case <-previous.done:
 			return d.replayReceipt(requestID, name, idempotencyKey, argumentsHash, previous)
 		case <-ctx.Done():
-			result := modernEnvelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
+			result := mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
 			normalizeToolTimeout(ctx, d.toolTimeout, name, result)
 			return result
 		}
 	}
 
 	ctx = withReceiptCheckpoint(ctx, func(receipt map[string]any) error {
-		persisted := cloneEnvelope(receipt)
+		persisted := mcpapi.CloneEnvelope(receipt)
 		persisted["idempotency"] = "created"
 		persisted["idempotency_persisted"] = true
 		return d.receipts.checkpoint(replayKey, pending, persisted)
@@ -150,7 +151,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	timedOut := normalizeToolTimeout(ctx, d.toolTimeout, name, result)
 	if timedOut {
 		if checkpointed, ok := d.receipts.checkpointedResult(pending); ok {
-			result = cloneEnvelope(checkpointed)
+			result = mcpapi.CloneEnvelope(checkpointed)
 			result["request_id"] = requestID
 			result["outcome"] = "provisional"
 			result["warnings"] = append(result["warnings"].([]string),
@@ -165,10 +166,10 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 		return result
 	}
 	var stored map[string]any
-	if err := d.receipts.storeReceipt(replayKey, pending, cloneEnvelope(result)); err != nil {
+	if err := d.receipts.storeReceipt(replayKey, pending, mcpapi.CloneEnvelope(result)); err != nil {
 		result["warnings"] = append(result["warnings"].([]string), "idempotency receipt was not persisted: "+err.Error())
 		result["idempotency_persisted"] = false
-		stored = cloneEnvelope(result)
+		stored = mcpapi.CloneEnvelope(result)
 	}
 	d.receipts.finish(pending, stored)
 	return result
@@ -179,7 +180,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 // original envelope, marked as a replay, otherwise.
 func (d *directWorkspaces) replayReceipt(requestID, name, idempotencyKey, argumentsHash string, previous *directReplay) map[string]any {
 	if previous.argumentsHash != argumentsHash {
-		result := modernEnvelope(requestID, nil, "conflict", "idempotency_key_reused",
+		result := mcpapi.Envelope(requestID, nil, "conflict", "idempotency_key_reused",
 			"Idempotency key was already used with different arguments; use a new key for a different request", map[string]any{
 				"tool": name, "idempotency_key": idempotencyKey,
 			})
@@ -190,7 +191,7 @@ func (d *directWorkspaces) replayReceipt(requestID, name, idempotencyKey, argume
 	}
 	evicted, trimmed, stored := d.receipts.replaySnapshot(previous)
 	if evicted {
-		result := modernEnvelope(requestID, nil, "conflict", receiptEvictedCode, receiptEvictedSummary, map[string]any{
+		result := mcpapi.Envelope(requestID, nil, "conflict", receiptEvictedCode, receiptEvictedSummary, map[string]any{
 			"tool": name, "idempotency_key": idempotencyKey,
 		})
 		result["next"] = []any{map[string]any{
@@ -198,7 +199,7 @@ func (d *directWorkspaces) replayReceipt(requestID, name, idempotencyKey, argume
 		}}
 		return result
 	}
-	replayed := cloneEnvelope(stored)
+	replayed := mcpapi.CloneEnvelope(stored)
 	replayed["request_id"] = requestID
 	replayed["idempotency"] = "replayed"
 	replayed["summary"] = "Idempotent replay returned the original receipt; this call made no new mutation"
@@ -265,7 +266,7 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	if name == "verify_run" {
 		result = d.executeVerify(ctx, requestID, workspaceID, arguments)
 	} else {
-		class := classForCall(name, arguments)
+		class := mcpapi.ClassForCall(name, arguments)
 		release, err := d.scheduler.acquire(ctx, workspaceID, class)
 		if err != nil {
 			return schedulerCancelled(requestID, workspaceID, class, err)
@@ -286,8 +287,8 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	return result
 }
 
-func schedulerCancelled(requestID, workspaceID string, class schedulerClass, err error) map[string]any {
-	return modernEnvelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
+func schedulerCancelled(requestID, workspaceID string, class mcpapi.SchedulerClass, err error) map[string]any {
+	return mcpapi.Envelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
 		"workspace_id": workspaceID,
 		"class":        class,
 	})
@@ -298,24 +299,24 @@ func schedulerCancelled(requestID, workspaceID string, class schedulerClass, err
 // pipeline itself runs as an external job without blocking the workspace.
 func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspaceID string, arguments map[string]any) map[string]any {
 	if err := ctx.Err(); err != nil {
-		return modernEnvelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
+		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
 	workspace := d.registry.lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
-		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
-	releaseLane, err := d.scheduler.acquire(ctx, workspaceID, scheduleCanonicalWrite)
+	releaseLane, err := d.scheduler.acquire(ctx, workspaceID, mcpapi.ClassCanonicalWrite)
 	if err != nil {
-		return schedulerCancelled(requestID, workspaceID, scheduleCanonicalWrite, err)
+		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassCanonicalWrite, err)
 	}
 	job, early := d.handlers.verifyPrepare(ctx, requestID, workspace, arguments)
 	releaseLane()
 	if early != nil {
 		return early
 	}
-	releaseJob, err := d.scheduler.acquire(ctx, workspaceID, scheduleExternalJob)
+	releaseJob, err := d.scheduler.acquire(ctx, workspaceID, mcpapi.ClassExternalJob)
 	if err != nil {
-		return schedulerCancelled(requestID, workspaceID, scheduleExternalJob, err)
+		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassExternalJob, err)
 	}
 	defer releaseJob()
 	return d.handlers.verifyRun(ctx, requestID, workspace, job)

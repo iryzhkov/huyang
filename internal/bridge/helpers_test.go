@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 )
 
@@ -25,7 +26,7 @@ func openProbeProject(t *testing.T, files map[string]string) (*directWorkspaces,
 		}
 	}
 	direct := newDirectWorkspaces(t.TempDir())
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	t.Cleanup(cleanup)
 	opened := callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
@@ -36,7 +37,7 @@ func openProbeProject(t *testing.T, files map[string]string) (*directWorkspaces,
 // replaces its exact range through edit_apply.
 func applyLiteralProbeEdit(t *testing.T, direct *directWorkspaces, workspaceID, query, replacement, key string) map[string]any {
 	t.Helper()
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": query, "mode": "literal", "include_ranges": true,

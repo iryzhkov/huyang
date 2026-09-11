@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -30,7 +31,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 			data["changed_paths"] = append([]string(nil), plan.Preparation.AffectedFiles...)
 			data["canonical_changed"] = plan.Preparation.CanonicalChanged
 		}
-		result := modernEnvelope(requestID, workspace, "ok", "", summary, data)
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 		result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
 		if plan.Preparation != nil {
 			evidenceIDs := make([]string, 0)
@@ -202,7 +203,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 				data := result["data"].(map[string]any)
 				data["applied_from_provisional"] = true
 				if plan.Preparation != nil {
-					data["provisional_accepted"] = nonNilStrings(plan.Preparation.ProvisionalAccepted)
+					data["provisional_accepted"] = mcpapi.NonNilStrings(plan.Preparation.ProvisionalAccepted)
 					data["missing_coverage"] = plan.Preparation.MissingCoverage
 				}
 			}
@@ -229,7 +230,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 				data["canonical_changed"] = plan.Preparation.CanonicalChanged
 			}
 		}
-		result := modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
+		result := mcpapi.Envelope(requestID, workspace, outcome, code, err.Error(), data)
 		if code == workspacecore.CodeProvisionalNotAccepted && plan.PlanID != "" {
 			gaps := []workspacecore.VerificationGap{}
 			if plan.Preparation != nil {
@@ -308,7 +309,7 @@ func preparedRevisionOf(plan workspacecore.PlanRecord) string {
 func planStateNext(plan workspacecore.PlanRecord) []any {
 	base := map[string]any{"tool": "change_plan", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision}
 	with := func(action string, extra map[string]any) map[string]any {
-		item := cloneEnvelope(base)
+		item := mcpapi.CloneEnvelope(base)
 		item["action"] = action
 		for key, value := range extra {
 			item[key] = value

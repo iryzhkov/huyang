@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -12,7 +13,7 @@ import (
 // current revision of the plan.
 func TestChangePlanInspectWithoutPlanRevisionReadsCurrentRevision(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "before\n"})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id":    workspaceID,
@@ -43,7 +44,7 @@ func TestChangePlanCreateResolvesSymbolLocatorThroughProvider(t *testing.T) {
 	})
 	defer direct.closeProviders()
 
-	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
 	result := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "symbol-plan", "action": "create",

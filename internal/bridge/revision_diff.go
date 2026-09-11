@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if err := workspace.PrimeDocuments(); err != nil {
-		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
-		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if err := h.registry.persistIdentity(workspace.Identity().ID); err != nil {
-		return modernFailure(requestID, workspace, "service_state_persist_failed", err)
+		return mcpapi.Failure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	from := fmt.Sprint(arguments["from_revision"])
 	to := fmt.Sprint(arguments["to_revision_or_current"])
@@ -27,10 +28,10 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	fromSeq, fromErr := workspaceRevisionSequence(from)
 	toSeq, toErr := workspaceRevisionSequence(to)
 	if fromErr != nil || toErr != nil || fromSeq > toSeq {
-		return modernEnvelope(requestID, workspace, "failed", "invalid_revision_range", "revision_diff requires an ordered wsrev_N range", map[string]any{"from_revision": from, "to_revision": to})
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_revision_range", "revision_diff requires an ordered wsrev_N range", map[string]any{"from_revision": from, "to_revision": to})
 	}
 	if toSeq > workspace.Identity().StateSeq {
-		return modernEnvelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
+		return mcpapi.Envelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
 	}
 	recorded := h.provenance.recordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
 	sort.Slice(recorded, func(i, j int) bool {
@@ -83,14 +84,14 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 		diffs := make([]any, 0, len(known))
 		paths := make([]string, 0, len(known))
 		for _, item := range known {
-			diffs = append(diffs, compactRevisionDiff(item.diff))
+			diffs = append(diffs, mcpapi.CompactRevisionDiff(item.diff))
 			if item.path != "" {
 				paths = append(paths, item.path)
 			}
 		}
 		sort.Strings(paths)
-		paths = uniqueStrings(paths)
-		result := modernEnvelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Known native edit segments are returned with explicit uncovered revision gaps", map[string]any{
+		paths = mcpapi.UniqueStrings(paths)
+		result := mcpapi.Envelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Known native edit segments are returned with explicit uncovered revision gaps", map[string]any{
 			"from_revision": from, "to_revision": to, "current_revision": current,
 			"known_segments": segments, "gaps": gaps, "diffs": diffs,
 		})
@@ -118,7 +119,7 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 		if ends.before != "" && ends.before == ends.after {
 			continue
 		}
-		diffs = append(diffs, compactRevisionDiff(item.diff))
+		diffs = append(diffs, mcpapi.CompactRevisionDiff(item.diff))
 	}
 	netChangedPaths := 0
 	for _, ends := range byPath {
@@ -127,7 +128,7 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 		}
 	}
 	summary := fmt.Sprintf("%d native edit events cover %d net-changed paths between %s and %s", len(diffs), netChangedPaths, from, to)
-	return modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{
+	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, map[string]any{
 		"from_revision": from, "to_revision": to, "current_revision": current, "diffs": diffs,
 		"semantics": "net endpoint identity with ordered edit evidence",
 	})

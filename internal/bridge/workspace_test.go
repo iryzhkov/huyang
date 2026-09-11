@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -18,7 +19,7 @@ func TestWorkspaceInspectViewsReportRevisionAndAdvanceAfterEdit(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{
 		"a.go": "package sample\nvar Before = 1\n",
 	})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 
 	for _, view := range []string{"status", "overview", "map"} {
@@ -69,7 +70,7 @@ func TestWorkspaceInspectRecordsExternalWriteToUnreadFileAsRevisionGap(t *testin
 		"main.go":   "package sample\n",
 		"README.md": "before\n",
 	})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("after\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -114,7 +115,7 @@ func TestWorkspaceReopenRecordsExternalNewFileAsRevisionGap(t *testing.T) {
 	diff := direct.handlers.revisionDiff("req_diff", direct.get(workspacecore.ID(workspaceID)), map[string]any{
 		"from_revision": from, "to_revision_or_current": to,
 	})
-	gaps := anySlice(diff["data"].(map[string]any)["gaps"])
+	gaps := mcpapi.AnySlice(diff["data"].(map[string]any)["gaps"])
 	if len(gaps) != 1 {
 		t.Fatalf("revision gaps = %#v", gaps)
 	}
@@ -129,7 +130,7 @@ func TestWorkspaceInspectExplainsUntrustedPipelineWithRecovery(t *testing.T) {
 		".huyang.toml": "version = 1\n[[check]]\nname = \"check\"\ncommand = [\"go\", \"test\", \"./...\"]\n",
 		"main.go":      "package sample\n",
 	})
-	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	inspected := callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID})
 	state := inspected["data"].(map[string]any)["pipeline_state"].(map[string]any)
