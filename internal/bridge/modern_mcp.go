@@ -1694,7 +1694,7 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 		revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 		data["document_revision"] = after.Revision
 		verification := map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
-		backend, providerErr := d.canonicalProvider(ctx, workspace)
+		backend, providerErr := d.restartCanonicalProvider(ctx, workspace)
 		if providerErr == nil {
 			report, evidenceErr := recordProviderDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
 				Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
@@ -2134,6 +2134,9 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	case "create":
 		var operations []workspacecore.PlanOperation
 		if err = decode(arguments["operations"], &operations); err == nil {
+			err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
+		}
+		if err == nil {
 			plan, err = workspace.CreatePlan(operations)
 		}
 		if err == nil {
@@ -2142,6 +2145,9 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	case "edit":
 		var edit workspacecore.PlanEdit
 		if err = decode(arguments["edit"], &edit); err == nil {
+			err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, edit.Operations)
+		}
+		if err == nil {
 			plan, err = workspace.EditPlan(
 				fmt.Sprint(arguments["plan_id"]), uintArgument(arguments["plan_revision"]), edit,
 			)
@@ -2169,6 +2175,9 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		if raw, inline := arguments["operations"]; inline {
 			var operations []workspacecore.PlanOperation
 			if err = decode(raw, &operations); err == nil {
+				err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
+			}
+			if err == nil {
 				plan, err = workspace.CreatePlan(operations)
 				if err == nil {
 					planID, revision = plan.PlanID, plan.PlanRevision

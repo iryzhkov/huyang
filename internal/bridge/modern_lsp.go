@@ -160,6 +160,21 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 		}
 		return result
 	}
+	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
+	if status == "failed" || status == "unknown" {
+		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
+		if note == "" {
+			note = "the provider did not supply installation diagnostics"
+		}
+		result := modernEnvelope(requestID, workspace, "failed", "language_server_install_failed",
+			fmt.Sprintf("Language support installation failed for %s: %s", language, note), data)
+		result["warnings"] = []string{note}
+		result["next"] = []any{
+			map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "server": arguments["server"], "use_new_idempotency_key": true},
+			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
+		}
+		return result
+	}
 	result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)
 	result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
 	return result
