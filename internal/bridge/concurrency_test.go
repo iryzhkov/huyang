@@ -124,14 +124,10 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 		}
 	})
 	promptly("preparedStager(A) bookkeeping", func() {
-		direct.handlers.pool.mu.Lock()
-		stager := direct.handlers.pool.stagers[stagerKey{workspace: workspacecore.ID(workspaceA), planID: "blocked-plan"}]
-		for key, candidate := range direct.handlers.pool.stagers {
-			if key.workspace == workspacecore.ID(workspaceA) {
-				stager = candidate
-			}
+		stager := direct.handlers.pool.stager(workspacecore.ID(workspaceA), "blocked-plan")
+		for _, candidate := range direct.handlers.pool.stagersFor(workspacecore.ID(workspaceA)) {
+			stager = candidate
 		}
-		direct.handlers.pool.mu.Unlock()
 		if stager == nil {
 			t.Error("workspace A has no stager while preparing")
 			return

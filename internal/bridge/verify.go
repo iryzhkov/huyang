@@ -189,7 +189,7 @@ func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspac
 	} else {
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		sandbox, materializeErr := workspacecore.MaterializeSandbox(
-			ctx, identity.Root, h.pool.sandboxBase, identity.ID,
+			ctx, identity.Root, h.pool.sandboxBaseDir(), identity.ID,
 			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
 		)
 		if materializeErr != nil {

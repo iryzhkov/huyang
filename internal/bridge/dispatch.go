@@ -78,7 +78,7 @@ func (d *directWorkspaces) loadState() error {
 			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
-	return workspacecore.ReapSandboxes(d.handlers.pool.sandboxBase, nil)
+	return workspacecore.ReapSandboxes(d.handlers.pool.sandboxBaseDir(), nil)
 }
 
 // setToolTimeout changes the global tool-call timeout the dispatcher

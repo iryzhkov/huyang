@@ -152,3 +152,31 @@ func (p *providerPool) close() {
 		_ = stager.Rollback(context.Background(), key.planID)
 	}
 }
+
+// sandboxBaseDir is the directory under which plan and verification
+// sandboxes are materialised.
+func (p *providerPool) sandboxBaseDir() string {
+	return p.sandboxBase
+}
+
+// stager returns the sandbox stager registered for one plan of one
+// workspace, or nil.
+func (p *providerPool) stager(workspaceID workspacecore.ID, planID string) *sandboxPlanStager {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stagers[stagerKey{workspace: workspaceID, planID: planID}]
+}
+
+// stagersFor lists the sandbox stagers registered for one workspace, in no
+// particular order.
+func (p *providerPool) stagersFor(workspaceID workspacecore.ID) []*sandboxPlanStager {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var found []*sandboxPlanStager
+	for key, candidate := range p.stagers {
+		if key.workspace == workspaceID {
+			found = append(found, candidate)
+		}
+	}
+	return found
+}

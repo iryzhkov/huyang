@@ -280,6 +280,14 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	return nil
 }
 
+// Sandbox returns the materialised sandbox, or nil before Stage or after
+// release. It takes only the short state lock.
+func (s *sandboxPlanStager) Sandbox() *workspacecore.Sandbox {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.sandbox
+}
+
 // snapshot reads the bookkeeping state without waiting on a running operation.
 func (s *sandboxPlanStager) snapshot() (*workspacecore.Sandbox, workspacecore.PlanStageRequest, bool) {
 	s.stateMu.Lock()

@@ -78,8 +78,8 @@ func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) 
 		call: call,
 		done: make(chan struct{}),
 	}
+	useFixedProvider(t, backend)
 	direct := newDirectWorkspaces(t.TempDir())
-	direct.handlers.pool.providers[workspace.Identity().ID] = &providerSlot{backend: backend}
 	t.Cleanup(direct.closeProviders)
 	return direct, workspace, backend, record
 }
