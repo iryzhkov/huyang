@@ -13,30 +13,41 @@
 
 ## Current checkpoint
 
-- Completed stage: S20 — Remaining wrappers, evaluation and release candidate.
-- Starting commit: `26864fe3a890d423d94701fddb3cfde27deffc75`.
-- The reviewed base remains in branch history; the worktree was clean after fetching origin.
-- Exact exit gates:
-  - rename, code-action, homogeneous replace-matches, and move-symbol legacy mutation families
-    use the isolated journaled transaction path while preserving guarded targets, exact legacy
-    responses, undo, dry-run/`wait=false`, and documented direct escape behavior;
-  - test/check wrappers use revision-keyed verification pipeline results without conflating
-    affected and full coverage or executing untrusted commands;
-  - all protocol/client/language/failpoint suites pass, and paired modern/legacy evaluation
-    records calls, schema/result size proxies, recovery behavior, and quality without regression;
-  - compatibility window, recovery guide, protocol/kernel/transaction version promises,
-    migration guide, and deployment-readiness report are tracked release-candidate artifacts;
-  - S20's focused tests, `make smoke`, `go test ./...`, `go vet ./...`, and
-    `git diff --check` all exit 0;
-  - the definition of done is reconciled honestly, the branch is committed and clean, and no
-    deployment, installation, live service/configuration mutation, push, or pull request occurs.
-- S20 met every exit gate and is committed with this handoff.
-- Post-S20 rollout started from commit `83009bc6caa3ef363bbdf140a9d31992c190ee44`.
-- Rollout exit gates: remove the Agent99 product/UI from the Huyang tree; pass `make smoke`,
-  `go test ./...`, `go vet ./...`, and `git diff --check`; publish a standalone
-  `huyang` repository to both upstream Git services; deploy and activate the user service;
-  replace Agent99 MCP registrations and instruction files on laptop, normandy, homelab, and
-  gaming-pc; verify each reachable host and record any queued laptop continuation.
+- Completed stage: S20b — Structural consolidation after the hardening rounds, waves 0
+  and 1. Record: `docs/plans/huyang-s20b-structural-consolidation.md`.
+- Audit baseline: `f0b537d90d522ae79b7aabcc54ada1cbd374175c`, the last of the 26
+  post-rollout hardening commits.
+- Branch tip at this checkpoint: `fe143fe97dc7ac0060489c0d0840086a6c93122d` on
+  `feature/huyang`.
+- Wave 0, legacy removal and workspace fixes, committed directly on the branch:
+  - `9978579d42efe0b1941e7ec919e60fa3332304af` remove legacy MCP catalog and tools
+  - `58ac5e269d2e8104c66c5e0e771175393203391d` remove socket provider
+  - `55eeb261de1b5deecc4dc2dcceb2d7b8ce5b7b75` remove embedded-provider and sandbox spikes
+  - `93abf23b06adc13371154de62f967c5ed76e74be` remove legacy Lua kernel paths and harness leftovers
+  - `367a2f40093a8b2d4818a706cafea6d7cc2be009` rename in-process agent99 identifiers to huyang
+  - `f26c58205ebd2f934d10b69da4dac9086de51bfc` merge: workspace commit and plan lifecycle
+    fixes (`d5bc7f8`, `6fd8c84`, `840b453`)
+  - `96c52e1f56c84454552e76bb67753151ee61c65d` merge: workspace store, confinement and
+    pipeline fixes (`e420f66`, `f898280`, `354043b`, `d77ea12`, `306dcb9`)
+  - `88d36574b3700eb6d38b3f33508848d240de2bcd` store plans per record with bounded
+    terminal retention
+- Wave 1, provider and bridge:
+  - `9adebee88761838b77f23350ee87a6c2c32d7abe` merge: provider protocol 2, cooperative
+    cancellation and kernel cleanup (`b289aac`, `6074f88`)
+  - `9f18be18bc455beaa31ebbe8c46b928a26ada47d` docs: record the S20b stage
+  - `40af416f01be6adedc23b9146e58ba299d757c2f` merge: bridge concurrency, scheduling,
+    compaction and receipt retention fixes (`b1a70f5`, `d8e52b2`, `39967ce`, `0d51310`,
+    `21bb8f2`)
+  - `fe143fe97dc7ac0060489c0d0840086a6c93122d` test margin for the advertised-timeout test
+- Exit gates met at `fe143fe`: `go build`, `go vet ./...` and `go test ./...` green; the
+  four profile catalogs match `docs/plans/fixtures/huyang-v1alpha1/contract-schema.json`
+  at 19/8/13/12 tools; every tool declares a scheduler class; no `AGENT99_`-only reader
+  remains and no legacy tool, profile or endpoint ships.
+- Wave 2 (documentation sweep, hardening-test consolidation, `internal/bridge` split,
+  `make budget` gate) is planned in the stage record; the documentation sweep is the
+  commit that carries this handoff.
+- Normandy runs `fe143fe`; homelab and gaming-pc remain at `4f87241` and need the redeploy
+  procedure in `docs/plans/huyang-rollout-2026-09-10.md`.
 
 ## Predecessor and stage artifacts
 
@@ -108,13 +119,13 @@ S19D adds:
 - docs/plans/huyang-s19d-debugger-facade.md
 - internal/bridge/modern_debug.go
 - internal/bridge/modern_debug_test.go
-- modern debugger integration coverage in tests/drive_debug.py
+- modern debugger coverage in internal/bridge/modern_debug_test.go
 
 S20 adds:
 
 - docs/plans/huyang-s20-release-candidate.md
 - remaining wrapper migration in internal/bridge/legacy_wrapper.go and legacy_state.go
-- wrapper coverage in internal/bridge/legacy_wrapper_test.go and tests/drive_headless.py
+- wrapper coverage in internal/bridge/legacy_wrapper_test.go (removed with the wrappers in S20b)
 - revision-keyed verification caching in internal/bridge/modern_mcp.go
 - cache and catalog evaluation coverage in internal/bridge/pipeline_test.go and
   internal/bridge/modern_mcp_test.go
@@ -251,6 +262,30 @@ Run from /home/igor/Work/huyang on 2026-09-10:
 - The user superseded the planned Agent99 executable/UI deprecation window by explicitly
   requesting complete replacement and removal during rollout.
 - Exact next stage: none. Rollout was explicitly authorized and is tracked below.
+
+## Post-rollout hardening and S20b
+
+Between the rollout at `4f87241` and the S20b audit baseline `f0b537d`, agent-led probe
+sessions landed 26 hardening commits (`817f0fb` through `f0b537d`) against the deployed release
+candidate: MCP recovery and probe workflows, sandbox copies and history counts, bounded
+responses, creation and verification probes, verification latency and recovery, pipeline
+policy bootstrap, embedded language-server attachment and administration (which added
+`language_server_status` and `language_server_setup`), multilingual plan and LSP recovery,
+Java and Rust toolchain recovery, transport recovery, exact plan recovery across service
+restarts, and the shipped debugger runtime. Each fixed a real defect and left a regression
+test, but the fixes accumulated as symptoms rather than causes: string-prefix parsing,
+substring error classification, unbounded persistence, and a service that reached 8 GB
+RSS behind a 524 MB `registry.json`.
+
+S20b consolidated them. Wave 0 deleted the legacy tool layer, socket provider and spikes
+(57 files, 9,681 lines) and fixed the workspace transaction and store layers with typed
+error codes, an enforced plan state machine including `CONFLICTED` and `EXPIRED`,
+content-derived revisions, per-plan record files and bounds on every store. Wave 1 moved
+the kernel to protocol 2 with cooperative cancellation, keyed stagers and scheduler classes
+per tool, compacted the results, and moved receipts out of `registry.json` into bounded
+per-workspace files. The complete finding list, decisions and consequences for the later
+plans are in `docs/plans/huyang-s20b-structural-consolidation.md`; the amended contract is
+in `docs/plans/huyang-tools-v1alpha1.md`.
 
 ## Post-S20 repository split and rollout
 

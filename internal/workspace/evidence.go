@@ -394,6 +394,39 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	}
 	batch.Document = filepath.ToSlash(filepath.Clean(batch.Document))
 	confidence, reasons := confidenceFor(batch)
+	evID := s.recordEvidenceLocked(batch, confidence, reasons)
+	key := batch.ProviderID + "\x00" + batch.Document
+	previous := append([]string(nil), s.state.Active[key]...)
+	previousStale := append([]string(nil), s.state.Stale[key]...)
+	current, added, seen := s.recordFindingsLocked(batch, evID)
+	var resolved []DiagnosticItem
+	if batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
+		// A complete observation of this document verifies the absence of
+		// everything it did not report: previously current items and items
+		// left stale by a content change are both resolved.
+		resolved = s.resolveAbsentLocked(append(previous, previousStale...), seen, batch.ObservedAt)
+		s.state.Active[key] = idsOf(current)
+		delete(s.state.Stale, key)
+	} else {
+		s.state.Active[key] = appendUnique(previous, idsOf(current)...)
+		s.state.Stale[key] = withoutIDs(previousStale, seen)
+	}
+	s.pruneLocked(batch.ObservedAt)
+	if err := s.save(); err != nil {
+		return DiagnosticReport{}, err
+	}
+	report := s.reportLocked(added, resolved, evID, reasons)
+	// Mutation-time verification needs the confidence of this observation. The
+	// persisted coverage remains historical and is returned by diagnostics queries.
+	report.Confidence = confidence
+	report.Current = append([]DiagnosticItem(nil), current...)
+	report.ProvisionalReasons = append([]string(nil), reasons...)
+	return report, nil
+}
+
+// recordEvidenceLocked stores the batch as an evidence record and folds its confidence
+// into the coverage dimension it reports on. It returns the new evidence ID.
+func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence DiagnosticConfidence, reasons []string) string {
 	dimension := batch.Dimension
 	if dimension == "" {
 		dimension = "edited_documents"
@@ -406,35 +439,42 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	if confidence == ConfidenceProvisional || confidence == ConfidenceUnavailable {
 		dimensionState = "incomplete"
 	}
-	updatedDimension := DiagnosticDimension{State: dimensionState, Confidence: confidence, EvidenceIDs: []string{evID}, Reasons: reasons}
+	updated := DiagnosticDimension{State: dimensionState, Confidence: confidence, EvidenceIDs: []string{evID}, Reasons: reasons}
 	if batch.Kind == EvidenceProjectCheck {
-		s.state.Dimensions[dimension] = updatedDimension
-	} else {
-		providerDimension := dimension + "\x00" + batch.ProviderID
-		if prior, ok := s.state.ProviderDimensions[providerDimension]; ok {
-			updatedDimension.EvidenceIDs = appendUnique(prior.EvidenceIDs, evID)
-		}
-		s.state.ProviderDimensions[providerDimension] = updatedDimension
-		aggregate := DiagnosticDimension{State: "complete", Confidence: ConfidenceAuthoritative}
-		for key, providerEvidence := range s.state.ProviderDimensions {
-			if !strings.HasPrefix(key, dimension+"\x00") {
-				continue
-			}
-			aggregate.EvidenceIDs = appendUnique(aggregate.EvidenceIDs, providerEvidence.EvidenceIDs...)
-			aggregate.Reasons = appendUnique(aggregate.Reasons, providerEvidence.Reasons...)
-			if confidenceRank(providerEvidence.Confidence) < confidenceRank(aggregate.Confidence) {
-				aggregate.Confidence = providerEvidence.Confidence
-				aggregate.State = providerEvidence.State
-			}
-		}
-		s.state.Dimensions[dimension] = aggregate
+		s.state.Dimensions[dimension] = updated
+		return evID
 	}
+	providerDimension := dimension + "\x00" + batch.ProviderID
+	if prior, ok := s.state.ProviderDimensions[providerDimension]; ok {
+		updated.EvidenceIDs = appendUnique(prior.EvidenceIDs, evID)
+	}
+	s.state.ProviderDimensions[providerDimension] = updated
+	s.state.Dimensions[dimension] = s.aggregateDimensionLocked(dimension)
+	return evID
+}
 
-	key := batch.ProviderID + "\x00" + batch.Document
-	previous := append([]string(nil), s.state.Active[key]...)
-	previousStale := append([]string(nil), s.state.Stale[key]...)
-	seen := map[string]bool{}
-	var current, added, resolved []DiagnosticItem
+// aggregateDimensionLocked combines every provider's evidence for a dimension, taking the
+// weakest confidence and its state.
+func (s *diagnosticStore) aggregateDimensionLocked(dimension string) DiagnosticDimension {
+	aggregate := DiagnosticDimension{State: "complete", Confidence: ConfidenceAuthoritative}
+	for key, providerEvidence := range s.state.ProviderDimensions {
+		if !strings.HasPrefix(key, dimension+"\x00") {
+			continue
+		}
+		aggregate.EvidenceIDs = appendUnique(aggregate.EvidenceIDs, providerEvidence.EvidenceIDs...)
+		aggregate.Reasons = appendUnique(aggregate.Reasons, providerEvidence.Reasons...)
+		if confidenceRank(providerEvidence.Confidence) < confidenceRank(aggregate.Confidence) {
+			aggregate.Confidence = providerEvidence.Confidence
+			aggregate.State = providerEvidence.State
+		}
+	}
+	return aggregate
+}
+
+// recordFindingsLocked upserts every finding of the batch as a current item. It returns
+// the current items, the ones that were announced as new, and the set of IDs reported.
+func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID string) (current, added []DiagnosticItem, seen map[string]bool) {
+	seen = map[string]bool{}
 	for _, finding := range batch.Findings {
 		finding = normalizeFinding(finding)
 		id := "diag_" + diagnosticFingerprint(batch.ProviderID, batch.Document, finding)
@@ -469,41 +509,27 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		}
 		current = append(current, item)
 	}
-	if batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
-		// A complete observation of this document verifies the absence of
-		// everything it did not report: previously current items and items
-		// left stale by a content change are both resolved.
-		for _, id := range append(previous, previousStale...) {
-			if seen[id] {
-				continue
-			}
-			item, ok := s.state.Items[id]
-			if !ok {
-				continue
-			}
-			item.Status = DiagnosticStatusResolved
-			item.ResolvedAt = batch.ObservedAt
-			s.state.Items[id] = item
-			resolved = append(resolved, item)
-			s.addNotice("resolved", item)
+	return current, added, seen
+}
+
+// resolveAbsentLocked marks every listed item the batch did not report as resolved.
+func (s *diagnosticStore) resolveAbsentLocked(ids []string, seen map[string]bool, observedAt time.Time) []DiagnosticItem {
+	var resolved []DiagnosticItem
+	for _, id := range ids {
+		if seen[id] {
+			continue
 		}
-		s.state.Active[key] = idsOf(current)
-		delete(s.state.Stale, key)
-	} else {
-		s.state.Active[key] = appendUnique(previous, idsOf(current)...)
-		s.state.Stale[key] = withoutIDs(previousStale, seen)
+		item, ok := s.state.Items[id]
+		if !ok {
+			continue
+		}
+		item.Status = DiagnosticStatusResolved
+		item.ResolvedAt = observedAt
+		s.state.Items[id] = item
+		resolved = append(resolved, item)
+		s.addNotice("resolved", item)
 	}
-	s.pruneLocked(batch.ObservedAt)
-	if err := s.save(); err != nil {
-		return DiagnosticReport{}, err
-	}
-	report := s.reportLocked(added, resolved, evID, reasons)
-	// Mutation-time verification needs the confidence of this observation. The
-	// persisted coverage remains historical and is returned by diagnostics queries.
-	report.Confidence = confidence
-	report.Current = append([]DiagnosticItem(nil), current...)
-	report.ProvisionalReasons = append([]string(nil), reasons...)
-	return report, nil
+	return resolved
 }
 
 // documentChanged marks every current finding recorded for document as stale
@@ -573,6 +599,14 @@ func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
 // or stale item, or by a coverage dimension, is never dropped. The caller
 // holds s.mu.
 func (s *diagnosticStore) pruneLocked(now time.Time) {
+	noticed := s.pruneNoticesLocked()
+	s.pruneItemsLocked(now, noticed)
+	s.pruneEvidenceLocked(now)
+}
+
+// pruneNoticesLocked drops acknowledged notices and the oldest beyond the cap, and
+// returns the IDs the retained notices still name.
+func (s *diagnosticStore) pruneNoticesLocked() map[string]bool {
 	// Acknowledged notices have been consumed through diagnostics(since).
 	// NoticeFloor remembers the highest dropped notice sequence so a cursor
 	// older than it is told that its delta is incomplete.
@@ -600,9 +634,12 @@ func (s *diagnosticStore) pruneLocked(now time.Time) {
 	for _, notice := range s.state.Notices {
 		noticed[notice.ID] = true
 	}
+	return noticed
+}
 
-	// Resolved items stay while a retained notice names them, then for the
-	// window, then up to the cap.
+// pruneItemsLocked keeps every current or stale item and every item a retained notice
+// names; other items stay for the retention window, then up to the cap, oldest first.
+func (s *diagnosticStore) pruneItemsLocked(now time.Time, noticed map[string]bool) {
 	live := map[string]bool{}
 	for _, ids := range s.state.Active {
 		for _, id := range ids {
@@ -625,19 +662,14 @@ func (s *diagnosticStore) pruneLocked(now time.Time) {
 		}
 		inactive = append(inactive, id)
 	}
-	if excess := len(inactive) - maxInactiveDiagnosticItems; excess > 0 {
-		sort.Slice(inactive, func(i, j int) bool {
-			left, right := s.state.Items[inactive[i]].LastSeen, s.state.Items[inactive[j]].LastSeen
-			if left.Equal(right) {
-				return inactive[i] < inactive[j]
-			}
-			return left.Before(right)
-		})
-		for _, id := range inactive[:excess] {
-			delete(s.state.Items, id)
-		}
-	}
+	dropOldest(inactive, len(inactive)-maxInactiveDiagnosticItems,
+		func(id string) time.Time { return s.state.Items[id].LastSeen },
+		func(id string) { delete(s.state.Items, id) })
+}
 
+// pruneEvidenceLocked keeps evidence an item or a dimension references; unreferenced
+// evidence stays for the retention window, then up to the cap, oldest first.
+func (s *diagnosticStore) pruneEvidenceLocked(now time.Time) {
 	referenced := map[string]bool{}
 	for _, item := range s.state.Items {
 		for _, id := range item.EvidenceIDs {
@@ -665,17 +697,25 @@ func (s *diagnosticStore) pruneLocked(now time.Time) {
 		}
 		unreferenced = append(unreferenced, id)
 	}
-	if excess := len(unreferenced) - maxUnreferencedDiagnosticEvidence; excess > 0 {
-		sort.Slice(unreferenced, func(i, j int) bool {
-			left, right := s.state.Evidence[unreferenced[i]].RecordedAt, s.state.Evidence[unreferenced[j]].RecordedAt
-			if left.Equal(right) {
-				return unreferenced[i] < unreferenced[j]
-			}
-			return left.Before(right)
-		})
-		for _, id := range unreferenced[:excess] {
-			delete(s.state.Evidence, id)
+	dropOldest(unreferenced, len(unreferenced)-maxUnreferencedDiagnosticEvidence,
+		func(id string) time.Time { return s.state.Evidence[id].RecordedAt },
+		func(id string) { delete(s.state.Evidence, id) })
+}
+
+// dropOldest drops the excess oldest IDs, breaking equal timestamps by ID.
+func dropOldest(ids []string, excess int, at func(string) time.Time, drop func(string)) {
+	if excess <= 0 {
+		return
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		left, right := at(ids[i]), at(ids[j])
+		if left.Equal(right) {
+			return ids[i] < ids[j]
 		}
+		return left.Before(right)
+	})
+	for _, id := range ids[:excess] {
+		drop(id)
 	}
 }
 

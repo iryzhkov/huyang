@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-11",
+  "sha": "fe143fe",
+  "rounds": 20,
+  "provider": "nvim",
+  "diagnostics_outcome": "unavailable",
+  "cold_rss_kb": 17616,
+  "post_rss_kb": 22696,
+  "provider_rss_kb": 15840,
+  "state_bytes": 92457,
+  "registry_bytes": 240,
+  "receipts_bytes": 76271,
+  "plans_bytes": 0,
+  "journals_bytes": 0,
+  "diag_bytes": 15946,
+  "go_lines": 18749,
+  "go_test_lines": 11393,
+  "lua_lines": 24073,
+  "largest_go_file": 3008,
+  "long_functions": 39,
+  "long_function_threshold": 80,
+  "tools_bytes": {
+    "full": 79178,
+    "orient": 32514,
+    "edit": 57037,
+    "debug": 48847
+  }
+}

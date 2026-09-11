@@ -1,5 +1,5 @@
 {
-  "fixture_version": "huyang.tools/v1alpha1-s00",
+  "fixture_version": "huyang.tools/v1alpha1-s20b",
   "catalogs": {
     "full": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get", "language_server_status", "language_server_setup", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"],
     "orient": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get"],
@@ -40,6 +40,8 @@
     "verify_run": {"read_only": false, "required": ["workspace_id", "idempotency_key", "stages", "revision_or_transaction"], "stages": ["format_gate", "parser", "diagnostics", "check", "tests"], "test_scope": ["affected", "full"]},
     "revision_diff": {"read_only": true, "required": ["workspace_id", "from_revision", "to_revision_or_current"], "automatic_rebase": false},
     "evidence_get": {"read_only": true, "required": ["workspace_id", "evidence_id"], "returns": ["pending_or_final_state", "cursor"]},
+    "language_server_status": {"read_only": true, "required": ["workspace_id"], "profiles": ["full"], "returns": ["provider", "languages", "install_options"]},
+    "language_server_setup": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "profiles": ["full"], "action": ["install", "restart"]},
     "debug_session": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["start", "attach", "restart", "stop"]},
     "debug_breakpoints": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["list", "set", "remove", "clear"]},
     "debug_control": {"read_only": false, "required": ["workspace_id", "idempotency_key", "action"], "action": ["continue", "pause", "step_over", "step_into", "step_out", "run_to"]},

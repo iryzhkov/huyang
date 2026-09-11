@@ -1,0 +1,34 @@
+# Huyang repository pipeline policy for the Huyang repository itself.
+# Commands here run only when the workspace root is also trusted in the user's
+# $XDG_CONFIG_HOME/huyang/config.toml. Every command runs inside a prepared sandbox
+# copy of the tree, never against canonical bytes.
+version = 1
+
+[format]
+mode = "check"
+scope = "whole_repository"
+
+# Non-mutating formatting gate: gofmt lists unformatted files and exits zero, so the
+# gate fails when the list is non-empty.
+[format.gate]
+command = ["sh", "-c", "test -z \"$(gofmt -l cmd internal)\""]
+
+[[check]]
+name = "go-vet"
+command = ["go", "vet", "./..."]
+required = true
+
+[[tests]]
+name = "go-unit"
+covers = ["**/*.go", "go.mod", "go.sum"]
+variants = ["default"]
+command = ["go", "test", "./..."]
+
+[[variants]]
+name = "default"
+files = ["**"]
+required = true
+
+[resource]
+timeout_seconds = 600
+max_output_bytes = 262144

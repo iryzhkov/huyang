@@ -1,6 +1,6 @@
 # S20b — Structural consolidation after the hardening rounds
 
-Status: in progress on `feature/huyang`; this record is updated as each wave merges
+Status: waves 0 and 1 merged on `feature/huyang` at `fe143fe`; wave 2 in progress
 Prepared: 2026-09-11
 Predecessor: S20 release candidate at `4f87241`, followed by 26 probe-driven hardening commits ending at `f0b537d`
 Audit baseline: `f0b537d`, `go build`, `go vet`, `go test ./...` green
@@ -109,20 +109,44 @@ for findings whose document changed, `DiagnosticNoticesSince(cursor)`, sanitized
 parser stage kept `unavailable` under corroboration, explicit `FormattingClaims`, canonical
 stage ordering, `atomicWriteFile`.
 
-## Wave 1 (pending merge)
+## Wave 1 (merged)
 
-Bridge: cross-workspace stall removed, stagers keyed by workspace, scheduler class per
-descriptor, envelope finaliser with universal output-schema validation, `AcceptProvisional`
-wired to an explicit `accept_provisional` argument, `ErrorCode` classification, bounded and
-payload-stripped receipts outside `registry.json`, pprof on the loopback listener,
-compaction of `diagnostics`, `search`, `workspace_open`, `language_server_status`, the
-per-client `diagnostic_updates` delta, and the `read` by `symbol_locator` failure.
-
-Provider and kernel: cooperative cancellation, kernel protocol 2 with `huyang/result` and
-native MessagePack payloads, structured provider errors, `Result` extended with touched
-documents, evidence and health, API-level Neovim compatibility, fault hooks behind
+Provider and kernel, merged at `9adebee` (`b289aac`, `6074f88`): cooperative
+cancellation, kernel protocol 2 with `huyang/result` and native MessagePack payloads,
+structured provider errors, `Result` extended with touched documents, evidence and health,
+API-level Neovim compatibility (`minAPILevel` 13, Neovim 0.11), fault hooks behind
 `HUYANG_TEST_FAULTS`, client-keyed Lua request state, removal of dispatch entries with no
-Go caller, `HUYANG_*` names for the surviving `AGENT99_*` variables.
+Go caller, `HUYANG_*` names for the surviving `AGENT99_*` variables. The `AGENT99_*`
+names are still read as fallbacks when the `HUYANG_*` name is empty; the README lists
+every one.
+
+Bridge, merged at `40af416` (`b1a70f5`, `d8e52b2`, `39967ce`, `0d51310`, `21bb8f2`, with
+`eeeb885` and `4c7f6cf` merging the trunk into the working branch along the way):
+cross-workspace stall removed, stagers keyed by workspace, scheduler class per descriptor,
+envelope finaliser bounding `next` to two entries and filling the required envelope keys,
+`AcceptProvisional` wired to an explicit `accept_provisional` argument, `ErrorCode`
+classification, bounded and payload-stripped receipts in `receipts/<workspace>.json`
+outside `registry.json` (which is now version 2 and holds workspace definitions only),
+pprof on a loopback listener behind the HTTP bearer token, compaction of `diagnostics`,
+`search`, `workspace_open` and `language_server_status`, the per-client
+`diagnostic_updates` delta, the typed provider result and error codes, and the `read` by
+`symbol_locator` failure. `fe143fe` widened one timing margin in the advertised-timeout
+test after the merge.
+
+The stage record itself was committed at `9f18be1` between the two merges.
+
+### Follow-ups deferred by the bridge wave
+
+- The diagnostic ledger marks findings whose document changed as `stale` and counts them
+  (`StaleCount` in the report), but the compact `diagnostics` result does not surface that
+  count; it is visible only with `full=true`.
+- `diagnostic_updates` is a per-client delta keyed by the MCP session ID. The Streamable
+  HTTP transport is stateless, so every HTTP request is a fresh session and receives the
+  pending notices again; a client identity header would be needed to make the delta hold
+  over HTTP.
+- Output-schema validation of every envelope runs only under test: `envelopeAudit` is a
+  package variable the test suite installs, and `finalizeEnvelope` enforces the required
+  keys and the `next` bound in production without validating against the schema.
 
 ## Wave 2 (planned)
 

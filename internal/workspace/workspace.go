@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -660,10 +661,56 @@ func revisionFor(snapshot DocumentSnapshot) RevisionID {
 // atomicWriteFile writes data to path through a same-directory temporary
 // file, fsyncs the file, renames it into place and fsyncs the parent
 // directory so the replacement is durable before the call returns. It is the
-// single implementation every state file in this package should use.
+// single implementation every state file, native mutation and native recovery
+// write in this package uses; commit postimages share its core through
+// commitWrite, which adds the no-replace variant and the wider mode mask.
 func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
-	if err := atomicWrite(path, data, mode); err != nil {
+	if err := writeTempAndRename(path, data, mode.Perm(), true); err != nil {
 		return err
 	}
 	return syncDirectory(filepath.Dir(path))
+}
+
+// writeTempAndRename is the temp-write core: the temporary file is created
+// beside path, written, chmoded to exactly mode, fsynced and closed, then
+// renamed over path (replace) or moved into place only if nothing exists there
+// (no replace). The temporary file is removed on every failure. The parent
+// directory is not synced here.
+func writeTempAndRename(path string, content []byte, mode fs.FileMode, replace bool) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".huyang-*")
+	if err != nil {
+		return err
+	}
+	name := temp.Name()
+	remove := true
+	defer func() {
+		_ = temp.Close()
+		if remove {
+			_ = os.Remove(name)
+		}
+	}()
+	if _, err := temp.Write(content); err != nil {
+		return err
+	}
+	if err := temp.Chmod(mode); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if replace {
+		if err := os.Rename(name, path); err != nil {
+			return err
+		}
+	} else if err := renameNoReplace(name, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return clobberRefusal(path)
+		}
+		return err
+	}
+	remove = false
+	return nil
 }

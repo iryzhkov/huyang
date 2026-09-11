@@ -688,15 +688,7 @@ func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult
 		return HistorySearchResult{}, errors.New("invalid local history ref")
 	}
 	limit := bounded(req.Limit, 20, 100)
-	fields := map[string]bool{"message": true}
-	if len(req.Fields) > 0 {
-		fields = make(map[string]bool)
-	}
-	for _, f := range req.Fields {
-		if f == "message" || f == "path" || f == "diff" {
-			fields[f] = true
-		}
-	}
+	fields := historyFields(req.Fields)
 	c := coverageFor(g.root)
 	c.Ref = ref
 	c.Traversal = "date_order"
@@ -723,36 +715,11 @@ func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult
 		c.Truncated = true
 	}
 	for _, block := range blocks {
-		end := strings.IndexByte(block, '\n')
-		if end < 0 {
-			continue
+		hit, ok, hitErr := w.historyHit(g, block, fields, needle)
+		if hitErr != nil {
+			return HistorySearchResult{}, hitErr
 		}
-		s, x := parseCommit(strings.TrimSpace(block[:end]))
-		if x != nil {
-			continue
-		}
-		s, x = w.summary(g, s.ObjectID)
-		if x != nil {
-			return HistorySearchResult{}, x
-		}
-		hit := HistorySearchHit{Commit: s}
-		if fields["message"] && strings.Contains(strings.ToLower(s.Subject), needle) {
-			hit.Fields = append(hit.Fields, "message")
-		}
-		for _, line := range strings.Split(block[end+1:], "\n") {
-			trim := strings.TrimSpace(line)
-			if fields["path"] && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") && within(trim, g.prefix) && strings.Contains(strings.ToLower(trim), needle) {
-				hit.Fields = unique(hit.Fields, "path")
-				hit.Paths = unique(hit.Paths, trim)
-			}
-			if fields["diff"] && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")) && !strings.HasPrefix(line, "+++") && !strings.HasPrefix(line, "---") && strings.Contains(strings.ToLower(line), needle) {
-				hit.Fields = unique(hit.Fields, "diff")
-				if hit.Excerpt == "" {
-					hit.Excerpt = sanitizeText(line, 240)
-				}
-			}
-		}
-		if len(hit.Fields) > 0 {
+		if ok {
 			hits = append(hits, hit)
 		}
 	}
@@ -761,4 +728,54 @@ func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult
 		return HistorySearchResult{}, err
 	}
 	return HistorySearchResult{Query: req.Query, Hits: hits, ResultSet: set, Coverage: c}, nil
+}
+
+// historyFields selects the searched fields: message only by default, otherwise the
+// recognised names among those requested.
+func historyFields(requested []string) map[string]bool {
+	if len(requested) == 0 {
+		return map[string]bool{"message": true}
+	}
+	fields := make(map[string]bool)
+	for _, f := range requested {
+		if f == "message" || f == "path" || f == "diff" {
+			fields[f] = true
+		}
+	}
+	return fields
+}
+
+// historyHit scans one commit block of the log output for the needle in the selected
+// fields. ok is false when the block is unparsable or matches nowhere.
+func (w *Workspace) historyHit(g *gitState, block string, fields map[string]bool, needle string) (HistorySearchHit, bool, error) {
+	end := strings.IndexByte(block, '\n')
+	if end < 0 {
+		return HistorySearchHit{}, false, nil
+	}
+	s, x := parseCommit(strings.TrimSpace(block[:end]))
+	if x != nil {
+		return HistorySearchHit{}, false, nil
+	}
+	s, x = w.summary(g, s.ObjectID)
+	if x != nil {
+		return HistorySearchHit{}, false, x
+	}
+	hit := HistorySearchHit{Commit: s}
+	if fields["message"] && strings.Contains(strings.ToLower(s.Subject), needle) {
+		hit.Fields = append(hit.Fields, "message")
+	}
+	for _, line := range strings.Split(block[end+1:], "\n") {
+		trim := strings.TrimSpace(line)
+		if fields["path"] && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") && within(trim, g.prefix) && strings.Contains(strings.ToLower(trim), needle) {
+			hit.Fields = unique(hit.Fields, "path")
+			hit.Paths = unique(hit.Paths, trim)
+		}
+		if fields["diff"] && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")) && !strings.HasPrefix(line, "+++") && !strings.HasPrefix(line, "---") && strings.Contains(strings.ToLower(line), needle) {
+			hit.Fields = unique(hit.Fields, "diff")
+			if hit.Excerpt == "" {
+				hit.Excerpt = sanitizeText(line, 240)
+			}
+		}
+	}
+	return hit, len(hit.Fields) > 0, nil
 }

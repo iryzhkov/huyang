@@ -183,12 +183,111 @@ func commitEntryOrder(entries []CommitJournalEntry) []int {
 	return order
 }
 
-func stateMatchesSnapshot(path string, expected DiskSnapshot, content []byte) (bool, error) {
+// snapshotMatch selects how much of a recorded DiskSnapshot a preimage comparison trusts.
+// The two callers legitimately differ: content is the revision (S20b decision 6), and the
+// disk metadata is only a change detector whose reliability depends on who recorded it.
+type snapshotMatch int
+
+const (
+	// matchExactSnapshot compares the whole snapshot, including device, inode and mtime.
+	// CommitPlan and CommitPreparedTransaction need it: their preimages were captured by
+	// this process moments earlier, so any metadata drift is a third-party write that must
+	// refuse the commit.
+	matchExactSnapshot snapshotMatch = iota
+	// matchJournalImage compares kind, mode, size and symlink target, then the bytes.
+	// Startup recovery and CompensatePlan need it: a journal read back after a crash, or a
+	// committed postimage undone later, describes an object whose inode and mtime may have
+	// changed through an atomic save or a checkout of identical content.
+	matchJournalImage
+)
+
+func stateMatchesImage(path string, expected DiskSnapshot, content []byte, match snapshotMatch) (bool, error) {
 	current, currentBytes, err := inspectPath(path)
 	if err != nil {
 		return false, err
 	}
-	return equalDisk(current, expected) && bytes.Equal(currentBytes, content), nil
+	if match == matchExactSnapshot {
+		return equalDisk(current, expected) && bytes.Equal(currentBytes, content), nil
+	}
+	if current.Kind != expected.Kind || current.Mode != expected.Mode ||
+		current.Size != expected.Size || current.SymlinkTarget != expected.SymlinkTarget {
+		return false, nil
+	}
+	return bytes.Equal(currentBytes, content), nil
+}
+
+// stateMatchesSnapshot is the strict comparator; see matchExactSnapshot.
+func stateMatchesSnapshot(path string, expected DiskSnapshot, content []byte) (bool, error) {
+	return stateMatchesImage(path, expected, content, matchExactSnapshot)
+}
+
+// stateMatchesJournalImage is the lenient comparator; see matchJournalImage.
+func stateMatchesJournalImage(path string, expected DiskSnapshot, content []byte) (bool, error) {
+	return stateMatchesImage(path, expected, content, matchJournalImage)
+}
+
+// newCommitJournal returns a prepared journal whose entries mirror the staged write set.
+func (w *Workspace) newCommitJournal(planID string, planRevision uint64, preparedRevision string, files []PlanStageFile) CommitJournal {
+	now := time.Now().UTC()
+	journal := CommitJournal{
+		Version: commitJournalVersion, WorkspaceID: w.Identity().ID, PlanID: planID,
+		PlanRevision: planRevision, PreparedRevision: preparedRevision, State: CommitJournalPrepared,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	for _, file := range files {
+		journal.Entries = append(journal.Entries, CommitJournalEntry{
+			Path: file.Path, Preimage: append([]byte(nil), file.Before...), Postimage: append([]byte(nil), file.After...),
+			Before: file.BeforeDisk, After: file.AfterDisk, Progress: CommitPathPending,
+		})
+	}
+	return journal
+}
+
+// applyJournalEntries makes every journal entry durable in commit order. Each path is
+// rechecked immediately before its replacement so a third-party write that landed after
+// the whole-set validation is refused rather than overwritten, and progress is persisted
+// after each write. The returned written flag reports whether any canonical write was
+// attempted, which is what separates a refusal (nothing written, the journal rolls back)
+// from a failure that needs recovery.
+func (w *Workspace) applyJournalEntries(ctx context.Context, journalPath string, journal *CommitJournal, recheck func(absolute string, entry CommitJournalEntry) error) (written bool, err error) {
+	for _, index := range commitEntryOrder(journal.Entries) {
+		entry := &journal.Entries[index]
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
+			return written, err
+		}
+		absolute, err := w.confinedPath(entry.Path)
+		if err != nil {
+			return written, err
+		}
+		if err := recheck(absolute, *entry); err != nil {
+			return written, err
+		}
+		written = true
+		if err := applyCommitEntry(absolute, *entry); err != nil {
+			return written, err
+		}
+		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
+			return written, err
+		}
+		entry.Progress = CommitPathApplied
+		if err := w.persistCommitJournal(journalPath, journal, "progress_journal"); err != nil {
+			return written, err
+		}
+	}
+	return written, nil
+}
+
+// sealCommittedJournal advances the canonical revision for the applied write set and
+// persists the committed journal, the durable receipt every caller records before it
+// claims success.
+func (w *Workspace) sealCommittedJournal(journalPath string, journal *CommitJournal) (Identity, error) {
+	identity := w.recordCanonicalCommit(journal.Entries)
+	journal.State = CommitJournalCommitted
+	journal.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
+	return identity, w.persistCommitJournal(journalPath, journal, "committed_journal")
 }
 
 // applyCommitEntry makes one journal entry durable at path. A postimage that replaces an
@@ -237,42 +336,7 @@ func clobberRefusal(path string) error {
 }
 
 func commitWrite(path string, content []byte, mode fs.FileMode, replace bool) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".huyang-*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	remove := true
-	defer func() {
-		_ = temp.Close()
-		if remove {
-			_ = os.Remove(name)
-		}
-	}()
-	if _, err := temp.Write(content); err != nil {
-		return err
-	}
-	if err := temp.Chmod(mode & commitModeMask); err != nil {
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if replace {
-		if err := os.Rename(name, path); err != nil {
-			return err
-		}
-	} else if err := renameNoReplace(name, path); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return clobberRefusal(path)
-		}
-		return err
-	}
-	remove = false
-	return nil
+	return writeTempAndRename(path, content, mode&commitModeMask, replace)
 }
 
 func commitSymlink(path, target string, replace bool) error {
@@ -384,34 +448,10 @@ func (w *Workspace) CommitPreparedTransaction(ctx context.Context, transactionID
 	if len(files) == 0 {
 		return w.Identity(), nil
 	}
-	now := time.Now().UTC()
-	journal := CommitJournal{
-		Version: commitJournalVersion, WorkspaceID: w.Identity().ID, PlanID: transactionID,
-		PlanRevision: 1, PreparedRevision: "legacy:" + operationID, State: CommitJournalPrepared,
-		CreatedAt: now, UpdatedAt: now,
+	if err := w.validatePreparedWrites(files); err != nil {
+		return Identity{}, err
 	}
-	seen := map[string]bool{}
-	for _, file := range files {
-		if file.Path == "" || seen[file.Path] {
-			return Identity{}, fmt.Errorf("invalid prepared write path %q", file.Path)
-		}
-		seen[file.Path] = true
-		absolute, err := w.confinedPath(file.Path)
-		if err != nil {
-			return Identity{}, err
-		}
-		matches, err := stateMatchesSnapshot(absolute, file.BeforeDisk, file.Before)
-		if err != nil {
-			return Identity{}, err
-		}
-		if !matches {
-			return Identity{}, Codedf(CodeCommitPreconditionChanged, "%s changed before commit", file.Path)
-		}
-		journal.Entries = append(journal.Entries, CommitJournalEntry{
-			Path: file.Path, Preimage: append([]byte(nil), file.Before...), Postimage: append([]byte(nil), file.After...),
-			Before: file.BeforeDisk, After: file.AfterDisk, Progress: CommitPathPending,
-		})
-	}
+	journal := w.newCommitJournal(transactionID, 1, "legacy:"+operationID, files)
 	journalPath := w.commitJournalPath(transactionID)
 	if journalPath == "" {
 		return Identity{}, errors.New("commit journal state directory is required")
@@ -436,46 +476,45 @@ func (w *Workspace) CommitPreparedTransaction(ctx context.Context, transactionID
 		_ = w.persistCommitJournal(journalPath, &journal, "recovery_required_journal")
 		return Identity{}, Coded(CodeCommitRecoveryRequired, cause)
 	}
-	for _, index := range commitEntryOrder(journal.Entries) {
-		entry := &journal.Entries[index]
-		if err := ctx.Err(); err != nil {
-			return failure(err)
-		}
-		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
-			return failure(err)
-		}
-		absolute, err := w.confinedPath(entry.Path)
-		if err != nil {
-			return failure(err)
-		}
-		if err := recheckCommitEntry(absolute, *entry); err != nil {
-			return failure(err)
-		}
-		written = true
-		if err := applyCommitEntry(absolute, *entry); err != nil {
-			return failure(err)
-		}
-		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
-			return failure(err)
-		}
-		entry.Progress = CommitPathApplied
-		if err := w.persistCommitJournal(journalPath, &journal, "progress_journal"); err != nil {
-			return failure(err)
-		}
+	var err error
+	if written, err = w.applyJournalEntries(ctx, journalPath, &journal, recheckCommitEntry); err != nil {
+		return failure(err)
 	}
 	if finalize != nil {
 		if err := finalize(ctx); err != nil {
 			return failure(err)
 		}
 	}
-	identity := w.recordCanonicalCommit(journal.Entries)
-	journal.State = CommitJournalCommitted
-	journal.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
-	if err := w.persistCommitJournal(journalPath, &journal, "committed_journal"); err != nil {
+	identity, err := w.sealCommittedJournal(journalPath, &journal)
+	if err != nil {
 		return failure(err)
 	}
 	w.collectCommitJournals()
 	return identity, nil
+}
+
+// validatePreparedWrites refuses a legacy write set with an empty or duplicate path, a path
+// outside the workspace, or a preimage the canonical tree no longer matches.
+func (w *Workspace) validatePreparedWrites(files []PlanStageFile) error {
+	seen := map[string]bool{}
+	for _, file := range files {
+		if file.Path == "" || seen[file.Path] {
+			return fmt.Errorf("invalid prepared write path %q", file.Path)
+		}
+		seen[file.Path] = true
+		absolute, err := w.confinedPath(file.Path)
+		if err != nil {
+			return err
+		}
+		matches, err := stateMatchesSnapshot(absolute, file.BeforeDisk, file.Before)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return Codedf(CodeCommitPreconditionChanged, "%s changed before commit", file.Path)
+		}
+	}
+	return nil
 }
 
 // recheckCommitEntry compares the canonical object with the journal preimage immediately
@@ -548,185 +587,189 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	if plan.State == PlanCommitted && plan.Preparation != nil && plan.Preparation.PreparedRevision == preparedRevision {
 		return plan, nil
 	}
+	run, err := w.admitCommit(ctx, plan, expected, preparedRevision, stager, settings)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	// The commit is admitted. From here every exit releases the provider lease, and every
+	// failure rolls the stager back unless the provider view was already committed.
+	defer run.finish()
+	if err := run.stageWriteSet(); err != nil {
+		return run.refuse(err)
+	}
+	if err := run.revalidate(); err != nil {
+		return run.abort(err)
+	}
+	run.written, err = w.applyJournalEntries(ctx, run.journalPath, &run.journal, recheckCommitEntry)
+	if err != nil {
+		return run.fail(err)
+	}
+	return run.complete()
+}
+
+// commitRun carries one admitted CommitPlan call through its phases: stage the write set,
+// revalidate, apply and complete. The identity fields are fixed at admission; journal,
+// written and stagerCommitted record progress for the failure paths and for finish.
+type commitRun struct {
+	w               *Workspace
+	ctx             context.Context
+	stager          PlanStager
+	plan            PlanRecord
+	expected        uint64
+	preparation     PlanPreparation
+	preparedRev     string
+	request         PlanStageRequest
+	journalPath     string
+	journal         CommitJournal
+	written         bool
+	stagerCommitted bool
+	finished        bool
+}
+
+// admitCommit checks the plan, prepared revision, provider epoch and provisional
+// acceptance. It succeeds only for a plan this call may commit; nothing is written.
+func (w *Workspace) admitCommit(ctx context.Context, plan PlanRecord, expected uint64, preparedRevision string, stager PlanStager, settings commitOptions) (*commitRun, error) {
 	if (plan.State != PlanReady && plan.State != PlanProvisional) || plan.Preparation == nil {
-		return PlanRecord{}, Codedf(CodePlanStateInvalid, "plan %s is %s; only a READY plan commits", planID, plan.State)
+		return nil, Codedf(CodePlanStateInvalid, "plan %s is %s; only a READY plan commits", plan.PlanID, plan.State)
 	}
 	if preparedRevision == "" || plan.Preparation.PreparedRevision != preparedRevision {
-		return PlanRecord{}, Coded(CodePreparedRevisionChanged, nil)
+		return nil, Coded(CodePreparedRevisionChanged, nil)
 	}
 	durablePreparation := false
 	if source, ok := stager.(PreparedPlanStager); ok {
 		_, _, durablePreparation = source.PreparedRequest()
 	}
 	if plan.Preparation.ProviderEpoch != stager.Epoch() && !durablePreparation {
-		return PlanRecord{}, Coded(CodeWorkspaceEpochChanged, nil)
+		return nil, Coded(CodeWorkspaceEpochChanged, nil)
 	}
 	preparation := *plan.Preparation
 	if plan.State == PlanProvisional {
-		gaps := verificationGaps(preparation.Verification)
-		if len(gaps) == 0 {
-			gaps = []VerificationGap{{Dimension: "diagnostics", Detail: "semantic coverage " + preparation.Diagnostics}}
-		}
-		var missing []string
-		for _, gap := range gaps {
-			if !settings.acceptProvisional[gap.Dimension] {
-				missing = append(missing, gap.Dimension+" ("+gap.Detail+")")
-			}
-		}
-		if len(missing) > 0 {
-			return PlanRecord{}, Codedf(CodeProvisionalNotAccepted,
-				"plan %s is PROVISIONAL; accept the incomplete evidence explicitly for: %s", planID, strings.Join(missing, "; "))
-		}
-		preparation.MissingCoverage = append([]VerificationGap(nil), gaps...)
-		preparation.ProvisionalAccepted = nil
-		for _, gap := range gaps {
-			preparation.ProvisionalAccepted = append(preparation.ProvisionalAccepted, gap.Dimension)
+		if err := acceptProvisionalGaps(plan.PlanID, &preparation, settings); err != nil {
+			return nil, err
 		}
 	}
+	return &commitRun{w: w, ctx: ctx, stager: stager, plan: plan, expected: expected, preparation: preparation, preparedRev: preparedRevision}, nil
+}
 
-	// The commit is admitted. From here every exit releases the provider lease, and every
-	// failure rolls the stager back unless the provider view was already committed.
-	stagerCommitted := false
-	finished := false
-	finish := func() {
-		if finished {
-			return
-		}
-		finished = true
-		if !stagerCommitted {
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = stager.Rollback(rollbackCtx, planID)
-			cancel()
-		}
-		w.prepareMu.Lock()
-		delete(w.activePlans, planID)
-		w.prepareMu.Unlock()
+// acceptProvisionalGaps requires every missing verification dimension to be accepted
+// explicitly and records both the gaps and the acceptance on the preparation.
+func acceptProvisionalGaps(planID string, preparation *PlanPreparation, settings commitOptions) error {
+	gaps := verificationGaps(preparation.Verification)
+	if len(gaps) == 0 {
+		gaps = []VerificationGap{{Dimension: "diagnostics", Detail: "semantic coverage " + preparation.Diagnostics}}
 	}
-	defer finish()
-
-	// refuse records a failure that happened before any canonical byte was written. A
-	// precondition mismatch is a CONFLICTED plan; any other cause leaves it FAILED. Both are
-	// re-preparable and neither needs recovery.
-	refuse := func(cause error) (PlanRecord, error) {
-		var record PlanRecord
-		var transitionErr error
-		if commitAbortsAsConflict(cause) {
-			record, transitionErr = w.conflictPlan(planID, expected, "commit_refused", &preparation, cause)
-		} else {
-			record, transitionErr = w.transitionPlan(planID, expected, PlanFailed, "commit_refused", cause.Error(), &preparation)
+	var missing []string
+	for _, gap := range gaps {
+		if !settings.acceptProvisional[gap.Dimension] {
+			missing = append(missing, gap.Dimension+" ("+gap.Detail+")")
 		}
-		if transitionErr != nil {
-			return record, fmt.Errorf("%w; persist refusal: %v", cause, transitionErr)
-		}
-		return record, cause
 	}
+	if len(missing) > 0 {
+		return Codedf(CodeProvisionalNotAccepted,
+			"plan %s is PROVISIONAL; accept the incomplete evidence explicitly for: %s", planID, strings.Join(missing, "; "))
+	}
+	preparation.MissingCoverage = append([]VerificationGap(nil), gaps...)
+	preparation.ProvisionalAccepted = nil
+	for _, gap := range gaps {
+		preparation.ProvisionalAccepted = append(preparation.ProvisionalAccepted, gap.Dimension)
+	}
+	return nil
+}
 
+// finish releases the provider lease and rolls the stager back unless the provider view
+// was already committed. It runs once, on every exit after admission.
+func (run *commitRun) finish() {
+	if run.finished {
+		return
+	}
+	run.finished = true
+	if !run.stagerCommitted {
+		_ = rollbackStager(run.stager, run.plan.PlanID)
+	}
+	run.w.prepareMu.Lock()
+	delete(run.w.activePlans, run.plan.PlanID)
+	run.w.prepareMu.Unlock()
+}
+
+// stageWriteSet confirms the preview is still current, reconstructs the exact write set
+// (preferring the durable prepared request when the stager has one) and persists the
+// prepared journal. A failure here happened before any canonical write.
+func (run *commitRun) stageWriteSet() error {
+	w, plan := run.w, run.plan
 	freshPreview := w.buildPreview(plan)
 	if freshPreview.Outcome != "ok" || freshPreview.PreviewRevision != plan.Preview.PreviewRevision {
-		return refuse(Coded(CodeCommitPreconditionChanged, errors.New("plan preview is stale")))
+		return Coded(CodeCommitPreconditionChanged, errors.New("plan preview is stale"))
 	}
 	request, err := w.planStageRequest(plan)
 	if err != nil {
-		return refuse(err)
+		return err
 	}
-	if source, ok := stager.(PreparedPlanStager); ok {
+	if source, ok := run.stager.(PreparedPlanStager); ok {
 		if prepared, _, available := source.PreparedRequest(); available {
 			request = prepared
 		}
 	}
-	now := time.Now().UTC()
-	journal := CommitJournal{
-		Version: commitJournalVersion, WorkspaceID: w.Identity().ID, PlanID: planID,
-		PlanRevision: expected, PreparedRevision: preparedRevision, State: CommitJournalPrepared,
-		CreatedAt: now, UpdatedAt: now,
+	run.request = request
+	run.journal = w.newCommitJournal(plan.PlanID, run.expected, run.preparedRev, request.Files)
+	run.journalPath = w.commitJournalPath(plan.PlanID)
+	if run.journalPath == "" {
+		return errors.New("commit journal state directory is required")
 	}
-	for _, file := range request.Files {
-		journal.Entries = append(journal.Entries, CommitJournalEntry{
-			Path: file.Path, Preimage: append([]byte(nil), file.Before...), Postimage: append([]byte(nil), file.After...),
-			Before: file.BeforeDisk, After: file.AfterDisk, Progress: CommitPathPending,
-		})
+	return w.persistCommitJournal(run.journalPath, &run.journal, "prepare_journal")
+}
+
+// revalidate moves the plan to COMMITTING, rechecks every preimage against the canonical
+// tree and marks the journal applying. The journal exists but nothing canonical is written.
+func (run *commitRun) revalidate() error {
+	w, plan := run.w, run.plan
+	if _, err := w.transitionPlan(plan.PlanID, run.expected, PlanCommitting, "commit_started", "pending", &run.preparation); err != nil {
+		return err
 	}
-	journalPath := w.commitJournalPath(planID)
-	if journalPath == "" {
-		return refuse(errors.New("commit journal state directory is required"))
-	}
-	if err := w.persistCommitJournal(journalPath, &journal, "prepare_journal"); err != nil {
-		return refuse(err)
-	}
-	// abort handles a failure after the journal exists but before any canonical write: the
-	// journal is rolled back so startup never reprocesses it, then the plan is refused.
-	abort := func(cause error) (PlanRecord, error) {
-		journal.State = CommitJournalRolledBack
-		journal.LastError = cause.Error()
-		if err := w.writeCommitJournal(journalPath, &journal); err != nil {
-			cause = fmt.Errorf("%w; persist rolled-back journal: %v", cause, err)
-		}
-		return refuse(cause)
-	}
-	if _, err := w.transitionPlan(planID, expected, PlanCommitting, "commit_started", "pending", &preparation); err != nil {
-		return abort(err)
-	}
-	for _, entry := range journal.Entries {
+	for _, entry := range run.journal.Entries {
 		absolute, err := w.confinedPath(entry.Path)
 		if err != nil {
-			return abort(err)
+			return err
 		}
 		if err := recheckCommitEntry(absolute, entry); err != nil {
-			return abort(err)
+			return err
 		}
 	}
-	journal.State = CommitJournalApplying
-	if err := w.persistCommitJournal(journalPath, &journal, "applying_journal"); err != nil {
-		return abort(err)
+	run.journal.State = CommitJournalApplying
+	return w.persistCommitJournal(run.journalPath, &run.journal, "applying_journal")
+}
+
+// complete resyncs the provider, seals the committed journal and records the COMMITTED
+// plan. The committed journal is the durable receipt and is persisted before the plan
+// record claims COMMITTED, so a crash between the two is reconciled at startup.
+func (run *commitRun) complete() (PlanRecord, error) {
+	w, plan := run.w, run.plan
+	if err := run.stager.Commit(run.ctx, plan.PlanID); err != nil {
+		return run.fail(fmt.Errorf("provider resync: %w", err))
 	}
-	written := false
-	fail := func(cause error) (PlanRecord, error) {
-		if !written {
-			return abort(cause)
-		}
-		return w.markCommitRecovery(plan, journalPath, &journal, cause)
+	run.stagerCommitted = true
+	run.preparation.CanonicalFromRevision = fmt.Sprintf("wsrev_%d", w.Identity().StateSeq)
+	run.preparation.CommittedDiffs = committedDiffs(run.request.Files)
+	if _, err := w.sealCommittedJournal(run.journalPath, &run.journal); err != nil {
+		return run.fail(err)
 	}
-	for _, index := range commitEntryOrder(journal.Entries) {
-		entry := &journal.Entries[index]
-		if err := ctx.Err(); err != nil {
-			return fail(err)
-		}
-		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
-			return fail(err)
-		}
-		absolute, err := w.confinedPath(entry.Path)
-		if err != nil {
-			return fail(err)
-		}
-		// Recheck immediately before the durable replacement so a third-party write that
-		// landed after the whole-set validation is refused rather than overwritten.
-		if err := recheckCommitEntry(absolute, *entry); err != nil {
-			return fail(err)
-		}
-		written = true
-		if err := applyCommitEntry(absolute, *entry); err != nil {
-			return fail(err)
-		}
-		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
-			return fail(err)
-		}
-		entry.Progress = CommitPathApplied
-		if err := w.persistCommitJournal(journalPath, &journal, "progress_journal"); err != nil {
-			return fail(err)
-		}
+	run.preparation.CanonicalChanged = true
+	run.preparation.CanonicalRevision = run.journal.CanonicalRevision
+	run.preparation.JournalID = plan.PlanID
+	result, err := w.transitionPlan(plan.PlanID, run.expected, PlanCommitted, "commit", "ok", &run.preparation)
+	if err != nil {
+		// Every canonical byte and the committed journal are durable; only the plan record
+		// lags. Startup reconciliation marks it COMMITTED from the journal.
+		record, _ := w.transitionPlan(plan.PlanID, run.expected, PlanRecoveryRequired, "commit_receipt_failed", err.Error(), &run.preparation)
+		return record, Codedf(CodeCommitRecoveryRequired, "plan record could not be marked COMMITTED: %w", err)
 	}
-	if err := stager.Commit(ctx, planID); err != nil {
-		return fail(fmt.Errorf("provider resync: %w", err))
-	}
-	stagerCommitted = true
-	canonicalFromRevision := fmt.Sprintf("wsrev_%d", w.Identity().StateSeq)
-	identity := w.recordCanonicalCommit(journal.Entries)
-	preparation.CanonicalFromRevision = canonicalFromRevision
-	preparation.CanonicalChanged = true
-	preparation.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
-	preparation.JournalID = planID
-	preparation.CommittedDiffs = make([]ExactDiff, 0, len(request.Files))
-	for _, file := range request.Files {
+	w.collectCommitJournals()
+	return result, nil
+}
+
+// committedDiffs records the exact byte change of every committed file.
+func committedDiffs(files []PlanStageFile) []ExactDiff {
+	diffs := make([]ExactDiff, 0, len(files))
+	for _, file := range files {
 		before, after := file.Before, file.After
 		if !file.BeforeExists {
 			before = nil
@@ -734,22 +777,45 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 		if !file.AfterExists {
 			after = nil
 		}
-		preparation.CommittedDiffs = append(preparation.CommittedDiffs, exactDiff(file.Path, before, after, 0, len(before), after))
+		diffs = append(diffs, exactDiff(file.Path, before, after, 0, len(before), after))
 	}
-	// The committed journal is the durable receipt and is persisted before the plan record
-	// claims COMMITTED, so a crash between the two is reconciled from the journal at startup.
-	journal.State = CommitJournalCommitted
-	journal.CanonicalRevision = preparation.CanonicalRevision
-	if err := w.persistCommitJournal(journalPath, &journal, "committed_journal"); err != nil {
-		return fail(err)
+	return diffs
+}
+
+// refuse records a failure that happened before any canonical byte was written. A
+// precondition mismatch is a CONFLICTED plan; any other cause leaves it FAILED. Both are
+// re-preparable and neither needs recovery.
+func (run *commitRun) refuse(cause error) (PlanRecord, error) {
+	w, plan := run.w, run.plan
+	var record PlanRecord
+	var transitionErr error
+	if commitAbortsAsConflict(cause) {
+		record, transitionErr = w.conflictPlan(plan.PlanID, run.expected, "commit_refused", &run.preparation, cause)
+	} else {
+		record, transitionErr = w.transitionPlan(plan.PlanID, run.expected, PlanFailed, "commit_refused", cause.Error(), &run.preparation)
 	}
-	result, err := w.transitionPlan(planID, expected, PlanCommitted, "commit", "ok", &preparation)
-	if err != nil {
-		// Every canonical byte and the committed journal are durable; only the plan record
-		// lags. Startup reconciliation marks it COMMITTED from the journal.
-		record, _ := w.transitionPlan(planID, expected, PlanRecoveryRequired, "commit_receipt_failed", err.Error(), &preparation)
-		return record, Codedf(CodeCommitRecoveryRequired, "plan record could not be marked COMMITTED: %w", err)
+	if transitionErr != nil {
+		return record, fmt.Errorf("%w; persist refusal: %v", cause, transitionErr)
 	}
-	w.collectCommitJournals()
-	return result, nil
+	return record, cause
+}
+
+// abort handles a failure after the journal exists but before any canonical write: the
+// journal is rolled back so startup never reprocesses it, then the plan is refused.
+func (run *commitRun) abort(cause error) (PlanRecord, error) {
+	run.journal.State = CommitJournalRolledBack
+	run.journal.LastError = cause.Error()
+	if err := run.w.writeCommitJournal(run.journalPath, &run.journal); err != nil {
+		cause = fmt.Errorf("%w; persist rolled-back journal: %v", cause, err)
+	}
+	return run.refuse(cause)
+}
+
+// fail routes a failure by whether a canonical write was attempted: before the first
+// write it is an abort, after it the journal and plan need recovery.
+func (run *commitRun) fail(cause error) (PlanRecord, error) {
+	if !run.written {
+		return run.abort(cause)
+	}
+	return run.w.markCommitRecovery(run.plan, run.journalPath, &run.journal, cause)
 }

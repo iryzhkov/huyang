@@ -1,4 +1,19 @@
+-- nvim-dap is resolved by tests/minimal_init.lua; without it this suite
+-- skips rather than fails, because the runtime is not part of Huyang.
+if not pcall(require, "dap") then
+    print("unit_dap: SKIP (nvim-dap not found; run tests/fetch-nvim-dap.sh "
+        .. "or set HUYANG_NVIM_DAP_PATH)")
+    return
+end
+
 local probe = require("huyang.dap")._test
+
+-- Discovery sees the copy the harness put on the runtimepath and never
+-- raises; the report names where it came from.
+local report = require("huyang.dap").discover_runtime()
+assert(report.available == true, "discover_runtime should find the harness copy")
+assert(report.path == vim.g.huyang_test_nvim_dap, "discovered path should be the harness copy")
+assert(report.source == "runtimepath" or report.source == "HUYANG_NVIM_DAP_PATH")
 
 local adapter = probe.js_debug_adapter("/tmp/dapDebugServer.js")
 assert(adapter.type == "server")
