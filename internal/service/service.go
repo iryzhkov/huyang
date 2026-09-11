@@ -273,104 +273,66 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 	_ = newSDKServer(profile, s.direct).Run(ctx, transport)
 }
 
+// proxyMessage is the part of a JSON-RPC frame the proxy inspects.
+type proxyMessage struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+}
+
+func decodeProxyMessage(line []byte) proxyMessage {
+	var value proxyMessage
+	_ = json.Unmarshal(line, &value)
+	return value
+}
+
+func proxyIDKey(id json.RawMessage) string {
+	value := strings.TrimSpace(string(id))
+	if value == "" || value == "null" {
+		return ""
+	}
+	return value
+}
+
+// mcpProxy is the byte proxy behind huyang mcp: it forwards newline-delimited
+// JSON-RPC frames between the adapter's stdio and the service socket, and
+// reconnects across a service restart by replaying the initialize handshake
+// and every request still outstanding.
+type mcpProxy struct {
+	socketPath string
+	profile    mcpapi.Profile
+	stdout     io.Writer
+
+	connection *net.UnixConn
+	generation uint64
+	// backendEvents carries frames read from the service; done stops the
+	// reader goroutines once the proxy loop returns.
+	backendEvents chan proxyLineEvent
+	done          chan struct{}
+
+	initializeRequest       []byte
+	initializedNotification []byte
+	initializeID            string
+	clientInitialized       bool
+	outstanding             map[string][]byte
+}
+
 func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, stdout io.Writer) error {
-	type envelope struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
+	proxy := &mcpProxy{
+		socketPath: socketPath, profile: profile, stdout: stdout,
+		backendEvents: make(chan proxyLineEvent, 32), done: make(chan struct{}),
+		outstanding: make(map[string][]byte),
 	}
-
-	done := make(chan struct{})
-	defer close(done)
+	defer close(proxy.done)
 	clientEvents := make(chan proxyLineEvent, 32)
-	go readProxyLines(stdin, 0, clientEvents, done)
-	backendEvents := make(chan proxyLineEvent, 32)
-
-	var connection *net.UnixConn
-	var generation uint64
-	var initializeRequest, initializedNotification []byte
-	var initializeID string
-	clientInitialized := false
-	outstanding := make(map[string][]byte)
-
-	message := func(line []byte) envelope {
-		var value envelope
-		_ = json.Unmarshal(line, &value)
-		return value
-	}
-	idKey := func(id json.RawMessage) string {
-		value := strings.TrimSpace(string(id))
-		if value == "" || value == "null" {
-			return ""
-		}
-		return value
-	}
-
-	connect := func(restarting bool) error {
-		deadline := time.Now().Add(30 * time.Second)
-		for {
-			err := func() error {
-				candidate, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
-				if err != nil {
-					return fmt.Errorf("connect service at %s: %w", socketPath, err)
-				}
-				connection = candidate
-				fail := func(err error) error {
-					_ = candidate.Close()
-					return err
-				}
-				if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(profile)}); err != nil {
-					return fail(fmt.Errorf("identify service connection: %w", err))
-				}
-				reader := bufio.NewReader(candidate)
-				if restarting && clientInitialized && len(initializeRequest) > 0 {
-					if _, err := candidate.Write(initializeRequest); err != nil {
-						return fail(fmt.Errorf("send service reinitialize request: %w", err))
-					}
-					_ = candidate.SetReadDeadline(time.Now().Add(10 * time.Second))
-					for {
-						line, err := reader.ReadBytes('\n')
-						if err != nil {
-							return fail(fmt.Errorf("reinitialize service connection: %w", err))
-						}
-						if idKey(message(line).ID) == initializeID {
-							break
-						}
-					}
-					_ = candidate.SetReadDeadline(time.Time{})
-					if len(initializedNotification) > 0 {
-						if _, err := candidate.Write(initializedNotification); err != nil {
-							return fail(fmt.Errorf("send service initialized notification: %w", err))
-						}
-					}
-				}
-				for _, line := range outstanding {
-					if _, err := candidate.Write(line); err != nil {
-						return fail(fmt.Errorf("replay outstanding service request: %w", err))
-					}
-				}
-				generation++
-				go readProxyLines(reader, generation, backendEvents, done)
-				return nil
-			}()
-			if err == nil {
-				return nil
-			}
-			if !restarting || time.Now().After(deadline) {
-				return err
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	if err := connect(false); err != nil {
+	go readProxyLines(stdin, 0, clientEvents, proxy.done)
+	if err := proxy.connect(false); err != nil {
 		return err
 	}
 	defer func() {
-		if connection != nil {
-			_ = connection.Close()
+		if proxy.connection != nil {
+			_ = proxy.connection.Close()
 		}
 	}()
-
 	for {
 		select {
 		case event := <-clientEvents:
@@ -380,48 +342,138 @@ func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, 
 				}
 				return event.err
 			}
-			value := message(event.line)
-			key := idKey(value.ID)
-			if value.Method == "initialize" {
-				initializeRequest = append([]byte(nil), event.line...)
-				initializeID = key
+			if err := proxy.forwardClient(event.line); err != nil {
+				return err
 			}
-			if value.Method == "notifications/initialized" || value.Method == "initialized" {
-				initializedNotification = append([]byte(nil), event.line...)
-			}
-			if key != "" && value.Method != "" {
-				outstanding[key] = append([]byte(nil), event.line...)
-			}
-			if _, err := connection.Write(event.line); err != nil {
-				_ = connection.Close()
-				if err := connect(true); err != nil {
-					return fmt.Errorf("reconnect service after write failure: %w", err)
-				}
-			}
-		case event := <-backendEvents:
-			if event.generation != generation {
-				continue
-			}
-			if event.err != nil {
-				_ = connection.Close()
-				if err := connect(true); err != nil {
-					return fmt.Errorf("reconnect service after disconnect: %w", err)
-				}
-				continue
-			}
-			value := message(event.line)
-			key := idKey(value.ID)
-			if key != "" {
-				delete(outstanding, key)
-				if key == initializeID {
-					clientInitialized = true
-				}
-			}
-			if _, err := stdout.Write(event.line); err != nil {
+		case event := <-proxy.backendEvents:
+			if err := proxy.forwardBackend(event); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// forwardClient records what a later reconnect must replay and writes the
+// frame to the service, reconnecting once when the write fails.
+func (p *mcpProxy) forwardClient(line []byte) error {
+	value := decodeProxyMessage(line)
+	key := proxyIDKey(value.ID)
+	if value.Method == "initialize" {
+		p.initializeRequest = append([]byte(nil), line...)
+		p.initializeID = key
+	}
+	if value.Method == "notifications/initialized" || value.Method == "initialized" {
+		p.initializedNotification = append([]byte(nil), line...)
+	}
+	if key != "" && value.Method != "" {
+		p.outstanding[key] = append([]byte(nil), line...)
+	}
+	if _, err := p.connection.Write(line); err != nil {
+		_ = p.connection.Close()
+		if err := p.connect(true); err != nil {
+			return fmt.Errorf("reconnect service after write failure: %w", err)
+		}
+	}
+	return nil
+}
+
+// forwardBackend writes a service frame to the adapter, settles the request
+// it answers, and reconnects when the service connection dropped. Frames
+// from a superseded connection are ignored.
+func (p *mcpProxy) forwardBackend(event proxyLineEvent) error {
+	if event.generation != p.generation {
+		return nil
+	}
+	if event.err != nil {
+		_ = p.connection.Close()
+		if err := p.connect(true); err != nil {
+			return fmt.Errorf("reconnect service after disconnect: %w", err)
+		}
+		return nil
+	}
+	value := decodeProxyMessage(event.line)
+	if key := proxyIDKey(value.ID); key != "" {
+		delete(p.outstanding, key)
+		if key == p.initializeID {
+			p.clientInitialized = true
+		}
+	}
+	_, err := p.stdout.Write(event.line)
+	return err
+}
+
+// connect dials the service. A restart retries for up to 30 seconds so the
+// adapter survives the service being replaced underneath it.
+func (p *mcpProxy) connect(restarting bool) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		err := p.dial(restarting)
+		if err == nil {
+			return nil
+		}
+		if !restarting || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// dial makes one connection attempt: it identifies the profile, replays the
+// initialize handshake after a restart, resends every outstanding request,
+// and starts the reader for the new connection generation.
+func (p *mcpProxy) dial(restarting bool) error {
+	candidate, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: p.socketPath, Net: "unix"})
+	if err != nil {
+		return fmt.Errorf("connect service at %s: %w", p.socketPath, err)
+	}
+	p.connection = candidate
+	fail := func(err error) error {
+		_ = candidate.Close()
+		return err
+	}
+	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile)}); err != nil {
+		return fail(fmt.Errorf("identify service connection: %w", err))
+	}
+	reader := bufio.NewReader(candidate)
+	if restarting && p.clientInitialized && len(p.initializeRequest) > 0 {
+		if err := p.reinitialize(candidate, reader); err != nil {
+			return fail(err)
+		}
+	}
+	for _, line := range p.outstanding {
+		if _, err := candidate.Write(line); err != nil {
+			return fail(fmt.Errorf("replay outstanding service request: %w", err))
+		}
+	}
+	p.generation++
+	go readProxyLines(reader, p.generation, p.backendEvents, p.done)
+	return nil
+}
+
+// reinitialize repeats the client's initialize request on a fresh
+// connection, waits for its response, and resends the initialized
+// notification, so the service session matches what the client believes.
+func (p *mcpProxy) reinitialize(candidate *net.UnixConn, reader *bufio.Reader) error {
+	if _, err := candidate.Write(p.initializeRequest); err != nil {
+		return fmt.Errorf("send service reinitialize request: %w", err)
+	}
+	_ = candidate.SetReadDeadline(time.Now().Add(10 * time.Second))
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return fmt.Errorf("reinitialize service connection: %w", err)
+		}
+		if proxyIDKey(decodeProxyMessage(line).ID) == p.initializeID {
+			break
+		}
+	}
+	_ = candidate.SetReadDeadline(time.Time{})
+	if len(p.initializedNotification) > 0 {
+		if _, err := candidate.Write(p.initializedNotification); err != nil {
+			return fmt.Errorf("send service initialized notification: %w", err)
+		}
+	}
+	return nil
 }
 
 // readProxyLines forwards newline-delimited frames to events until the reader
