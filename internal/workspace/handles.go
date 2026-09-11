@@ -569,89 +569,15 @@ func locateRanges(read TextRead, locator SemanticLocator) []HandleCandidate {
 
 func (w *Workspace) resolveSymbol(record HandleRecord) (HandleResolution, error) {
 	original := record.Locator
-	if read, readErr := w.Read(original.Path); readErr == nil &&
-		read.Snapshot.Revision == original.DocumentRevision &&
-		original.ByteStart >= 0 && original.ByteEnd <= len(read.Content) && original.ByteEnd > original.ByteStart {
-		currentBytes := read.Content[original.ByteStart:original.ByteEnd]
-		if hashBytes(currentBytes) == original.ContentSHA256 {
-			current := original
-			current.DocumentRevision = read.Snapshot.Revision
-			current.Device, current.Inode = read.Snapshot.Disk.Device, read.Snapshot.Disk.Inode
-			status := ResolutionExact
-			if current.DocumentRevision != original.DocumentRevision {
-				status = ResolutionRelocated
-			}
-			return HandleResolution{Status: status, Handle: record.Handle, Original: original, Current: &current}, nil
-		}
+	if resolution, ok := w.resolveSymbolInPlace(record); ok {
+		return resolution, nil
 	}
 	if w.sectioner == nil {
-		files, _, err := w.collectFiles()
-		if err != nil {
-			return HandleResolution{}, err
-		}
-		var candidates []HandleCandidate
-		for _, path := range files {
-			read, readErr := w.Read(path)
-			if readErr == nil {
-				candidates = append(candidates, locateRanges(read, original)...)
-			}
-		}
-		if len(candidates) == 1 {
-			current := candidates[0].Locator
-			code := ConflictFormatOnlyRelocation
-			if current.Path != original.Path {
-				code = ConflictSymbolMoved
-			}
-			return HandleResolution{Status: ResolutionRelocated, Code: code, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
-		}
-		code := ConflictDocumentChanged
-		if len(candidates) > 1 {
-			code = ConflictSymbolAmbiguous
-		} else if _, readErr := w.Read(original.Path); readErr != nil {
-			code = ConflictTargetDeleted
-		}
-		return HandleResolution{Status: ResolutionConflicted, Code: code, Handle: record.Handle, Original: original, Candidates: candidates}, nil
+		return w.resolveSymbolByBytes(record)
 	}
-	files, _, err := w.collectFiles()
+	sameName, fingerprint, err := w.sectionCandidates(original)
 	if err != nil {
 		return HandleResolution{}, err
-	}
-	var sameName, fingerprint []HandleCandidate
-	for _, path := range files {
-		read, readErr := w.Read(path)
-		if readErr != nil {
-			continue
-		}
-		sections, sectionErr := w.sectioner.Sections(read.Path, read.Content)
-		if sectionErr != nil {
-			continue
-		}
-		for _, section := range sections {
-			if section.Name != original.NamePath || section.Kind != original.Kind ||
-				section.ByteStart < 0 || section.ByteEnd > len(read.Content) || section.ByteEnd <= section.ByteStart {
-				continue
-			}
-			content := read.Content[section.ByteStart:section.ByteEnd]
-			locator := original
-			locator.Path, locator.ByteStart, locator.ByteEnd = read.Path, section.ByteStart, section.ByteEnd
-			locator.DocumentRevision = read.Snapshot.Revision
-			locator.Device, locator.Inode = read.Snapshot.Disk.Device, read.Snapshot.Disk.Inode
-			locator.NodeSHA256 = normalizedFingerprint(content)
-			locator.SignatureSHA256 = signatureFingerprint(content)
-			locator.ContentSHA256 = hashBytes(content)
-			currentRange, rangeErr := rangeHandle(read, section.ByteStart, section.ByteEnd, locator.AnchorBytes)
-			if rangeErr != nil {
-				continue
-			}
-			locator.BeforeSHA256 = currentRange.BeforeSHA256
-			locator.AfterSHA256 = currentRange.AfterSHA256
-			line, column := bytePosition(read.Content, section.ByteStart)
-			candidate := HandleCandidate{Display: fmt.Sprintf("%s:%d:%d %s %s", read.Path, line, column, section.Name, section.Kind), Locator: locator}
-			sameName = append(sameName, candidate)
-			if locator.NodeSHA256 == original.NodeSHA256 && locator.SignatureSHA256 == original.SignatureSHA256 {
-				fingerprint = append(fingerprint, candidate)
-			}
-		}
 	}
 	if len(fingerprint) == 1 {
 		current := fingerprint[0].Locator
@@ -675,6 +601,116 @@ func (w *Workspace) resolveSymbol(record HandleRecord) (HandleResolution, error)
 		code = ConflictSymbolSignatureChanged
 	}
 	return HandleResolution{Status: ResolutionConflicted, Code: code, Handle: record.Handle, Original: original, Candidates: sameName}, nil
+}
+
+// resolveSymbolInPlace answers a handle whose recorded bytes are still at the recorded
+// range of the recorded document revision, without any search.
+func (w *Workspace) resolveSymbolInPlace(record HandleRecord) (HandleResolution, bool) {
+	original := record.Locator
+	read, readErr := w.Read(original.Path)
+	if readErr != nil || read.Snapshot.Revision != original.DocumentRevision ||
+		original.ByteStart < 0 || original.ByteEnd > len(read.Content) || original.ByteEnd <= original.ByteStart {
+		return HandleResolution{}, false
+	}
+	if hashBytes(read.Content[original.ByteStart:original.ByteEnd]) != original.ContentSHA256 {
+		return HandleResolution{}, false
+	}
+	current := original
+	current.DocumentRevision = read.Snapshot.Revision
+	current.Device, current.Inode = read.Snapshot.Disk.Device, read.Snapshot.Disk.Inode
+	status := ResolutionExact
+	if current.DocumentRevision != original.DocumentRevision {
+		status = ResolutionRelocated
+	}
+	return HandleResolution{Status: status, Handle: record.Handle, Original: original, Current: &current}, true
+}
+
+// resolveSymbolByBytes relocates a handle by its exact bytes when no sectioner is
+// available: one match relocates, several are ambiguous, none is a changed or deleted
+// document.
+func (w *Workspace) resolveSymbolByBytes(record HandleRecord) (HandleResolution, error) {
+	original := record.Locator
+	files, _, err := w.collectFiles()
+	if err != nil {
+		return HandleResolution{}, err
+	}
+	var candidates []HandleCandidate
+	for _, path := range files {
+		read, readErr := w.Read(path)
+		if readErr == nil {
+			candidates = append(candidates, locateRanges(read, original)...)
+		}
+	}
+	if len(candidates) == 1 {
+		current := candidates[0].Locator
+		code := ConflictFormatOnlyRelocation
+		if current.Path != original.Path {
+			code = ConflictSymbolMoved
+		}
+		return HandleResolution{Status: ResolutionRelocated, Code: code, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
+	}
+	code := ConflictDocumentChanged
+	if len(candidates) > 1 {
+		code = ConflictSymbolAmbiguous
+	} else if _, readErr := w.Read(original.Path); readErr != nil {
+		code = ConflictTargetDeleted
+	}
+	return HandleResolution{Status: ResolutionConflicted, Code: code, Handle: record.Handle, Original: original, Candidates: candidates}, nil
+}
+
+// sectionCandidates lists every parsed declaration in the workspace with the original's
+// name and kind, and the subset whose normalized node and signature fingerprints match.
+func (w *Workspace) sectionCandidates(original SemanticLocator) (sameName, fingerprint []HandleCandidate, err error) {
+	files, _, err := w.collectFiles()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, path := range files {
+		read, readErr := w.Read(path)
+		if readErr != nil {
+			continue
+		}
+		sections, sectionErr := w.sectioner.Sections(read.Path, read.Content)
+		if sectionErr != nil {
+			continue
+		}
+		for _, section := range sections {
+			candidate, ok := sectionCandidate(read, section, original)
+			if !ok {
+				continue
+			}
+			sameName = append(sameName, candidate)
+			if candidate.Locator.NodeSHA256 == original.NodeSHA256 && candidate.Locator.SignatureSHA256 == original.SignatureSHA256 {
+				fingerprint = append(fingerprint, candidate)
+			}
+		}
+	}
+	return sameName, fingerprint, nil
+}
+
+// sectionCandidate builds the candidate locator for one parsed section that has the
+// original's name and kind and a valid range.
+func sectionCandidate(read TextRead, section Section, original SemanticLocator) (HandleCandidate, bool) {
+	if section.Name != original.NamePath || section.Kind != original.Kind ||
+		section.ByteStart < 0 || section.ByteEnd > len(read.Content) || section.ByteEnd <= section.ByteStart {
+		return HandleCandidate{}, false
+	}
+	content := read.Content[section.ByteStart:section.ByteEnd]
+	locator := original
+	locator.Path, locator.ByteStart, locator.ByteEnd = read.Path, section.ByteStart, section.ByteEnd
+	locator.DocumentRevision = read.Snapshot.Revision
+	locator.Device, locator.Inode = read.Snapshot.Disk.Device, read.Snapshot.Disk.Inode
+	locator.NodeSHA256 = normalizedFingerprint(content)
+	locator.SignatureSHA256 = signatureFingerprint(content)
+	locator.ContentSHA256 = hashBytes(content)
+	currentRange, rangeErr := rangeHandle(read, section.ByteStart, section.ByteEnd, locator.AnchorBytes)
+	if rangeErr != nil {
+		return HandleCandidate{}, false
+	}
+	locator.BeforeSHA256 = currentRange.BeforeSHA256
+	locator.AfterSHA256 = currentRange.AfterSHA256
+	line, column := bytePosition(read.Content, section.ByteStart)
+	return HandleCandidate{Display: fmt.Sprintf("%s:%d:%d %s %s", read.Path, line, column, section.Name, section.Kind), Locator: locator}, true
 }
 
 func nonOverlapping(hits []SearchHit) bool {

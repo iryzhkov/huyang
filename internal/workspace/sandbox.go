@@ -160,64 +160,76 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		source := filepath.Join(sourceRoot, filepath.FromSlash(entry.Path))
-		target := filepath.Join(sandbox.Tree, filepath.FromSlash(entry.Path))
-		switch entry.Kind {
-		case ObjectDirectory:
-			if err := os.Mkdir(target, entry.Mode.Perm()); err != nil {
-				return nil, err
-			}
-			if err := os.Chmod(target, entry.Mode.Perm()); err != nil {
-				return nil, err
-			}
-		case ObjectSymlink:
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, err
-			}
-			if err := refuseSymlinkIntoCanonical(sourceRoot, sandbox.Tree, entry.Path, entry.Target); err != nil {
-				return nil, err
-			}
-			if err := os.Symlink(entry.Target, target); err != nil {
-				return nil, err
-			}
-		case ObjectRegularText, ObjectBinary:
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, err
-			}
-			if backend == "reflink" {
-				err = sandboxCloneFile(source, target, entry.Mode.Perm())
-			} else {
-				err = copySandboxFile(ctx, source, target, entry.Mode.Perm())
-			}
-			if err != nil {
-				return nil, err
-			}
-			if err := os.Chmod(target, entry.Mode.Perm()); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("sandbox_special_file: %s has unsupported kind %s", entry.Path, entry.Kind)
+		if err := materializeEntry(ctx, sourceRoot, sandbox.Tree, backend, entry); err != nil {
+			return nil, err
 		}
 	}
-	current, _, err := inventorySandboxTree(ctx, sourceRoot, SandboxLimits{MaxEntries: len(manifest) + 1, MaxLogicalBytes: 1<<63 - 1})
-	if err != nil {
+	if err := verifySandboxManifest(ctx, sourceRoot, sandbox.Tree, manifest); err != nil {
 		return nil, err
-	}
-	if !reflect.DeepEqual(current, manifest) {
-		return nil, errors.New("sandbox_source_changed: canonical tree changed during materialization")
-	}
-	copied, _, err := inventorySandboxTree(ctx, sandbox.Tree, SandboxLimits{MaxEntries: len(manifest) + 1, MaxLogicalBytes: 1<<63 - 1})
-	if err != nil {
-		return nil, err
-	}
-	if !equalSandboxContent(copied, manifest) {
-		return nil, errors.New("sandbox_manifest_mismatch: destination does not equal canonical base")
 	}
 	if err := sandbox.writeMarker("sealed"); err != nil {
 		return nil, err
 	}
 	failed = false
 	return sandbox, nil
+}
+
+// materializeEntry recreates one manifest entry under tree with its recorded mode.
+func materializeEntry(ctx context.Context, sourceRoot, tree, backend string, entry sandboxEntry) error {
+	source := filepath.Join(sourceRoot, filepath.FromSlash(entry.Path))
+	target := filepath.Join(tree, filepath.FromSlash(entry.Path))
+	switch entry.Kind {
+	case ObjectDirectory:
+		if err := os.Mkdir(target, entry.Mode.Perm()); err != nil {
+			return err
+		}
+		return os.Chmod(target, entry.Mode.Perm())
+	case ObjectSymlink:
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		if err := refuseSymlinkIntoCanonical(sourceRoot, tree, entry.Path, entry.Target); err != nil {
+			return err
+		}
+		return os.Symlink(entry.Target, target)
+	case ObjectRegularText, ObjectBinary:
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		var err error
+		if backend == "reflink" {
+			err = sandboxCloneFile(source, target, entry.Mode.Perm())
+		} else {
+			err = copySandboxFile(ctx, source, target, entry.Mode.Perm())
+		}
+		if err != nil {
+			return err
+		}
+		return os.Chmod(target, entry.Mode.Perm())
+	default:
+		return fmt.Errorf("sandbox_special_file: %s has unsupported kind %s", entry.Path, entry.Kind)
+	}
+}
+
+// verifySandboxManifest refuses a sandbox whose source changed during materialization or
+// whose copy does not equal the canonical base.
+func verifySandboxManifest(ctx context.Context, sourceRoot, tree string, manifest []sandboxEntry) error {
+	limits := SandboxLimits{MaxEntries: len(manifest) + 1, MaxLogicalBytes: 1<<63 - 1}
+	current, _, err := inventorySandboxTree(ctx, sourceRoot, limits)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(current, manifest) {
+		return errors.New("sandbox_source_changed: canonical tree changed during materialization")
+	}
+	copied, _, err := inventorySandboxTree(ctx, tree, limits)
+	if err != nil {
+		return err
+	}
+	if !equalSandboxContent(copied, manifest) {
+		return errors.New("sandbox_manifest_mismatch: destination does not equal canonical base")
+	}
+	return nil
 }
 
 // refuseSymlinkIntoCanonical rejects a symlink that, recreated verbatim at

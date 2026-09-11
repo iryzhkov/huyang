@@ -118,6 +118,46 @@ func defaultImpactPolicy(policy ImpactPolicy) ImpactPolicy {
 func BuildImpactGraph(root, revision string, changed []string, policy ImpactPolicy, variants []VariantPolicy) (ImpactGraph, error) {
 	policy = defaultImpactPolicy(policy)
 	graph := ImpactGraph{Revision: revision, Changed: uniqueSorted(changed)}
+	sources, walkErr := collectImpactSources(root, policy, &graph)
+	if walkErr != nil {
+		return graph, walkErr
+	}
+	linkImpactSources(sources, policy, &graph)
+	if graph.Coverage.Capped {
+		graph.Coverage.Skipped = append(graph.Coverage.Skipped, "impact_graph_cap")
+		graph.Risks = append(graph.Risks, ImpactRisk{Kind: "graph_cap", Detail: "file or edge cap reached"})
+	}
+	graph.Affected = impactClosure(graph.Changed, graph.Edges)
+	graph.Untested = untestedAffected(graph.Affected, sources)
+	for _, variant := range variants {
+		if variantApplies(variant, graph.Affected) {
+			graph.Included = append(graph.Included, variant.Name)
+			continue
+		}
+		graph.Omitted = append(graph.Omitted, variant.Name)
+		if variant.Required {
+			graph.Risks = append(graph.Risks, ImpactRisk{Kind: "variant_omitted", Detail: variant.Name})
+		}
+	}
+	sort.Slice(graph.Nodes, func(i, j int) bool { return graph.Nodes[i].Path < graph.Nodes[j].Path })
+	sort.Slice(graph.Edges, func(i, j int) bool {
+		if graph.Edges[i].From == graph.Edges[j].From {
+			return graph.Edges[i].To < graph.Edges[j].To
+		}
+		return graph.Edges[i].From < graph.Edges[j].From
+	})
+	graph.Adapters = adaptersFor(graph.Nodes)
+	graph.Untested = uniqueSorted(graph.Untested)
+	graph.Included = uniqueSorted(graph.Included)
+	graph.Omitted = uniqueSorted(graph.Omitted)
+	graph.Coverage.Complete = !graph.Coverage.Capped && len(graph.Risks) == 0
+	graph.RecommendFull = !graph.Coverage.Complete || len(graph.Untested) > 0 || len(graph.Omitted) > 0
+	return graph, nil
+}
+
+// collectImpactSources reads every source file under root up to the file cap, recording
+// coverage and the risks that make a static graph incomplete.
+func collectImpactSources(root string, policy ImpactPolicy, graph *ImpactGraph) (map[string]impactSource, error) {
 	sources := map[string]impactSource{}
 	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -164,9 +204,12 @@ func BuildImpactGraph(root, revision string, changed []string, policy ImpactPoli
 		sources[relative] = impactSource{node: node, content: text}
 		return nil
 	})
-	if walkErr != nil {
-		return graph, walkErr
-	}
+	return sources, walkErr
+}
+
+// linkImpactSources adds every source as a node and every resolvable import as an edge,
+// up to the edge cap.
+func linkImpactSources(sources map[string]impactSource, policy ImpactPolicy, graph *ImpactGraph) {
 	for _, item := range sources {
 		graph.Nodes = append(graph.Nodes, item.node)
 		for _, imported := range impactImports(item.node.Language, item.content) {
@@ -182,47 +225,24 @@ func BuildImpactGraph(root, revision string, changed []string, policy ImpactPoli
 			graph.Edges = append(graph.Edges, ImpactEdge{From: item.node.Path, To: target, Kind: "imports", Adapter: item.node.Language, Confidence: confidence})
 		}
 	}
-	if graph.Coverage.Capped {
-		graph.Coverage.Skipped = append(graph.Coverage.Skipped, "impact_graph_cap")
-		graph.Risks = append(graph.Risks, ImpactRisk{Kind: "graph_cap", Detail: "file or edge cap reached"})
-	}
-	graph.Affected = impactClosure(graph.Changed, graph.Edges)
+}
+
+// untestedAffected lists affected non-test sources whose directory holds no affected test.
+func untestedAffected(affected []string, sources map[string]impactSource) []string {
 	testDirs := map[string]bool{}
-	for _, path := range graph.Affected {
+	for _, path := range affected {
 		if node, ok := sources[path]; ok && node.node.Test {
 			testDirs[filepath.ToSlash(filepath.Dir(path))] = true
 		}
 	}
-	for _, path := range graph.Affected {
+	var untested []string
+	for _, path := range affected {
 		node, ok := sources[path]
 		if ok && !node.node.Test && !testDirs[filepath.ToSlash(filepath.Dir(path))] {
-			graph.Untested = append(graph.Untested, path)
+			untested = append(untested, path)
 		}
 	}
-	for _, variant := range variants {
-		if variantApplies(variant, graph.Affected) {
-			graph.Included = append(graph.Included, variant.Name)
-		} else {
-			graph.Omitted = append(graph.Omitted, variant.Name)
-			if variant.Required {
-				graph.Risks = append(graph.Risks, ImpactRisk{Kind: "variant_omitted", Detail: variant.Name})
-			}
-		}
-	}
-	sort.Slice(graph.Nodes, func(i, j int) bool { return graph.Nodes[i].Path < graph.Nodes[j].Path })
-	sort.Slice(graph.Edges, func(i, j int) bool {
-		if graph.Edges[i].From == graph.Edges[j].From {
-			return graph.Edges[i].To < graph.Edges[j].To
-		}
-		return graph.Edges[i].From < graph.Edges[j].From
-	})
-	graph.Adapters = adaptersFor(graph.Nodes)
-	graph.Untested = uniqueSorted(graph.Untested)
-	graph.Included = uniqueSorted(graph.Included)
-	graph.Omitted = uniqueSorted(graph.Omitted)
-	graph.Coverage.Complete = !graph.Coverage.Capped && len(graph.Risks) == 0
-	graph.RecommendFull = !graph.Coverage.Complete || len(graph.Untested) > 0 || len(graph.Omitted) > 0
-	return graph, nil
+	return untested
 }
 
 func SelectAffectedTests(graph ImpactGraph, tests []CommandPolicy, history []TestHistoryEntry) []SelectedTest {

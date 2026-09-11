@@ -684,9 +684,7 @@ func (run *commitRun) finish() {
 	}
 	run.finished = true
 	if !run.stagerCommitted {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = run.stager.Rollback(rollbackCtx, run.plan.PlanID)
-		cancel()
+		_ = rollbackStager(run.stager, run.plan.PlanID)
 	}
 	run.w.prepareMu.Lock()
 	delete(run.w.activePlans, run.plan.PlanID)

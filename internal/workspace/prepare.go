@@ -113,18 +113,11 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if stager == nil {
 		return PlanRecord{}, Coded(CodeProviderUnavailable, errors.New("prepare requires a provider"))
 	}
-	w.prepareMu.Lock()
-	if _, exists := w.activePlans[planID]; exists {
-		w.prepareMu.Unlock()
-		current, inspectErr := w.InspectPlan(planID, expected)
-		if inspectErr == nil && (current.State == PlanReady || current.State == PlanProvisional) {
-			return current, nil
-		}
-		return PlanRecord{}, Codedf(CodeWorkspaceBusy, "transaction %s is already preparing", planID)
+	if prepared, err := w.acquirePrepareLease(planID, expected); err != nil {
+		return PlanRecord{}, err
+	} else if prepared != nil {
+		return *prepared, nil
 	}
-	w.activePlans[planID] = struct{}{}
-	w.prepareMu.Unlock()
-
 	release := true
 	defer func() {
 		if release {
@@ -133,7 +126,64 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 			w.prepareMu.Unlock()
 		}
 	}()
+	plan, err := w.previewedPlan(planID, expected)
+	if err != nil {
+		return plan, err
+	}
+	if _, err := w.transitionPlan(planID, expected, PlanPreparing, "prepare_started", "pending", nil); err != nil {
+		return PlanRecord{}, err
+	}
+	request, err := w.planStageRequest(plan)
+	if err != nil {
+		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
+		return PlanRecord{}, err
+	}
+	if err := stager.Stage(ctx, request); err != nil {
+		message := err.Error()
+		if rollbackErr := rollbackStager(stager, planID); rollbackErr != nil {
+			message += "; rollback: " + rollbackErr.Error()
+		}
+		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", message, nil)
+		return PlanRecord{}, errors.New(message)
+	}
+	prepared, targetState := preparationFor(plan, request, stager)
+	if target, ok := stager.(PreparedRevisionStager); ok {
+		target.SetPreparedRevision(prepared.PreparedRevision)
+	}
+	result, err := w.transitionPlan(planID, expected, targetState, "prepare", prepared.Diagnostics, prepared)
+	if err != nil {
+		if rollbackErr := rollbackStager(stager, planID); rollbackErr != nil {
+			err = fmt.Errorf("%w; rollback: %v", err, rollbackErr)
+		}
+		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
+		return PlanRecord{}, err
+	}
+	release = false
+	return result, nil
+}
 
+// acquirePrepareLease takes the exclusive lease for planID. When the plan already holds
+// the lease and is READY or PROVISIONAL, its prepared record is returned instead so a
+// repeated prepare is idempotent; any other holder makes the workspace busy.
+func (w *Workspace) acquirePrepareLease(planID string, expected uint64) (*PlanRecord, error) {
+	w.prepareMu.Lock()
+	if _, exists := w.activePlans[planID]; exists {
+		w.prepareMu.Unlock()
+		current, inspectErr := w.InspectPlan(planID, expected)
+		if inspectErr == nil && (current.State == PlanReady || current.State == PlanProvisional) {
+			return &current, nil
+		}
+		return nil, Codedf(CodeWorkspaceBusy, "transaction %s is already preparing", planID)
+	}
+	w.activePlans[planID] = struct{}{}
+	w.prepareMu.Unlock()
+	return nil, nil
+}
+
+// previewedPlan returns the plan with a successful preview for the expected revision,
+// building the preview when it is missing or stale. On a preview conflict the plan is
+// returned beside the error so the caller can report it.
+func (w *Workspace) previewedPlan(planID string, expected uint64) (PlanRecord, error) {
 	plan, err := w.InspectPlan(planID, expected)
 	if err != nil {
 		return PlanRecord{}, err
@@ -150,25 +200,20 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if plan.Preview.Outcome != "ok" {
 		return plan, Coded(CodePlanValidationConflicts, errors.New("preview must succeed before prepare"))
 	}
-	if _, err := w.transitionPlan(planID, expected, PlanPreparing, "prepare_started", "pending", nil); err != nil {
-		return PlanRecord{}, err
-	}
-	request, err := w.planStageRequest(plan)
-	if err != nil {
-		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
-		return PlanRecord{}, err
-	}
-	if err := stager.Stage(ctx, request); err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		rollbackErr := stager.Rollback(rollbackCtx, planID)
-		cancel()
-		message := err.Error()
-		if rollbackErr != nil {
-			message += "; rollback: " + rollbackErr.Error()
-		}
-		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", message, nil)
-		return PlanRecord{}, errors.New(message)
-	}
+	return plan, nil
+}
+
+// rollbackStager rolls the provider's staged view back with a bounded timeout.
+func rollbackStager(stager PlanStager, planID string) error {
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return stager.Rollback(rollbackCtx, planID)
+}
+
+// preparationFor derives the prepared revision and evidence from the staged request and
+// the stager's verification, and the state the plan reaches: READY when every
+// verification dimension is covered, PROVISIONAL otherwise.
+func preparationFor(plan PlanRecord, request PlanStageRequest, stager PlanStager) (*PlanPreparation, PlanState) {
 	backend, baseRevision, evidencePaths := "", plan.Preview.PreviewRevision, "canonical"
 	diskChecks := "unavailable_buffer_backed_prepare"
 	if metadata, ok := stager.(PlanStagerMetadata); ok {
@@ -204,22 +249,7 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		Verification: append([]VerificationStage(nil), verification.Stages...),
 		ToolDelta:    append([]ToolDelta(nil), verification.ToolDelta...),
 	}
-	if target, ok := stager.(PreparedRevisionStager); ok {
-		target.SetPreparedRevision(prepared.PreparedRevision)
-	}
-	result, err := w.transitionPlan(planID, expected, targetState, "prepare", diagnosticStatus, prepared)
-	if err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		rollbackErr := stager.Rollback(rollbackCtx, planID)
-		cancel()
-		if rollbackErr != nil {
-			err = fmt.Errorf("%w; rollback: %v", err, rollbackErr)
-		}
-		_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
-		return PlanRecord{}, err
-	}
-	release = false
-	return result, nil
+	return prepared, targetState
 }
 
 // RollbackPlan restores exact provider preimages and releases the transaction lease.

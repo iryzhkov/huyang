@@ -219,40 +219,13 @@ func OpenDocument(file string, providerEpoch uint64, stateDir string) (*Workspac
 }
 
 func newWorkspace(options OpenOptions) (*Workspace, error) {
-	switch options.Kind {
-	case KindProject, KindDocuments, KindTransactionSandbox:
-	default:
-		return nil, fmt.Errorf("unknown workspace kind %q", options.Kind)
-	}
-	if options.Kind == KindDocuments && len(options.Files) == 0 {
-		return nil, errors.New("document workspace requires at least one allowlisted file")
-	}
-	root := options.Root
-	if root == "" && options.Kind == KindDocuments {
-		var err error
-		root, err = commonRoot(options.Files)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if root == "" {
-		return nil, errors.New("workspace root is required")
-	}
-	canonical, err := filepath.Abs(root)
+	canonical, err := workspaceRoot(options)
 	if err != nil {
 		return nil, err
 	}
-	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
-		canonical = resolved
-	}
-	id := options.Identity
-	if id == "" {
-		id, err = newID()
-		if err != nil {
-			return nil, err
-		}
-	} else if !validID(id) {
-		return nil, fmt.Errorf("invalid restored workspace ID %q", id)
+	id, err := workspaceIdentity(options.Identity)
+	if err != nil {
+		return nil, err
 	}
 	stateSeq := options.StateSeq
 	if stateSeq == 0 {
@@ -274,18 +247,9 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		commitFault:     options.CommitFault,
 	}
 	for _, name := range options.Files {
-		absolute := name
-		if !filepath.IsAbs(absolute) {
-			absolute = filepath.Join(canonical, absolute)
-		}
-		absolute, err = filepath.Abs(absolute)
+		absolute, err := allowlistedPath(canonical, name)
 		if err != nil {
 			return nil, err
-		}
-		absolute = filepath.Clean(absolute)
-		rel, relErr := filepath.Rel(canonical, absolute)
-		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("allowlisted document %s is outside workspace root %s", absolute, canonical)
 		}
 		workspace.allowlist[absolute] = struct{}{}
 	}
@@ -300,6 +264,67 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		return nil, err
 	}
 	return workspace, nil
+}
+
+// workspaceRoot validates the kind and returns the canonical absolute root, derived from
+// the allowlisted files for a document workspace that named none.
+func workspaceRoot(options OpenOptions) (string, error) {
+	switch options.Kind {
+	case KindProject, KindDocuments, KindTransactionSandbox:
+	default:
+		return "", fmt.Errorf("unknown workspace kind %q", options.Kind)
+	}
+	if options.Kind == KindDocuments && len(options.Files) == 0 {
+		return "", errors.New("document workspace requires at least one allowlisted file")
+	}
+	root := options.Root
+	if root == "" && options.Kind == KindDocuments {
+		var err error
+		root, err = commonRoot(options.Files)
+		if err != nil {
+			return "", err
+		}
+	}
+	if root == "" {
+		return "", errors.New("workspace root is required")
+	}
+	canonical, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
+		canonical = resolved
+	}
+	return canonical, nil
+}
+
+// workspaceIdentity returns a fresh ID, or validates the one a restored workspace names.
+func workspaceIdentity(restored ID) (ID, error) {
+	if restored == "" {
+		return newID()
+	}
+	if !validID(restored) {
+		return "", fmt.Errorf("invalid restored workspace ID %q", restored)
+	}
+	return restored, nil
+}
+
+// allowlistedPath resolves one allowlisted document to a clean absolute path inside root.
+func allowlistedPath(root, name string) (string, error) {
+	absolute := name
+	if !filepath.IsAbs(absolute) {
+		absolute = filepath.Join(root, absolute)
+	}
+	absolute, err := filepath.Abs(absolute)
+	if err != nil {
+		return "", err
+	}
+	absolute = filepath.Clean(absolute)
+	rel, relErr := filepath.Rel(root, absolute)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("allowlisted document %s is outside workspace root %s", absolute, root)
+	}
+	return absolute, nil
 }
 
 func commonRoot(files []string) (string, error) {
@@ -448,33 +473,7 @@ func (w *Workspace) Orient() (Orientation, error) {
 func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	coverage := Coverage{Complete: true, Semantic: w.semanticCoverage()}
 	if w.identity.Kind == KindDocuments {
-		w.mu.Lock()
-		candidates := make([]string, 0, len(w.allowlist))
-		for name := range w.allowlist {
-			candidates = append(candidates, name)
-		}
-		w.mu.Unlock()
-		sort.Strings(candidates)
-		coverage.FilesConsidered = len(candidates)
-		files := make([]string, 0, len(candidates))
-		for _, name := range candidates {
-			if len(files) >= w.limits.MaxFiles {
-				coverage.Complete = false
-				coverage.Capped = true
-				break
-			}
-			_, err := os.Lstat(name)
-			if errors.Is(err, os.ErrNotExist) {
-				files = append(files, name)
-				continue
-			}
-			if err != nil {
-				coverage.Complete = false
-				coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(err.Error(), 256))
-				continue
-			}
-			files = append(files, name)
-		}
+		files := w.collectAllowlisted(&coverage)
 		return files, coverage, nil
 	}
 	// The inventory honours .gitignore through the sanitized Git runner so
@@ -482,29 +481,75 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	// reach the native text path. A truncated listing is not trusted; the
 	// bounded walk below takes over instead.
 	if output, truncated, err := runGitAt(w.identity.Root, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err == nil && !truncated {
-		var files []string
-		for _, relative := range strings.Split(output, "\x00") {
-			if relative == "" {
-				continue
-			}
-			coverage.FilesConsidered++
-			depth := len(strings.Split(filepath.Clean(relative), string(filepath.Separator)))
-			if depth > w.limits.MaxDepth {
-				coverage.Complete = false
-				coverage.Capped = true
-				coverage.Skipped = append(coverage.Skipped, relative+": depth limit")
-				continue
-			}
-			if len(files) >= w.limits.MaxFiles {
-				coverage.Complete = false
-				coverage.Capped = true
-				break
-			}
-			files = append(files, filepath.Join(w.identity.Root, filepath.FromSlash(relative)))
-		}
-		sort.Strings(files)
+		files := w.collectListedFiles(output, &coverage)
 		return files, coverage, nil
 	}
+	files, err := w.walkFiles(&coverage)
+	return files, coverage, err
+}
+
+// collectAllowlisted returns the allowlisted documents in path order, keeping a missing
+// document (it may be created) and skipping one that cannot be stat'ed.
+func (w *Workspace) collectAllowlisted(coverage *Coverage) []string {
+	w.mu.Lock()
+	candidates := make([]string, 0, len(w.allowlist))
+	for name := range w.allowlist {
+		candidates = append(candidates, name)
+	}
+	w.mu.Unlock()
+	sort.Strings(candidates)
+	coverage.FilesConsidered = len(candidates)
+	files := make([]string, 0, len(candidates))
+	for _, name := range candidates {
+		if len(files) >= w.limits.MaxFiles {
+			coverage.Complete = false
+			coverage.Capped = true
+			break
+		}
+		_, err := os.Lstat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			files = append(files, name)
+			continue
+		}
+		if err != nil {
+			coverage.Complete = false
+			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(err.Error(), 256))
+			continue
+		}
+		files = append(files, name)
+	}
+	return files
+}
+
+// collectListedFiles turns a NUL-separated git ls-files listing into bounded absolute
+// paths.
+func (w *Workspace) collectListedFiles(output string, coverage *Coverage) []string {
+	var files []string
+	for _, relative := range strings.Split(output, "\x00") {
+		if relative == "" {
+			continue
+		}
+		coverage.FilesConsidered++
+		depth := len(strings.Split(filepath.Clean(relative), string(filepath.Separator)))
+		if depth > w.limits.MaxDepth {
+			coverage.Complete = false
+			coverage.Capped = true
+			coverage.Skipped = append(coverage.Skipped, relative+": depth limit")
+			continue
+		}
+		if len(files) >= w.limits.MaxFiles {
+			coverage.Complete = false
+			coverage.Capped = true
+			break
+		}
+		files = append(files, filepath.Join(w.identity.Root, filepath.FromSlash(relative)))
+	}
+	sort.Strings(files)
+	return files
+}
+
+// walkFiles is the bounded filesystem walk used when Git cannot list the tree.
+func (w *Workspace) walkFiles(coverage *Coverage) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(w.identity.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -544,7 +589,7 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 		err = nil
 	}
 	sort.Strings(files)
-	return files, coverage, err
+	return files, err
 }
 
 var (
@@ -587,19 +632,9 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	if request.Query == "" {
 		return SearchResult{}, errors.New("search query is required")
 	}
-	mode := request.Mode
-	if mode == "" {
-		mode = SearchLiteral
-	}
-	var expression *regexp.Regexp
-	var err error
-	if mode == SearchRegex {
-		expression, err = regexp.Compile(request.Query)
-		if err != nil {
-			return SearchResult{}, fmt.Errorf("invalid regular expression: %w", err)
-		}
-	} else if mode != SearchLiteral {
-		return SearchResult{}, fmt.Errorf("unknown search mode %q", mode)
+	mode, expression, err := searchExpression(request)
+	if err != nil {
+		return SearchResult{}, err
 	}
 	files, coverage, err := w.collectFiles()
 	if err != nil {
@@ -614,49 +649,14 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 			coverage.Capped = true
 			break
 		}
-		disk, _, inspectErr := inspectPath(name)
-		if inspectErr == nil && disk.Kind == ObjectBinary {
+		read, ok := w.readSearchable(name, &coverage)
+		if !ok {
 			continue
 		}
-		read, readErr := w.Read(name)
-		if readErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(readErr.Error(), 256))
-			continue
-		}
-		if coverage.BytesRead+int64(len(read.Content)) > w.limits.MaxBytes {
-			coverage.Complete = false
-			coverage.Capped = true
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": byte limit")
-			continue
-		}
-		coverage.FilesRead++
-		coverage.BytesRead += int64(len(read.Content))
 		revisions[read.Path] = read.Snapshot.Revision
-		ranges := matchRanges(read.Content, []byte(request.Query), expression)
-		for _, span := range ranges {
-			if span[0] == span[1] {
-				continue
-			}
-			if len(hits) >= w.limits.MaxMatches {
-				coverage.Complete = false
-				coverage.Capped = true
-				break
-			}
-			handle, handleErr := rangeHandle(read, span[0], span[1], defaultAnchorBytes)
-			if handleErr != nil {
-				return SearchResult{}, handleErr
-			}
-			line, column := bytePosition(read.Content, span[0])
-			record, registerErr := w.RegisterRangeHandle(handle, HandleMatch,
-				fmt.Sprintf("%s:%d:%d exact match", displayPath(w.identity.Root, read.Path), line, column))
-			if registerErr != nil {
-				return SearchResult{}, registerErr
-			}
-			hits = append(hits, SearchHit{
-				Path: read.Path, ByteStart: span[0], ByteEnd: span[1], Line: line, Column: column,
-				Match: string(read.Content[span[0]:span[1]]), Range: handle, MatchHandle: &record,
-			})
+		hits, err = w.matchHits(read, request.Query, expression, hits, &coverage)
+		if err != nil {
+			return SearchResult{}, err
 		}
 	}
 	result := SearchResult{
@@ -669,6 +669,79 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	}
 	result.ResultSet = &set
 	return result, nil
+}
+
+// searchExpression resolves the search mode and compiles the regular expression for it.
+func searchExpression(request SearchRequest) (SearchMode, *regexp.Regexp, error) {
+	mode := request.Mode
+	if mode == "" {
+		mode = SearchLiteral
+	}
+	if mode == SearchRegex {
+		expression, err := regexp.Compile(request.Query)
+		if err != nil {
+			return mode, nil, fmt.Errorf("invalid regular expression: %w", err)
+		}
+		return mode, expression, nil
+	}
+	if mode != SearchLiteral {
+		return mode, nil, fmt.Errorf("unknown search mode %q", mode)
+	}
+	return mode, nil, nil
+}
+
+// readSearchable reads one candidate document for search, recording in coverage why a
+// binary, unreadable or over-budget document was skipped.
+func (w *Workspace) readSearchable(name string, coverage *Coverage) (TextRead, bool) {
+	disk, _, inspectErr := inspectPath(name)
+	if inspectErr == nil && disk.Kind == ObjectBinary {
+		return TextRead{}, false
+	}
+	read, readErr := w.Read(name)
+	if readErr != nil {
+		coverage.Complete = false
+		coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(readErr.Error(), 256))
+		return TextRead{}, false
+	}
+	if coverage.BytesRead+int64(len(read.Content)) > w.limits.MaxBytes {
+		coverage.Complete = false
+		coverage.Capped = true
+		coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": byte limit")
+		return TextRead{}, false
+	}
+	coverage.FilesRead++
+	coverage.BytesRead += int64(len(read.Content))
+	return read, true
+}
+
+// matchHits registers a match handle for every non-empty match in read, stopping at the
+// match cap.
+func (w *Workspace) matchHits(read TextRead, query string, expression *regexp.Regexp, hits []SearchHit, coverage *Coverage) ([]SearchHit, error) {
+	for _, span := range matchRanges(read.Content, []byte(query), expression) {
+		if span[0] == span[1] {
+			continue
+		}
+		if len(hits) >= w.limits.MaxMatches {
+			coverage.Complete = false
+			coverage.Capped = true
+			break
+		}
+		handle, handleErr := rangeHandle(read, span[0], span[1], defaultAnchorBytes)
+		if handleErr != nil {
+			return nil, handleErr
+		}
+		line, column := bytePosition(read.Content, span[0])
+		record, registerErr := w.RegisterRangeHandle(handle, HandleMatch,
+			fmt.Sprintf("%s:%d:%d exact match", displayPath(w.identity.Root, read.Path), line, column))
+		if registerErr != nil {
+			return nil, registerErr
+		}
+		hits = append(hits, SearchHit{
+			Path: read.Path, ByteStart: span[0], ByteEnd: span[1], Line: line, Column: column,
+			Match: string(read.Content[span[0]:span[1]]), Range: handle, MatchHandle: &record,
+		})
+	}
+	return hits, nil
 }
 
 func matchRanges(content, literal []byte, expression *regexp.Regexp) [][2]int {
