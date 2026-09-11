@@ -734,6 +734,8 @@ end
 -- A provider restart creates a fresh Neovim process, so vim.lsp.enable calls
 -- made by language_server_setup are gone. Mason's installed-package state is
 -- durable; re-enable installed servers before probing workspace buffers.
+local ensure_ruby_lsp_bundler
+
 local function enable_installed_servers(ft)
     local okreg, registry = pcall(require, "mason-registry")
     local okml, mlsp = pcall(require, "mason-lspconfig")
@@ -763,8 +765,14 @@ local function enable_installed_servers(ft)
             local pkg
             local okp = package and pcall(function() pkg = registry.get_package(package) end)
             if okp and pkg and pkg:is_installed() then
-                pcall(vim.lsp.enable, name)
-                enabled[#enabled + 1] = name
+                local runtime_ready = true
+                if name == "ruby_lsp" and ensure_ruby_lsp_bundler then
+                    runtime_ready = ensure_ruby_lsp_bundler(pkg) == true
+                end
+                if runtime_ready then
+                    pcall(vim.lsp.enable, name)
+                    enabled[#enabled + 1] = name
+                end
             end
         end
     end
@@ -1109,7 +1117,7 @@ end
 -- it on Ruby distributions that omit the default Bundler gem. Keep the
 -- dependency inside the Mason package so the generated launcher, whose
 -- GEM_PATH points there, can load it without mutating the user's gem home.
-local function ensure_ruby_lsp_bundler(pkg)
+ensure_ruby_lsp_bundler = function(pkg)
     local ruby, gem = vim.fn.exepath("ruby"), vim.fn.exepath("gem")
     if ruby == "" or gem == "" then
         return nil, "ruby-lsp requires RubyGems and Bundler; install ruby and gem, then retry"

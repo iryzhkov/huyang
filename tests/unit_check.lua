@@ -209,6 +209,46 @@ do
         vim.deep_equal(markers[1], { ".huyang.toml", ".huyang/pipeline.json" }), markers)
 end
 
+do
+    local old_registry, old_mlsp = package.loaded["mason-registry"], package.loaded["mason-lspconfig"]
+    local original_enable, original_exepath, original_system = vim.lsp.enable, vim.fn.exepath, vim.system
+    local original_path, original_gem_home, original_gem_path = vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH
+    local enabled = {}
+    local pkg = {
+        name = "ruby-lsp",
+        get_install_path = function() return "/mason/packages/ruby-lsp" end,
+        is_installed = function() return true end,
+    }
+    vim.lsp.config("ruby_lsp", { cmd = { "ruby-lsp" }, filetypes = { "ruby" } })
+    package.loaded["mason-registry"] = {
+        get_package = function() return pkg end,
+        get_installed_packages = function() return { pkg } end,
+    }
+    package.loaded["mason-lspconfig"] = {
+        get_mappings = function()
+            return {
+                lspconfig_to_package = { ruby_lsp = "ruby-lsp" },
+                package_to_lspconfig = { ["ruby-lsp"] = "ruby_lsp" },
+            }
+        end,
+        get_available_servers = function() return {} end,
+    }
+    vim.fn.exepath = function(name) return "/test/bin/" .. name end
+    vim.system = function()
+        return { wait = function() return { code = 0, stdout = "", stderr = "" } end }
+    end
+    vim.lsp.enable = function(name) enabled[#enabled + 1] = name end
+    local restored = install._enable_installed_servers("ruby")
+    local configured = vim.lsp.config.ruby_lsp.cmd_env or {}
+    vim.lsp.enable, vim.fn.exepath, vim.system = original_enable, original_exepath, original_system
+    vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH = original_path, original_gem_home, original_gem_path
+    package.loaded["mason-registry"], package.loaded["mason-lspconfig"] = old_registry, old_mlsp
+    check("ruby-lsp runtime dependencies are restored after provider restart",
+        restored[1] == "ruby_lsp" and enabled[1] == "ruby_lsp"
+            and configured.GEM_HOME == "/mason/packages/ruby-lsp",
+        { restored = restored, enabled = enabled, cmd_env = configured })
+end
+
 if failures > 0 then
     io.stdout:write(("unit_check: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

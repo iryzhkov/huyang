@@ -278,7 +278,7 @@ func (w *Workspace) InspectPlan(planID string, expected uint64) (PlanRecord, err
 	if !ok {
 		return PlanRecord{}, errors.New("unknown plan")
 	}
-	if expected == 0 || plan.PlanRevision != expected {
+	if expected != 0 && plan.PlanRevision != expected {
 		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
 	}
 	plan.UpdatedAt = time.Now().UTC()

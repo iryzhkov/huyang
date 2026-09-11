@@ -1639,7 +1639,12 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 	if opaque, _ := target["handle"].(string); opaque != "" {
 		resolved, resolveErr := workspace.ResolveHandle(workspacecore.HandleID(opaque))
 		if resolveErr != nil {
-			return modernFailure(requestID, workspace, "handle_resolve_failed", resolveErr)
+			result := modernFailure(requestID, workspace, "handle_resolve_failed", resolveErr)
+			result["next"] = []any{
+				map[string]any{"tool": "workspace_inspect", "view": "status", "action": "confirm_current_revision"},
+				map[string]any{"tool": "search", "action": "repeat_source_query_and_retry_with_fresh_handle", "expired_handle": opaque},
+			}
+			return result
 		}
 		resolution = &resolved
 		if resolved.Status == workspacecore.ResolutionConflicted {
@@ -2264,7 +2269,12 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			}
 		}
 		result := modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
-		if action == "prepare" && plan.PlanID != "" {
+		if action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed" {
+			result["next"] = []any{
+				map[string]any{"tool": "change_plan", "action": "prepare", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision, "use_new_idempotency_key": true},
+				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+			}
+		} else if action == "prepare" && plan.PlanID != "" {
 			result["next"] = []any{
 				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
 				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
