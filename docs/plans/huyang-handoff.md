@@ -13,7 +13,7 @@
 
 ## Current checkpoint
 
-- Completed stage: S20b — Structural consolidation after the hardening rounds, waves 0
+- Completed stage: S20b (all waves merged) — Structural consolidation after the hardening rounds, waves 0
   and 1. Record: `docs/plans/huyang-s20b-structural-consolidation.md`.
 - Audit baseline: `f0b537d90d522ae79b7aabcc54ada1cbd374175c`, the last of the 26
   post-rollout hardening commits.

@@ -1,6 +1,6 @@
 # S20b — Structural consolidation after the hardening rounds
 
-Status: waves 0 and 1 merged on `feature/huyang` at `fe143fe`; wave 2 in progress
+Status: waves 0, 1 and 2 merged on `feature/huyang`; stage complete
 Prepared: 2026-09-11
 Predecessor: S20 release candidate at `4f87241`, followed by 26 probe-driven hardening commits ending at `f0b537d`
 Audit baseline: `f0b537d`, `go build`, `go vet`, `go test ./...` green
@@ -148,18 +148,43 @@ The stage record itself was committed at `9f18be1` between the two merges.
   package variable the test suite installs, and `finalizeEnvelope` enforces the required
   keys and the `next` bound in production without validating against the schema.
 
-## Wave 2 (planned)
+## Wave 2 (merged)
 
-- Docs sweep: README, tool contract and fixtures at 19 tools, environment and flag table,
-  Neovim compatibility statement, handoff checkpoint, rollout record, this file.
-- Hardening residue: rename `hardening_r*_test.go` and `probe_regression_test.go` after
-  the invariants they protect and move them beside the guarded code; confirm each patch is
-  superseded or still needed.
-- Split `internal/bridge` along the seams the audit named: service and scheduler, MCP
-  catalog and envelope, handlers, provider pool. The provider pool is the object the stall
-  fix wants anyway. This split is a prerequisite for a v1alpha2 catalog to coexist.
-- Add a `make budget` gate that records LOC delta, state-directory size and RSS after a
-  cold start, so growth is caught by a number between hardening rounds.
+Docs sweep, `fb45e67` and `35dd80b`: README, tool contract amendment and fixture at 19 tools,
+handoff checkpoint, rollout addendum with the checkout-based redeploy procedure, removal of
+the Agent99 UI screenshots.
+
+nvim-dap de-vendoring, `89cbfe7` and `42cc21a`: the GPL-3.0 nvim-dap copy left the tree;
+the kernel discovers it from `HUYANG_NVIM_DAP_PATH`, the provider's own init, the lazy.nvim
+path or a site pack, reports `dap_runtime` in the handshake, and the debugger tools return
+`dap_runtime_unavailable` with the searched locations when it is absent.
+
+Workspace refactor, `5defe8e..7d51038`: every function in `internal/workspace` under 80
+lines, one temp-write path, unified preimage comparators, a package doc comment stating the
+three invariants callers must not break.
+
+Embedded provider, `5a61a1c`: `Call` and `bootstrap` split into phases.
+
+Gates, merged at `846a586`: `make budget` (cold and warm RSS, state directory, code size,
+descriptor bytes, compared against `docs/plans/budget/baseline.json`), `make lint` (gofmt,
+vet, functions over 80 lines) and `make check`.
+
+Bridge split, merged at `fc6faa8`: `internal/bridge` replaced by `internal/service`
+(listeners, proxy, dispatcher, registry, receipts, scheduler), `internal/mcpapi` (catalog,
+schemas, envelope, compaction), `internal/handlers` (one file per tool family) and
+`internal/providerpool` (providers, stagers, evidence). Dependency direction is service to
+handlers, mcpapi and providerpool; handlers to mcpapi and providerpool; providerpool to
+provider and workspace. Hardening tests renamed after their invariants and moved beside the
+code they guard; no function over 80 lines; `stale_count` surfaced in `diagnostics`;
+`X-Huyang-Client` header gives HTTP clients a delta cursor; symbol name paths accept
+`Type.Method` and `(*Type).Method` and resolve through the provider.
+
+Also in this wave: `.huyang.toml` declares the repository's own gofmt gate, `go vet` check
+and `go test` suite, so `verify_run` and prepared plans verify this repository.
+
+Final budget at the stage end: 0 functions over 80 lines (39 at the start of wave 2),
+largest Go file 1,373 lines (3,008), cold service RSS 13 MB, state directory under 100 KB
+for the fixture scenario.
 
 ## Consequences for the future plans
 
