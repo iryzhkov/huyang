@@ -388,42 +388,17 @@ func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any
 	}, truncated
 }
 
+// CompactVerificationResult bounds every list and output a verification
+// result carries; the second result is the sorted set of evidence IDs
+// across its stages.
 func CompactVerificationResult(result workspacecore.VerificationResult) (map[string]any, []string) {
 	compacted := map[string]any{"revision": result.Revision}
 	var evidenceIDs []string
 	detailsTruncated := false
 	stages := make([]any, 0, len(result.Stages))
 	for _, stage := range result.Stages {
-		output := stage.Output
-		outputTruncated := len(output) > VerificationOutputLimit
-		if outputTruncated {
-			output = output[:VerificationOutputLimit]
-			detailsTruncated = true
-		}
-		scope, scopeTruncated := boundedVerificationStrings(stage.Scope)
-		writes, writesTruncated := boundedVerificationStrings(stage.Writes)
-		executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
-		selected := make([]any, 0, min(len(stage.SelectedTests), VerificationListLimit))
-		for _, test := range stage.SelectedTests[:min(len(stage.SelectedTests), VerificationListLimit)] {
-			selected = append(selected, map[string]any{
-				"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
-			})
-		}
-		selectedTruncated := len(stage.SelectedTests) > VerificationListLimit
-		detailsTruncated = detailsTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
-		stageData := map[string]any{
-			"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
-			"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
-			"coverage": stage.Coverage, "evidence_ids": NonNilStrings(stage.EvidenceIDs),
-			"scope": scope, "scope_count": len(stage.Scope), "scope_truncated": scopeTruncated,
-			"writes": writes, "writes_count": len(stage.Writes), "writes_truncated": writesTruncated,
-			"output": output, "output_bytes": len(stage.Output), "output_truncated": outputTruncated,
-			"test_scope": stage.TestScope, "test_verdict": stage.TestVerdict,
-			"selected_tests": selected, "selected_test_count": len(stage.SelectedTests),
-			"selected_tests_truncated": selectedTruncated,
-			"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
-			"executed_tests_truncated": executedTruncated,
-		}
+		stageData, truncated := compactVerificationStage(stage)
+		detailsTruncated = detailsTruncated || truncated
 		stages = append(stages, stageData)
 		evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
 	}
@@ -434,37 +409,12 @@ func CompactVerificationResult(result workspacecore.VerificationResult) (map[str
 		detailsTruncated = detailsTruncated || truncated
 	}
 	if result.Targeted != nil {
-		selected := make([]any, 0, min(len(result.Targeted.Selected), VerificationListLimit))
-		for _, test := range result.Targeted.Selected[:min(len(result.Targeted.Selected), VerificationListLimit)] {
-			selected = append(selected, map[string]any{
-				"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
-			})
-		}
-		executed, executedTruncated := boundedVerificationStrings(result.Targeted.Executed)
-		selectedTruncated := len(result.Targeted.Selected) > VerificationListLimit
-		compacted["targeted_tests"] = map[string]any{
-			"status": result.Targeted.Status, "selected": selected,
-			"selected_count": len(result.Targeted.Selected), "selected_truncated": selectedTruncated,
-			"executed": executed, "executed_count": len(result.Targeted.Executed),
-			"executed_truncated": executedTruncated,
-			"graph_revision":     result.Targeted.Graph.Revision,
-		}
-		detailsTruncated = detailsTruncated || selectedTruncated || executedTruncated || len(result.Targeted.Graph.Nodes) > 0 ||
-			len(result.Targeted.Graph.Edges) > 0 || len(result.Targeted.Graph.Risks) > 0
+		targeted, truncated := compactTargetedTests(result.Targeted)
+		compacted["targeted_tests"] = targeted
+		detailsTruncated = detailsTruncated || truncated
 	}
 	if len(result.ToolDelta) > 0 {
-		deltas := make([]any, 0, min(len(result.ToolDelta), VerificationListLimit))
-		for _, delta := range result.ToolDelta[:min(len(result.ToolDelta), VerificationListLimit)] {
-			deltas = append(deltas, map[string]any{
-				"path": delta.Path, "classification": delta.Classification,
-				"before_exists": delta.BeforeExists, "after_exists": delta.AfterExists,
-				"before_kind": delta.BeforeKind, "after_kind": delta.AfterKind,
-				"before_mode": delta.BeforeMode, "after_mode": delta.AfterMode,
-				"before_target": delta.BeforeTarget, "after_target": delta.AfterTarget,
-				"before_bytes": len(delta.Before), "after_bytes": len(delta.After),
-			})
-		}
-		compacted["tool_delta"] = deltas
+		compacted["tool_delta"] = compactToolDelta(result.ToolDelta)
 		compacted["tool_delta_count"] = len(result.ToolDelta)
 		compacted["tool_delta_truncated"] = len(result.ToolDelta) > VerificationListLimit
 		detailsTruncated = true
@@ -475,4 +425,77 @@ func CompactVerificationResult(result workspacecore.VerificationResult) (map[str
 	compacted["details_truncated"] = detailsTruncated
 	sort.Strings(evidenceIDs)
 	return compacted, NonNilStrings(UniqueStrings(evidenceIDs))
+}
+
+// compactVerificationStage bounds one stage's output and lists; the second
+// result reports whether anything was cut.
+func compactVerificationStage(stage workspacecore.VerificationStage) (map[string]any, bool) {
+	output := stage.Output
+	outputTruncated := len(output) > VerificationOutputLimit
+	if outputTruncated {
+		output = output[:VerificationOutputLimit]
+	}
+	scope, scopeTruncated := boundedVerificationStrings(stage.Scope)
+	writes, writesTruncated := boundedVerificationStrings(stage.Writes)
+	executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
+	selected, selectedTruncated := compactSelectedTests(stage.SelectedTests)
+	truncated := outputTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
+	return map[string]any{
+		"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
+		"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
+		"coverage": stage.Coverage, "evidence_ids": NonNilStrings(stage.EvidenceIDs),
+		"scope": scope, "scope_count": len(stage.Scope), "scope_truncated": scopeTruncated,
+		"writes": writes, "writes_count": len(stage.Writes), "writes_truncated": writesTruncated,
+		"output": output, "output_bytes": len(stage.Output), "output_truncated": outputTruncated,
+		"test_scope": stage.TestScope, "test_verdict": stage.TestVerdict,
+		"selected_tests": selected, "selected_test_count": len(stage.SelectedTests),
+		"selected_tests_truncated": selectedTruncated,
+		"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
+		"executed_tests_truncated": executedTruncated,
+	}, truncated
+}
+
+// compactSelectedTests keeps the first VerificationListLimit selected
+// tests with their reasons and variants.
+func compactSelectedTests(tests []workspacecore.SelectedTest) ([]any, bool) {
+	kept := min(len(tests), VerificationListLimit)
+	selected := make([]any, 0, kept)
+	for _, test := range tests[:kept] {
+		selected = append(selected, map[string]any{
+			"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
+		})
+	}
+	return selected, len(tests) > VerificationListLimit
+}
+
+func compactTargetedTests(targeted *workspacecore.TargetedTestResult) (map[string]any, bool) {
+	selected, selectedTruncated := compactSelectedTests(targeted.Selected)
+	executed, executedTruncated := boundedVerificationStrings(targeted.Executed)
+	truncated := selectedTruncated || executedTruncated || len(targeted.Graph.Nodes) > 0 ||
+		len(targeted.Graph.Edges) > 0 || len(targeted.Graph.Risks) > 0
+	return map[string]any{
+		"status": targeted.Status, "selected": selected,
+		"selected_count": len(targeted.Selected), "selected_truncated": selectedTruncated,
+		"executed": executed, "executed_count": len(targeted.Executed),
+		"executed_truncated": executedTruncated,
+		"graph_revision":     targeted.Graph.Revision,
+	}, truncated
+}
+
+// compactToolDelta describes each tool-written path by its kinds, modes and
+// sizes, never its bytes, and keeps the first VerificationListLimit.
+func compactToolDelta(deltas []workspacecore.ToolDelta) []any {
+	kept := min(len(deltas), VerificationListLimit)
+	compact := make([]any, 0, kept)
+	for _, delta := range deltas[:kept] {
+		compact = append(compact, map[string]any{
+			"path": delta.Path, "classification": delta.Classification,
+			"before_exists": delta.BeforeExists, "after_exists": delta.AfterExists,
+			"before_kind": delta.BeforeKind, "after_kind": delta.AfterKind,
+			"before_mode": delta.BeforeMode, "after_mode": delta.AfterMode,
+			"before_target": delta.BeforeTarget, "after_target": delta.AfterTarget,
+			"before_bytes": len(delta.Before), "after_bytes": len(delta.After),
+		})
+	}
+	return compact
 }

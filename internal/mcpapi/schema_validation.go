@@ -4,80 +4,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 func ValidateToolArguments(schema map[string]any, arguments map[string]any) error {
 	return validateSchemaValue(schema, arguments, "arguments")
 }
 
+// validateSchemaValue checks value against the subset of JSON Schema the
+// catalog uses: oneOf alternatives, enums, and the object, string, boolean,
+// integer and array types with their closed-property, length and item
+// constraints.
 func validateSchemaValue(schema map[string]any, value any, path string) error {
 	if alternatives, ok := schema["oneOf"].([]any); ok {
-		base := make(map[string]any, len(schema)-1)
-		for key, item := range schema {
-			if key != "oneOf" {
-				base[key] = item
-			}
-		}
-		if properties, ok := base["properties"].(map[string]any); ok && len(properties) == 0 {
-			delete(base, "properties")
-			delete(base, "additionalProperties")
-		}
-		if err := validateSchemaValue(base, value, path); err != nil {
-			return err
-		}
-		matches := 0
-		for _, candidate := range alternatives {
-			candidateSchema, _ := candidate.(map[string]any)
-			if candidateSchema != nil && validateSchemaValue(candidateSchema, value, path) == nil {
-				matches++
-			}
-		}
-		if matches != 1 {
-			return fmt.Errorf("%s must match exactly one allowed shape", path)
-		}
-		return nil
+		return validateOneOf(schema, alternatives, value, path)
 	}
-	if enum, ok := schema["enum"].([]any); ok {
-		found := false
-		for _, candidate := range enum {
-			if value == candidate {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("%s is not one of the allowed values", path)
-		}
+	if enum, ok := schema["enum"].([]any); ok && !slices.Contains(enum, value) {
+		return fmt.Errorf("%s is not one of the allowed values", path)
 	}
 	switch schema["type"] {
 	case "object":
-		object, ok := value.(map[string]any)
-		if !ok {
-			return fmt.Errorf("%s must be an object", path)
-		}
-		properties, _ := schema["properties"].(map[string]any)
-		if closed, present := schema["additionalProperties"].(bool); present && !closed {
-			for key := range object {
-				if _, ok := properties[key]; !ok {
-					return fmt.Errorf("%s contains unknown property %q", path, key)
-				}
-			}
-		}
-		if required, ok := schema["required"].([]string); ok {
-			for _, key := range required {
-				if _, present := object[key]; !present {
-					return fmt.Errorf("%s is missing required property %q", path, key)
-				}
-			}
-		}
-		for key, child := range object {
-			childSchema, _ := properties[key].(map[string]any)
-			if childSchema != nil {
-				if err := validateSchemaValue(childSchema, child, path+"."+key); err != nil {
-					return err
-				}
-			}
-		}
+		return validateObject(schema, value, path)
 	case "string":
 		text, ok := value.(string)
 		if !ok {
@@ -96,20 +43,87 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 			return fmt.Errorf("%s must be an integer", path)
 		}
 	case "array":
-		array, ok := value.([]any)
-		if !ok {
-			return fmt.Errorf("%s must be an array", path)
+		return validateArray(schema, value, path)
+	}
+	return nil
+}
+
+// validateOneOf checks the schema without its alternatives first (an empty
+// property set is treated as open), then requires exactly one alternative
+// to match.
+func validateOneOf(schema map[string]any, alternatives []any, value any, path string) error {
+	base := make(map[string]any, len(schema)-1)
+	for key, item := range schema {
+		if key != "oneOf" {
+			base[key] = item
 		}
-		if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
-			return fmt.Errorf("%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
+	}
+	if properties, ok := base["properties"].(map[string]any); ok && len(properties) == 0 {
+		delete(base, "properties")
+		delete(base, "additionalProperties")
+	}
+	if err := validateSchemaValue(base, value, path); err != nil {
+		return err
+	}
+	matches := 0
+	for _, candidate := range alternatives {
+		candidateSchema, _ := candidate.(map[string]any)
+		if candidateSchema != nil && validateSchemaValue(candidateSchema, value, path) == nil {
+			matches++
 		}
-		itemSchema, _ := schema["items"].(map[string]any)
-		for index, item := range array {
-			if itemSchema != nil {
-				if err := validateSchemaValue(itemSchema, item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
-					return err
-				}
+	}
+	if matches != 1 {
+		return fmt.Errorf("%s must match exactly one allowed shape", path)
+	}
+	return nil
+}
+
+func validateObject(schema map[string]any, value any, path string) error {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be an object", path)
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if closed, present := schema["additionalProperties"].(bool); present && !closed {
+		for key := range object {
+			if _, ok := properties[key]; !ok {
+				return fmt.Errorf("%s contains unknown property %q", path, key)
 			}
+		}
+	}
+	if required, ok := schema["required"].([]string); ok {
+		for _, key := range required {
+			if _, present := object[key]; !present {
+				return fmt.Errorf("%s is missing required property %q", path, key)
+			}
+		}
+	}
+	for key, child := range object {
+		childSchema, _ := properties[key].(map[string]any)
+		if childSchema != nil {
+			if err := validateSchemaValue(childSchema, child, path+"."+key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateArray(schema map[string]any, value any, path string) error {
+	array, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be an array", path)
+	}
+	if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
+		return fmt.Errorf("%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
+	}
+	itemSchema, _ := schema["items"].(map[string]any)
+	if itemSchema == nil {
+		return nil
+	}
+	for index, item := range array {
+		if err := validateSchemaValue(itemSchema, item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+			return err
 		}
 	}
 	return nil

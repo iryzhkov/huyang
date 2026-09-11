@@ -176,13 +176,26 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	}, "workspace_id", "idempotency_key", "action")
 }
 
+// buildModernTools assembles the catalog from its tool families; the
+// profile each family belongs to is fixed here.
 func buildModernTools() []ToolDescriptor {
 	orient := []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug}
 	edit := []Profile{ProfileFull, ProfileEdit}
 	debug := []Profile{ProfileFull, ProfileDebug}
-	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "target": targetSchema()}
-	stateful := statefulProperties()
-	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"}
+	tools := orientationTools(orient)
+	tools = append(tools, editTools(edit)...)
+	tools = append(tools,
+		modernDebugSessionTool(debug),
+		modernDebugBreakpointsTool(debug),
+		modernDebugControlTool(debug),
+		modernDebugInspectTool(debug),
+	)
+	return tools
+}
+
+// searchSchema is the closed search input: exactly one of a query, a
+// result-set refinement or a Git history source.
+func searchSchema() map[string]any {
 	refinement := schemaObject(map[string]any{
 		"path": stringSchema("Additional path substring."),
 		"matched_text": schemaObject(map[string]any{
@@ -196,18 +209,23 @@ func buildModernTools() []ToolDescriptor {
 		"fields": map[string]any{"type": "array", "items": enumSchema("message", "path", "diff")},
 		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 	}, "query")
-	searchProperties := map[string]any{
+	properties := map[string]any{
 		"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
 		"git_history": historySource, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
 		"include_ranges": map[string]any{"type": "boolean", "description": "Return exact byte anchors (range, byte offsets) on every hit; the default hit carries only the editable handle."},
 	}
-	searchSchema := schemaObject(searchProperties, "workspace_id")
-	searchSchema["oneOf"] = []any{
-		schemaObject(searchProperties, "workspace_id", "query"),
-		schemaObject(searchProperties, "workspace_id", "result_set_handle", "refine"),
-		schemaObject(searchProperties, "workspace_id", "git_history"),
+	schema := schemaObject(properties, "workspace_id")
+	schema["oneOf"] = []any{
+		schemaObject(properties, "workspace_id", "query"),
+		schemaObject(properties, "workspace_id", "result_set_handle", "refine"),
+		schemaObject(properties, "workspace_id", "git_history"),
 	}
+	return schema
+}
+
+// orientationTools are the read-only tools every profile carries.
+func orientationTools(orient []Profile) []ToolDescriptor {
 	return []ToolDescriptor{
 		{Class: ClassProviderRead, Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":     enumSchema("project", "documents"),
@@ -218,7 +236,7 @@ func buildModernTools() []ToolDescriptor {
 		{Class: ClassProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
 		}, "workspace_id")},
-		{Class: ClassPureRead, Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
+		{Class: ClassPureRead, Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema()},
 		{Class: ClassProviderRead, Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or path."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
@@ -233,16 +251,28 @@ func buildModernTools() []ToolDescriptor {
 		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(),
 		}, "workspace_id")},
+		{Class: ClassPureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
+			"full": map[string]any{"type": "boolean", "description": "Return the complete report including finding bodies and per-dimension evidence IDs."},
+		}, "workspace_id")},
+		{Class: ClassPureRead, Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
+		}, "workspace_id", "evidence_id")},
+	}
+}
+
+// editTools are the mutating and verification tools of the edit profile.
+func editTools(edit []Profile) []ToolDescriptor {
+	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "target": targetSchema()}
+	stateful := statefulProperties()
+	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"}
+	return []ToolDescriptor{
 		{Class: ClassCanonicalWrite, Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"action": enumSchema("install", "restart"), "language": stringSchema("Filetype or extension, required for install."),
 			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
 			"parser": map[string]any{"type": "boolean"},
 		}, "workspace_id", "idempotency_key", "action")},
-		{Class: ClassPureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
-			"full": map[string]any{"type": "boolean", "description": "Return the complete report including finding bodies and per-dimension evidence IDs."},
-		}, "workspace_id")},
 		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
 		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
@@ -261,13 +291,6 @@ func buildModernTools() []ToolDescriptor {
 		{Class: ClassCanonicalWrite, Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "from_revision": stringSchema("Earlier revision."), "to_revision_or_current": stringSchema("Later revision or current."),
 		}, "workspace_id", "from_revision", "to_revision_or_current")},
-		{Class: ClassPureRead, Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
-		}, "workspace_id", "evidence_id")},
-		modernDebugSessionTool(debug),
-		modernDebugBreakpointsTool(debug),
-		modernDebugControlTool(debug),
-		modernDebugInspectTool(debug),
 	}
 }
 

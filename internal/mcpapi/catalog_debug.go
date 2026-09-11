@@ -148,77 +148,29 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 	}
 }
 
+// ValidateDebugArguments refuses properties that do not belong to the
+// action of a debugger tool, and the actions that lack their one required
+// property. Every other tool passes.
 func ValidateDebugArguments(name string, arguments map[string]any) error {
 	action, _ := arguments["action"].(string)
-	baseStateful := map[string]bool{"workspace_id": true, "idempotency_key": true, "transaction_id": true, "action": true}
-	baseRead := map[string]bool{"workspace_id": true, "transaction_id": true, "action": true}
-	allowed := map[string]bool{}
-	for key, value := range baseStateful {
-		allowed[key] = value
-	}
+	allowed := map[string]bool{"workspace_id": true, "idempotency_key": true, "transaction_id": true, "action": true}
 	var extras []string
+	var err error
 	switch name {
 	case "debug_session":
-		switch action {
-		case "start":
-			extras = []string{"file", "program", "args", "cwd", "env", "config", "adapter", "stop_on_entry", "variables", "track", "wait_ms", "initial_breakpoints"}
-		case "attach":
-			extras = []string{"pid", "host", "port", "file", "config", "adapter", "variables", "track", "wait_ms", "initial_breakpoints"}
-			if arguments["pid"] == nil && arguments["port"] == nil {
-				return errors.New("debug_session attach requires pid or port")
-			}
-		case "restart":
-			extras = []string{"wait_ms"}
-		case "stop":
-			extras = []string{"force"}
-		default:
-			return fmt.Errorf("unknown debug_session action %q", action)
-		}
+		extras, err = debugSessionExtras(action, arguments)
 	case "debug_breakpoints":
-		switch action {
-		case "set", "remove":
-			extras = []string{"target", "line_offset", "condition", "hit_condition", "log_message"}
-			if arguments["target"] == nil {
-				return fmt.Errorf("debug_breakpoints %s requires target", action)
-			}
-		case "list", "clear":
-		default:
-			return fmt.Errorf("unknown debug_breakpoints action %q", action)
-		}
+		extras, err = debugBreakpointsExtras(action, arguments)
 	case "debug_control":
-		extras = []string{"wait_ms"}
-		switch action {
-		case "step_over", "step_into", "step_out":
-			extras = append(extras, "count")
-		case "run_to":
-			extras = append(extras, "target", "line_offset")
-			if arguments["target"] == nil {
-				return errors.New("debug_control run_to requires target")
-			}
-		case "continue", "pause":
-		default:
-			return fmt.Errorf("unknown debug_control action %q", action)
-		}
+		extras, err = debugControlExtras(action, arguments)
 	case "debug_inspect":
-		allowed = baseRead
-		switch action {
-		case "threads":
-		case "stack":
-			extras = []string{"thread", "depth", "all_frames"}
-		case "scopes":
-			extras = []string{"thread", "frame"}
-		case "variables":
-			extras = []string{"thread", "frame", "scope", "expand", "depth", "max"}
-		case "evaluate":
-			extras = []string{"thread", "frame", "expression", "context", "policy"}
-			if arguments["expression"] == nil {
-				return errors.New("debug_inspect evaluate requires expression")
-			}
-		default:
-			return fmt.Errorf("unknown debug_inspect action %q", action)
-		}
+		allowed = map[string]bool{"workspace_id": true, "transaction_id": true, "action": true}
+		extras, err = debugInspectExtras(action, arguments)
 	default:
 		return nil
+	}
+	if err != nil {
+		return err
 	}
 	for _, key := range extras {
 		allowed[key] = true
@@ -229,4 +181,72 @@ func ValidateDebugArguments(name string, arguments map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func debugSessionExtras(action string, arguments map[string]any) ([]string, error) {
+	switch action {
+	case "start":
+		return []string{"file", "program", "args", "cwd", "env", "config", "adapter", "stop_on_entry", "variables", "track", "wait_ms", "initial_breakpoints"}, nil
+	case "attach":
+		if arguments["pid"] == nil && arguments["port"] == nil {
+			return nil, errors.New("debug_session attach requires pid or port")
+		}
+		return []string{"pid", "host", "port", "file", "config", "adapter", "variables", "track", "wait_ms", "initial_breakpoints"}, nil
+	case "restart":
+		return []string{"wait_ms"}, nil
+	case "stop":
+		return []string{"force"}, nil
+	default:
+		return nil, fmt.Errorf("unknown debug_session action %q", action)
+	}
+}
+
+func debugBreakpointsExtras(action string, arguments map[string]any) ([]string, error) {
+	switch action {
+	case "set", "remove":
+		if arguments["target"] == nil {
+			return nil, fmt.Errorf("debug_breakpoints %s requires target", action)
+		}
+		return []string{"target", "line_offset", "condition", "hit_condition", "log_message"}, nil
+	case "list", "clear":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unknown debug_breakpoints action %q", action)
+	}
+}
+
+func debugControlExtras(action string, arguments map[string]any) ([]string, error) {
+	switch action {
+	case "step_over", "step_into", "step_out":
+		return []string{"wait_ms", "count"}, nil
+	case "run_to":
+		if arguments["target"] == nil {
+			return nil, errors.New("debug_control run_to requires target")
+		}
+		return []string{"wait_ms", "target", "line_offset"}, nil
+	case "continue", "pause":
+		return []string{"wait_ms"}, nil
+	default:
+		return nil, fmt.Errorf("unknown debug_control action %q", action)
+	}
+}
+
+func debugInspectExtras(action string, arguments map[string]any) ([]string, error) {
+	switch action {
+	case "threads":
+		return nil, nil
+	case "stack":
+		return []string{"thread", "depth", "all_frames"}, nil
+	case "scopes":
+		return []string{"thread", "frame"}, nil
+	case "variables":
+		return []string{"thread", "frame", "scope", "expand", "depth", "max"}, nil
+	case "evaluate":
+		if arguments["expression"] == nil {
+			return nil, errors.New("debug_inspect evaluate requires expression")
+		}
+		return []string{"thread", "frame", "expression", "context", "policy"}, nil
+	default:
+		return nil, fmt.Errorf("unknown debug_inspect action %q", action)
+	}
 }
