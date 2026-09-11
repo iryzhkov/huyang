@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -11,13 +12,13 @@ func (h *toolHandlers) recoverPreparedStager(
 	ctx context.Context,
 	workspace *workspacecore.Workspace,
 	reference string,
-) (*sandboxPlanStager, workspacecore.PlanRecord, bool, error) {
+) (*providerpool.SandboxStager, workspacecore.PlanRecord, bool, error) {
 	plan, ok := workspace.RecoverablePreparedPlan(reference)
 	if !ok {
 		return nil, workspacecore.PlanRecord{}, false, nil
 	}
 	originalRevision := plan.Preparation.PreparedRevision
-	raw, err := h.pool.planStager(workspace, plan.PlanID, plan.PlanRevision, true)
+	raw, err := h.pool.PlanStager(workspace, plan.PlanID, plan.PlanRevision, true)
 	if err != nil {
 		return nil, plan, true, err
 	}
@@ -25,7 +26,7 @@ func (h *toolHandlers) recoverPreparedStager(
 	if err != nil {
 		return nil, plan, true, err
 	}
-	stager, ok := raw.(*sandboxPlanStager)
+	stager, ok := raw.(*providerpool.SandboxStager)
 	if !ok {
 		return nil, recovered, true, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("recovered plan stager has an unexpected type"))
 	}

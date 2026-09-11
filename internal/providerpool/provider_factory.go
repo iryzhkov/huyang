@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"fmt"
@@ -10,26 +10,26 @@ import (
 	embedprovider "github.com/iryzhkov/huyang/internal/provider/embed"
 )
 
-type providerOpenConfig struct {
+type OpenConfig struct {
 	Root        string
 	InitFile    string
 	RuntimePath string
 	Debug       bool
 }
 
-type providerFactory interface {
-	Open(providerOpenConfig) (provider.Provider, error)
+type Factory interface {
+	Open(OpenConfig) (provider.Provider, error)
 }
 
-// configuredProviderFactory opens the embedded Neovim backend, the only
+// ConfiguredFactory opens the embedded Neovim backend, the only
 // backend that ships. The backend name is still read from the environment so
 // that an explicit "embed" keeps working and anything else fails loudly.
-type configuredProviderFactory struct {
-	backend string
+type ConfiguredFactory struct {
+	Backend string
 }
 
-func (f configuredProviderFactory) Open(config providerOpenConfig) (provider.Provider, error) {
-	switch f.backend {
+func (f ConfiguredFactory) Open(config OpenConfig) (provider.Provider, error) {
+	switch f.Backend {
 	case "", "embed":
 		return embedprovider.Open(embedprovider.Config{
 			Root: config.Root, InitFile: config.InitFile,
@@ -37,12 +37,12 @@ func (f configuredProviderFactory) Open(config providerOpenConfig) (provider.Pro
 		})
 	default:
 		return nil, fmt.Errorf(
-			"unknown HUYANG_PROVIDER_BACKEND %q (want embed)", f.backend,
+			"unknown HUYANG_PROVIDER_BACKEND %q (want embed)", f.Backend,
 		)
 	}
 }
 
-func shippedRuntimePath() string {
+func ShippedRuntimePath() string {
 	for _, name := range []string{"HUYANG_RUNTIME_PATH", "AGENT99_RUNTIME_PATH"} {
 		if configured := strings.TrimSpace(os.Getenv(name)); configured != "" {
 			return configured
@@ -73,7 +73,7 @@ func providerBackend() string {
 	return ""
 }
 
-var referenceProviders providerFactory = configuredProviderFactory{backend: providerBackend()}
+var DefaultFactory Factory = ConfiguredFactory{Backend: providerBackend()}
 
 func huyangHeadlessInit() string {
 	if value := os.Getenv("HUYANG_HEADLESS_INIT"); value != "" {

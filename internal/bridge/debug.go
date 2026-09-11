@@ -10,6 +10,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -34,7 +35,7 @@ func (h *toolHandlers) debug(ctx context.Context, requestID, name string, worksp
 			return result
 		}
 	}
-	backend, err := h.pool.debug(ctx, workspace)
+	backend, err := h.pool.Debug(ctx, workspace)
 	if err != nil {
 		result := debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
 		result["next"] = debugFailureNext(name, action)
@@ -86,7 +87,7 @@ func (h *toolHandlers) debug(ctx context.Context, requestID, name string, worksp
 
 func callModernDebugProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
 	transactionID, _ := arguments["transaction_id"].(string)
-	result, err := callProvider(ctx, workspace, backend, providerCall{
+	result, err := providerpool.Call(ctx, workspace, backend, providerpool.CallSpec{
 		RequestID: requestID, TransactionID: transactionID, Timeout: modernDebugTimeout,
 	}, operation, arguments)
 	if err != nil {

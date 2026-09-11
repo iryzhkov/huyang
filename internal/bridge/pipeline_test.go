@@ -8,15 +8,16 @@ import (
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 )
 
 func TestOfficialClientRunsTrustedPipelineAgainstPreparedSandbox(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-specific")
 	}
-	previousFactory := referenceProviders
-	referenceProviders = configuredProviderFactory{backend: "embed"}
-	defer func() { referenceProviders = previousFactory }()
+	previousFactory := providerpool.DefaultFactory
+	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	defer func() { providerpool.DefaultFactory = previousFactory }()
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)

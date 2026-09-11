@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -110,9 +111,9 @@ func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspa
 	providerEvidence := any(nil)
 	providerWarning := ""
 	if !coverage.Complete {
-		backend, providerErr := h.pool.canonical(ctx, workspace)
+		backend, providerErr := h.pool.Canonical(ctx, workspace)
 		if providerErr == nil {
-			providerEvidence, providerErr = callCanonicalProvider(ctx, requestID, workspace, backend, "find_symbol", map[string]any{
+			providerEvidence, providerErr = providerpool.CallCanonical(ctx, requestID, workspace, backend, "find_symbol", map[string]any{
 				"root": workspace.Identity().Root, "name": query, "include_body": false,
 			})
 		}

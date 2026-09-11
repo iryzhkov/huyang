@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -93,9 +94,9 @@ func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *wo
 		revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 		data["document_revision"] = after.Revision
 		verification := map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
-		backend, providerErr := h.pool.resync(ctx, workspace)
+		backend, providerErr := h.pool.Resync(ctx, workspace)
 		if providerErr == nil {
-			report, evidenceErr := recordProviderDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
+			report, evidenceErr := providerpool.RecordDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
 				Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
 				BeforeExists: true, AfterExists: true,
 			}}, revision, "edit_"+requestID)

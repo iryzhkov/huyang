@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"context"
@@ -8,24 +8,24 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// defaultToolCallTimeout bounds every tool call and every provider call
+// DefaultCallTimeout bounds every tool call and every provider call
 // that carries no deadline of its own.
-const defaultToolCallTimeout = 2 * time.Minute
+const DefaultCallTimeout = 2 * time.Minute
 
-// providerCall names one request to a provider. TransactionID is set for
+// CallSpec names one request to a provider. TransactionID is set for
 // plan-scoped calls so the provider can label staged views; canonical calls
 // leave it empty.
-type providerCall struct {
+type CallSpec struct {
 	RequestID     string
 	TransactionID string
 	Timeout       time.Duration
 }
 
-// callProvider is the single request-context assembly for provider calls. It
+// Call is the single request-context assembly for provider calls. It
 // applies the default timeout when the caller context carries no deadline,
 // stamps the workspace and provider epoch on the request, and resynchronises
 // the workspace epoch with the provider afterwards.
-func callProvider(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, call providerCall, operation string, arguments map[string]any) (provider.Result, error) {
+func Call(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, call CallSpec, operation string, arguments map[string]any) (provider.Result, error) {
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
@@ -51,14 +51,14 @@ func callProvider(ctx context.Context, workspace *workspacecore.Workspace, backe
 	return result, err
 }
 
-// callCanonicalProvider issues one canonical provider call bounded by the
+// CallCanonical issues one canonical provider call bounded by the
 // default tool-call timeout. A transaction_id argument, when the caller asks
 // for a staged view, is carried on the request context so the kernel can
 // label the view it serves.
-func callCanonicalProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
+func CallCanonical(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
 	transactionID, _ := arguments["transaction_id"].(string)
-	result, err := callProvider(ctx, workspace, backend, providerCall{
-		RequestID: requestID, TransactionID: transactionID, Timeout: defaultToolCallTimeout,
+	result, err := Call(ctx, workspace, backend, CallSpec{
+		RequestID: requestID, TransactionID: transactionID, Timeout: DefaultCallTimeout,
 	}, operation, arguments)
 	if err != nil {
 		return nil, err
@@ -66,9 +66,9 @@ func callCanonicalProvider(ctx context.Context, requestID string, workspace *wor
 	return result.Value, nil
 }
 
-// canonicalProviderStatus reports the provider descriptor and its health as
+// Status reports the provider descriptor and its health as
 // observed within the request deadline.
-func canonicalProviderStatus(ctx context.Context, backend provider.Provider) map[string]any {
+func Status(ctx context.Context, backend provider.Provider) map[string]any {
 	if ctx == nil {
 		ctx = context.Background()
 	}

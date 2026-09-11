@@ -12,6 +12,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -265,14 +266,14 @@ func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 // useFixedProvider installs a factory returning one fixed provider.
 func useFixedProvider(t *testing.T, backend provider.Provider) {
 	t.Helper()
-	previous := referenceProviders
-	referenceProviders = fixedProviderFactory{backend: backend}
-	t.Cleanup(func() { referenceProviders = previous })
+	previous := providerpool.DefaultFactory
+	providerpool.DefaultFactory = fixedProviderFactory{backend: backend}
+	t.Cleanup(func() { providerpool.DefaultFactory = previous })
 }
 
 type fixedProviderFactory struct{ backend provider.Provider }
 
-func (f fixedProviderFactory) Open(providerOpenConfig) (provider.Provider, error) {
+func (f fixedProviderFactory) Open(providerpool.OpenConfig) (provider.Provider, error) {
 	return f.backend, nil
 }
 

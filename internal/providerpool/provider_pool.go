@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"context"
@@ -9,27 +9,27 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// providerPool owns every provider the service spawns: the canonical (or
+// Pool owns every provider the service spawns: the canonical (or
 // debug) provider of each workspace and the sandbox stagers that prepare
 // plans in isolation. It is the single place a provider is opened, so the
 // runtime path and init file cannot drift between call sites.
-type providerPool struct {
-	factory     providerFactory
+type Pool struct {
+	factory     Factory
 	sandboxBase string
 
 	// mu guards only the two maps below; provider and stager operations run
-	// outside it (see providerSlot and sandboxPlanStager).
+	// outside it (see providerSlot and SandboxStager).
 	mu        sync.Mutex
 	providers map[workspacecore.ID]*providerSlot
-	stagers   map[stagerKey]*sandboxPlanStager
+	stagers   map[stagerKey]*SandboxStager
 }
 
-func newProviderPool(sandboxBase string, factory providerFactory) *providerPool {
-	return &providerPool{
+func New(sandboxBase string, factory Factory) *Pool {
+	return &Pool{
 		factory:     factory,
 		sandboxBase: sandboxBase,
 		providers:   make(map[workspacecore.ID]*providerSlot),
-		stagers:     make(map[stagerKey]*sandboxPlanStager),
+		stagers:     make(map[stagerKey]*SandboxStager),
 	}
 }
 
@@ -43,7 +43,7 @@ type providerSlot struct {
 	backend provider.Provider
 }
 
-func (p *providerPool) slotFor(id workspacecore.ID) *providerSlot {
+func (p *Pool) slotFor(id workspacecore.ID) *providerSlot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	slot := p.providers[id]
@@ -58,10 +58,10 @@ func (p *providerPool) slotFor(id workspacecore.ID) *providerSlot {
 // runtime and the configured headless init file. Every provider the pool
 // spawns, canonical, debug, sandbox or verification, goes through this
 // constructor.
-func (p *providerPool) open(root string, debug bool) (provider.Provider, error) {
-	return p.factory.Open(providerOpenConfig{
+func (p *Pool) Open(root string, debug bool) (provider.Provider, error) {
+	return p.factory.Open(OpenConfig{
 		Root: root, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: debug,
+		RuntimePath: ShippedRuntimePath(), Debug: debug,
 	})
 }
 
@@ -69,17 +69,17 @@ func (p *providerPool) open(root string, debug bool) (provider.Provider, error) 
 // Workspaces are durable while provider processes are replaceable, so the
 // provider is started lazily and recreated after a daemon or provider
 // restart without changing the workspace ID.
-func (p *providerPool) canonical(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+func (p *Pool) Canonical(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
 	return p.workspaceProvider(ctx, workspace, false)
 }
 
 // debug returns the workspace provider, starting it in debug mode when no
 // provider is running yet. A healthy canonical provider is reused.
-func (p *providerPool) debug(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+func (p *Pool) Debug(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
 	return p.workspaceProvider(ctx, workspace, true)
 }
 
-func (p *providerPool) workspaceProvider(ctx context.Context, workspace *workspacecore.Workspace, debug bool) (provider.Provider, error) {
+func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.Workspace, debug bool) (provider.Provider, error) {
 	identity := workspace.Identity()
 	if identity.Kind != workspacecore.KindProject {
 		return nil, fmt.Errorf("semantic provider requires a project workspace")
@@ -96,7 +96,7 @@ func (p *providerPool) workspaceProvider(ctx context.Context, workspace *workspa
 		_ = existing.Close(context.Background())
 		slot.backend = nil
 	}
-	backend, err := p.open(identity.Root, debug)
+	backend, err := p.Open(identity.Root, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (p *providerPool) workspaceProvider(ctx context.Context, workspace *workspa
 }
 
 // restart closes the workspace's provider and starts a fresh one.
-func (p *providerPool) restart(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+func (p *Pool) Restart(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
 	slot := p.slotFor(workspace.Identity().ID)
 	slot.mu.Lock()
 	if existing := slot.backend; existing != nil {
@@ -114,31 +114,31 @@ func (p *providerPool) restart(ctx context.Context, workspace *workspacecore.Wor
 		slot.backend = nil
 	}
 	slot.mu.Unlock()
-	return p.canonical(ctx, workspace)
+	return p.Canonical(ctx, workspace)
 }
 
 // resync asks the canonical provider to reload the workspace from disk and
 // restarts it when the resync fails.
-func (p *providerPool) resync(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
-	backend, err := p.canonical(ctx, workspace)
+func (p *Pool) Resync(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	backend, err := p.Canonical(ctx, workspace)
 	if err == nil {
-		_, err = callCanonicalProvider(ctx, "provider_resync", workspace, backend, "workspace_resync", map[string]any{"root": workspace.Identity().Root})
+		_, err = CallCanonical(ctx, "provider_resync", workspace, backend, "workspace_resync", map[string]any{"root": workspace.Identity().Root})
 	}
 	if err == nil {
 		return backend, nil
 	}
-	return p.restart(ctx, workspace)
+	return p.Restart(ctx, workspace)
 }
 
 // close shuts every provider and rolls back every sandbox stager. The maps
 // are detached under mu and the slow work happens outside it so a stager
 // still inside a long operation cannot stall the map.
-func (p *providerPool) close() {
+func (p *Pool) Close() {
 	p.mu.Lock()
 	slots := p.providers
 	stagers := p.stagers
 	p.providers = make(map[workspacecore.ID]*providerSlot)
-	p.stagers = make(map[stagerKey]*sandboxPlanStager)
+	p.stagers = make(map[stagerKey]*SandboxStager)
 	p.mu.Unlock()
 	for _, slot := range slots {
 		slot.mu.Lock()
@@ -155,13 +155,13 @@ func (p *providerPool) close() {
 
 // sandboxBaseDir is the directory under which plan and verification
 // sandboxes are materialised.
-func (p *providerPool) sandboxBaseDir() string {
+func (p *Pool) SandboxBaseDir() string {
 	return p.sandboxBase
 }
 
 // stager returns the sandbox stager registered for one plan of one
 // workspace, or nil.
-func (p *providerPool) stager(workspaceID workspacecore.ID, planID string) *sandboxPlanStager {
+func (p *Pool) Stager(workspaceID workspacecore.ID, planID string) *SandboxStager {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.stagers[stagerKey{workspace: workspaceID, planID: planID}]
@@ -169,10 +169,10 @@ func (p *providerPool) stager(workspaceID workspacecore.ID, planID string) *sand
 
 // stagersFor lists the sandbox stagers registered for one workspace, in no
 // particular order.
-func (p *providerPool) stagersFor(workspaceID workspacecore.ID) []*sandboxPlanStager {
+func (p *Pool) StagersFor(workspaceID workspacecore.ID) []*SandboxStager {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var found []*sandboxPlanStager
+	var found []*SandboxStager
 	for key, candidate := range p.stagers {
 		if key.workspace == workspaceID {
 			found = append(found, candidate)

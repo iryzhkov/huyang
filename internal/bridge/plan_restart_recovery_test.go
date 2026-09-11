@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 )
 
 func TestApplyFailureRecommendsSafeReprepare(t *testing.T) {
@@ -28,9 +29,9 @@ func TestApplyFailureRecommendsSafeReprepare(t *testing.T) {
 }
 
 func TestPreparedPlanRecoversAcrossServiceRestart(t *testing.T) {
-	previousFactory := referenceProviders
-	referenceProviders = configuredProviderFactory{backend: "embed"}
-	defer func() { referenceProviders = previousFactory }()
+	previousFactory := providerpool.DefaultFactory
+	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	defer func() { providerpool.DefaultFactory = previousFactory }()
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)

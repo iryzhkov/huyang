@@ -122,7 +122,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 		}
 		var stager workspacecore.PlanStager
 		if err == nil {
-			stager, err = h.pool.planStager(workspace, planID, revision, true)
+			stager, err = h.pool.PlanStager(workspace, planID, revision, true)
 		}
 		if err == nil {
 			plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
@@ -145,7 +145,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 		}
 		switch current.State {
 		case workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanFailed, workspacecore.PlanConflicted:
-			stager, stagerErr := h.pool.planStager(workspace, planID, revision, false)
+			stager, stagerErr := h.pool.PlanStager(workspace, planID, revision, false)
 			if stagerErr != nil {
 				if (current.State == workspacecore.PlanFailed || current.State == workspacecore.PlanConflicted) && workspacecore.ErrorCode(stagerErr) == workspacecore.CodeProviderUnavailable {
 					plan, err = workspace.DiscardPlan(planID, revision)
@@ -171,7 +171,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 			wasProvisional = current.State == workspacecore.PlanProvisional
 		}
 		var stager workspacecore.PlanStager
-		stager, err = h.pool.planStager(workspace, planID, revision, false)
+		stager, err = h.pool.PlanStager(workspace, planID, revision, false)
 		if err != nil {
 			recoveredStager, recoveredPlan, recoverable, recoveryErr := h.recoverPreparedStager(ctx, workspace, preparedRevision)
 			switch {
@@ -207,7 +207,7 @@ func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspa
 					data["missing_coverage"] = plan.Preparation.MissingCoverage
 				}
 			}
-			if _, resyncErr := h.pool.resync(ctx, workspace); resyncErr != nil {
+			if _, resyncErr := h.pool.Resync(ctx, workspace); resyncErr != nil {
 				result["outcome"] = "provisional"
 				result["code"] = "provider_resync_failed"
 				result["summary"] = "Prepared plan applied, but canonical provider resynchronization failed"

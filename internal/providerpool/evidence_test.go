@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"context"
@@ -8,8 +8,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
+
+func TestDiagnosticPayloadPrefersTypedEvidence(t *testing.T) {
+	typed := provider.Result{
+		Value:    map[string]any{"batches": []any{map[string]any{"producer": "stale"}}},
+		Evidence: []provider.EvidenceBatch{{Kind: "lsp_push", Producer: "gopls", Document: "/x/main.go", Complete: true}},
+	}
+	payload, err := diagnosticPayload(typed)
+	if err != nil || len(payload.Batches) != 1 || payload.Batches[0].Producer != "gopls" {
+		t.Fatalf("typed payload = %#v, %v", payload, err)
+	}
+	legacy := provider.Result{Value: map[string]any{"batches": []any{map[string]any{"producer": "pyright", "kind": "lsp_push"}}}}
+	payload, err = diagnosticPayload(legacy)
+	if err != nil || len(payload.Batches) != 1 || payload.Batches[0].Producer != "pyright" {
+		t.Fatalf("legacy payload = %#v, %v", payload, err)
+	}
+}
 
 func TestDiagnosticEvidenceTimeoutIncludesOnlyBoundedProviderOverhead(t *testing.T) {
 	if got, want := diagnosticEvidenceTimeout(1500), 3500*time.Millisecond; got != want {
@@ -55,7 +72,7 @@ func TestUnavailableDiagnosticReasonSurvivesJSONAndReachesStageCoverage(t *testi
 		t.Fatalf("report reasons=%v", report.ProvisionalReasons)
 	}
 
-	stage := diagnosticVerificationStage("wsrev_1", report)
+	stage := DiagnosticVerificationStage("wsrev_1", report)
 	if stage.Status != workspacecore.VerificationSkipped {
 		t.Fatalf("stage status=%s", stage.Status)
 	}
@@ -80,7 +97,7 @@ func TestPassingProjectCheckCorroboratesTimedOutDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err = corroborateDiagnosticsWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
+	report, err = CorroborateWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
 		Stage: "check", Status: workspacecore.VerificationPassed,
 	}}, report)
 	if err != nil {
@@ -89,7 +106,7 @@ func TestPassingProjectCheckCorroboratesTimedOutDiagnostics(t *testing.T) {
 	if report.Confidence != workspacecore.ConfidenceCorroborated {
 		t.Fatalf("confidence = %s, want corroborated", report.Confidence)
 	}
-	if stage := diagnosticVerificationStage("prep_1", report); stage.Status != workspacecore.VerificationPassed {
+	if stage := DiagnosticVerificationStage("prep_1", report); stage.Status != workspacecore.VerificationPassed {
 		t.Fatalf("diagnostic stage = %#v", stage)
 	}
 }
@@ -138,18 +155,18 @@ func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			backend, err := configuredProviderFactory{backend: "embed"}.Open(providerOpenConfig{Root: root, InitFile: initFile, RuntimePath: runtimeRoot})
+			backend, err := ConfiguredFactory{Backend: "embed"}.Open(OpenConfig{Root: root, InitFile: initFile, RuntimePath: runtimeRoot})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer backend.Close(context.Background())
-			report, err := recordProviderDiagnostics(context.Background(), workspace, backend, []workspacecore.PlanStageFile{{Path: test.file, AfterExists: true}}, "wsrev_1", "tx_real")
+			report, err := RecordDiagnostics(context.Background(), workspace, backend, []workspacecore.PlanStageFile{{Path: test.file, AfterExists: true}}, "wsrev_1", "tx_real")
 			if err != nil {
 				t.Fatal(err)
 			}
 			detail, _ := workspace.Evidence(report.EvidenceIDs[0])
 			t.Logf("confidence=%s coverage=%#v new=%d evidence=%s", report.Confidence, report.Coverage, len(report.New), detail.Payload)
-			stage := diagnosticVerificationStage("wsrev_1", report)
+			stage := DiagnosticVerificationStage("wsrev_1", report)
 			switch report.Confidence {
 			case workspacecore.ConfidenceAuthoritative, workspacecore.ConfidenceCorroborated:
 				want := workspacecore.VerificationPassed
@@ -218,13 +235,13 @@ func TestProjectCheckDoesNotCorroborateMissingLanguageServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err = corroborateDiagnosticsWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
+	report, err = CorroborateWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
 		Stage: "check", Status: workspacecore.VerificationPassed,
 	}}, report)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Confidence == workspacecore.ConfidenceCorroborated || diagnosticVerificationStage("prep_1", report).Status == workspacecore.VerificationPassed {
+	if report.Confidence == workspacecore.ConfidenceCorroborated || DiagnosticVerificationStage("prep_1", report).Status == workspacecore.VerificationPassed {
 		t.Fatalf("missing LSP was hidden by project check: %#v", report)
 	}
 }

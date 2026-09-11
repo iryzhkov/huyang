@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -19,13 +20,13 @@ import (
 // root lies inside a sandbox tree until release is closed. It simulates a slow
 // sandbox provider spawn inside a running plan preparation.
 type blockingSandboxFactory struct {
-	inner   providerFactory
+	inner   providerpool.Factory
 	release chan struct{}
 	entered chan struct{}
 	once    sync.Once
 }
 
-func (f *blockingSandboxFactory) Open(config providerOpenConfig) (provider.Provider, error) {
+func (f *blockingSandboxFactory) Open(config providerpool.OpenConfig) (provider.Provider, error) {
 	if strings.Contains(config.Root, string(filepath.Separator)+"sandboxes"+string(filepath.Separator)) {
 		f.once.Do(func() { close(f.entered) })
 		<-f.release
@@ -51,15 +52,15 @@ func openTestProject(t *testing.T, direct *directWorkspaces, files map[string]st
 
 // startBlockedPrepare begins a change_plan prepare in workspace A whose
 // sandbox provider spawn blocks until the returned release function runs.
-func startBlockedPrepare(t *testing.T, inner providerFactory) (*directWorkspaces, string, string, func() map[string]any) {
+func startBlockedPrepare(t *testing.T, inner providerpool.Factory) (*directWorkspaces, string, string, func() map[string]any) {
 	t.Helper()
-	previous := referenceProviders
+	previous := providerpool.DefaultFactory
 	factory := &blockingSandboxFactory{
 		inner:   inner,
 		release: make(chan struct{}), entered: make(chan struct{}),
 	}
-	referenceProviders = factory
-	t.Cleanup(func() { referenceProviders = previous })
+	providerpool.DefaultFactory = factory
+	t.Cleanup(func() { providerpool.DefaultFactory = previous })
 
 	direct := newDirectWorkspaces(t.TempDir())
 	t.Cleanup(direct.closeProviders)
@@ -109,23 +110,23 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 		}
 	}
 	promptly("canonicalProvider(B)", func() {
-		if _, err := direct.handlers.pool.canonical(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.pool.Canonical(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("canonicalProvider(B): %v", err)
 		}
 	})
 	promptly("restartCanonicalProvider(B)", func() {
-		if _, err := direct.handlers.pool.restart(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.pool.Restart(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("restartCanonicalProvider(B): %v", err)
 		}
 	})
 	promptly("planStager lookup", func() {
-		if _, err := direct.handlers.pool.planStager(workspaceBRecord, "missing", 1, false); err == nil {
+		if _, err := direct.handlers.pool.PlanStager(workspaceBRecord, "missing", 1, false); err == nil {
 			t.Error("missing stager lookup succeeded")
 		}
 	})
 	promptly("preparedStager(A) bookkeeping", func() {
-		stager := direct.handlers.pool.stager(workspacecore.ID(workspaceA), "blocked-plan")
-		for _, candidate := range direct.handlers.pool.stagersFor(workspacecore.ID(workspaceA)) {
+		stager := direct.handlers.pool.Stager(workspacecore.ID(workspaceA), "blocked-plan")
+		for _, candidate := range direct.handlers.pool.StagersFor(workspacecore.ID(workspaceA)) {
 			stager = candidate
 		}
 		if stager == nil {
@@ -164,13 +165,13 @@ func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
 	}
 	revision := plan.Preparation.PreparedRevision
 
-	if stager := direct.handlers.pool.preparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
+	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
 		t.Fatal("workspace A cannot find its own prepared revision")
 	}
-	if stager := direct.handlers.pool.preparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
+	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
 		t.Fatal("workspace B resolved a prepared revision that belongs to workspace A")
 	}
-	if stager := direct.handlers.pool.preparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
+	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
 		t.Fatal("workspace B resolved a plan ID that belongs to workspace A")
 	}
 	result := direct.call(context.Background(), "verify_run", map[string]any{
@@ -207,85 +208,11 @@ func TestReadProxyLinesStopsWhenProxyLoopEnds(t *testing.T) {
 	}
 }
 
-type slowHealthProvider struct {
-	stubProvider
-}
-
-func (p *slowHealthProvider) Health(ctx context.Context) provider.Health {
-	<-ctx.Done()
-	return provider.Health{State: provider.HealthFailed, Detail: ctx.Err().Error()}
-}
-
-func TestCanonicalProviderStatusHonoursRequestDeadline(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	status := canonicalProviderStatus(ctx, &slowHealthProvider{})
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("status ignored the deadline: %s", elapsed)
-	}
-	if status["state"] != provider.HealthFailed {
-		t.Fatalf("status = %#v", status)
-	}
-}
-
-type recordingProvider struct {
-	stubProvider
-	mu       sync.Mutex
-	requests []provider.Request
-}
-
-func (p *recordingProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
-	p.mu.Lock()
-	p.requests = append(p.requests, request)
-	p.mu.Unlock()
-	return p.stubProvider.Call(ctx, request)
-}
-
-func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
-	root := t.TempDir()
-	workspace, err := workspacecore.New(workspacecore.KindProject, root, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend := &recordingProvider{}
-	backend.descriptor = provider.Descriptor{ID: "record", Backend: "test", Epoch: 3, Root: root, Cancellation: provider.CancellationCooperative}
-
-	if _, err := callCanonicalProvider(context.Background(), "req_canonical", workspace, backend, "workspace_support", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := callModernDebugProvider(context.Background(), "req_debug", workspace, backend, "debug_threads", map[string]any{"transaction_id": "tx_debug"}); err != nil {
-		t.Fatal(err)
-	}
-	stager := &providerPlanStager{workspace: workspace, provider: backend, epoch: 3}
-	if err := stager.Commit(context.Background(), "plan_1"); err != nil {
-		t.Fatal(err)
-	}
-	if len(backend.requests) != 3 {
-		t.Fatalf("requests = %d", len(backend.requests))
-	}
-	for index, request := range backend.requests {
-		if request.Context.WorkspaceID != string(workspace.Identity().ID) || request.Context.Epoch != 3 ||
-			request.Context.Deadline.IsZero() || request.Context.Cancellation != provider.CancellationCooperative {
-			t.Fatalf("request %d context = %#v", index, request.Context)
-		}
-	}
-	if backend.requests[0].Context.RequestID != "req_canonical" || backend.requests[0].Context.TransactionID != "" {
-		t.Fatalf("canonical context = %#v", backend.requests[0].Context)
-	}
-	if backend.requests[1].Context.TransactionID != "tx_debug" {
-		t.Fatalf("debug context = %#v", backend.requests[1].Context)
-	}
-	if backend.requests[2].Context.TransactionID != "plan_1" {
-		t.Fatalf("plan context = %#v", backend.requests[2].Context)
-	}
-}
-
 // silentDiagnosticsFactory opens providers that never publish diagnostics, so
 // every prepared plan stays PROVISIONAL.
 type silentDiagnosticsFactory struct{}
 
-func (silentDiagnosticsFactory) Open(config providerOpenConfig) (provider.Provider, error) {
+func (silentDiagnosticsFactory) Open(config providerpool.OpenConfig) (provider.Provider, error) {
 	return &stubProvider{descriptor: provider.Descriptor{ID: "silent", Backend: "test", Epoch: 1, Root: config.Root}}, nil
 }
 
@@ -341,21 +268,5 @@ func TestProviderFailuresAreClassifiedByKernelCode(t *testing.T) {
 	plain := modernProviderFailure("req", workspace, "language_server_probe_failed", errors.New("boom"))
 	if plain["code"] != "language_server_probe_failed" {
 		t.Fatalf("uncoded failure = %#v", plain)
-	}
-}
-
-func TestDiagnosticPayloadPrefersTypedEvidence(t *testing.T) {
-	typed := provider.Result{
-		Value:    map[string]any{"batches": []any{map[string]any{"producer": "stale"}}},
-		Evidence: []provider.EvidenceBatch{{Kind: "lsp_push", Producer: "gopls", Document: "/x/main.go", Complete: true}},
-	}
-	payload, err := diagnosticPayload(typed)
-	if err != nil || len(payload.Batches) != 1 || payload.Batches[0].Producer != "gopls" {
-		t.Fatalf("typed payload = %#v, %v", payload, err)
-	}
-	legacy := provider.Result{Value: map[string]any{"batches": []any{map[string]any{"producer": "pyright", "kind": "lsp_push"}}}}
-	payload, err = diagnosticPayload(legacy)
-	if err != nil || len(payload.Batches) != 1 || payload.Batches[0].Producer != "pyright" {
-		t.Fatalf("legacy payload = %#v, %v", payload, err)
 	}
 }

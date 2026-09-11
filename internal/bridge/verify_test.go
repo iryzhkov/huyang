@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -155,7 +156,7 @@ func TestVerificationEnvelopeOffersRunnableFullFallback(t *testing.T) {
 // Provider attach and diagnostic settle waits during verification stay
 // within a routine tool call.
 func TestVerificationProviderWaitsStayBounded(t *testing.T) {
-	if verificationProviderAttachWaitMS > 2000 || verificationDiagnosticSettleWait > 2*time.Second {
-		t.Fatalf("verification provider waits are not routine-call bounded: attach=%dms settle=%s", verificationProviderAttachWaitMS, verificationDiagnosticSettleWait)
+	if providerpool.VerificationAttachWaitMS > 2000 || verificationDiagnosticSettleWait > 2*time.Second {
+		t.Fatalf("verification provider waits are not routine-call bounded: attach=%dms settle=%s", providerpool.VerificationAttachWaitMS, verificationDiagnosticSettleWait)
 	}
 }

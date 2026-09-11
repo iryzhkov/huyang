@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -62,7 +63,7 @@ func checkpointStatefulReceipt(ctx context.Context, result map[string]any) error
 type toolHandlers struct {
 	registry     workspaceLookup
 	provenance   revisionProvenance
-	pool         *providerPool
+	pool         *providerpool.Pool
 	verification *verificationCache
 	notices      *noticeDelivery
 	stateDir     string
@@ -132,10 +133,10 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		}
 		inspection := workspace.Inspect()
 		var semanticProvider map[string]any
-		if backend, providerErr := h.pool.canonical(ctx, workspace); providerErr == nil {
+		if backend, providerErr := h.pool.Canonical(ctx, workspace); providerErr == nil {
 			inspection.Optional["provider"] = "available"
 			inspection.Optional["lsp"] = "probe_with_language_server_status"
-			semanticProvider = canonicalProviderStatus(ctx, backend)
+			semanticProvider = providerpool.Status(ctx, backend)
 		}
 		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
 		if policyErr != nil {

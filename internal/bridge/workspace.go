@@ -8,6 +8,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -43,8 +44,8 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 		return mcpapi.Failure(requestID, opened, "workspace_baseline_failed", err)
 	}
 	var canonicalBackend provider.Provider
-	if opened.Identity().Kind == workspacecore.KindProject && shippedRuntimePath() != "" {
-		canonicalBackend, _ = h.pool.canonical(ctx, opened)
+	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
+		canonicalBackend, _ = h.pool.Canonical(ctx, opened)
 	}
 	orientation, err := opened.Orient()
 	if err != nil {
@@ -59,7 +60,7 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 	if canonicalBackend != nil {
 		capabilities.Optional["provider"] = "available"
 		capabilities.Optional["lsp"] = "probe_with_language_server_status"
-		semanticProvider = canonicalProviderStatus(ctx, canonicalBackend)
+		semanticProvider = providerpool.Status(ctx, canonicalBackend)
 	}
 	if policy, policyErr := workspacecore.LoadPipelinePolicy(opened.Identity().Root, ""); policyErr == nil {
 		reconcilePipelineCapabilities(&capabilities, policy)

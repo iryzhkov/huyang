@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *testing.T) {
-	previousFactory := referenceProviders
-	referenceProviders = configuredProviderFactory{backend: "embed"}
-	defer func() { referenceProviders = previousFactory }()
+	previousFactory := providerpool.DefaultFactory
+	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	defer func() { providerpool.DefaultFactory = previousFactory }()
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
 		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
 	}
-	sandboxStager := direct.handlers.pool.stager(workspaceIDValue(workspaceID), planID)
+	sandboxStager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
 	sandboxFile := filepath.Join(sandboxStager.Sandbox().Tree, "note.txt")
 	staged, err := os.ReadFile(sandboxFile)
 	if err != nil || !bytes.Equal(staged, []byte("alpha DELTA gamma\n")) {
@@ -85,9 +86,9 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 }
 
 func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
-	previousFactory := referenceProviders
-	referenceProviders = configuredProviderFactory{backend: "embed"}
-	defer func() { referenceProviders = previousFactory }()
+	previousFactory := providerpool.DefaultFactory
+	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	defer func() { providerpool.DefaultFactory = previousFactory }()
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +150,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
 		t.Fatalf("canonical apply = %q, %v", current, err)
 	}
-	sandboxStager := direct.handlers.pool.stager(workspaceIDValue(workspaceID), planID)
+	sandboxStager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
 	if _, err := os.Stat(sandboxStager.Sandbox().Root); !os.IsNotExist(err) {
 		t.Fatalf("commit did not remove owned sandbox: %v", err)
 	}
@@ -182,9 +183,9 @@ func TestProviderBackedPrepareReceiptIsNotReplayedAfterRestart(t *testing.T) {
 }
 
 func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.T) {
-	previousFactory := referenceProviders
-	referenceProviders = configuredProviderFactory{backend: "embed"}
-	defer func() { referenceProviders = previousFactory }()
+	previousFactory := providerpool.DefaultFactory
+	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	defer func() { providerpool.DefaultFactory = previousFactory }()
 
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
@@ -222,7 +223,7 @@ func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.
 	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
 		t.Fatalf("prepare wrote missing file to canonical disk: %v", err)
 	}
-	stager := direct.handlers.pool.stager(workspaceIDValue(workspaceID), planID)
+	stager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
 	request, _, ok := stager.PreparedRequest()
 	if !ok || len(request.Files) != 1 {
 		t.Fatalf("prepared request = %#v, available=%t", request, ok)

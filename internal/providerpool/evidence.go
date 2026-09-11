@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func diagnosticSourcePath(path string) bool {
 		filepath.Base(clean) != ".gitignore"
 }
 
-func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
+func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
 	if backend == nil {
 		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
 	}
@@ -47,7 +47,7 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	result, err := callProvider(callCtx, workspace, backend, providerCall{
+	result, err := Call(callCtx, workspace, backend, CallSpec{
 		RequestID: fmt.Sprintf("diagnostics_%s", transactionID), TransactionID: transactionID,
 	}, "huyang_diagnostic_evidence", map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS})
 	if err != nil {
@@ -121,7 +121,7 @@ func diagnosticEvidenceTimeout(waitMS int) time.Duration {
 	return time.Duration(waitMS)*time.Millisecond + 2*time.Second
 }
 
-func diagnosticVerificationStage(revision string, report workspacecore.DiagnosticReport) workspacecore.VerificationStage {
+func DiagnosticVerificationStage(revision string, report workspacecore.DiagnosticReport) workspacecore.VerificationStage {
 	status := workspacecore.VerificationPassed
 	complete := true
 	errorCount := 0
@@ -146,7 +146,7 @@ func diagnosticVerificationStage(revision string, report workspacecore.Diagnosti
 	}
 }
 
-func corroborateDiagnosticsWithProjectCheck(workspace *workspacecore.Workspace, revision, transactionID string, stages []workspacecore.VerificationStage, report workspacecore.DiagnosticReport) (workspacecore.DiagnosticReport, error) {
+func CorroborateWithProjectCheck(workspace *workspacecore.Workspace, revision, transactionID string, stages []workspacecore.VerificationStage, report workspacecore.DiagnosticReport) (workspacecore.DiagnosticReport, error) {
 	if report.Confidence != workspacecore.ConfidenceProvisional && report.Confidence != workspacecore.ConfidenceUnavailable {
 		return report, nil
 	}

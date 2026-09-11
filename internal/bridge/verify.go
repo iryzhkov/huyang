@@ -13,6 +13,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -80,7 +81,7 @@ type verifyJob struct {
 	revision  string
 	cacheKey  string
 	identity  workspacecore.Identity
-	stager    *sandboxPlanStager
+	stager    *providerpool.SandboxStager
 }
 
 // verify runs both phases back to back for callers that already hold the
@@ -145,7 +146,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 	if cacheHit {
 		return nil, modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
 	}
-	job.stager = h.pool.preparedStager(workspace, revision)
+	job.stager = h.pool.PreparedStager(workspace, revision)
 	if job.stager == nil {
 		recoveredStager, recoveredPlan, recoverable, recoveryErr := h.recoverPreparedStager(ctx, workspace, revision)
 		if recoveryErr != nil {
@@ -189,7 +190,7 @@ func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspac
 	} else {
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		sandbox, materializeErr := workspacecore.MaterializeSandbox(
-			ctx, identity.Root, h.pool.sandboxBaseDir(), identity.ID,
+			ctx, identity.Root, h.pool.SandboxBaseDir(), identity.ID,
 			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
 		)
 		if materializeErr != nil {
@@ -236,26 +237,26 @@ func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspac
 
 			if filesErr == nil && wantsDiagnostics {
 				var providerErr error
-				diagnosticProvider, providerErr = h.pool.open(sandbox.Tree, false)
+				diagnosticProvider, providerErr = h.pool.Open(sandbox.Tree, false)
 				providerOpened = providerErr == nil
 				if providerErr == nil {
-					_, providerErr = callCanonicalProvider(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,
-						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
+					_, providerErr = providerpool.CallCanonical(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,
+						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": providerpool.VerificationAttachWaitMS})
 				}
 				if providerErr == nil {
 
 					request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-						report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
+						report, evidenceErr := providerpool.RecordDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
 						diagnosticReport = &report
-						return diagnosticVerificationStage(revision, report), evidenceErr
+						return providerpool.DiagnosticVerificationStage(revision, report), evidenceErr
 					}
 				}
 			}
 			if filesErr == nil {
 				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
 				if err == nil && diagnosticReport != nil {
-					if report, evidenceErr := corroborateDiagnosticsWithProjectCheck(workspace, revision, "verify_"+requestID, result.Stages, *diagnosticReport); evidenceErr == nil {
-						replaceDiagnosticVerificationStage(&result, revision, report)
+					if report, evidenceErr := providerpool.CorroborateWithProjectCheck(workspace, revision, "verify_"+requestID, result.Stages, *diagnosticReport); evidenceErr == nil {
+						providerpool.ReplaceDiagnosticVerificationStage(&result, revision, report)
 					}
 				}
 			}

@@ -1,4 +1,4 @@
-package bridge
+package providerpool
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// verificationProviderAttachWaitMS is how long a sandbox provider is given
+// VerificationAttachWaitMS is how long a sandbox provider is given
 // to attach language servers before diagnostics are collected; it stays
 // well inside one tool call.
-const verificationProviderAttachWaitMS = 1500
+const VerificationAttachWaitMS = 1500
 
 type providerPlanStager struct {
 	workspace *workspacecore.Workspace
@@ -57,21 +57,21 @@ func (s *providerPlanStager) Rollback(ctx context.Context, planID string) error 
 }
 
 func (s *providerPlanStager) call(ctx context.Context, operation, planID string, arguments map[string]any) (provider.Result, error) {
-	return callProvider(ctx, s.workspace, s.provider, providerCall{
-		RequestID: fmt.Sprintf("huyang-plan-%d", s.requests.Add(1)), TransactionID: planID, Timeout: defaultToolCallTimeout,
+	return Call(ctx, s.workspace, s.provider, CallSpec{
+		RequestID: fmt.Sprintf("huyang-plan-%d", s.requests.Add(1)), TransactionID: planID, Timeout: DefaultCallTimeout,
 	}, operation, arguments)
 }
 
-// sandboxPlanStager prepares one plan in an isolated sandbox. Two locks keep
+// SandboxStager prepares one plan in an isolated sandbox. Two locks keep
 // bookkeeping separate from the long-running work: opMu serialises Stage,
 // Verify, Commit and Rollback, each of which may materialise a sandbox, spawn
 // a provider and run the pipeline; stateMu guards the small state below and
 // is only ever held briefly, so lookups such as PreparedRequest or Epoch never
 // wait behind a running operation.
-type sandboxPlanStager struct {
+type SandboxStager struct {
 	opMu             sync.Mutex
 	stateMu          sync.Mutex
-	pool             *providerPool
+	pool             *Pool
 	workspace        *workspacecore.Workspace
 	sandboxBase      string
 	planID           string
@@ -86,7 +86,7 @@ type sandboxPlanStager struct {
 	done             bool
 }
 
-func (s *sandboxPlanStager) Epoch() uint64 {
+func (s *SandboxStager) Epoch() uint64 {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.stager != nil {
@@ -98,7 +98,7 @@ func (s *sandboxPlanStager) Epoch() uint64 {
 	return s.workspace.Identity().Epoch
 }
 
-func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
+func (s *SandboxStager) PreparationMetadata() (string, string, string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.sandbox == nil {
@@ -107,7 +107,7 @@ func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
 	return s.sandbox.Backend, s.baseRevision, "canonical"
 }
 
-func (s *sandboxPlanStager) PreparedRequest() (workspacecore.PlanStageRequest, workspacecore.VerificationResult, bool) {
+func (s *SandboxStager) PreparedRequest() (workspacecore.PlanStageRequest, workspacecore.VerificationResult, bool) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.sandbox == nil || len(s.prepared.Files) == 0 {
@@ -132,14 +132,14 @@ func (s *sandboxPlanStager) PreparedRequest() (workspacecore.PlanStageRequest, w
 	return request, result, true
 }
 
-func (s *sandboxPlanStager) SetPreparedRevision(revision string) {
+func (s *SandboxStager) SetPreparedRevision(revision string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	s.preparedRevision = revision
 	s.verification.Revision = revision
 }
 
-func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
+func (s *SandboxStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	sandbox, prepared, done := s.snapshot()
@@ -152,14 +152,14 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 	}
 	var diagnosticReport *workspacecore.DiagnosticReport
 	request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, files []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-		report, evidenceErr := recordProviderDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
+		report, evidenceErr := RecordDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
 		diagnosticReport = &report
-		return diagnosticVerificationStage(revision, report), evidenceErr
+		return DiagnosticVerificationStage(revision, report), evidenceErr
 	}
 	result, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, prepared.Files)
 	if err == nil && diagnosticReport != nil {
-		if report, evidenceErr := corroborateDiagnosticsWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
-			replaceDiagnosticVerificationStage(&result, request.Revision, report)
+		if report, evidenceErr := CorroborateWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
+			ReplaceDiagnosticVerificationStage(&result, request.Revision, report)
 		}
 	}
 	if len(result.Stages) > 0 {
@@ -170,7 +170,7 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 	return result, err
 }
 
-func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
+func (s *SandboxStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if current, _, done := s.snapshot(); done {
@@ -186,7 +186,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		return err
 	}
 	s.setResources(sandbox, nil, nil)
-	backend, err := s.pool.open(sandbox.Tree, false)
+	backend, err := s.pool.Open(sandbox.Tree, false)
 	if err != nil {
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
@@ -194,8 +194,8 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	}
 	stager := &providerPlanStager{workspace: s.workspace, provider: backend, epoch: backend.Descriptor().Epoch}
 	s.setResources(sandbox, backend, stager)
-	_, _ = callProvider(ctx, s.workspace, backend, providerCall{
-		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: defaultToolCallTimeout,
+	_, _ = Call(ctx, s.workspace, backend, CallSpec{
+		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
 	}, "workspace_support", map[string]any{"root": sandbox.Tree})
 	if err := stager.Stage(ctx, request); err != nil {
 		_ = backend.Close(context.Background())
@@ -256,24 +256,24 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			known[delta.Path] = true
 		}
 	}
-	replacement, err := s.pool.open(sandbox.Tree, false)
+	replacement, err := s.pool.Open(sandbox.Tree, false)
 	if err != nil {
 		return err
 	}
 	s.setResources(sandbox, replacement, nil)
-	_, _ = callProvider(ctx, s.workspace, replacement, providerCall{
-		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: defaultToolCallTimeout,
-	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
-	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, replacement, request.Files, s.baseRevision, s.planID)
+	_, _ = Call(ctx, s.workspace, replacement, CallSpec{
+		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
+	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": VerificationAttachWaitMS})
+	diagnosticReport, err := RecordDiagnostics(ctx, s.workspace, replacement, request.Files, s.baseRevision, s.planID)
 	if err != nil {
 		return err
 	}
-	diagnosticReport, err = corroborateDiagnosticsWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
+	diagnosticReport, err = CorroborateWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
 	if err != nil {
 		return err
 	}
 
-	verification.Stages = append(verification.Stages, diagnosticVerificationStage(s.baseRevision, diagnosticReport))
+	verification.Stages = append(verification.Stages, DiagnosticVerificationStage(s.baseRevision, diagnosticReport))
 	s.stateMu.Lock()
 	s.prepared, s.verification = request, verification
 	s.stateMu.Unlock()
@@ -282,27 +282,27 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 
 // Sandbox returns the materialised sandbox, or nil before Stage or after
 // release. It takes only the short state lock.
-func (s *sandboxPlanStager) Sandbox() *workspacecore.Sandbox {
+func (s *SandboxStager) Sandbox() *workspacecore.Sandbox {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return s.sandbox
 }
 
 // snapshot reads the bookkeeping state without waiting on a running operation.
-func (s *sandboxPlanStager) snapshot() (*workspacecore.Sandbox, workspacecore.PlanStageRequest, bool) {
+func (s *SandboxStager) snapshot() (*workspacecore.Sandbox, workspacecore.PlanStageRequest, bool) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return s.sandbox, s.prepared, s.done
 }
 
-func (s *sandboxPlanStager) setResources(sandbox *workspacecore.Sandbox, backend provider.Provider, stager *providerPlanStager) {
+func (s *SandboxStager) setResources(sandbox *workspacecore.Sandbox, backend provider.Provider, stager *providerPlanStager) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	s.sandbox, s.provider, s.stager = sandbox, backend, stager
 }
 
 // reusable reports whether the stager still serves the given plan revision.
-func (s *sandboxPlanStager) reusable(planRevision uint64) bool {
+func (s *SandboxStager) reusable(planRevision uint64) bool {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return !s.done && s.planRevision == planRevision
@@ -310,7 +310,7 @@ func (s *sandboxPlanStager) reusable(planRevision uint64) bool {
 
 // release finishes the provider transaction, closes the provider and removes
 // the sandbox. It runs under opMu so it cannot interleave with Stage or Verify.
-func (s *sandboxPlanStager) release(ctx context.Context, planID string, commit bool) error {
+func (s *SandboxStager) release(ctx context.Context, planID string, commit bool) error {
 	s.stateMu.Lock()
 	done, stager, backend, sandbox := s.done, s.stager, s.provider, s.sandbox
 	s.stateMu.Unlock()
@@ -341,8 +341,8 @@ func (s *sandboxPlanStager) release(ctx context.Context, planID string, commit b
 	return result
 }
 
-func replaceDiagnosticVerificationStage(result *workspacecore.VerificationResult, revision string, report workspacecore.DiagnosticReport) {
-	replacement := diagnosticVerificationStage(revision, report)
+func ReplaceDiagnosticVerificationStage(result *workspacecore.VerificationResult, revision string, report workspacecore.DiagnosticReport) {
+	replacement := DiagnosticVerificationStage(revision, report)
 	for index := range result.Stages {
 		if result.Stages[index].Stage == "diagnostics" {
 			result.Stages[index] = replacement
@@ -352,13 +352,13 @@ func replaceDiagnosticVerificationStage(result *workspacecore.VerificationResult
 	result.Stages = append(result.Stages, replacement)
 }
 
-func (s *sandboxPlanStager) Commit(ctx context.Context, planID string) error {
+func (s *SandboxStager) Commit(ctx context.Context, planID string) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.release(ctx, planID, true)
 }
 
-func (s *sandboxPlanStager) Rollback(ctx context.Context, planID string) error {
+func (s *SandboxStager) Rollback(ctx context.Context, planID string) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.release(ctx, planID, false)
@@ -375,10 +375,10 @@ type stagerKey struct {
 // revision matches reference. The map is snapshotted under p.mu and
 // inspected after it is released; PreparedRequest only takes the stager's
 // short state lock, so a stager inside a long Stage never blocks the lookup.
-func (p *providerPool) preparedStager(workspace *workspacecore.Workspace, reference string) *sandboxPlanStager {
+func (p *Pool) PreparedStager(workspace *workspacecore.Workspace, reference string) *SandboxStager {
 	workspaceID := workspace.Identity().ID
 	p.mu.Lock()
-	candidates := make([]*sandboxPlanStager, 0, len(p.stagers))
+	candidates := make([]*SandboxStager, 0, len(p.stagers))
 	if exact := p.stagers[stagerKey{workspace: workspaceID, planID: reference}]; exact != nil {
 		candidates = append(candidates, exact)
 	}
@@ -402,7 +402,7 @@ func (p *providerPool) preparedStager(workspace *workspacecore.Workspace, refere
 	return nil
 }
 
-func (p *providerPool) planStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
+func (p *Pool) PlanStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
 	identity := workspace.Identity()
 	key := stagerKey{workspace: identity.ID, planID: planID}
 	p.mu.Lock()
@@ -429,7 +429,7 @@ func (p *providerPool) planStager(workspace *workspacecore.Workspace, planID str
 	if !create {
 		return nil, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
 	}
-	stager := &sandboxPlanStager{
+	stager := &SandboxStager{
 		pool: p, workspace: workspace, sandboxBase: p.sandboxBase,
 		planID: planID, planRevision: planRevision, baseRevision: fmt.Sprintf("wsrev_%d", identity.StateSeq),
 	}

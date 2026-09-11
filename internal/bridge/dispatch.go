@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -43,15 +44,15 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		registry:    registry,
 		receipts:    receipts,
 		scheduler:   scheduler,
-		toolTimeout: defaultToolCallTimeout,
+		toolTimeout: providerpool.DefaultCallTimeout,
 		handlers: &toolHandlers{
 			registry:      registry,
 			provenance:    receipts,
-			pool:          newProviderPool(filepath.Join(stateDir, "sandboxes"), referenceProviders),
+			pool:          providerpool.New(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory),
 			verification:  newVerificationCache(),
 			notices:       newNoticeDelivery(),
 			stateDir:      stateDir,
-			toolTimeout:   defaultToolCallTimeout,
+			toolTimeout:   providerpool.DefaultCallTimeout,
 			schedulerInfo: scheduler.description,
 		},
 	}
@@ -78,7 +79,7 @@ func (d *directWorkspaces) loadState() error {
 			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
-	return workspacecore.ReapSandboxes(d.handlers.pool.sandboxBaseDir(), nil)
+	return workspacecore.ReapSandboxes(d.handlers.pool.SandboxBaseDir(), nil)
 }
 
 // setToolTimeout changes the global tool-call timeout the dispatcher
@@ -93,7 +94,7 @@ func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
 }
 
 func (d *directWorkspaces) closeProviders() {
-	d.handlers.pool.close()
+	d.handlers.pool.Close()
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {

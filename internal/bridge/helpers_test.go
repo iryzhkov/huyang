@@ -8,6 +8,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 )
 
 // openProbeProject writes files into a fresh project root, opens it through
@@ -118,7 +119,7 @@ func (p *stubProvider) Done() <-chan struct{}       { return make(chan struct{})
 // the opens so a test can assert a warm provider was reused.
 type stubProviderFactory struct{ backend *stubProvider }
 
-func (f stubProviderFactory) Open(config providerOpenConfig) (provider.Provider, error) {
+func (f stubProviderFactory) Open(config providerpool.OpenConfig) (provider.Provider, error) {
 	f.backend.opens++
 	f.backend.descriptor.Root = config.Root
 	f.backend.descriptor.Epoch = uint64(f.backend.opens)
@@ -127,7 +128,7 @@ func (f stubProviderFactory) Open(config providerOpenConfig) (provider.Provider,
 
 func useStubProvider(t *testing.T, backend *stubProvider) {
 	t.Helper()
-	previous := referenceProviders
-	referenceProviders = stubProviderFactory{backend: backend}
-	t.Cleanup(func() { referenceProviders = previous })
+	previous := providerpool.DefaultFactory
+	providerpool.DefaultFactory = stubProviderFactory{backend: backend}
+	t.Cleanup(func() { providerpool.DefaultFactory = previous })
 }
