@@ -61,8 +61,8 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "workspace_support", map[string]any{"root": workspace.Identity().Root})
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_probe_failed", err)
-		result["data"] = map[string]any{"provider": canonicalProviderStatus(backend)}
+		result := modernProviderFailure(requestID, workspace, "language_server_probe_failed", err)
+		result["data"] = map[string]any{"provider": canonicalProviderStatus(ctx, backend)}
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
 		return result
 	}
@@ -117,7 +117,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(attachedServers), strings.Join(failedAttachments, ", "))
 	}
 	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
-		"provider": canonicalProviderStatus(backend), "language_servers": support,
+		"provider": canonicalProviderStatus(ctx, backend), "language_servers": compactLanguageSupport(support),
 		"attached_language_count": attachedLanguages, "attached_server_count": len(attachedServers),
 		"attached_servers": attachedServers, "missing_languages": missing,
 		"failed_attachment_languages": failedAttachments, "install_options": installOptions,
@@ -131,7 +131,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 			}
 			action := map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "use_new_idempotency_key": true}
 			if options := installOptions[language]; len(options) > 0 {
-				action["server_options"] = options
+				action["install_options_key"] = language
 				action["selection"] = "automatic_preferred"
 			}
 			next = append(next, action)
@@ -176,7 +176,7 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 		if data == nil {
 			data = map[string]any{}
 		}
-		data["provider"] = canonicalProviderStatus(backend)
+		data["provider"] = canonicalProviderStatus(ctx, backend)
 		verified["data"] = data
 		current := map[string]bool{}
 		for _, server := range anySlice(data["attached_servers"]) {
@@ -218,9 +218,9 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "install_language", providerArguments)
 	if err != nil {
-		return modernFailure(requestID, workspace, "language_server_install_failed", err)
+		return modernProviderFailure(requestID, workspace, "language_server_install_failed", err)
 	}
-	data := map[string]any{"installation": value, "provider": canonicalProviderStatus(backend)}
+	data := map[string]any{"installation": value, "provider": canonicalProviderStatus(ctx, backend)}
 	installation, _ := value.(map[string]any)
 	serverResult, _ := installation["server"].(map[string]any)
 	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
@@ -288,7 +288,7 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, relation, providerArguments)
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_unavailable", err)
+		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
@@ -296,7 +296,7 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 	if count, present := navigation["count"]; present && fmt.Sprint(count) == "0" {
 		result := modernEnvelope(requestID, workspace, "partial", "navigation_not_found",
 			fmt.Sprintf("The workspace language server returned no %s location", relation), map[string]any{
-				"navigation": value, "provider": canonicalProviderStatus(backend),
+				"navigation": value, "provider": canonicalProviderStatus(ctx, backend),
 				"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
 			})
 		result["next"] = []any{
@@ -306,7 +306,7 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 		return result
 	}
 	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the workspace language server", relation), map[string]any{
-		"navigation": value, "provider": canonicalProviderStatus(backend),
+		"navigation": value, "provider": canonicalProviderStatus(ctx, backend),
 		"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
 	})
 }
@@ -323,9 +323,9 @@ func (d *directWorkspaces) codeActionsProvider(ctx context.Context, requestID st
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "code_actions", providerArguments)
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_unavailable", err)
+		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
-	return modernEnvelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": canonicalProviderStatus(backend)})
+	return modernEnvelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": canonicalProviderStatus(ctx, backend)})
 }

@@ -5,18 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-const registryStateVersion = 1
+// registryStateVersion 2 holds workspace definitions only. Version 1 also
+// embedded every idempotency receipt with its full result payload, which is
+// why the file grew without bound; a version 1 file is migrated on load into
+// per-workspace receipt files and rewritten as version 2.
+const (
+	registryStateVersion       = 2
+	legacyRegistryStateVersion = 1
+)
 
 type persistedRegistry struct {
 	Version    int
 	Workspaces []persistedWorkspace
-	Replays    []persistedReplay
+	// Replays is read from version 1 files only and never written again.
+	Replays []persistedReplay `json:",omitempty"`
 }
 
 type persistedWorkspace struct {
@@ -28,16 +35,10 @@ type persistedWorkspace struct {
 	StateSeq      uint64
 }
 
-type persistedReplay struct {
-	Key           string
-	ArgumentsHash string
-	Result        map[string]any
-}
-
 func (d *directWorkspaces) loadRegistry() error {
 	content, err := os.ReadFile(d.registryPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return d.loadReceipts()
 	}
 	if err != nil {
 		return fmt.Errorf("read registry: %w", err)
@@ -46,7 +47,7 @@ func (d *directWorkspaces) loadRegistry() error {
 	if err := json.Unmarshal(content, &state); err != nil {
 		return fmt.Errorf("decode registry: %w", err)
 	}
-	if state.Version != registryStateVersion {
+	if state.Version != registryStateVersion && state.Version != legacyRegistryStateVersion {
 		return fmt.Errorf("unsupported registry version %d", state.Version)
 	}
 	for _, record := range state.Workspaces {
@@ -61,15 +62,15 @@ func (d *directWorkspaces) loadRegistry() error {
 		d.items[record.ID] = opened
 		d.records[record.ID] = record
 	}
-	for _, replay := range state.Replays {
-		if providerBackedReplay(replay.Result) {
-			continue
+	if err := d.loadReceipts(); err != nil {
+		return err
+	}
+	if state.Version == legacyRegistryStateVersion {
+		if err := d.migrateLegacyReceipts(state.Replays); err != nil {
+			return fmt.Errorf("migrate legacy receipts: %w", err)
 		}
-		d.replays[replay.Key] = &directReplay{
-			argumentsHash: replay.ArgumentsHash,
-			result:        replay.Result,
-			done:          closedSignal(),
-			complete:      true,
+		if err := d.persistRegistry(); err != nil {
+			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
 	return nil
@@ -79,17 +80,16 @@ func providerBackedReplay(result map[string]any) bool {
 	transaction, _ := result["transaction"].(map[string]any)
 	state, _ := transaction["state"].(string)
 	switch workspacecore.PlanState(state) {
-	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack:
+	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack, workspacecore.PlanConflicted:
 		return true
 	default:
 		return false
 	}
 }
 
+// persistRegistry writes the workspace definitions. Receipts are persisted
+// separately per workspace by persistReceipts.
 func (d *directWorkspaces) persistRegistry() error {
-	d.persistMu.Lock()
-	defer d.persistMu.Unlock()
-
 	d.mu.Lock()
 	records := make([]persistedWorkspace, 0, len(d.records))
 	for id, record := range d.records {
@@ -105,58 +105,16 @@ func (d *directWorkspaces) persistRegistry() error {
 	d.mu.Unlock()
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 
-	d.replayMu.Lock()
-	replays := make([]persistedReplay, 0, len(d.replays))
-	for key, replay := range d.replays {
-		if replay.complete {
-			replays = append(replays, persistedReplay{
-				Key: key, ArgumentsHash: replay.argumentsHash, Result: cloneEnvelope(replay.result),
-			})
-		}
-	}
-	d.replayMu.Unlock()
-	sort.Slice(replays, func(i, j int) bool { return replays[i].Key < replays[j].Key })
-
-	content, err := json.MarshalIndent(persistedRegistry{
-		Version: registryStateVersion, Workspaces: records, Replays: replays,
-	}, "", "  ")
+	content, err := json.MarshalIndent(persistedRegistry{Version: registryStateVersion, Workspaces: records}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode registry: %w", err)
 	}
-	content = append(content, '\n')
+	d.persistMu.Lock()
+	defer d.persistMu.Unlock()
 	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(d.stateDir, ".registry-*.tmp")
-	if err != nil {
-		return err
-	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempName, d.registryPath); err != nil {
-		return err
-	}
-	directory, err := os.Open(filepath.Dir(d.registryPath))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return writeDurableFile(d.registryPath, append(content, '\n'))
 }
 
 func (d *directWorkspaces) persistWorkspaceIdentity(id workspacecore.ID) error {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -19,87 +20,92 @@ func huyangHeadlessInit() string {
 	return os.Getenv("AGENT99_HEADLESS_INIT")
 }
 
+// providerSlot owns the canonical provider of one workspace. Spawning and
+// health-checking a provider can take seconds, so each slot has its own lock:
+// d.providerMu only guards the slot map and is never held across a provider
+// operation, which keeps one workspace's slow spawn from stalling every other
+// workspace's provider lookups.
+type providerSlot struct {
+	mu      sync.Mutex
+	backend provider.Provider
+}
+
+func (d *directWorkspaces) providerSlotFor(id workspacecore.ID) *providerSlot {
+	d.providerMu.Lock()
+	defer d.providerMu.Unlock()
+	slot := d.providers[id]
+	if slot == nil {
+		slot = &providerSlot{}
+		d.providers[id] = slot
+	}
+	return slot
+}
+
 // canonicalProvider returns the owned Neovim provider for a modern workspace.
 // Modern workspaces are durable while provider processes are replaceable, so
 // the provider is started lazily and recreated after a daemon or provider
 // restart without changing the workspace ID.
 func (d *directWorkspaces) canonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	return d.workspaceProvider(ctx, workspace, false)
+}
+
+func (d *directWorkspaces) workspaceProvider(ctx context.Context, workspace *workspacecore.Workspace, debug bool) (provider.Provider, error) {
 	identity := workspace.Identity()
 	if identity.Kind != workspacecore.KindProject {
 		return nil, fmt.Errorf("semantic provider requires a project workspace")
 	}
-	d.providerMu.Lock()
-	defer d.providerMu.Unlock()
-	if existing := d.providers[identity.ID]; existing != nil {
+	slot := d.providerSlotFor(identity.ID)
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if existing := slot.backend; existing != nil {
 		health := existing.Health(ctx)
 		if health.State == provider.HealthHealthy || health.State == provider.HealthStarting {
 			workspace.SyncProviderEpoch(existing.Descriptor().Epoch)
 			return existing, nil
 		}
 		_ = existing.Close(context.Background())
-		delete(d.providers, identity.ID)
+		slot.backend = nil
 	}
-	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: identity.Root, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: false,
-	})
+	backend, err := openReferenceProvider(identity.Root, debug)
 	if err != nil {
 		return nil, err
 	}
-	d.providers[identity.ID] = backend
+	slot.backend = backend
 	workspace.SyncProviderEpoch(backend.Descriptor().Epoch)
 	return backend, nil
 }
 
 func (d *directWorkspaces) restartCanonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
-	identity := workspace.Identity()
-	d.providerMu.Lock()
-	if existing := d.providers[identity.ID]; existing != nil {
+	slot := d.providerSlotFor(workspace.Identity().ID)
+	slot.mu.Lock()
+	if existing := slot.backend; existing != nil {
 		_ = existing.Close(context.Background())
-		delete(d.providers, identity.ID)
+		slot.backend = nil
 	}
-	d.providerMu.Unlock()
+	slot.mu.Unlock()
 	return d.canonicalProvider(ctx, workspace)
 }
 
-func callCanonicalProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
-	if arguments == nil {
-		arguments = map[string]any{}
+// closeProviders shuts every provider and rolls back every sandbox stager.
+// The maps are detached under d.providerMu and the slow work happens outside
+// it so a stager still inside a long operation cannot stall the map.
+func (d *directWorkspaces) closeProviders() {
+	d.providerMu.Lock()
+	slots := d.providers
+	stagers := d.sandboxStagers
+	d.providers = make(map[workspacecore.ID]*providerSlot)
+	d.sandboxStagers = make(map[stagerKey]*sandboxPlanStager)
+	d.providerMu.Unlock()
+	for _, slot := range slots {
+		slot.mu.Lock()
+		if slot.backend != nil {
+			_ = slot.backend.Close(context.Background())
+			slot.backend = nil
+		}
+		slot.mu.Unlock()
 	}
-	callContext := ctx
-	if callContext == nil {
-		callContext = context.Background()
-	}
-	if _, ok := callContext.Deadline(); !ok {
-		var cancel context.CancelFunc
-		callContext, cancel = context.WithTimeout(callContext, defaultToolCallTimeout)
-		defer cancel()
-	}
-	deadline, _ := callContext.Deadline()
-	descriptor := backend.Descriptor()
-	result, err := backend.Call(callContext, provider.Request{
-		Context: provider.RequestContext{
-			RequestID: requestID, WorkspaceID: string(workspace.Identity().ID),
-			Epoch: descriptor.Epoch, Deadline: deadline, Cancellation: descriptor.Cancellation,
-		},
-		Operation: operation, Arguments: arguments,
-	})
-	workspace.SyncProviderEpoch(backend.Descriptor().Epoch)
-	if err != nil {
-		return nil, err
-	}
-	return result.Value, nil
-}
-
-func canonicalProviderStatus(backend provider.Provider) map[string]any {
-	descriptor := backend.Descriptor()
-	health := backend.Health(context.Background())
-	return map[string]any{
-		"state": health.State, "detail": health.Detail, "failure_code": health.FailureCode,
-		"backend": descriptor.Backend, "provider_id": descriptor.ID,
-		"epoch": descriptor.Epoch, "process_id": descriptor.ProcessID,
-		"endpoint": descriptor.Endpoint, "languages": descriptor.Languages,
-		"capabilities": descriptor.Capabilities, "observed_at": health.ObservedAt,
+	for key, stager := range stagers {
+		_ = stager.Rollback(context.Background(), key.planID)
 	}
 }
 

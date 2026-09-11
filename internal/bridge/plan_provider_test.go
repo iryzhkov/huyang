@@ -36,6 +36,7 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
@@ -64,7 +65,7 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
 		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
 	}
-	sandboxStager := direct.sandboxStagers[planID]
+	sandboxStager := direct.sandboxStagers[stagerKey{workspace: workspaceIDValue(workspaceID), planID: planID}]
 	sandboxFile := filepath.Join(sandboxStager.sandbox.Tree, "note.txt")
 	staged, err := os.ReadFile(sandboxFile)
 	if err != nil || !bytes.Equal(staged, []byte("alpha DELTA gamma\n")) {
@@ -118,6 +119,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
@@ -138,6 +140,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	applied := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "apply", "action": "apply",
 		"plan_id": planID, "plan_revision": planRevision, "prepared_revision": preparedRevision,
+		"accept_provisional": true,
 	})
 	if applied["outcome"] != "provisional" || applied["transaction"].(map[string]any)["state"] != "COMMITTED" {
 		t.Fatalf("apply = %#v", applied)
@@ -145,7 +148,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
 		t.Fatalf("canonical apply = %q, %v", current, err)
 	}
-	sandboxStager := direct.sandboxStagers[planID]
+	sandboxStager := direct.sandboxStagers[stagerKey{workspace: workspaceIDValue(workspaceID), planID: planID}]
 	if _, err := os.Stat(sandboxStager.sandbox.Root); !os.IsNotExist(err) {
 		t.Fatalf("commit did not remove owned sandbox: %v", err)
 	}
@@ -218,7 +221,7 @@ func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.
 	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
 		t.Fatalf("prepare wrote missing file to canonical disk: %v", err)
 	}
-	stager := direct.sandboxStagers[planID]
+	stager := direct.sandboxStagers[stagerKey{workspace: workspaceIDValue(workspaceID), planID: planID}]
 	request, _, ok := stager.PreparedRequest()
 	if !ok || len(request.Files) != 1 {
 		t.Fatalf("prepared request = %#v, available=%t", request, ok)

@@ -234,21 +234,6 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 	}
 }
 
-func assertModernOutputValid(t *testing.T, value map[string]any) {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateSchemaValue(outputEnvelopeSchema(), decoded, "result"); err != nil {
-		t.Fatalf("invalid modern output: %v\n%#v", err, value)
-	}
-}
-
 func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "note.txt")
@@ -265,7 +250,7 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 		t.Fatalf("open result = %#v", opened)
 	}
 
-	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal"})
+	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal", "include_ranges": true})
 	searchData := searched["data"].(map[string]any)
 	hits := searchData["hits"].([]any)
 	if len(hits) != 1 {
@@ -405,6 +390,7 @@ func TestOfficialClientPersistsIdempotentPlanPreviewAcrossRestart(t *testing.T) 
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	createArguments := map[string]any{
@@ -495,6 +481,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	searchData := searched["data"].(map[string]any)
 	resultSet := searchData["result_set"].(map[string]any)
@@ -514,7 +501,10 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	}
 
 	hit := searchData["hits"].([]any)[0].(map[string]any)
-	opaque := hit["match_handle"].(map[string]any)["handle"].(string)
+	opaque := hit["handle"].(string)
+	if _, present := hit["match_handle"]; present {
+		t.Fatalf("hit repeats the handle under match_handle: %#v", hit)
+	}
 	read := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "target": map[string]any{"handle": opaque},
 	})
@@ -849,7 +839,9 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 		t.Fatalf("stage summary = %#v", stage)
 	}
 	evidence := envelope["evidence"].(map[string]any)
-	if !slices.Equal(evidence["ids"].([]string), []string{"ev_impact", "ev_tests"}) || len(envelope["next"].([]any)) != 2 {
+	next := envelope["next"].([]any)
+	if !slices.Equal(evidence["ids"].([]string), []string{"ev_impact", "ev_tests"}) || len(next) != 1 ||
+		next[0].(map[string]any)["evidence_id"] != "ev_impact" || next[0].(map[string]any)["evidence_count"] != 2 {
 		t.Fatalf("evidence follow-up = %#v, next = %#v", evidence, envelope["next"])
 	}
 }
