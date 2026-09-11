@@ -116,7 +116,8 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 }
 
 func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
-	query, _ := arguments["query"].(string)
+	requested, _ := arguments["query"].(string)
+	query := canonicalNamePath(requested)
 	records, coverage, err := workspace.FindSymbols(query)
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_find_failed", err)

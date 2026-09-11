@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -84,3 +85,18 @@ func newTestHandlers(t *testing.T, factory providerpool.Factory) *Handlers {
 		SchedulerInfo: func() map[string]any { return map[string]any{} },
 	})
 }
+
+// stubProvider answers every operation with an empty result.
+type stubProvider struct {
+	descriptor provider.Descriptor
+}
+
+func (p *stubProvider) Descriptor() provider.Descriptor { return p.descriptor }
+func (p *stubProvider) Health(context.Context) provider.Health {
+	return provider.Health{State: provider.HealthHealthy, Epoch: p.descriptor.Epoch}
+}
+func (p *stubProvider) Call(context.Context, provider.Request) (provider.Result, error) {
+	return provider.Result{Value: map[string]any{}}, nil
+}
+func (p *stubProvider) Close(context.Context) error { return nil }
+func (p *stubProvider) Done() <-chan struct{}       { return make(chan struct{}) }

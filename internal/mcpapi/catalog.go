@@ -103,7 +103,7 @@ func targetSchema() map[string]any {
 			}, "path", "revision_id", "byte_start", "byte_end", "expected_sha256", "before_sha256", "after_sha256", "anchor_bytes")}, "file_range"),
 			schemaObject(map[string]any{"symbol_locator": schemaObject(map[string]any{
 				"path":      stringSchema("File path."),
-				"name_path": stringSchema("Human-readable declaration name path."),
+				"name_path": stringSchema("Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name."),
 			}, "path", "name_path")}, "symbol_locator"),
 		},
 	}
@@ -238,7 +238,7 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 		}, "workspace_id")},
 		{Class: ClassPureRead, Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema()},
 		{Class: ClassProviderRead, Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or path."), "include_source": map[string]any{"type": "boolean"},
+			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
 		{Class: ClassProviderRead, Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),

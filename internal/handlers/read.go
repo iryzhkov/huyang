@@ -115,8 +115,9 @@ func readHandle(requestID string, workspace *workspacecore.Workspace, request re
 // readSymbol reads the declaration a symbol locator names, resolving it
 // through the provider when the native text core has no parser coverage.
 func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
-	path, _ := request.Symbol["path"].(string)
-	name, _ := request.Symbol["name_path"].(string)
+	rawPath, _ := request.Symbol["path"].(string)
+	rawName, _ := request.Symbol["name_path"].(string)
+	path, name := workspacePath(workspace, rawPath), canonicalNamePath(rawName)
 	matches, coverage, findErr := workspace.FindSymbols(name)
 	if findErr != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
@@ -143,7 +144,7 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 			outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
 		}
 		result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
-		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": name, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
 		return result
 	}
 	resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
