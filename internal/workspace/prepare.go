@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -66,6 +67,39 @@ type PlanPreparation struct {
 	Verification          []VerificationStage `json:"verification,omitempty"`
 	ToolDelta             []ToolDelta         `json:"tool_delta,omitempty"`
 	CommittedDiffs        []ExactDiff         `json:"committed_diffs,omitempty"`
+	// ProvisionalAccepted lists the dimensions whose incomplete evidence the committer
+	// explicitly accepted; MissingCoverage describes what each of them lacked.
+	ProvisionalAccepted []string          `json:"provisional_accepted,omitempty"`
+	MissingCoverage     []VerificationGap `json:"missing_coverage,omitempty"`
+}
+
+// VerificationGap names one verification dimension whose evidence is incomplete and
+// therefore keeps a prepared plan PROVISIONAL instead of READY.
+type VerificationGap struct {
+	Dimension string `json:"dimension"`
+	Detail    string `json:"detail"`
+}
+
+// verificationGaps lists the dimensions whose evidence is too weak for a READY plan. Today
+// only the diagnostics stage decides readiness: it must have passed with authoritative or
+// corroborated semantic coverage.
+func verificationGaps(stages []VerificationStage) []VerificationGap {
+	var gaps []VerificationGap
+	for _, stage := range stages {
+		if stage.Stage != "diagnostics" {
+			continue
+		}
+		semantic := stage.Coverage.Semantic
+		if stage.Status == VerificationPassed && (semantic == string(ConfidenceAuthoritative) || semantic == string(ConfidenceCorroborated)) {
+			continue
+		}
+		detail := fmt.Sprintf("status %s, semantic coverage %q", stage.Status, semantic)
+		if len(stage.Coverage.Skipped) > 0 {
+			detail += " (" + strings.Join(stage.Coverage.Skipped, ", ") + ")"
+		}
+		gaps = append(gaps, VerificationGap{Dimension: stage.Stage, Detail: detail})
+	}
+	return gaps
 }
 
 // CheckProviderAccess prevents a provider-backed call from observing an unlabeled staged view.
@@ -77,7 +111,7 @@ func (w *Workspace) CheckProviderAccess(transactionID string) error {
 // exact predicted bytes without writing canonical files.
 func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uint64, stager PlanStager) (PlanRecord, error) {
 	if stager == nil {
-		return PlanRecord{}, errors.New("provider_unavailable: prepare requires a provider")
+		return PlanRecord{}, Coded(CodeProviderUnavailable, errors.New("prepare requires a provider"))
 	}
 	w.prepareMu.Lock()
 	if _, exists := w.activePlans[planID]; exists {
@@ -86,7 +120,7 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		if inspectErr == nil && (current.State == PlanReady || current.State == PlanProvisional) {
 			return current, nil
 		}
-		return PlanRecord{}, fmt.Errorf("workspace_busy: transaction %s is already preparing", planID)
+		return PlanRecord{}, Codedf(CodeWorkspaceBusy, "transaction %s is already preparing", planID)
 	}
 	w.activePlans[planID] = struct{}{}
 	w.prepareMu.Unlock()
@@ -104,8 +138,8 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	if err != nil {
 		return PlanRecord{}, err
 	}
-	if plan.State != PlanOpen && plan.State != PlanPreviewed && plan.State != PlanFailed {
-		return PlanRecord{}, errors.New("plan cannot be prepared in its current state")
+	if !canTransition(plan.State, PlanPreparing) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanPreparing)
 	}
 	if plan.Preview == nil || plan.Preview.PlanRevision != expected {
 		plan, err = w.PreviewPlan(planID, expected)
@@ -114,7 +148,7 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		}
 	}
 	if plan.Preview.Outcome != "ok" {
-		return plan, errors.New("plan_validation_conflicts: preview must succeed before prepare")
+		return plan, Coded(CodePlanValidationConflicts, errors.New("preview must succeed before prepare"))
 	}
 	if _, err := w.transitionPlan(planID, expected, PlanPreparing, "prepare_started", "pending", nil); err != nil {
 		return PlanRecord{}, err
@@ -153,16 +187,14 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 		preparedHash = hashBytes(fmt.Appendf(nil, "%s:%s:%t:%x", preparedHash, file.Path, file.AfterExists, file.After))
 	}
 	diagnosticStatus := "suppressed"
-	targetState := PlanReady
 	for _, stage := range verification.Stages {
 		if stage.Stage == "diagnostics" {
 			diagnosticStatus = stage.Coverage.Semantic
-			if stage.Status == VerificationPassed && (stage.Coverage.Semantic == string(ConfidenceAuthoritative) || stage.Coverage.Semantic == string(ConfidenceCorroborated)) {
-				targetState = PlanReady
-			} else {
-				targetState = PlanProvisional
-			}
 		}
+	}
+	targetState := PlanReady
+	if len(verificationGaps(verification.Stages)) > 0 {
+		targetState = PlanProvisional
 	}
 	prepared := &PlanPreparation{
 		PreparedRevision: "prep_" + preparedHash,
@@ -193,7 +225,7 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 // RollbackPlan restores exact provider preimages and releases the transaction lease.
 func (w *Workspace) RollbackPlan(ctx context.Context, planID string, expected uint64, stager PlanStager) (PlanRecord, error) {
 	if stager == nil {
-		return PlanRecord{}, errors.New("provider_unavailable: rollback requires a provider")
+		return PlanRecord{}, Coded(CodeProviderUnavailable, errors.New("rollback requires a provider"))
 	}
 	if err := w.CheckProviderAccess(planID); err != nil {
 		return PlanRecord{}, err
@@ -202,8 +234,8 @@ func (w *Workspace) RollbackPlan(ctx context.Context, planID string, expected ui
 	if err != nil {
 		return PlanRecord{}, err
 	}
-	if plan.State != PlanReady && plan.State != PlanProvisional && plan.State != PlanFailed {
-		return PlanRecord{}, errors.New("plan has no provider preparation to roll back")
+	if !canTransition(plan.State, PlanRollingBack) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanRollingBack)
 	}
 	if _, err := w.transitionPlan(planID, expected, PlanRollingBack, "rollback_started", "pending", plan.Preparation); err != nil {
 		return PlanRecord{}, err
@@ -219,20 +251,44 @@ func (w *Workspace) RollbackPlan(ctx context.Context, planID string, expected ui
 	return result, err
 }
 
+// transitionPlan moves one plan to a new state under the plan state machine, replaces its
+// preparation evidence, records the event and persists the record. An edge the state
+// machine does not allow is refused with plan_state_invalid. A persistence failure leaves
+// the in-memory record at its previous state so a later transition is judged from the
+// durable truth rather than from the half-applied one.
 func (w *Workspace) transitionPlan(planID string, expected uint64, state PlanState, action, outcome string, preparation *PlanPreparation) (PlanRecord, error) {
+	return w.transitionPlanWithConflict(planID, expected, state, action, outcome, preparation, nil)
+}
+
+// conflictPlan moves a plan to CONFLICTED and records the stable conflict reason.
+func (w *Workspace) conflictPlan(planID string, expected uint64, action string, preparation *PlanPreparation, cause error) (PlanRecord, error) {
+	code := ErrorCode(cause)
+	if code == "" {
+		code = CodeCommitPreconditionChanged
+	}
+	reason := &PlanConflictReason{Code: code, Message: cause.Error()}
+	return w.transitionPlanWithConflict(planID, expected, PlanConflicted, action, code, preparation, reason)
+}
+
+func (w *Workspace) transitionPlanWithConflict(planID string, expected uint64, state PlanState, action, outcome string, preparation *PlanPreparation, conflict *PlanConflictReason) (PlanRecord, error) {
 	w.plansMu.Lock()
 	defer w.plansMu.Unlock()
-	plan, ok := w.plans[planID]
+	previous, ok := w.plans[planID]
 	if !ok {
 		return PlanRecord{}, errors.New("unknown plan")
 	}
-	if expected == 0 || plan.PlanRevision != expected {
-		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
+	if expected == 0 || previous.PlanRevision != expected {
+		return PlanRecord{}, planRevisionChanged(expected, previous.PlanRevision)
 	}
-	plan.State, plan.Preparation, plan.UpdatedAt = state, preparation, time.Now().UTC()
-	plan.Events = append(plan.Events, PlanEvent{Action: action, PlanRevision: expected, Outcome: outcome, At: plan.UpdatedAt})
+	if !canTransition(previous.State, state) {
+		return PlanRecord{}, illegalTransition(planID, previous.State, state)
+	}
+	plan := clonePlan(previous)
+	plan.State, plan.Preparation, plan.Conflict = state, preparation, conflict
+	recordPlanEvent(&plan, action, outcome)
 	w.plans[planID] = plan
 	if err := w.persistPlansLocked(); err != nil {
+		w.plans[planID] = previous
 		return PlanRecord{}, err
 	}
 	return clonePlan(plan), nil

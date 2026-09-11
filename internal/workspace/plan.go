@@ -48,7 +48,63 @@ const (
 	PlanRollingBack      PlanState = "ROLLING_BACK"
 	PlanRolledBack       PlanState = "ROLLED_BACK"
 	PlanDiscarded        PlanState = "DISCARDED"
+	PlanConflicted       PlanState = "CONFLICTED"
+	PlanExpired          PlanState = "EXPIRED"
 )
+
+// planTransitions is the plan state machine from the implementation plan. Every durable
+// state change goes through transitionPlan, which refuses an edge that is not listed here.
+// Two edges extend the documented table: COMMITTING -> CONFLICTED and COMMITTING -> FAILED
+// both describe a commit aborted before any canonical byte was written, so the plan is
+// re-preparable rather than in need of recovery. Startup reconciliation in loadPlans and
+// recoverCommitJournals uses the same table to reconcile the persisted state of a plan whose
+// process died mid-transition.
+var planTransitions = map[PlanState][]PlanState{
+	PlanOpen:             {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
+	PlanPreviewed:        {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
+	PlanPreparing:        {PlanConflicted, PlanFailed, PlanProvisional, PlanReady},
+	PlanConflicted:       {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
+	PlanFailed:           {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
+	PlanProvisional:      {PlanCommitting, PlanRollingBack, PlanFailed},
+	PlanReady:            {PlanCommitting, PlanRollingBack, PlanFailed},
+	PlanCommitting:       {PlanCommitted, PlanRecoveryRequired, PlanConflicted, PlanFailed},
+	PlanRollingBack:      {PlanRolledBack, PlanFailed},
+	PlanRecoveryRequired: {PlanRolledBack, PlanCommitted},
+	PlanCommitted:        {},
+	PlanRolledBack:       {},
+	PlanDiscarded:        {},
+	PlanExpired:          {},
+}
+
+// canTransition reports whether the plan state machine allows moving from one state to
+// another. Unknown states have no legal transitions.
+func canTransition(from, to PlanState) bool {
+	for _, allowed := range planTransitions[from] {
+		if allowed == to {
+			return true
+		}
+	}
+	return false
+}
+
+func illegalTransition(planID string, from, to PlanState) error {
+	return Codedf(CodePlanStateInvalid, "plan %s cannot move from %s to %s", planID, from, to)
+}
+
+// Plan event retention. A plan record keeps its first planEventsHead events, which describe
+// how it was created and shaped, and its most recent planEventsTail events; anything between
+// is dropped and counted in PlanRecord.DroppedEvents. Inspect-only reads record no event at
+// all, because they neither change the plan nor justify rewriting its durable file.
+const (
+	planEventsHead = 8
+	planEventsTail = 56
+)
+
+// PlanConflictReason records why a plan entered CONFLICTED.
+type PlanConflictReason struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
 
 type PlanTarget struct {
 	Handle        HandleID           `json:"handle,omitempty"`
@@ -102,17 +158,20 @@ type PlanPreview struct {
 }
 
 type PlanRecord struct {
-	PlanID       string           `json:"plan_id"`
-	WorkspaceID  ID               `json:"workspace_id"`
-	State        PlanState        `json:"state"`
-	PlanRevision uint64           `json:"plan_revision"`
-	BaseStateSeq uint64           `json:"base_state_seq"`
-	Operations   []PlanOperation  `json:"operations"`
-	Preview      *PlanPreview     `json:"preview,omitempty"`
-	Preparation  *PlanPreparation `json:"preparation,omitempty"`
-	Events       []PlanEvent      `json:"events"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
+	PlanID       string              `json:"plan_id"`
+	WorkspaceID  ID                  `json:"workspace_id"`
+	State        PlanState           `json:"state"`
+	PlanRevision uint64              `json:"plan_revision"`
+	BaseStateSeq uint64              `json:"base_state_seq"`
+	Operations   []PlanOperation     `json:"operations"`
+	Preview      *PlanPreview        `json:"preview,omitempty"`
+	Preparation  *PlanPreparation    `json:"preparation,omitempty"`
+	Conflict     *PlanConflictReason `json:"conflict,omitempty"`
+	Events       []PlanEvent         `json:"events"`
+	// DroppedEvents counts events removed from the middle of Events by retention.
+	DroppedEvents int       `json:"dropped_events,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type PlanEvent struct {
@@ -120,6 +179,21 @@ type PlanEvent struct {
 	PlanRevision uint64    `json:"plan_revision"`
 	Outcome      string    `json:"outcome"`
 	At           time.Time `json:"at"`
+}
+
+// recordPlanEvent appends one event, stamps UpdatedAt, and applies event retention.
+func recordPlanEvent(plan *PlanRecord, action string, outcome string) {
+	plan.UpdatedAt = time.Now().UTC()
+	plan.Events = append(plan.Events, PlanEvent{
+		Action: action, PlanRevision: plan.PlanRevision, Outcome: outcome, At: plan.UpdatedAt,
+	})
+	if excess := len(plan.Events) - (planEventsHead + planEventsTail); excess > 0 {
+		kept := make([]PlanEvent, 0, planEventsHead+planEventsTail)
+		kept = append(kept, plan.Events[:planEventsHead]...)
+		kept = append(kept, plan.Events[planEventsHead+excess:]...)
+		plan.Events = kept
+		plan.DroppedEvents += excess
+	}
 }
 
 type persistedPlans struct {
@@ -164,28 +238,16 @@ func (w *Workspace) loadPlans() error {
 		switch plan.State {
 		case PlanReady, PlanProvisional:
 			plan.State = PlanFailed
-			plan.UpdatedAt = time.Now().UTC()
-			plan.Events = append(plan.Events, PlanEvent{
-				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
-				Outcome: "provider_buffers_discarded_reprepare_available", At: plan.UpdatedAt,
-			})
+			recordPlanEvent(&plan, "provider_restart_restore", "provider_buffers_discarded_reprepare_available")
 			recovered = true
 		case PlanPreparing, PlanRollingBack:
 			plan.State = PlanFailed
 			plan.Preparation = nil
-			plan.UpdatedAt = time.Now().UTC()
-			plan.Events = append(plan.Events, PlanEvent{
-				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
-				Outcome: "incomplete_provider_operation_discarded", At: plan.UpdatedAt,
-			})
+			recordPlanEvent(&plan, "provider_restart_restore", "incomplete_provider_operation_discarded")
 			recovered = true
 		case PlanCommitting:
 			plan.State = PlanRecoveryRequired
-			plan.UpdatedAt = time.Now().UTC()
-			plan.Events = append(plan.Events, PlanEvent{
-				Action: "commit_restart_detected", PlanRevision: plan.PlanRevision,
-				Outcome: "recovery_required", At: plan.UpdatedAt,
-			})
+			recordPlanEvent(&plan, "commit_restart_detected", "recovery_required")
 			recovered = true
 		}
 		w.plans[plan.PlanID] = plan
@@ -287,17 +349,14 @@ func (w *Workspace) InspectPlan(planID string, expected uint64) (PlanRecord, err
 		return PlanRecord{}, errors.New("unknown plan")
 	}
 	if expected != 0 && plan.PlanRevision != expected {
-		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
+		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
 	}
-	plan.UpdatedAt = time.Now().UTC()
-	plan.Events = append(plan.Events, PlanEvent{
-		Action: "inspect", PlanRevision: plan.PlanRevision, Outcome: "ok", At: plan.UpdatedAt,
-	})
-	w.plans[planID] = plan
-	if err := w.persistPlansLocked(); err != nil {
-		return PlanRecord{}, err
-	}
+	// Inspection is a pure read: it records no event and never rewrites the plan file.
 	return clonePlan(plan), nil
+}
+
+func planRevisionChanged(expected, current uint64) error {
+	return Codedf(CodePlanRevisionChanged, "expected %d, current %d", expected, current)
 }
 
 func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (PlanRecord, error) {
@@ -307,11 +366,15 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	if !ok {
 		return PlanRecord{}, errors.New("unknown plan")
 	}
-	if plan.State != PlanOpen && plan.State != PlanPreviewed {
-		return PlanRecord{}, errors.New("plan cannot be edited in its current state")
+	// READY and PROVISIONAL plans hold the provider lease and staged buffers, so they must
+	// be rolled back before their operations change; every other editable state carries no
+	// provider-side state and returns to OPEN, dropping its preview, preparation evidence and
+	// conflict reason.
+	if !canTransition(plan.State, PlanOpen) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanOpen)
 	}
 	if expected == 0 || plan.PlanRevision != expected {
-		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
+		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
 	}
 	operations := cloneOperations(plan.Operations)
 	switch edit.Mode {
@@ -374,10 +437,9 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	plan.State = PlanOpen
 	plan.PlanRevision++
 	plan.Preview = nil
-	plan.UpdatedAt = time.Now().UTC()
-	plan.Events = append(plan.Events, PlanEvent{
-		Action: "edit", PlanRevision: plan.PlanRevision, Outcome: "ok", At: plan.UpdatedAt,
-	})
+	plan.Preparation = nil
+	plan.Conflict = nil
+	recordPlanEvent(&plan, "edit", "ok")
 	w.plans[planID] = plan
 	if err := w.persistPlansLocked(); err != nil {
 		return PlanRecord{}, err
@@ -393,13 +455,17 @@ func (w *Workspace) DiscardPlan(planID string, expected uint64) (PlanRecord, err
 		return PlanRecord{}, errors.New("unknown plan")
 	}
 	if expected == 0 || plan.PlanRevision != expected {
-		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
+		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
+	}
+	// Terminal plans keep their record: a COMMITTED plan is the receipt CompensatePlan
+	// undoes from, and a RECOVERY_REQUIRED plan must stay visible until startup recovery
+	// resolves it. READY and PROVISIONAL plans go through RollbackPlan so the provider lease
+	// and staged buffers are released with them.
+	if !canTransition(plan.State, PlanDiscarded) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanDiscarded)
 	}
 	plan.State = PlanDiscarded
-	plan.UpdatedAt = time.Now().UTC()
-	plan.Events = append(plan.Events, PlanEvent{
-		Action: "discard", PlanRevision: plan.PlanRevision, Outcome: "ok", At: plan.UpdatedAt,
-	})
+	recordPlanEvent(&plan, "discard", "ok")
 	w.plans[planID] = plan
 	if err := w.persistPlansLocked(); err != nil {
 		return PlanRecord{}, err
@@ -418,7 +484,7 @@ func (w *Workspace) PreviewPlan(planID string, expected uint64) (PlanRecord, err
 		return PlanRecord{}, errors.New("plan cannot be previewed in its current state")
 	}
 	if expected == 0 || plan.PlanRevision != expected {
-		return PlanRecord{}, fmt.Errorf("plan_revision_changed: expected %d, current %d", expected, plan.PlanRevision)
+		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
 	}
 	preview := w.buildPreview(plan)
 	w.plansMu.Lock()
@@ -430,10 +496,7 @@ func (w *Workspace) PreviewPlan(planID string, expected uint64) (PlanRecord, err
 	}
 	current.Preview = &preview
 	current.State = PlanPreviewed
-	current.UpdatedAt = time.Now().UTC()
-	current.Events = append(current.Events, PlanEvent{
-		Action: "preview", PlanRevision: current.PlanRevision, Outcome: preview.Outcome, At: current.UpdatedAt,
-	})
+	recordPlanEvent(&current, "preview", preview.Outcome)
 	w.plans[planID] = current
 	if err := w.persistPlansLocked(); err != nil {
 		return PlanRecord{}, err

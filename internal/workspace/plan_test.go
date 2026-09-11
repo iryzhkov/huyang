@@ -227,7 +227,7 @@ func TestPlanLifecycleEditsAndDiscardAreDurable(t *testing.T) {
 	for _, event := range restored.Events {
 		actions = append(actions, event.Action)
 	}
-	if want := []string{"create", "edit", "edit", "discard", "inspect"}; !reflect.DeepEqual(actions, want) {
+	if want := []string{"create", "edit", "edit", "discard"}; !reflect.DeepEqual(actions, want) {
 		t.Fatalf("durable lifecycle actions = %v, want %v", actions, want)
 	}
 	if _, err := reopened.PreviewPlan(plan.PlanID, plan.PlanRevision); err == nil {
