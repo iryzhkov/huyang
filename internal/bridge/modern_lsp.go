@@ -117,7 +117,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(attachedServers), strings.Join(failedAttachments, ", "))
 	}
 	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
-		"provider": canonicalProviderStatus(ctx, backend), "language_servers": support,
+		"provider": canonicalProviderStatus(ctx, backend), "language_servers": compactLanguageSupport(support),
 		"attached_language_count": attachedLanguages, "attached_server_count": len(attachedServers),
 		"attached_servers": attachedServers, "missing_languages": missing,
 		"failed_attachment_languages": failedAttachments, "install_options": installOptions,
@@ -131,7 +131,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 			}
 			action := map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "use_new_idempotency_key": true}
 			if options := installOptions[language]; len(options) > 0 {
-				action["server_options"] = options
+				action["install_options_key"] = language
 				action["selection"] = "automatic_preferred"
 			}
 			next = append(next, action)

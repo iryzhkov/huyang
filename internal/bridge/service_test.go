@@ -86,6 +86,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	}
 	searched := callModern(t, firstSession, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	applyArguments := map[string]any{
@@ -184,6 +185,7 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
 	searched := direct.call(context.Background(), "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]map[string]any)[0]
 	encodedRange, err := json.Marshal(hit["range"])

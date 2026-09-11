@@ -40,7 +40,7 @@ func applyLiteralProbeEdit(t *testing.T, direct *directWorkspaces, workspaceID, 
 	session, cleanup := connectOfficialClient(t, profileEdit, direct)
 	defer cleanup()
 	searched := callModern(t, session, "search", map[string]any{
-		"workspace_id": workspaceID, "query": query, "mode": "literal",
+		"workspace_id": workspaceID, "query": query, "mode": "literal", "include_ranges": true,
 	})
 	hits := searched["data"].(map[string]any)["hits"].([]any)
 	if len(hits) != 1 {
@@ -277,6 +277,7 @@ func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
 
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "seed", "mode": "literal",
+		"include_ranges": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	large := strings.Repeat("x", 128<<10)
@@ -382,6 +383,7 @@ func TestSearchDiagnosticsAndIdempotencyFailuresAreActionable(t *testing.T) {
 
 	singular := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "once", "mode": "literal",
+		"include_ranges": true,
 	})
 	if singular["summary"] != "1 match" {
 		t.Fatalf("singular search summary = %#v", singular)

@@ -221,6 +221,7 @@ func buildModernTools() []modernTool {
 		"workspace_id": workspaceIDProperty(), "query": stringSchema("Text or regular expression."), "mode": enumSchema("literal", "regex"),
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
 		"git_history": historySource, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
+		"include_ranges": map[string]any{"type": "boolean", "description": "Return exact byte anchors (range, byte offsets) on every hit; the default hit carries only the editable handle."},
 	}
 	searchSchema := schemaObject(searchProperties, "workspace_id")
 	searchSchema["oneOf"] = []any{
@@ -230,9 +231,10 @@ func buildModernTools() []modernTool {
 	}
 	return []modernTool{
 		{Class: scheduleProviderRead, Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"kind":  enumSchema("project", "documents"),
-			"root":  stringSchema("Project root; required for kind=project."),
-			"files": map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
+			"kind":     enumSchema("project", "documents"),
+			"root":     stringSchema("Project root; required for kind=project."),
+			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
+			"overview": enumSchema("compact", "full"),
 		}, "kind")},
 		{Class: scheduleProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
@@ -260,6 +262,7 @@ func buildModernTools() []modernTool {
 		}, "workspace_id", "idempotency_key", "action")},
 		{Class: schedulePureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
+			"full": map[string]any{"type": "boolean", "description": "Return the complete report including finding bodies and per-dimension evidence IDs."},
 		}, "workspace_id")},
 		{Class: scheduleProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
 		{Class: scheduleCanonicalWrite, Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
@@ -325,8 +328,9 @@ func outputEnvelopeSchema() map[string]any {
 			"id": stringSchema("Stable diagnostic ID."), "severity": map[string]any{"type": "integer"},
 			"document": stringSchema("Affected document."), "attribution": map[string]any{"type": "object"},
 		}, "cursor", "kind", "id")},
-		"idempotency":           enumSchema("created", "replayed"),
-		"idempotency_persisted": map[string]any{"type": "boolean"},
+		"diagnostic_updates_truncated": map[string]any{"type": "boolean"},
+		"idempotency":                  enumSchema("created", "replayed"),
+		"idempotency_persisted":        map[string]any{"type": "boolean"},
 	}, "api_version", "request_id", "outcome", "summary", "data", "evidence", "warnings", "next")
 }
 
@@ -371,7 +375,7 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
-		envelope := direct.call(ctx, descriptor.Name, arguments)
+		envelope := direct.call(withClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
 		logFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
 			map[string]any{
@@ -390,6 +394,19 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 			IsError:           isError,
 		}, nil
 	})
+}
+
+// sessionIdentity keys per-client delivery state by the MCP session. Stateless
+// HTTP transports produce a fresh session per request and therefore receive
+// every pending notice again; the Unix proxy keeps one session per adapter.
+func sessionIdentity(request *mcp.CallToolRequest) string {
+	if request == nil || request.Session == nil {
+		return ""
+	}
+	if id := request.Session.ID(); id != "" {
+		return id
+	}
+	return fmt.Sprintf("session_%p", request.Session)
 }
 
 func modernClientName(request *mcp.CallToolRequest) string {
@@ -718,6 +735,8 @@ type directWorkspaces struct {
 
 	verificationMu    sync.Mutex
 	verificationCache map[string]cachedVerification
+
+	notices *noticeDelivery
 }
 
 type directReplay struct {
@@ -773,6 +792,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		providers:         make(map[workspacecore.ID]*providerSlot),
 		sandboxStagers:    make(map[stagerKey]*sandboxPlanStager),
 		verificationCache: make(map[string]cachedVerification),
+		notices:           newNoticeDelivery(),
 	}
 	direct.loadErr = direct.loadRegistry()
 	if direct.loadErr == nil {
@@ -1078,13 +1098,6 @@ func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspa
 	return d.verifyRun(ctx, requestID, workspace, job)
 }
 
-// attachDiagnosticUpdates adds the pending diagnostic notices to a result.
-func (d *directWorkspaces) attachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
-	if notices := workspace.DiagnosticNotices(20); len(notices) > 0 {
-		result["diagnostic_updates"] = notices
-	}
-}
-
 func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
 	if err := ctx.Err(); err != nil {
 		return modernEnvelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
@@ -1203,7 +1216,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	case "symbol_find":
 		return d.symbolFind(ctx, requestID, workspace, arguments)
 	case "read":
-		return d.read(requestID, workspace, arguments)
+		return d.read(ctx, requestID, workspace, arguments)
 	case "diagnostics":
 		since, _ := arguments["since"].(string)
 		report, err := workspace.Diagnostics(since)
@@ -1219,8 +1232,11 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			outcome = "unavailable"
 			summary = "Diagnostic evidence is unavailable for this workspace"
 		}
-		result := modernEnvelope(requestID, workspace, outcome, "", summary, map[string]any{"diagnostics": report})
-		result["evidence"] = map[string]any{"ids": nonNilStrings(report.EvidenceIDs), "truncated": false}
+		full, _ := arguments["full"].(bool)
+		result := modernEnvelope(requestID, workspace, outcome, "", summary, compactDiagnosticReport(report, outcome, full))
+		ids := append([]string(nil), report.EvidenceIDs...)
+		sort.Strings(ids)
+		result["evidence"] = map[string]any{"ids": nonNilStrings(uniqueStrings(ids)), "truncated": false}
 		if outcome == "unavailable" {
 			result["next"] = []any{
 				map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status"},
@@ -1340,12 +1356,16 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 	if !created {
 		action = "Reopened"
 	}
+	var overview any = compactOrientation(orientation)
+	if mode, _ := arguments["overview"].(string); mode == "full" {
+		overview = orientation
+	}
 	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
 		"revision":     fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities": capabilities, "semantic_provider": semanticProvider,
 		"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
-		"overview":       orientation,
-		"recent_commits": recent,
+		"overview":       overview,
+		"recent_commits": compactRecentCommits(recent, 3),
 		"registry":       map[string]any{"persistent": true, "reused": !created},
 	})
 }
@@ -1414,7 +1434,8 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 			return modernFailure(requestID, workspace, "search_refinement_failed", err)
 		}
 		limit := argInt(arguments, "limit", 50)
-		hits, truncated := compactSearchHits(result.Matches, limit)
+		includeRanges, _ := arguments["include_ranges"].(bool)
+		hits, truncated := compactSearchHits(result.Matches, limit, includeRanges)
 		envelope := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
 			"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
 		})
@@ -1443,7 +1464,8 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 		return failure
 	}
 	limit := argInt(arguments, "limit", 50)
-	hits, truncated := compactSearchHits(result.Hits, limit)
+	includeRanges, _ := arguments["include_ranges"].(bool)
+	hits, truncated := compactSearchHits(result.Hits, limit, includeRanges)
 	summary := fmt.Sprintf("%d matches", len(result.Hits))
 	if len(result.Hits) == 1 {
 		summary = "1 match"
@@ -1463,29 +1485,6 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
 	return envelope
-}
-
-func compactSearchHits(hits []workspacecore.SearchHit, limit int) ([]map[string]any, bool) {
-	if limit <= 0 {
-		limit = 100
-	}
-	returned := hits
-	if len(returned) > limit {
-		returned = returned[:limit]
-	}
-	compact := make([]map[string]any, 0, len(returned))
-	for _, hit := range returned {
-		item := map[string]any{
-			"path": hit.Path, "byte_start": hit.ByteStart, "byte_end": hit.ByteEnd,
-			"line": hit.Line, "column": hit.Column, "match": hit.Match, "range": hit.Range,
-		}
-		if hit.MatchHandle != nil {
-			item["handle"] = hit.MatchHandle.Handle
-			item["match_handle"] = map[string]any{"handle": hit.MatchHandle.Handle}
-		}
-		compact = append(compact, item)
-	}
-	return compact, len(hits) > len(returned)
 }
 
 func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1569,7 +1568,7 @@ func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, wor
 	return result
 }
 
-func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (d *directWorkspaces) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, ok := arguments["target"].(map[string]any)
 	if !ok {
 		return modernEnvelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
@@ -1635,6 +1634,16 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 				}
 			}
 			if len(exact) != 1 {
+				// The bridge configures no built-in sectioner, so the native
+				// FindSymbols never has parser coverage. Resolve through the
+				// same provider-backed path symbol_find uses, which registers
+				// durable handles the locator can then select.
+				if record, ok := d.resolveSymbolLocatorViaProvider(ctx, requestID, workspace, path, name); ok {
+					exact = []workspacecore.HandleRecord{record}
+					coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+				}
+			}
+			if len(exact) != 1 {
 				outcome, code, summary := "conflict", "symbol_not_found", "Symbol locator did not resolve uniquely"
 				if !coverage.Complete {
 					outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
@@ -1692,6 +1701,20 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 		data["start_line"], data["end_line"] = actualStart, actualEnd
 	}
 	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
+}
+
+// resolveSymbolLocatorViaProvider asks the semantic provider for the
+// declaration when the native text core cannot section the document.
+func (d *directWorkspaces) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
+	if record, err := workspace.ResolveSymbolLocator(path, name); err == nil {
+		return record, true
+	}
+	if workspace.Identity().Kind != workspacecore.KindProject {
+		return workspacecore.HandleRecord{}, false
+	}
+	d.symbolFind(ctx, requestID+"_resolve", workspace, map[string]any{"query": name})
+	record, err := workspace.ResolveSymbolLocator(path, name)
+	return record, err == nil
 }
 
 func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, resolution workspacecore.HandleResolution) map[string]any {
