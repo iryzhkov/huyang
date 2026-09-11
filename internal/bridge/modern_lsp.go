@@ -44,7 +44,16 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 			missing = append(missing, language)
 			for _, rawOption := range anySlice(entry["install_options"]) {
 				if option := strings.TrimSpace(fmt.Sprint(rawOption)); option != "" {
-					installOptions[language] = append(installOptions[language], option)
+					duplicate := false
+					for _, existing := range installOptions[language] {
+						if existing == option {
+							duplicate = true
+							break
+						}
+					}
+					if !duplicate {
+						installOptions[language] = append(installOptions[language], option)
+					}
 				}
 			}
 		}
@@ -110,7 +119,28 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	if err != nil {
 		return modernFailure(requestID, workspace, "language_server_install_failed", err)
 	}
-	result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed for %s", language), map[string]any{"installation": value, "provider": canonicalProviderStatus(backend)})
+	data := map[string]any{"installation": value, "provider": canonicalProviderStatus(backend)}
+	installation, _ := value.(map[string]any)
+	serverResult, _ := installation["server"].(map[string]any)
+	if attached, present := serverResult["attached"]; present && attached == false {
+		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
+		if note == "" {
+			note = "the language server did not attach after installation"
+		}
+		requirement := note
+		if strings.Contains(strings.ToLower(note), "cargo not found") {
+			requirement = "Install the Rust toolchain so cargo is executable in the Huyang user service PATH, then restart the provider."
+		}
+		result := modernEnvelope(requestID, workspace, "provisional", "language_server_not_attached",
+			fmt.Sprintf("Language support was installed for %s, but its server did not attach: %s", language, note), data)
+		result["warnings"] = []string{requirement}
+		result["next"] = []any{
+			map[string]any{"tool": "language_server_setup", "action": "restart", "prerequisite": requirement, "use_new_idempotency_key": true},
+			map[string]any{"tool": "language_server_status", "action": "verify_attachment"},
+		}
+		return result
+	}
+	result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)
 	result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
 	return result
 }
@@ -130,6 +160,19 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 	if err != nil {
 		result := modernFailure(requestID, workspace, "language_server_unavailable", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
+		return result
+	}
+	navigation, _ := value.(map[string]any)
+	if count, present := navigation["count"]; present && fmt.Sprint(count) == "0" {
+		result := modernEnvelope(requestID, workspace, "partial", "navigation_not_found",
+			fmt.Sprintf("The workspace language server returned no %s location", relation), map[string]any{
+				"navigation": value, "provider": canonicalProviderStatus(backend),
+				"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
+			})
+		result["next"] = []any{
+			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
+			map[string]any{"tool": "symbol_find", "query": fmt.Sprint(providerArguments["symbol"])},
+		}
 		return result
 	}
 	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the workspace language server", relation), map[string]any{

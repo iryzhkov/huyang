@@ -929,7 +929,12 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 					testName = fmt.Sprintf("test_%d", index+1)
 				}
 				run.stage.TestScope = "full"
-				run.stage.TestVerdict = "full_tests_passed"
+				if run.stage.Status == VerificationPassed {
+					run.stage.TestVerdict = "full_tests_passed"
+				} else {
+					run.stage.TestVerdict = "full_tests_unavailable"
+					result.FullTestGate = "full_tests_unavailable"
+				}
 				run.stage.ExecutedTests = []string{testName}
 				result.Stages = append(result.Stages, run.stage)
 				result.ToolDelta = append(result.ToolDelta, run.delta...)

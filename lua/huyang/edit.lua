@@ -1046,6 +1046,16 @@ function M.diagnostic_evidence(args)
     for _, path in ipairs(paths) do
         if path and path ~= "" then
             local bufnr = load_buf(path)
+            local filetype = vim.bo[bufnr].filetype
+            for _, existing in ipairs(vim.lsp.get_clients()) do
+                local config = existing.config or {}
+                local root = config.root_dir
+                local filetypes = config.filetypes
+                if root and vim.fs.relpath(root, path)
+                    and (not filetypes or vim.tbl_contains(filetypes, filetype)) then
+                    pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
+                end
+            end
             local clients = vim.lsp.get_clients({ bufnr = bufnr })
             local configured = enabled_lsp_configs_for(vim.bo[bufnr].filetype)
             local startable = {}
@@ -1069,6 +1079,7 @@ function M.diagnostic_evidence(args)
             local expected = vim.api.nvim_buf_get_changedtick(bufnr)
             for _, client in ipairs(clients) do
                 wrap_publish_handler(client)
+                local barrier_started = vim.uv.now()
                 local remaining = math.max(1, attach_deadline - vim.uv.now())
                 local barrier_acked = false
                 if client:supports_method("textDocument/documentSymbol", bufnr) then
@@ -1110,7 +1121,7 @@ function M.diagnostic_evidence(args)
                     transaction_id = transaction_id,
                     complete = published,
                     change_barrier = barrier_acked,
-                    progress_pending = progress_since({ client.name }, 0),
+                    progress_pending = not barrier_acked and progress_since({ client.name }, barrier_started),
                     selected = true,
                     dimension = "edited_documents",
                     findings = diagnostics,
@@ -1135,7 +1146,7 @@ function M.diagnostic_evidence(args)
                             result_id = pulled.resultId,
                             transaction_id = transaction_id,
                             complete = pulled.kind == "full" or pulled.items ~= nil,
-                            progress_pending = progress_since({ client.name }, 0),
+                            progress_pending = not barrier_acked and progress_since({ client.name }, barrier_started),
                             selected = true,
                             dimension = "edited_documents",
                             findings = items,

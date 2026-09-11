@@ -257,7 +257,7 @@ func openWorkspace(root string) (*headlessWorkspace, error) {
 
 	backend, err := referenceProviders.Open(providerOpenConfig{
 		Root:        abs,
-		InitFile:    os.Getenv("AGENT99_HEADLESS_INIT"),
+		InitFile:    huyangHeadlessInit(),
 		RuntimePath: shippedRuntimePath(),
 		Debug:       debugEnabled(),
 	})

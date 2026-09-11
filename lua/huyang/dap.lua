@@ -60,9 +60,10 @@ local function has_dap()
     return nil
 end
 
-local NO_DAP = "nvim-dap is not on the runtimepath of this Neovim; add "
-    .. "`mfussenegger/nvim-dap` to your plugin spec (agent99 lists it as an "
-    .. "optional dependency) and restart"
+local NO_DAP = "nvim-dap is not on the runtimepath of Huyang's embedded Neovim; add "
+    .. "`mfussenegger/nvim-dap` to the Neovim init used by Huyang, restart "
+    .. "the Huyang user service, then retry. language_server_setup installs "
+    .. "parsers and language servers, not debugger plugins"
 
 local function need_dap()
     local dap = has_dap()

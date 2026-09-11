@@ -12,6 +12,13 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+func huyangHeadlessInit() string {
+	if value := os.Getenv("HUYANG_HEADLESS_INIT"); value != "" {
+		return value
+	}
+	return os.Getenv("AGENT99_HEADLESS_INIT")
+}
+
 // canonicalProvider returns the owned Neovim provider for a modern workspace.
 // Modern workspaces are durable while provider processes are replaceable, so
 // the provider is started lazily and recreated after a daemon or provider
@@ -33,7 +40,7 @@ func (d *directWorkspaces) canonicalProvider(ctx context.Context, workspace *wor
 		delete(d.providers, identity.ID)
 	}
 	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: identity.Root, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+		Root: identity.Root, InitFile: huyangHeadlessInit(),
 		RuntimePath: shippedRuntimePath(), Debug: false,
 	})
 	if err != nil {

@@ -238,6 +238,14 @@ func (w *Workspace) registerSymbol(read TextRead, section Section) (HandleRecord
 	return record, nil
 }
 
+func (w *Workspace) RegisterSymbolHandle(path, name, kind string, byteStart, byteEnd int) (HandleRecord, error) {
+	read, err := w.Read(path)
+	if err != nil {
+		return HandleRecord{}, err
+	}
+	return w.registerSymbol(read, Section{Name: name, Kind: kind, ByteStart: byteStart, ByteEnd: byteEnd})
+}
+
 func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, Coverage{}, errors.New("symbol query is required")
@@ -400,6 +408,49 @@ func locateRanges(read TextRead, locator SemanticLocator) []HandleCandidate {
 
 func (w *Workspace) resolveSymbol(record HandleRecord) (HandleResolution, error) {
 	original := record.Locator
+	if read, readErr := w.Read(original.Path); readErr == nil &&
+		read.Snapshot.Revision == original.DocumentRevision &&
+		original.ByteStart >= 0 && original.ByteEnd <= len(read.Content) && original.ByteEnd > original.ByteStart {
+		currentBytes := read.Content[original.ByteStart:original.ByteEnd]
+		if hashBytes(currentBytes) == original.ContentSHA256 {
+			current := original
+			current.DocumentRevision = read.Snapshot.Revision
+			current.Device, current.Inode = read.Snapshot.Disk.Device, read.Snapshot.Disk.Inode
+			status := ResolutionExact
+			if current.DocumentRevision != original.DocumentRevision {
+				status = ResolutionRelocated
+			}
+			return HandleResolution{Status: status, Handle: record.Handle, Original: original, Current: &current}, nil
+		}
+	}
+	if w.sectioner == nil {
+		files, _, err := w.collectFiles()
+		if err != nil {
+			return HandleResolution{}, err
+		}
+		var candidates []HandleCandidate
+		for _, path := range files {
+			read, readErr := w.Read(path)
+			if readErr == nil {
+				candidates = append(candidates, locateRanges(read, original)...)
+			}
+		}
+		if len(candidates) == 1 {
+			current := candidates[0].Locator
+			code := ConflictFormatOnlyRelocation
+			if current.Path != original.Path {
+				code = ConflictSymbolMoved
+			}
+			return HandleResolution{Status: ResolutionRelocated, Code: code, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
+		}
+		code := ConflictDocumentChanged
+		if len(candidates) > 1 {
+			code = ConflictSymbolAmbiguous
+		} else if _, readErr := w.Read(original.Path); readErr != nil {
+			code = ConflictTargetDeleted
+		}
+		return HandleResolution{Status: ResolutionConflicted, Code: code, Handle: record.Handle, Original: original, Candidates: candidates}, nil
+	}
 	files, _, err := w.collectFiles()
 	if err != nil {
 		return HandleResolution{}, err

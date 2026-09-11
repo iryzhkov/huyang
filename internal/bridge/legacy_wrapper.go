@@ -214,7 +214,7 @@ func callLegacyTransaction(name string, arguments map[string]any, ses session) (
 	}
 	if name == "move_symbols" {
 		sandboxProvider, err = referenceProviders.Open(providerOpenConfig{
-			Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"), RuntimePath: shippedRuntimePath(),
+			Root: sandbox.Tree, InitFile: huyangHeadlessInit(), RuntimePath: shippedRuntimePath(),
 		})
 		if err != nil {
 			return "", fmt.Errorf("legacy transaction sandbox provider: %w", err)

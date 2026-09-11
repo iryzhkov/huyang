@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -87,6 +86,9 @@ func (s *sandboxPlanStager) Epoch() uint64 {
 	defer s.mu.Unlock()
 	if s.stager != nil {
 		return s.stager.Epoch()
+	}
+	if s.provider != nil {
+		return s.provider.Descriptor().Epoch
 	}
 	return s.workspace.Identity().Epoch
 }
@@ -171,7 +173,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	}
 	s.sandbox = sandbox
 	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+		Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
 		RuntimePath: shippedRuntimePath(), Debug: false,
 	})
 	if err != nil {
@@ -197,6 +199,23 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		s.provider, s.stager, s.sandbox = nil, nil, nil
 		return err
 	}
+	// The provider staged identical bytes in modified buffers while the
+	// coordinator wrote the durable sandbox copy. Commit only the disposable
+	// provider transaction now so its buffers are marked synchronized before
+	// diagnostics; the sandbox remains the rollback boundary for the plan.
+	if err := s.stager.Commit(ctx, request.PlanID); err != nil {
+		_ = backend.Close(context.Background())
+		_ = sandbox.Cleanup()
+		s.provider, s.stager, s.sandbox = nil, nil, nil
+		return err
+	}
+	s.stager = nil
+	if err := backend.Close(context.Background()); err != nil {
+		_ = sandbox.Cleanup()
+		s.provider, s.sandbox = nil, nil
+		return err
+	}
+	s.provider = nil
 	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
 		return err
@@ -225,22 +244,16 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			request.Files = append(request.Files, file)
 			known[delta.Path] = true
 		}
-		if err := backend.Close(context.Background()); err != nil {
-			return err
-		}
-		replacement, err := referenceProviders.Open(providerOpenConfig{
-			Root: sandbox.Tree, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
-			RuntimePath: shippedRuntimePath(), Debug: false,
-		})
-		if err != nil {
-			return err
-		}
-		s.provider = replacement
-		_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree})
-		s.stager = &providerPlanStager{
-			workspaceID: s.workspace.Identity().ID, provider: replacement, epoch: replacement.Descriptor().Epoch,
-		}
 	}
+	replacement, err := referenceProviders.Open(providerOpenConfig{
+		Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
+		RuntimePath: shippedRuntimePath(), Debug: false,
+	})
+	if err != nil {
+		return err
+	}
+	s.provider = replacement
+	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree})
 	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, s.provider, request.Files, s.baseRevision, s.planID)
 	if err != nil {
 		return err

@@ -15,11 +15,15 @@ type providerDiagnosticPayload struct {
 	Batches []workspacecore.DiagnosticBatch `json:"batches"`
 }
 
-func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string) (workspacecore.DiagnosticReport, error) {
+func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
 	if backend == nil {
 		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
 	}
 	descriptor := backend.Descriptor()
+	waitMS := 1500
+	if len(settleWait) > 0 && settleWait[0] > 0 {
+		waitMS = int(settleWait[0] / time.Millisecond)
+	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file.AfterExists {
@@ -36,7 +40,7 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 			Cancellation: descriptor.Cancellation,
 		},
 		Operation: "huyang_diagnostic_evidence",
-		Arguments: map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID},
+		Arguments: map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS},
 	})
 	if err != nil {
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{

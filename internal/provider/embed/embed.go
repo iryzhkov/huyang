@@ -292,6 +292,15 @@ func (b *Backend) Close(context.Context) error {
 		if g == nil || !g.alive.Load() {
 			return
 		}
+		lspFinished := make(chan struct{})
+		go func() {
+			_ = g.nvim.ExecLua("pcall(function() for _, client in ipairs(vim.lsp.get_clients()) do client:stop(true) end vim.wait(2000, function() return #vim.lsp.get_clients() == 0 end, 20) end)", nil)
+			close(lspFinished)
+		}()
+		select {
+		case <-lspFinished:
+		case <-time.After(stopTimeout):
+		}
 		if b.config.Debug {
 			finished := make(chan struct{})
 			go func() {

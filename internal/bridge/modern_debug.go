@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -312,7 +311,7 @@ func (d *directWorkspaces) debugProvider(workspace *workspacecore.Workspace) (pr
 		return existing, nil
 	}
 	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: identity.Root, InitFile: os.Getenv("AGENT99_HEADLESS_INIT"),
+		Root: identity.Root, InitFile: huyangHeadlessInit(),
 		RuntimePath: shippedRuntimePath(), Debug: true,
 	})
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -181,6 +182,27 @@ func (w *Workspace) SyncProviderEpoch(epoch uint64) Identity {
 
 func (w *Workspace) Snapshot(path string, layer ProviderLayer) (DocumentSnapshot, error) {
 	return w.snapshot(path, layer, false)
+}
+
+func (w *Workspace) RefreshKnownDocuments() (Identity, error) {
+	w.mu.Lock()
+	layers := make(map[string]ProviderLayer, len(w.documents))
+	for path, document := range w.documents {
+		layers[path] = cloneLayer(document.layer)
+	}
+	w.mu.Unlock()
+
+	paths := make([]string, 0, len(layers))
+	for path := range layers {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if _, err := w.Refresh(path, layers[path]); err != nil {
+			return w.Identity(), err
+		}
+	}
+	return w.Identity(), nil
 }
 
 func (w *Workspace) Refresh(path string, layer ProviderLayer) (DocumentSnapshot, error) {

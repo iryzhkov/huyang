@@ -669,10 +669,69 @@ local function node_modules_note(root, by_ft)
     return nil
 end
 
+-- Resolve a real JDK home before jdtls starts. The Mason launcher eventually
+-- execs Java without preserving argv[0]; that is harmless for a JVM binary
+-- but makes version-manager shims (notably mise) interpret the first JVM flag
+-- as a shim name. JAVA_HOME makes the launcher select the real binary and also
+-- gives administration calls an actionable prerequisite failure.
+local function configure_jdtls_sandbox_safety()
+    local settings = vim.deepcopy((vim.lsp.config.jdtls or {}).settings or {})
+    settings.java = settings.java or {}
+    settings.java.import = settings.java.import or {}
+    -- Eclipse metadata is editor state, not a source change. Ask jdtls not
+    -- to generate it at the project root; provider shutdown also quiesces
+    -- any background import before sandbox command auditing begins.
+    settings.java.import.generatesMetadataFilesAtProjectRoot = false
+    vim.lsp.config("jdtls", { settings = settings })
+end
+
+local function ensure_java_home()
+    configure_jdtls_sandbox_safety()
+    local configured = vim.env.JAVA_HOME
+    if type(configured) == "string" and configured ~= ""
+        and vim.uv.fs_stat(configured .. "/bin/java") then
+        return configured
+    end
+    local java = vim.fn.exepath("java")
+    if java == "" then
+        return nil, "Java is not executable in the embedded Neovim environment; install JDK 21+ "
+            .. "or set JAVA_HOME for the huyang user service"
+    end
+    local result = vim.system(
+        { java, "-XshowSettings:properties", "-version" },
+        { text = true }
+    ):wait(3000)
+    if not result then
+        return nil, "Java prerequisite probe did not finish within 3s; set JAVA_HOME to a JDK 21+"
+    end
+    local output = (result.stdout or "") .. "\n" .. (result.stderr or "")
+    local home = output:match("[\r\n]%s*java%.home%s*=%s*([^\r\n]+)")
+    home = home and vim.trim(home) or nil
+    if result.code ~= 0 or not home or not vim.uv.fs_stat(home .. "/bin/java") then
+        local detail = vim.trim(output):gsub("%s+", " ")
+        if #detail > 240 then detail = detail:sub(1, 237) .. "..." end
+        return nil, "Java prerequisite probe failed"
+            .. (detail ~= "" and (": " .. detail) or "")
+            .. "; install JDK 21+ or set JAVA_HOME for the huyang user service"
+    end
+    vim.env.JAVA_HOME = home
+    return home
+end
+
 local function workspace_support(args)
+    local attach_wait_ms = math.min(15000, math.max(250, tonumber(args.attach_wait_ms) or SUPPORT_ATTACH_MS))
     local root = args.root
     if type(root) ~= "string" or root == "" then
         err("missing project root")
+    end
+    if vim.uv.fs_stat(root .. "/Cargo.toml") and not vim.env.CARGO_TARGET_DIR then
+        local target = vim.fn.tempname() .. "-huyang-cargo-target"
+        vim.fn.mkdir(target, "p")
+        vim.env.CARGO_TARGET_DIR = target
+        vim.api.nvim_create_autocmd("VimLeavePre", {
+            once = true,
+            callback = function() pcall(vim.fn.delete, target, "rf") end,
+        })
     end
     local files = project_files(root)
     local by_ft, sample, ext_cache = {}, {}, {}
@@ -713,6 +772,11 @@ local function workspace_support(args)
             not_probed[#not_probed + 1] = ("%s (%d)"):format(ft, by_ft[ft])
         else
             local parser = has_parser(ft)
+            local prerequisite
+            if ft == "java" then
+                local _, why = ensure_java_home()
+                prerequisite = why
+            end
             local configs = enabled_lsp_configs_for(ft)
             -- What could run this language under a debugger, so a client
             -- learns the option exists even when the debug tools are off.
@@ -730,7 +794,7 @@ local function workspace_support(args)
             if #configs > 0 then
                 local okb, bufnr = pcall(load_buf, root .. "/" .. sample[ft])
                 if okb then
-                    local deadline = vim.uv.now() + SUPPORT_ATTACH_MS
+                    local deadline = vim.uv.now() + attach_wait_ms
                     while vim.uv.now() < deadline do
                         for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
                             clients[#clients + 1] = c.name
@@ -746,6 +810,13 @@ local function workspace_support(args)
                 pcall(function()
                     install_options = mlsp.get_available_servers({ filetype = ft })
                     table.sort(install_options)
+                    local unique_options = {}
+                    for _, option in ipairs(install_options) do
+                        if unique_options[#unique_options] ~= option then
+                            unique_options[#unique_options + 1] = option
+                        end
+                    end
+                    install_options = unique_options
                 end)
             end
             local entry = {
@@ -755,6 +826,7 @@ local function workspace_support(args)
                 lsp = #clients > 0 and table.concat(clients, ",") or "none",
                 debugger = debugger,
                 install_options = install_options,
+                prerequisite = prerequisite,
             }
             if #clients == 0 and #configs > 0 then
                 entry.lsp = "none (configured: " .. table.concat(configs, ",") .. ", did not attach)"
@@ -774,7 +846,7 @@ local function workspace_support(args)
     if #blind > 0 then
         notes[#notes + 1] = ("no parser and no language server for %s: symbol, navigation and "
                 .. "diagnostic tools will not work on those files; grep and read_file will. "
-                .. "install_language(language) can add both")
+                .. "language_server_setup(action=install, language=...) can add both")
             :format(table.concat(blind, ", "))
     end
     -- A JS/TS project whose dependencies are not installed makes the language
@@ -1053,6 +1125,13 @@ local function install_server(ft, wanted, root)
         candidates = mlsp.get_available_servers({ filetype = ft })
     end)
     table.sort(candidates)
+    local unique_candidates = {}
+    for _, candidate in ipairs(candidates) do
+        if unique_candidates[#unique_candidates] ~= candidate then
+            unique_candidates[#unique_candidates + 1] = candidate
+        end
+    end
+    candidates = unique_candidates
     local lspname, package
     if wanted and wanted ~= "" then
         if maps.package_to_lspconfig[wanted] then
@@ -1162,6 +1241,16 @@ local function install_server(ft, wanted, root)
     -- mason-lspconfig enables freshly installed servers itself when its
     -- automatic_enable is on; doing it here too is idempotent and covers
     -- the "already installed but never enabled" case.
+    if lspname == "jdtls" then
+        local java_home, why = ensure_java_home()
+        if not java_home then
+            out.status = "prerequisite missing"
+            out.attached = false
+            out.note = why
+            return out
+        end
+        out.java_home = java_home
+    end
     pcall(vim.lsp.enable, lspname)
     local cmd = vim.tbl_get(vim.lsp.config, lspname, "cmd")
     if type(cmd) == "table" and type(cmd[1]) == "string" and vim.fn.executable(cmd[1]) == 0 then

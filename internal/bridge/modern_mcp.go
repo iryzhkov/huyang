@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -996,6 +997,9 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	case "code_actions":
 		return d.codeActionsProvider(ctx, requestID, workspace, arguments)
 	case "workspace_inspect":
+		if _, refreshErr := workspace.RefreshKnownDocuments(); refreshErr != nil {
+			return modernFailure(requestID, workspace, "workspace_refresh_failed", refreshErr)
+		}
 		inspection := workspace.Inspect()
 		var semanticProvider map[string]any
 		if backend, providerErr := d.canonicalProvider(ctx, workspace); providerErr == nil {
@@ -1055,7 +1059,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	case "search":
 		return d.search(requestID, workspace, arguments)
 	case "symbol_find":
-		return d.symbolFind(requestID, workspace, arguments)
+		return d.symbolFind(ctx, requestID, workspace, arguments)
 	case "read":
 		return d.read(requestID, workspace, arguments)
 	case "diagnostics":
@@ -1317,11 +1321,82 @@ func compactSearchHits(hits []workspacecore.SearchHit, limit int) ([]map[string]
 	return compact, len(hits) > len(returned)
 }
 
-func (d *directWorkspaces) symbolFind(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func providerLineByteRange(content []byte, lines string) (int, int, error) {
+	parts := strings.SplitN(lines, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid provider line range %q", lines)
+	}
+	first, err := strconv.Atoi(parts[0])
+	if err != nil || first < 1 {
+		return 0, 0, fmt.Errorf("invalid provider start line %q", lines)
+	}
+	last, err := strconv.Atoi(parts[1])
+	if err != nil || last < first {
+		return 0, 0, fmt.Errorf("invalid provider end line %q", lines)
+	}
+	start, end, line := 0, len(content), 1
+	for index, value := range content {
+		if value != '\n' {
+			continue
+		}
+		if line < first {
+			start = index + 1
+		}
+		if line == last {
+			end = index + 1
+			break
+		}
+		line++
+	}
+	if line < first || start >= len(content) {
+		return 0, 0, fmt.Errorf("provider line range %q exceeds document", lines)
+	}
+	return start, end, nil
+}
+
+func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
 	records, coverage, err := workspace.FindSymbols(query)
 	if err != nil {
 		return modernFailure(requestID, workspace, "symbol_find_failed", err)
+	}
+	providerEvidence := any(nil)
+	providerWarning := ""
+	if !coverage.Complete {
+		backend, providerErr := d.canonicalProvider(ctx, workspace)
+		if providerErr == nil {
+			providerEvidence, providerErr = callCanonicalProvider(ctx, requestID, workspace, backend, "find_symbol", map[string]any{
+				"root": workspace.Identity().Root, "name": query, "include_body": false,
+			})
+		}
+		if providerErr != nil {
+			providerWarning = "Embedded semantic provider fallback failed: " + providerErr.Error()
+		} else {
+			value, _ := providerEvidence.(map[string]any)
+			providerRecords := make([]workspacecore.HandleRecord, 0, len(anySlice(value["matches"])))
+			for _, raw := range anySlice(value["matches"]) {
+				match, _ := raw.(map[string]any)
+				path, name, kind := fmt.Sprint(match["file"]), fmt.Sprint(match["name_path"]), fmt.Sprint(match["kind"])
+				read, readErr := workspace.Read(path)
+				if readErr != nil {
+					providerWarning = "Some embedded semantic provider matches could not be registered: " + readErr.Error()
+					continue
+				}
+				start, end, rangeErr := providerLineByteRange(read.Content, fmt.Sprint(match["lines"]))
+				if rangeErr != nil {
+					providerWarning = "Some embedded semantic provider matches could not be registered: " + rangeErr.Error()
+					continue
+				}
+				record, registerErr := workspace.RegisterSymbolHandle(path, name, kind, start, end)
+				if registerErr != nil {
+					providerWarning = "Some embedded semantic provider matches could not be registered: " + registerErr.Error()
+					continue
+				}
+				providerRecords = append(providerRecords, record)
+			}
+			records = providerRecords
+			coverage = workspacecore.Coverage{Complete: providerWarning == "", Semantic: "embedded_nvim"}
+		}
 	}
 	items := make([]map[string]any, 0, len(records))
 	includeSource, _ := arguments["include_source"].(bool)
@@ -1335,21 +1410,27 @@ func (d *directWorkspaces) symbolFind(requestID string, workspace *workspacecore
 		}
 		items = append(items, item)
 	}
-	outcome := "ok"
-	code := ""
+	outcome, code := "ok", ""
 	if !coverage.Complete {
-		outcome = "partial"
-		code = "semantic_coverage_partial"
+		outcome, code = "partial", "semantic_coverage_partial"
 	}
 	summary := fmt.Sprintf("%d symbols found", len(records))
 	if len(records) == 0 && !coverage.Complete {
 		summary = "Symbol search could not establish results because semantic coverage is incomplete"
 	}
-	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
-		"ranked_handles": items, "coverage": coverage,
-	})
+	data := map[string]any{"ranked_handles": items, "coverage": coverage}
+	if providerEvidence != nil {
+		data["provider_evidence"] = providerEvidence
+	}
+	result := modernEnvelope(requestID, workspace, outcome, code, summary, data)
+	if providerWarning != "" {
+		result["warnings"] = []string{providerWarning}
+	}
 	if !coverage.Complete {
-		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": query}}
+		result["next"] = []any{
+			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
+			map[string]any{"tool": "search", "action": "literal_fallback", "query": query},
+		}
 	}
 	return result
 }
@@ -1519,11 +1600,19 @@ func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, 
 	}
 	result := modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), summary, resolution)
 	path := resolution.Original.Path
-	result["next"] = []any{map[string]any{"tool": "read", "action": "refresh_path", "path": path}}
-	if resolution.Original.NamePath != "" {
-		result["next"] = append(result["next"].([]any),
-			map[string]any{"tool": "search", "action": "relocate_target", "path": path, "query": resolution.Original.NamePath})
+	next := []any{}
+	if resolution.Code != workspacecore.ConflictTargetDeleted {
+		next = append(next, map[string]any{"tool": "read", "action": "refresh_path", "path": path})
+	} else {
+		next = append(next, map[string]any{
+			"tool": "search", "action": "inspect_git_rename_history",
+			"git_history": map[string]any{"query": path, "fields": []string{"path", "diff"}},
+		})
 	}
+	if resolution.Original.NamePath != "" {
+		next = append(next, map[string]any{"tool": "symbol_find", "action": "relocate_target", "query": resolution.Original.NamePath})
+	}
+	result["next"] = next
 	return result
 }
 
@@ -1681,10 +1770,11 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 			"known_segments": segments, "gaps": gaps, "diffs": diffs,
 		})
 		result["warnings"] = []string{"Uncovered gaps may contain external writes, provider edits, or expired receipts; no diff is inferred for them."}
-		result["next"] = []any{
-			map[string]any{"tool": "read", "action": "inspect_known_changed_paths", "paths": paths},
-			map[string]any{"tool": "workspace_inspect", "action": "record_current_revision_as_new_baseline", "view": "status"},
+		next := []any{map[string]any{"tool": "workspace_inspect", "action": "record_current_revision_as_new_baseline", "view": "status"}}
+		if len(paths) > 0 {
+			next = append([]any{map[string]any{"tool": "read", "action": "inspect_known_changed_paths", "paths": paths}}, next...)
 		}
+		result["next"] = next
 		return result
 	}
 	type endpoints struct{ before, after string }
@@ -2179,8 +2269,42 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		if filesErr == nil {
 			var policy workspacecore.PipelinePolicy
 			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
+			var diagnosticProvider provider.Provider
+			providerOpened := false
+			wantsDiagnostics := false
+			for _, stage := range stages {
+				if stage == "diagnostics" {
+					wantsDiagnostics = true
+					break
+				}
+			}
+
+			if filesErr == nil && wantsDiagnostics {
+				var providerErr error
+				diagnosticProvider, providerErr = referenceProviders.Open(providerOpenConfig{
+					Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
+					RuntimePath: shippedRuntimePath(), Debug: false,
+				})
+				providerOpened = providerErr == nil
+				if providerErr == nil {
+					_, providerErr = callCanonicalProvider(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,
+						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": 12000})
+				}
+				if providerErr == nil {
+
+					request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
+						report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, 12*time.Second)
+						return diagnosticVerificationStage(revision, report), evidenceErr
+					}
+				}
+			}
 			if filesErr == nil {
 				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+			}
+			if providerOpened {
+				if closeErr := diagnosticProvider.Close(context.Background()); err == nil && closeErr != nil {
+					err = closeErr
+				}
 			}
 		}
 		if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {
