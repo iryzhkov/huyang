@@ -716,8 +716,9 @@ type directWorkspaces struct {
 	toolTimeout time.Duration
 	requests    atomic.Uint64
 
-	replayMu sync.Mutex
-	replays  map[string]*directReplay
+	replayMu      sync.Mutex
+	replays       map[string]*directReplay
+	receiptLimits receiptLimits
 	// observer receives lifecycle notifications; production leaves it nil.
 	// It is read under replayMu.
 	observer directObserver
@@ -735,16 +736,9 @@ type directWorkspaces struct {
 
 	verificationMu    sync.Mutex
 	verificationCache map[string]cachedVerification
+	verificationOrder []string
 
 	notices *noticeDelivery
-}
-
-type directReplay struct {
-	argumentsHash string
-	result        map[string]any
-	done          chan struct{}
-	complete      bool
-	checkpointed  bool
 }
 
 // directObserver is notified at points where a test needs to interleave
@@ -787,6 +781,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		stateDir:          stateDir,
 		toolTimeout:       defaultToolCallTimeout,
 		replays:           make(map[string]*directReplay),
+		receiptLimits:     defaultReceiptLimits(),
 		registryPath:      filepath.Join(stateDir, "registry.json"),
 		scheduler:         newWorkspaceScheduler(providerQuota, externalJobQuota),
 		providers:         make(map[workspacecore.ID]*providerSlot),
@@ -896,11 +891,23 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 				}}
 				return result
 			}
-			replayed := cloneEnvelope(previous.result)
+			d.replayMu.Lock()
+			evicted, trimmed, stored := previous.evicted, previous.trimmed, previous.result
+			d.replayMu.Unlock()
+			if evicted {
+				result := modernEnvelope(requestID, nil, "conflict", receiptEvictedCode, receiptEvictedSummary, map[string]any{
+					"tool": name, "idempotency_key": idempotencyKey,
+				})
+				result["next"] = []any{map[string]any{
+					"tool": "workspace_inspect", "view": "status", "action": "confirm_current_revision_before_retrying_with_a_new_key",
+				}}
+				return result
+			}
+			replayed := cloneEnvelope(stored)
 			replayed["request_id"] = requestID
 			replayed["idempotency"] = "replayed"
 			replayed["summary"] = "Idempotent replay returned the original receipt; this call made no new mutation"
-			if originalData, ok := previous.result["data"].(map[string]any); ok {
+			if originalData, ok := stored["data"].(map[string]any); ok {
 				replayData := make(map[string]any, len(originalData)+2)
 				for key, value := range originalData {
 					replayData[key] = value
@@ -911,6 +918,9 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 				}
 				replayData["replayed_request"] = true
 				replayed["data"] = replayData
+			}
+			if trimmed {
+				replayed["warnings"] = []string{receiptTrimmedWarning}
 			}
 			return replayed
 		case <-ctx.Done():
@@ -928,11 +938,9 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 		persisted["idempotency"] = "created"
 		persisted["idempotency_persisted"] = true
 		d.replayMu.Lock()
-		pending.result = persisted
-		pending.complete = true
 		pending.checkpointed = true
 		d.replayMu.Unlock()
-		if err := d.persistRegistry(); err != nil {
+		if err := d.storeReceipt(replayKey, pending, persisted); err != nil {
 			d.replayMu.Lock()
 			pending.complete = false
 			pending.checkpointed = false
@@ -965,18 +973,12 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	result["idempotency_persisted"] = !timedOut
 	if timedOut {
 		d.replayMu.Lock()
-		pending.result = cloneEnvelope(result)
-		pending.complete = true
 		delete(d.replays, replayKey)
 		close(pending.done)
 		d.replayMu.Unlock()
 		return result
 	}
-	d.replayMu.Lock()
-	pending.result = cloneEnvelope(result)
-	pending.complete = true
-	d.replayMu.Unlock()
-	if err := d.persistRegistry(); err != nil {
+	if err := d.storeReceipt(replayKey, pending, cloneEnvelope(result)); err != nil {
 		result["warnings"] = append(result["warnings"].([]string), "idempotency receipt was not persisted: "+err.Error())
 		result["idempotency_persisted"] = false
 		d.replayMu.Lock()
@@ -2787,10 +2789,25 @@ func (d *directWorkspaces) verifyRun(ctx context.Context, requestID string, work
 			break
 		}
 	}
-	d.verificationMu.Lock()
-	d.verificationCache[job.cacheKey] = cachedVerification{Result: result, Outcome: outcome}
-	d.verificationMu.Unlock()
+	d.cacheVerification(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
 	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
+}
+
+// maxVerificationCacheEntries bounds the exact-revision verification cache;
+// each entry holds full stage output, so the oldest entries are dropped.
+const maxVerificationCacheEntries = 32
+
+func (d *directWorkspaces) cacheVerification(key string, value cachedVerification) {
+	d.verificationMu.Lock()
+	defer d.verificationMu.Unlock()
+	if _, present := d.verificationCache[key]; !present {
+		d.verificationOrder = append(d.verificationOrder, key)
+	}
+	d.verificationCache[key] = value
+	for len(d.verificationOrder) > maxVerificationCacheEntries {
+		delete(d.verificationCache, d.verificationOrder[0])
+		d.verificationOrder = d.verificationOrder[1:]
+	}
 }
 
 func verificationPolicyFingerprint(root string) string {

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,6 +29,7 @@ type serviceConfig struct {
 	SocketPath       string
 	StateDir         string
 	HTTPAddress      string
+	PprofAddress     string
 	ProviderQuota    int
 	ExternalJobQuota int
 }
@@ -51,6 +53,8 @@ type huyangService struct {
 	httpServer    *http.Server
 	httpToken     string
 	httpTokenFile string
+	pprofListener net.Listener
+	pprofServer   *http.Server
 
 	closeOnce sync.Once
 }
@@ -74,13 +78,14 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		flags.StringVar(&config.SocketPath, "socket", defaultHuyangSocket(), "private Unix control socket")
 		flags.StringVar(&config.StateDir, "state-dir", defaultHuyangStateDir(), "durable service state directory")
 		flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address")
+		flags.StringVar(&config.PprofAddress, "pprof", "", "optional loopback address serving net/http/pprof profiles behind the HTTP bearer token, for heap and goroutine investigation")
 		flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
 		flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT]")
+			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N] [--external-job-quota N]")
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 		defer stop()
@@ -92,6 +97,9 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		fmt.Fprintf(stderr, "huyang serve: socket=%s\n", config.SocketPath)
 		if service.httpListener != nil {
 			fmt.Fprintf(stderr, "huyang serve: http=%s token_file=%s\n", service.httpListener.Addr(), service.httpTokenFile)
+		}
+		if service.pprofListener != nil {
+			fmt.Fprintf(stderr, "huyang serve: pprof=%s token_file=%s\n", service.pprofListener.Addr(), service.httpTokenFile)
 		}
 		return service.Serve(ctx)
 	case "mcp":
@@ -157,6 +165,12 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 			return nil, err
 		}
 	}
+	if config.PprofAddress != "" {
+		if err := service.preparePprof(); err != nil {
+			service.Close()
+			return nil, err
+		}
+	}
 	return service, nil
 }
 
@@ -166,6 +180,15 @@ func (s *huyangService) Serve(ctx context.Context) error {
 	if s.httpListener != nil {
 		go func() {
 			err := s.httpServer.Serve(s.httpListener)
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
+			}
+			errorsOut <- err
+		}()
+	}
+	if s.pprofListener != nil {
+		go func() {
+			err := s.pprofServer.Serve(s.pprofListener)
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
@@ -191,6 +214,14 @@ func (s *huyangService) Close() {
 		}
 		if s.httpListener != nil {
 			_ = s.httpListener.Close()
+		}
+		if s.pprofServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.pprofServer.Shutdown(ctx)
+			cancel()
+		}
+		if s.pprofListener != nil {
+			_ = s.pprofListener.Close()
 		}
 		if s.unixListener != nil {
 			_ = s.unixListener.Close()
@@ -451,6 +482,37 @@ func (s *huyangService) prepareHTTP() error {
 		mux.Handle(route, requireBearer(token, handler))
 	}
 	s.httpServer = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	return nil
+}
+
+// preparePprof exposes net/http/pprof on a loopback listener behind the same
+// bearer token as the Streamable HTTP transport, so a heap or goroutine
+// profile can be taken from the live service without exposing it to other
+// local users.
+func (s *huyangService) preparePprof() error {
+	if err := requireLoopbackAddress(s.config.PprofAddress); err != nil {
+		return err
+	}
+	token, tokenFile, err := loadOrCreateHTTPToken(s.config.StateDir)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", s.config.PprofAddress)
+	if err != nil {
+		return err
+	}
+	if s.httpToken == "" {
+		s.httpToken = token
+		s.httpTokenFile = tokenFile
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	s.pprofListener = listener
+	s.pprofServer = &http.Server{Handler: requireBearer(token, mux), ReadHeaderTimeout: 5 * time.Second}
 	return nil
 }
 
