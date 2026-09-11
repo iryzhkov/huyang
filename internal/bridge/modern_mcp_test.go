@@ -183,15 +183,17 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := newDirectWorkspaces(t.TempDir())
-	direct.toolTimeout = 20 * time.Millisecond
+	// 300ms leaves margin for workspace_open (tree walk, Git, provider probe) under
+	// suite load while keeping the blocked call below well under the one-second bound.
+	direct.toolTimeout = 300 * time.Millisecond
 	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	identity, ok := opened["workspace"].(workspacecore.Identity)
 	if !ok {
 		t.Fatalf("workspace identity = %#v", opened["workspace"])
 	}
 	limits := opened["data"].(map[string]any)["service_limits"].(map[string]any)
-	if got := limits["tool_call_timeout_ms"]; got != int64(20) {
-		t.Fatalf("advertised timeout = %#v, want 20", got)
+	if got := limits["tool_call_timeout_ms"]; got != int64(300) {
+		t.Fatalf("advertised timeout = %#v, want 300", got)
 	}
 
 	release, err := direct.scheduler.acquire(context.Background(), string(identity.ID), scheduleCanonicalWrite)
