@@ -261,7 +261,9 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 	}
 	backend, err := d.debugProvider(workspace)
 	if err != nil {
-		return debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
+		result := debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
+		result["next"] = debugFailureNext(name, action)
+		return result
 	}
 	operation, providerArguments, err := d.debugOperation(workspace, name, action, arguments)
 	if err != nil {
@@ -281,13 +283,17 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 				}
 			}
 			if _, callErr := callModernDebugProvider(ctx, requestID, workspace, backend, "debug_breakpoint", resolved); callErr != nil {
-				return debugProviderFailure(requestID, workspace, callErr)
+				result := debugProviderFailure(requestID, workspace, callErr)
+				result["next"] = debugFailureNext(name, action)
+				return result
 			}
 		}
 	}
 	value, err := callModernDebugProvider(ctx, requestID, workspace, backend, operation, providerArguments)
 	if err != nil {
-		return debugProviderFailure(requestID, workspace, err)
+		result := debugProviderFailure(requestID, workspace, err)
+		result["next"] = debugFailureNext(name, action)
+		return result
 	}
 	data, complete := enrichDebugResult(workspace, value)
 	outcome := "ok"
@@ -486,6 +492,17 @@ func (d *directWorkspaces) debugTargetArguments(workspace *workspacecore.Workspa
 	}
 	line := bytes.Count(read.Content[:handle.ByteStart], []byte{'\n'}) + 1
 	return map[string]any{"file": handle.Path, "line": line}, nil
+}
+
+func debugFailureNext(tool, action string) []any {
+	retry := map[string]any{"tool": tool, "action": action}
+	if tool != "debug_inspect" {
+		retry["use_new_idempotency_key"] = true
+	}
+	return []any{
+		map[string]any{"tool": "language_server_status", "action": "inspect_language_and_debugger_availability"},
+		retry,
+	}
 }
 
 func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, err error) map[string]any {

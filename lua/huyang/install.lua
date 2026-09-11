@@ -708,6 +708,11 @@ local function configure_jdtls_sandbox_safety()
     vim.lsp.config("jdtls", { settings = settings, root_markers = root_markers })
 end
 
+local function pin_jdtls_workspace_root(root)
+    configure_jdtls_sandbox_safety()
+    vim.lsp.config("jdtls", { root_dir = root })
+end
+
 -- Sandbox providers may run diagnostics without first serving a support or
 -- installation request. Configure jdtls before any Java buffer can attach so
 -- conventional src/main/java package roots are interpreted from the sandbox
@@ -906,6 +911,8 @@ local function workspace_support(args)
 				pcall(vim.lsp.config, "ts_ls", { root_dir = root, init_options = init_options })
 			elseif ft == "ruby" then
 				pcall(vim.lsp.config, "ruby_lsp", { root_dir = root })
+			elseif ft == "java" then
+				pcall(pin_jdtls_workspace_root, root)
 			end
 			local restored_servers = enable_installed_servers(ft)
 			local attach_wait_ms = support_attach_wait(ft, requested_attach_wait, restored_servers)
@@ -1561,5 +1568,6 @@ M._server_prerequisite = server_prerequisite
 M._ensure_mason_bin_on_path = ensure_mason_bin_on_path
 M._attached_client = attached_client
 M._configure_jdtls_sandbox_safety = configure_jdtls_sandbox_safety
+M._pin_jdtls_workspace_root = pin_jdtls_workspace_root
 
 return M

@@ -913,8 +913,8 @@ local function jdtls_client(root, file)
         end
         lsp.sleep(250)
     end
-    err("jdtls did not attach to %s within %d s; install_language(\"java\") installs it, "
-        .. "and install_debugger(\"java\") adds the java-debug bundle", lsp.rel_path(sample), JDTLS_ATTACH_MS / 1000)
+    err("jdtls did not attach to %s within %d s; language_server_setup(action=\"install\", language=\"java\", server=\"jdtls\") installs it, "
+        .. "and Mason's java-debug-adapter package supplies the java-debug bundle", lsp.rel_path(sample), JDTLS_ATTACH_MS / 1000)
 end
 
 local function jdtls_command(client, bufnr, command, arguments)
@@ -933,7 +933,7 @@ local function jdtls_command(client, bufnr, command, arguments)
     if rpc_err then
         local msg = rpc_err.message or vim.inspect(rpc_err)
         if msg:find("not found") or msg:find("No delegateCommandHandler") then
-            msg = msg .. " (jdtls is running without the java-debug bundle; restart it after install_debugger(\"java\"))"
+            msg = msg .. " (jdtls is running without the java-debug bundle; install Mason package java-debug-adapter, then call language_server_setup(action=\"restart\"))"
         end
         err("jdtls command %s failed: %s", command, msg)
     end

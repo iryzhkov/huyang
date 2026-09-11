@@ -214,11 +214,18 @@ end
 
 do
     install._configure_jdtls_sandbox_safety()
+    local root = "/tmp/huyang-jdtls-workspace-root"
+    install._pin_jdtls_workspace_root(root)
     local markers = vim.lsp.config.jdtls.root_markers or {}
     local source_paths = (((vim.lsp.config.jdtls.settings or {}).java or {}).project or {}).sourcePaths
-    check("jdtls recognizes trusted safe-copy sandbox roots",
+    check("jdtls recognizes and stays pinned to trusted safe-copy sandbox roots",
         vim.deep_equal(markers[1], { ".huyang.toml", ".huyang/pipeline.json" })
-            and vim.deep_equal(source_paths, { "src/main/java", "src/test/java", "src" }), markers)
+            and vim.deep_equal(source_paths, { "src/main/java", "src/test/java", "src" })
+            and vim.lsp.config.jdtls.root_dir == root, {
+                markers = markers,
+                source_paths = source_paths,
+                root_dir = vim.lsp.config.jdtls.root_dir,
+            })
 end
 
 do

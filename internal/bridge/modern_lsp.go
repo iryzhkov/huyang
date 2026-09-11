@@ -140,6 +140,21 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	return result
 }
+func failedLanguageServerInstallNext(status, language, requestedServer string) []any {
+	statusAction := map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}
+	if status != "failed" {
+		return []any{statusAction}
+	}
+	retry := map[string]any{
+		"tool": "language_server_setup", "action": "install", "language": language,
+		"use_new_idempotency_key": true,
+	}
+	if requestedServer != "" {
+		retry["server"] = requestedServer
+	}
+	return []any{retry, statusAction}
+}
+
 func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if action == "restart" {
@@ -241,10 +256,7 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 		result := modernEnvelope(requestID, workspace, "failed", "language_server_install_failed",
 			fmt.Sprintf("Language support installation failed for %s: %s", language, note), data)
 		result["warnings"] = []string{note}
-		result["next"] = []any{
-			map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "server": arguments["server"], "use_new_idempotency_key": true},
-			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
-		}
+		result["next"] = failedLanguageServerInstallNext(status, language, requestedServer)
 		return result
 	}
 	if attached, present := serverResult["attached"]; !present || !languageServerAttachmentConfirmed(attached) {
