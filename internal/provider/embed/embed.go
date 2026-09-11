@@ -272,29 +272,53 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 	if id == "" {
 		id = fmt.Sprintf("embed-%d", requestSeq.Add(1))
 	}
+	completed, release, err := b.registerPending(g, id)
+	if err != nil {
+		return provider.Result{}, err
+	}
+	defer release()
+	if err := b.submit(g, id, request); err != nil {
+		return provider.Result{}, err
+	}
+	select {
+	case result := <-completed:
+		return decodeCompletion(g.epoch, result.payload)
+	case err := <-g.done:
+		return provider.Result{}, deathFailure(g, err)
+	case <-ctx.Done():
+		return b.abandon(g, id, ctx.Err(), completed)
+	}
+}
+
+// registerPending reserves the completion slot for one request ID on the
+// current generation and returns the function that frees it.
+func (b *Backend) registerPending(g *generation, id string) (chan completion, func(), error) {
 	key := pendingKey(g.epoch, id)
 	completed := make(chan completion, 1)
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.closed || b.generation != g || !g.alive.Load() {
-		b.mu.Unlock()
-		return provider.Result{}, &provider.Failure{
+		return nil, nil, &provider.Failure{
 			Code: provider.FailureDied, Epoch: g.epoch, Detail: "provider changed before request submission",
 		}
 	}
 	if _, exists := b.pending[key]; exists {
-		b.mu.Unlock()
-		return provider.Result{}, &provider.Failure{
+		return nil, nil, &provider.Failure{
 			Code: provider.FailureProtocol, Epoch: g.epoch, Detail: "duplicate in-flight request ID " + id,
 		}
 	}
 	b.pending[key] = completed
-	b.mu.Unlock()
-	defer func() {
+	release := func() {
 		b.mu.Lock()
 		delete(b.pending, key)
 		b.mu.Unlock()
-	}()
+	}
+	return completed, release, nil
+}
 
+// submit starts the Lua request and checks that the kernel acknowledged the
+// same request ID.
+func (b *Backend) submit(g *generation, id string, request provider.Request) error {
 	arguments := request.Arguments
 	if arguments == nil {
 		arguments = map[string]any{}
@@ -309,52 +333,50 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 		`return require("huyang.rpc").start_notify(...)`,
 		&started, g.channel, id, payload,
 	); err != nil {
-		return provider.Result{}, &provider.Failure{
+		return &provider.Failure{
 			Code: provider.FailureProtocol, Epoch: g.epoch,
 			Detail: "starting Lua request: " + err.Error(), Err: err,
 		}
 	}
 	if started != id {
-		return provider.Result{}, &provider.Failure{
+		return &provider.Failure{
 			Code: provider.FailureProtocol, Epoch: g.epoch,
 			Detail: fmt.Sprintf("Lua acknowledged request %q as %q", id, started),
 		}
 	}
+	return nil
+}
 
-	select {
-	case result := <-completed:
-		return decodeCompletion(g.epoch, result.payload)
-	case err := <-g.done:
-		return provider.Result{}, deathFailure(g, err)
-	case <-ctx.Done():
-		cause := ctx.Err()
-		if result, ok := b.cancelCooperatively(g, id, cause, completed); ok {
-			value, err := decodeCompletion(g.epoch, result.payload)
-			if err == nil {
-				// The kernel finished the work before the cancel reached it;
-				// the result is real and the caller may still want it.
-				return value, nil
-			}
-			if provider.ErrorCode(err) == "provider_cancelled" {
-				failure := contextFailure(cause, g.epoch)
-				failure.Detail += "; acknowledged by the kernel"
-				return provider.Result{}, failure
-			}
-			return provider.Result{}, err
+// abandon handles a caller context that ended before the kernel completed:
+// cooperative cancellation first, generation replacement only when the kernel
+// never acknowledges.
+func (b *Backend) abandon(g *generation, id string, cause error, completed chan completion) (provider.Result, error) {
+	if result, ok := b.cancelCooperatively(g, id, cause, completed); ok {
+		value, err := decodeCompletion(g.epoch, result.payload)
+		if err == nil {
+			// The kernel finished the work before the cancel reached it;
+			// the result is real and the caller may still want it.
+			return value, nil
 		}
-		b.terminate(g)
-		<-g.done
-		restartCtx, cancel := context.WithTimeout(context.Background(), startTimeout)
-		_, restartErr := b.ensureGeneration(restartCtx)
-		cancel()
-		failure := contextFailure(cause, g.epoch)
-		failure.Detail += "; the kernel did not acknowledge cancellation within " +
-			b.config.CancelGrace.String() + ", generation replaced"
-		if restartErr != nil {
-			failure.Detail += "; restart failed: " + restartErr.Error()
+		if provider.ErrorCode(err) == "provider_cancelled" {
+			failure := contextFailure(cause, g.epoch)
+			failure.Detail += "; acknowledged by the kernel"
+			return provider.Result{}, failure
 		}
-		return provider.Result{}, failure
+		return provider.Result{}, err
 	}
+	b.terminate(g)
+	<-g.done
+	restartCtx, cancel := context.WithTimeout(context.Background(), startTimeout)
+	_, restartErr := b.ensureGeneration(restartCtx)
+	cancel()
+	failure := contextFailure(cause, g.epoch)
+	failure.Detail += "; the kernel did not acknowledge cancellation within " +
+		b.config.CancelGrace.String() + ", generation replaced"
+	if restartErr != nil {
+		failure.Detail += "; restart failed: " + restartErr.Error()
+	}
+	return provider.Result{}, failure
 }
 
 // cancelCooperatively asks the kernel to cancel one request and waits up to
@@ -578,97 +600,106 @@ func (b *Backend) serve(g *generation) {
 	b.mu.Unlock()
 }
 
+// bootstrapOutcome carries one bootstrap attempt across the goroutine boundary
+// so the caller can race it against generation death and context end.
+type bootstrapOutcome struct {
+	result  bootstrapResult
+	failure *provider.Failure
+}
+
 // bootstrap follows the documented embed sequence: client info, API level
 // check, VimEnter, shipped runtime, kernel handshake. It returns the
 // capabilities the kernel advertised and the nvim-dap discovery outcome.
 func (b *Backend) bootstrap(ctx context.Context, g *generation) (bootstrapResult, error) {
-	type outcome struct {
-		result  bootstrapResult
-		failure *provider.Failure
-	}
-	finished := make(chan outcome, 1)
-	go func() {
-		fail := func(code provider.FailureCode, detail string, err error) outcome {
-			return outcome{failure: &provider.Failure{Code: code, Epoch: g.epoch, Detail: detail, Err: err}}
-		}
-		if err := g.nvim.SetClientInfo(
-			"huyang", nvim.ClientVersion{Major: 0, Minor: 1}, nvim.EmbedderClientType,
-			map[string]*nvim.ClientMethod{}, nvim.ClientAttributes{},
-		); err != nil {
-			finished <- fail(provider.FailureBootstrap, "setting embedder client info: "+err.Error(), err)
-			return
-		}
-		info, err := g.nvim.APIInfo()
-		if err != nil {
-			finished <- fail(provider.FailureBootstrap, "reading Neovim API info: "+err.Error(), err)
-			return
-		}
-		if len(info) < 2 {
-			finished <- fail(provider.FailureProtocol, fmt.Sprintf("nvim_get_api_info returned %d elements", len(info)), nil)
-			return
-		}
-		channel, ok := info[0].(int64)
-		if !ok {
-			finished <- fail(provider.FailureProtocol, fmt.Sprintf("unexpected channel ID type %T", info[0]), nil)
-			return
-		}
-		g.channel = int(channel)
-		if failure := checkAPILevel(g.epoch, info[1]); failure != nil {
-			finished <- outcome{failure: failure}
-			return
-		}
-		// --headless reaches VimEnter without a UI, but not necessarily
-		// before the first RPC request is answered. Waiting here also gives
-		// VimEnter-scheduled provider setup (language servers enabled by the
-		// init) its event-loop turn before the first semantic call.
-		var entered bool
-		if err := g.nvim.ExecLua(
-			`return vim.wait(..., function() return vim.v.vim_did_enter == 1 end, 10)`,
-			&entered, enterTimeout.Milliseconds(),
-		); err != nil || !entered {
-			finished <- fail(provider.FailureBootstrap,
-				fmt.Sprintf("headless startup did not reach VimEnter within %s: %v", enterTimeout, err), err)
-			return
-		}
-		if b.config.RuntimePath != "" {
-			if err := g.nvim.ExecLua(`vim.opt.runtimepath:prepend(...)`, nil, b.config.RuntimePath); err != nil {
-				finished <- fail(provider.FailureBootstrap, "prepending shipped runtime: "+err.Error(), err)
-				return
-			}
-		}
-		var handshake map[string]any
-		if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
-			finished <- fail(provider.FailureBootstrap, "loading huyang kernel: "+err.Error(), err)
-			return
-		}
-		capabilities, failure := checkHandshake(g.epoch, handshake)
-		if failure != nil {
-			finished <- outcome{failure: failure}
-			return
-		}
-		// nvim-dap is discovered by the kernel after the Huyang runtime is
-		// on the runtimepath. A missing plugin is a normal outcome recorded
-		// in the handshake, never a bootstrap failure.
-		var discovered map[string]any
-		dapRuntime := DapRuntime{}
-		if err := g.nvim.ExecLua(dapDiscoveryLua, &discovered); err != nil {
-			dapRuntime.Detail = "nvim-dap discovery failed: " + err.Error()
-		} else {
-			dapRuntime = decodeDapRuntime(discovered)
-		}
-		finished <- outcome{result: bootstrapResult{capabilities: capabilities, dapRuntime: dapRuntime}}
-	}()
+	finished := make(chan bootstrapOutcome, 1)
+	go func() { finished <- b.runBootstrap(g) }()
 	select {
-	case result := <-finished:
-		if result.failure != nil {
-			return bootstrapResult{}, result.failure
+	case outcome := <-finished:
+		if outcome.failure != nil {
+			return bootstrapResult{}, outcome.failure
 		}
-		return result.result, nil
+		return outcome.result, nil
 	case err := <-g.done:
 		return bootstrapResult{}, deathFailure(g, err)
 	case <-ctx.Done():
 		return bootstrapResult{}, contextFailure(ctx.Err(), g.epoch)
 	}
+}
+
+// runBootstrap performs the embed sequence on the RPC channel: connect to the
+// kernel, prepend the shipped runtime, handshake, then discover nvim-dap.
+func (b *Backend) runBootstrap(g *generation) bootstrapOutcome {
+	if failure := b.connectKernel(g); failure != nil {
+		return bootstrapOutcome{failure: failure}
+	}
+	if b.config.RuntimePath != "" {
+		if err := g.nvim.ExecLua(`vim.opt.runtimepath:prepend(...)`, nil, b.config.RuntimePath); err != nil {
+			return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "prepending shipped runtime: "+err.Error(), err)}
+		}
+	}
+	var handshake map[string]any
+	if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
+		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "loading huyang kernel: "+err.Error(), err)}
+	}
+	capabilities, failure := checkHandshake(g.epoch, handshake)
+	if failure != nil {
+		return bootstrapOutcome{failure: failure}
+	}
+	// nvim-dap is discovered by the kernel after the Huyang runtime is
+	// on the runtimepath. A missing plugin is a normal outcome recorded
+	// in the handshake, never a bootstrap failure.
+	var discovered map[string]any
+	dapRuntime := DapRuntime{}
+	if err := g.nvim.ExecLua(dapDiscoveryLua, &discovered); err != nil {
+		dapRuntime.Detail = "nvim-dap discovery failed: " + err.Error()
+	} else {
+		dapRuntime = decodeDapRuntime(discovered)
+	}
+	return bootstrapOutcome{result: bootstrapResult{capabilities: capabilities, dapRuntime: dapRuntime}}
+}
+
+// connectKernel identifies Huyang to Neovim, records the RPC channel, checks
+// the API level and waits for VimEnter so init-scheduled provider setup has
+// had its event-loop turn.
+func (b *Backend) connectKernel(g *generation) *provider.Failure {
+	if err := g.nvim.SetClientInfo(
+		"huyang", nvim.ClientVersion{Major: 0, Minor: 1}, nvim.EmbedderClientType,
+		map[string]*nvim.ClientMethod{}, nvim.ClientAttributes{},
+	); err != nil {
+		return bootstrapFailure(g, provider.FailureBootstrap, "setting embedder client info: "+err.Error(), err)
+	}
+	info, err := g.nvim.APIInfo()
+	if err != nil {
+		return bootstrapFailure(g, provider.FailureBootstrap, "reading Neovim API info: "+err.Error(), err)
+	}
+	if len(info) < 2 {
+		return bootstrapFailure(g, provider.FailureProtocol, fmt.Sprintf("nvim_get_api_info returned %d elements", len(info)), nil)
+	}
+	channel, ok := info[0].(int64)
+	if !ok {
+		return bootstrapFailure(g, provider.FailureProtocol, fmt.Sprintf("unexpected channel ID type %T", info[0]), nil)
+	}
+	g.channel = int(channel)
+	if failure := checkAPILevel(g.epoch, info[1]); failure != nil {
+		return failure
+	}
+	// --headless reaches VimEnter without a UI, but not necessarily
+	// before the first RPC request is answered. Waiting here also gives
+	// VimEnter-scheduled provider setup (language servers enabled by the
+	// init) its event-loop turn before the first semantic call.
+	var entered bool
+	if err := g.nvim.ExecLua(
+		`return vim.wait(..., function() return vim.v.vim_did_enter == 1 end, 10)`,
+		&entered, enterTimeout.Milliseconds(),
+	); err != nil || !entered {
+		return bootstrapFailure(g, provider.FailureBootstrap,
+			fmt.Sprintf("headless startup did not reach VimEnter within %s: %v", enterTimeout, err), err)
+	}
+	return nil
+}
+
+func bootstrapFailure(g *generation, code provider.FailureCode, detail string, err error) *provider.Failure {
+	return &provider.Failure{Code: code, Epoch: g.epoch, Detail: detail, Err: err}
 }
 
 // bootstrapResult is what a successful bootstrap learned from the kernel.
