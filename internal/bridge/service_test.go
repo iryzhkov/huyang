@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -202,16 +205,17 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 			"kind": "replace_range", "target": map[string]any{"file_range": fileRange}, "content": "gamma",
 		},
 	}
-	checkpointed, release := make(chan struct{}), make(chan struct{})
-	direct.setObserver(checkpointObserver(func() {
-		close(checkpointed)
-		<-release
-	}))
+	// The canonical resync is the first provider call after the receipt
+	// checkpoint; blocking it holds the edit between the durable receipt and
+	// its post-mutation diagnostics while a second service instance starts.
+	backend := &resyncBlockingProvider{reached: make(chan struct{}), release: make(chan struct{})}
+	useFixedProvider(t, backend)
+	defer direct.closeProviders()
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()
 	done := make(chan map[string]any, 1)
 	go func() { done <- direct.call(requestContext, "edit_apply", arguments) }()
-	<-checkpointed
+	<-backend.reached
 
 	restarted := newDirectWorkspaces(stateDir)
 	replayed := restarted.call(context.Background(), "edit_apply", arguments)
@@ -222,9 +226,37 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 		t.Fatalf("checkpointed edit receipt = %#v", replayed)
 	}
 	cancelRequest()
-	close(release)
+	close(backend.release)
 	<-done
 }
+
+// resyncBlockingProvider is a provider whose workspace_resync call parks
+// until released, signalling reached when the call arrives.
+type resyncBlockingProvider struct {
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *resyncBlockingProvider) Descriptor() provider.Descriptor {
+	return provider.Descriptor{ID: "resync-blocking", Backend: "test", Epoch: 1}
+}
+func (p *resyncBlockingProvider) Health(context.Context) provider.Health {
+	return provider.Health{State: provider.HealthHealthy, Epoch: 1}
+}
+func (p *resyncBlockingProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
+	if request.Operation == "workspace_resync" {
+		p.once.Do(func() { close(p.reached) })
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return provider.Result{}, ctx.Err()
+		}
+	}
+	return provider.Result{Value: map[string]any{}}, nil
+}
+func (p *resyncBlockingProvider) Close(context.Context) error { return nil }
+func (p *resyncBlockingProvider) Done() <-chan struct{}       { return make(chan struct{}) }
 
 func displayRangeTarget(path string) map[string]any {
 	return map[string]any{"file_range": map[string]any{
@@ -401,8 +433,3 @@ func TestServiceRejectsNonLoopbackHTTPAndProtectsSocketPath(t *testing.T) {
 		t.Fatalf("protected socket path content = %q, err = %v", content, err)
 	}
 }
-
-// checkpointObserver adapts a function to the directObserver interface.
-type checkpointObserver func()
-
-func (o checkpointObserver) replayCheckpointed() { o() }

@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -215,7 +216,7 @@ func TestWorkspaceOpenOverviewIsCompactByDefault(t *testing.T) {
 }
 
 type installOptionsProvider struct {
-	hardeningR8Provider
+	stubProvider
 }
 
 func (p *installOptionsProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
@@ -225,13 +226,13 @@ func (p *installOptionsProvider) Call(ctx context.Context, request provider.Requ
 			map[string]any{"filetype": "rust", "lsp": "none", "install_options": []any{"rust_analyzer"}},
 		}}}, nil
 	}
-	return p.hardeningR8Provider.Call(ctx, request)
+	return p.stubProvider.Call(ctx, request)
 }
 
 func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 	backend := &installOptionsProvider{}
 	backend.descriptor = provider.Descriptor{ID: "options", Backend: "test", Epoch: 1}
-	useEditDiagnosticFactoryFor(t, backend)
+	useFixedProvider(t, backend)
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID, _ := openTestProject(t, direct, map[string]string{"main.py": "x = 1\n"})
 	status := direct.call(context.Background(), "language_server_status", map[string]any{"workspace_id": workspaceID})
@@ -260,8 +261,8 @@ func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 	}
 }
 
-// useEditDiagnosticFactoryFor installs a factory returning one fixed provider.
-func useEditDiagnosticFactoryFor(t *testing.T, backend provider.Provider) {
+// useFixedProvider installs a factory returning one fixed provider.
+func useFixedProvider(t *testing.T, backend provider.Provider) {
 	t.Helper()
 	previous := referenceProviders
 	referenceProviders = fixedProviderFactory{backend: backend}
@@ -275,8 +276,8 @@ func (f fixedProviderFactory) Open(providerOpenConfig) (provider.Provider, error
 }
 
 func TestReadSymbolLocatorFallsBackToProviderDeclarations(t *testing.T) {
-	backend := newHardeningR8Provider()
-	useHardeningR8Factory(t, backend)
+	backend := newStubProvider()
+	useStubProvider(t, backend)
 	direct := newDirectWorkspaces(t.TempDir())
 	source := "package model\n\ntype Shipment struct {\n\tID string\n}\n\nfunc other() {}\n"
 	workspaceID, _ := openTestProject(t, direct, map[string]string{"model.go": source})
@@ -300,5 +301,126 @@ func TestReadSymbolLocatorFallsBackToProviderDeclarations(t *testing.T) {
 	})
 	if missing["outcome"] == "ok" {
 		t.Fatalf("unknown symbol read succeeded: %#v", missing)
+	}
+}
+
+// The text rendering summarises an orientation without dropping the other
+// result fields.
+func TestCompactTextDataSummarisesOrientationWithoutDroppingResults(t *testing.T) {
+	orientation := workspacecore.Orientation{Entries: []workspacecore.Entry{{Path: "a.go"}, {Path: "b.go"}}}
+	data := compactTextData(map[string]any{"overview": orientation, "content": "kept"}).(map[string]any)
+	if data["content"] != "kept" {
+		t.Fatalf("substantive text data was dropped: %#v", data)
+	}
+	summary := data["overview"].(map[string]any)
+	if summary["entry_count"] != 2 {
+		t.Fatalf("orientation summary = %#v", summary)
+	}
+	if _, present := summary["entries"]; present {
+		t.Fatalf("compact text duplicated orientation entries: %#v", summary)
+	}
+}
+
+// Structured results bound the workspace map at maxStructuredEntries and
+// replace large plan operation bodies with their size and hash, while every
+// follow-up identifier stays present.
+func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
+	files := make(map[string]string, maxStructuredEntries+25)
+	for index := 0; index < maxStructuredEntries+25; index++ {
+		files[fmt.Sprintf("pkg/file_%03d.go", index)] = "package pkg\n"
+	}
+	files["large.txt"] = "seed"
+	direct, workspaceID, _ := openProbeProject(t, files)
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+
+	inspected := callModern(t, session, "workspace_inspect", map[string]any{
+		"workspace_id": workspaceID, "view": "map",
+	})
+	overview := inspected["data"].(map[string]any)["overview"].(map[string]any)
+	if overview["entry_count"] != float64(len(files)) || overview["entries_truncated"] != true {
+		t.Fatalf("bounded map metadata = %#v", overview)
+	}
+	if entries := overview["entries"].([]any); len(entries) != maxStructuredEntries {
+		t.Fatalf("bounded map returned %d entries", len(entries))
+	}
+
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "seed", "mode": "literal",
+		"include_ranges": true,
+	})
+	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
+	large := strings.Repeat("x", 128<<10)
+	created := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "large-plan-create", "action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "large-replace", "kind": "replace_range",
+			"target": map[string]any{"file_range": hit["range"]}, "content": large,
+		}},
+	})
+	if created["outcome"] != "ok" {
+		t.Fatalf("large plan create failed: %#v", created)
+	}
+	encoded, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16<<10 || strings.Contains(string(encoded), large[:1024]) {
+		t.Fatalf("large plan response was not bounded: %d bytes", len(encoded))
+	}
+	plan := created["data"].(map[string]any)["plan"].(map[string]any)
+	operation := plan["operations"].([]any)[0].(map[string]any)
+	if plan["plan_id"] == "" || operation["op_id"] != "large-replace" ||
+		operation["content_bytes"] != float64(len(large)) || operation["content_sha256"] == "" {
+		t.Fatalf("bounded plan omitted follow-up identifiers: %#v", plan)
+	}
+	previewed := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "large-plan-preview", "action": "preview",
+		"plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+	})
+	previewBytes, err := json.Marshal(previewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewed["outcome"] != "ok" || len(previewBytes) > 16<<10 ||
+		strings.Contains(string(previewBytes), large[:1024]) {
+		t.Fatalf("large plan preview response was not bounded: %d bytes, %#v", len(previewBytes), previewed)
+	}
+	preview := previewed["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
+	if preview["preview_revision"] == "" || len(preview["diffs"].([]any)) != 1 {
+		t.Fatalf("bounded preview omitted revision or diff identity: %#v", previewed)
+	}
+}
+
+// The text envelope compacts a typed plan record so a large operation body
+// never reaches the model.
+func TestCompactTextEnvelopeBoundsTypedPlanPayload(t *testing.T) {
+	large := strings.Repeat("large-marker-", 10000)
+	envelope := map[string]any{
+		"api_version": "huyang.workspace/v1alpha1",
+		"request_id":  "req_test",
+		"outcome":     "ok",
+		"summary":     "Plan created",
+		"data": map[string]any{
+			"plan": workspacecore.PlanRecord{
+				PlanID: "plan_test",
+				Operations: []workspacecore.PlanOperation{{
+					OpID:    "large-create",
+					Kind:    workspacecore.OperationCreateFile,
+					Path:    "large.txt",
+					Content: large,
+				}},
+			},
+		},
+		"evidence": map[string]any{"ids": []string{}, "truncated": false},
+		"warnings": []string{},
+		"next":     []any{},
+	}
+	encoded, err := json.Marshal(compactTextEnvelope(envelope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16<<10 || strings.Contains(string(encoded), large[:1024]) {
+		t.Fatalf("compact text envelope retained large plan bytes: %d", len(encoded))
 	}
 }

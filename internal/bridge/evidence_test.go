@@ -175,3 +175,56 @@ func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing
 		})
 	}
 }
+
+// Project metadata files never need language-server diagnostic coverage;
+// source files always do.
+func TestDiagnosticSourcePathExcludesProjectMetadata(t *testing.T) {
+	for _, path := range []string{".huyang.toml", ".huyang/pipeline.json", ".gitignore"} {
+		if diagnosticSourcePath(path) {
+			t.Fatalf("%s unexpectedly requires LSP diagnostic coverage", path)
+		}
+	}
+	for _, path := range []string{"README.md", "data/schema.json", "src/main.ts", "lib/service.rb", "pkg/risk.py", "main.go"} {
+		if !diagnosticSourcePath(path) {
+			t.Fatalf("%s unexpectedly excluded from LSP diagnostic coverage", path)
+		}
+	}
+}
+
+// A passing project check corroborates only freshness uncertainty; a
+// language server that is missing stays visible as unavailable.
+func TestProjectCheckDoesNotCorroborateMissingLanguageServer(t *testing.T) {
+	root := t.TempDir()
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: root, ProviderEpoch: 1, StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := filepath.Join(root, "Planner.cs")
+	report, err := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+		Kind: workspacecore.EvidencePush, ProviderID: "csharp#1", Producer: "csharp",
+		Document: document, DocumentRevision: "prep_1", TransactionID: "plan_1",
+		TimedOut: true, Selected: true, Dimension: "edited_documents",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err = workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+		Kind: workspacecore.EvidenceUnavailable, ProviderID: "csharp#1", Producer: "csharp",
+		Document: document, DocumentRevision: "prep_1", TransactionID: "plan_1",
+		Reason: "lsp_not_configured", Selected: true, Dimension: "edited_documents",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err = corroborateDiagnosticsWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
+		Stage: "check", Status: workspacecore.VerificationPassed,
+	}}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Confidence == workspacecore.ConfidenceCorroborated || diagnosticVerificationStage("prep_1", report).Status == workspacecore.VerificationPassed {
+		t.Fatalf("missing LSP was hidden by project check: %#v", report)
+	}
+}

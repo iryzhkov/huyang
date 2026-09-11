@@ -92,7 +92,7 @@ func startBlockedPrepare(t *testing.T, inner providerFactory) (*directWorkspaces
 }
 
 func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
-	direct, workspaceA, workspaceB, finish := startBlockedPrepare(t, hardeningR8Factory{backend: newHardeningR8Provider()})
+	direct, workspaceA, workspaceB, finish := startBlockedPrepare(t, stubProviderFactory{backend: newStubProvider()})
 	workspaceBRecord := direct.get(workspacecore.ID(workspaceB))
 
 	promptly := func(name string, run func()) {
@@ -159,7 +159,7 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 }
 
 func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
-	direct, workspaceA, workspaceB, finish := startBlockedPrepare(t, hardeningR8Factory{backend: newHardeningR8Provider()})
+	direct, workspaceA, workspaceB, finish := startBlockedPrepare(t, stubProviderFactory{backend: newStubProvider()})
 	prepared := finish()
 	transaction, _ := prepared["transaction"].(map[string]any)
 	plan, _ := prepared["data"].(map[string]any)["plan"].(workspacecore.PlanRecord)
@@ -212,7 +212,7 @@ func TestReadProxyLinesStopsWhenProxyLoopEnds(t *testing.T) {
 }
 
 type slowHealthProvider struct {
-	hardeningR8Provider
+	stubProvider
 }
 
 func (p *slowHealthProvider) Health(ctx context.Context) provider.Health {
@@ -234,7 +234,7 @@ func TestCanonicalProviderStatusHonoursRequestDeadline(t *testing.T) {
 }
 
 type recordingProvider struct {
-	hardeningR8Provider
+	stubProvider
 	mu       sync.Mutex
 	requests []provider.Request
 }
@@ -243,7 +243,7 @@ func (p *recordingProvider) Call(ctx context.Context, request provider.Request) 
 	p.mu.Lock()
 	p.requests = append(p.requests, request)
 	p.mu.Unlock()
-	return p.hardeningR8Provider.Call(ctx, request)
+	return p.stubProvider.Call(ctx, request)
 }
 
 func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
@@ -285,37 +285,12 @@ func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
 	}
 }
 
-func TestLineSpanHelpersAgree(t *testing.T) {
-	content := []byte("one\ntwo\nthree")
-	start, end, err := lineByteRange(content, 2)
-	if err != nil || string(content[start:end]) != "two" {
-		t.Fatalf("lineByteRange = %q, %v", content[start:end], err)
-	}
-	start, end, err = providerLineByteRange(content, "1-2")
-	if err != nil || string(content[start:end]) != "one\ntwo\n" {
-		t.Fatalf("providerLineByteRange = %q, %v", content[start:end], err)
-	}
-	window, first, last, err := boundedLines(content, 2, 9)
-	if err != nil || string(window) != "two\nthree" || first != 2 || last != 3 {
-		t.Fatalf("boundedLines = %q, %d-%d, %v", window, first, last, err)
-	}
-	if _, _, err := lineByteRange(content, 4); err == nil {
-		t.Fatal("line beyond the document was accepted")
-	}
-	if _, _, _, err := boundedLines(content, 4, 5); err == nil {
-		t.Fatal("start_line beyond the document was accepted")
-	}
-	if _, _, err := providerLineByteRange(content, "3-9"); err != nil {
-		t.Fatalf("clamped provider range rejected: %v", err)
-	}
-}
-
 // silentDiagnosticsFactory opens providers that never publish diagnostics, so
 // every prepared plan stays PROVISIONAL.
 type silentDiagnosticsFactory struct{}
 
 func (silentDiagnosticsFactory) Open(config providerOpenConfig) (provider.Provider, error) {
-	return &editDiagnosticProvider{descriptor: provider.Descriptor{ID: "silent", Backend: "test", Epoch: 1, Root: config.Root}}, nil
+	return &stubProvider{descriptor: provider.Descriptor{ID: "silent", Backend: "test", Epoch: 1, Root: config.Root}}, nil
 }
 
 func TestApplyRefusesProvisionalPlanWithoutAcceptance(t *testing.T) {

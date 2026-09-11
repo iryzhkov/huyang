@@ -259,3 +259,39 @@ func TestModernDebugCatalogIsCompact(t *testing.T) {
 		t.Logf("%s descriptor bytes = %d", descriptor.Name, len(encoded))
 	}
 }
+
+// A debugger failure points at tools the debug profile exposes and retries
+// the original action under a fresh idempotency key.
+func TestDebugFailureRecoveryUsesExposedToolsAndOriginalAction(t *testing.T) {
+	next := debugFailureNext("debug_session", "start")
+	if len(next) != 2 {
+		t.Fatalf("debug failure recovery is incomplete: %#v", next)
+	}
+	status, _ := next[0].(map[string]any)
+	retry, _ := next[1].(map[string]any)
+	if status["tool"] != "language_server_status" ||
+		retry["tool"] != "debug_session" || retry["action"] != "start" ||
+		retry["use_new_idempotency_key"] != true {
+		t.Fatalf("debug failure recovery names unavailable operations: %#v", next)
+	}
+}
+
+// An unavailable debugger names Huyang, never the retired agent99 name, and
+// carries a concrete repair step.
+func TestDebuggerUnavailableNamesHuyangAndGivesRepairStep(t *testing.T) {
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: t.TempDir(), StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := debugUnavailable("req_test", workspace, "debugger_unavailable", errors.New("agent99 adapter not installed"))
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "agent99") || len(result["next"].([]any)) != 2 ||
+		result["data"].(map[string]any)["repair"].(map[string]any)["action"] != "install_or_configure_dap_adapter" {
+		t.Fatalf("debugger recovery is obsolete or not actionable: %#v", result)
+	}
+}

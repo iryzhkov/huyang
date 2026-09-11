@@ -719,9 +719,6 @@ type directWorkspaces struct {
 	replayMu      sync.Mutex
 	replays       map[string]*directReplay
 	receiptLimits receiptLimits
-	// observer receives lifecycle notifications; production leaves it nil.
-	// It is read under replayMu.
-	observer directObserver
 
 	persistMu    sync.Mutex
 	registryPath string
@@ -739,19 +736,6 @@ type directWorkspaces struct {
 	verificationOrder []string
 
 	notices *noticeDelivery
-}
-
-// directObserver is notified at points where a test needs to interleave
-// another actor, for example a service restart between the durable receipt
-// checkpoint and the end of a stateful call.
-type directObserver interface {
-	replayCheckpointed()
-}
-
-func (d *directWorkspaces) setObserver(observer directObserver) {
-	d.replayMu.Lock()
-	defer d.replayMu.Unlock()
-	d.observer = observer
 }
 
 type replayCheckpoint func(map[string]any) error
@@ -946,12 +930,6 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 			pending.checkpointed = false
 			d.replayMu.Unlock()
 			return err
-		}
-		d.replayMu.Lock()
-		observer := d.observer
-		d.replayMu.Unlock()
-		if observer != nil {
-			observer.replayCheckpointed()
 		}
 		return nil
 	}))
