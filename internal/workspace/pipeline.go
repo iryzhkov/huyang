@@ -149,6 +149,12 @@ func DefaultPipelinePolicy() PipelinePolicy {
 }
 
 func LoadPipelinePolicy(projectRoot, userConfig string) (PipelinePolicy, error) {
+	return LoadPipelinePolicyForTrustedRoot(projectRoot, projectRoot, userConfig)
+}
+
+// LoadPipelinePolicyForTrustedRoot reads project policy from projectRoot while
+// evaluating command trust against the stable canonical workspace root.
+func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig string) (PipelinePolicy, error) {
 	policy := DefaultPipelinePolicy()
 	projectPath := filepath.Join(projectRoot, ".huyang.toml")
 	if content, err := os.ReadFile(projectPath); err == nil {
@@ -182,7 +188,7 @@ func LoadPipelinePolicy(projectRoot, userConfig string) (PipelinePolicy, error) 
 			return PipelinePolicy{}, err
 		}
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(projectRoot)
+	resolvedRoot, err := filepath.EvalSymlinks(trustedRoot)
 	if err != nil {
 		return PipelinePolicy{}, err
 	}

@@ -138,7 +138,7 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 	if s.sandbox == nil || s.done {
 		return workspacecore.VerificationResult{}, errors.New("prepared sandbox is not available")
 	}
-	policy, err := workspacecore.LoadPipelinePolicy(s.workspace.Identity().Root, "")
+	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(s.sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
 		return workspacecore.VerificationResult{}, err
 	}
@@ -196,7 +196,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		s.provider, s.stager, s.sandbox = nil, nil, nil
 		return err
 	}
-	policy, err := workspacecore.LoadPipelinePolicy(s.workspace.Identity().Root, "")
+	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
 		return err
 	}

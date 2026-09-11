@@ -442,3 +442,23 @@ func TestParallelCommandWithDeclaredWritesIsRejectedBeforeExecution(t *testing.T
 		t.Fatalf("rejected command ran: %v", statErr)
 	}
 }
+
+func TestPipelinePolicyCanReadPreparedConfigUsingCanonicalTrustRoot(t *testing.T) {
+	canonicalRoot := t.TempDir()
+	preparedRoot := t.TempDir()
+	projectPath := filepath.Join(preparedRoot, ".huyang.toml")
+	if err := os.WriteFile(projectPath, []byte("version = 1\n[[check]]\nname = \"prepared\"\ncommand = [\"true\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	userConfig := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(userConfig, []byte("[trust]\nroots = [\""+canonicalRoot+"\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadPipelinePolicyForTrustedRoot(preparedRoot, canonicalRoot, userConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !policy.Trusted || policy.ProjectConfig != projectPath || len(policy.Check) != 1 || policy.Check[0].Name != "prepared" {
+		t.Fatalf("prepared policy = %+v", policy)
+	}
+}
