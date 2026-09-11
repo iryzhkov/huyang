@@ -1,8 +1,8 @@
 // Command huyang exposes the long-lived Huyang service and its thin MCP adapter.
 package main
 
-import "github.com/iryzhkov/huyang/internal/bridge"
+import "github.com/iryzhkov/huyang/internal/service"
 
 func main() {
-	bridge.HuyangMain()
+	service.Main()
 }

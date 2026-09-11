@@ -1,4 +1,4 @@
-package bridge
+package service
 
 import (
 	"bufio"
@@ -60,7 +60,7 @@ type huyangService struct {
 	closeOnce sync.Once
 }
 
-func HuyangMain() {
+func Main() {
 	if err := runHuyang(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "huyang:", err)
 		os.Exit(1)

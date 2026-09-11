@@ -1,4 +1,4 @@
-package bridge
+package service
 
 // Friction spool: one JSON line per MCP tool call, appended to a file under
 // the local data directory, so that a later pass can measure which tools
@@ -186,7 +186,7 @@ func buildVersion() string {
 }
 
 var (
-	// Relative paths count too: an error naming internal/bridge/mcp.go has to
+	// Relative paths count too: an error naming internal/service/server.go has to
 	// fold the same way as one naming /home/igor/src/x.go, or the same failure
 	// splits into a cluster per file.
 	frictionPathRe  = regexp.MustCompile(`(?:[A-Za-z]:)?[\w.~@+-]*(?:/[\w.~@+-]+)+`)
