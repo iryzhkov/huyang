@@ -638,6 +638,7 @@ local SUPPORT_MAX_FILETYPES = 10
 
 local SUPPORT_ATTACH_MS = 2500
 local JAVA_RESTART_ATTACH_MS = 6000
+local RUBY_RESTART_ATTACH_MS = 8000
 
 -- A warning when a JavaScript or TypeScript project's dependencies are not
 -- where the language server will look, or are a symlink escaping the root:
@@ -736,7 +737,25 @@ end
 -- durable; re-enable installed servers before probing workspace buffers.
 local ensure_ruby_lsp_bundler
 
+-- Mason packages are durable, but an owned headless provider may start
+-- without mason.setup() having prepended its launcher directory. Put that
+-- directory first explicitly so a version-manager shim with the same name
+-- cannot win merely because it exists.
+local function ensure_mason_bin_on_path(bin)
+    bin = bin or (vim.fn.stdpath("data") .. "/mason/bin")
+    local stat = vim.uv.fs_stat(bin)
+    if not stat or stat.type ~= "directory" then return nil end
+    local separator = package.config:sub(1, 1) == "\\" and ";" or ":"
+    local kept = {}
+    for _, entry in ipairs(vim.split(vim.env.PATH or "", separator, { plain = true, trimempty = true })) do
+        if entry ~= bin then kept[#kept + 1] = entry end
+    end
+    vim.env.PATH = bin .. (#kept > 0 and (separator .. table.concat(kept, separator)) or "")
+    return bin
+end
+
 local function enable_installed_servers(ft)
+    ensure_mason_bin_on_path()
     local okreg, registry = pcall(require, "mason-registry")
     local okml, mlsp = pcall(require, "mason-lspconfig")
     if not okreg or not okml then return {} end
@@ -770,8 +789,9 @@ local function enable_installed_servers(ft)
                     runtime_ready = ensure_ruby_lsp_bundler(pkg) == true
                 end
                 if runtime_ready then
-                    pcall(vim.lsp.enable, name)
-                    enabled[#enabled + 1] = name
+                    if pcall(vim.lsp.enable, name) then
+                        enabled[#enabled + 1] = name
+                    end
                 end
             end
         end
@@ -788,6 +808,9 @@ local function support_attach_wait(ft, requested, restored)
     -- callers retain their requested bound.
     if requested == nil and ft == "java" and vim.tbl_contains(restored or {}, "jdtls") then
         wait_ms = math.max(wait_ms, JAVA_RESTART_ATTACH_MS)
+    end
+    if requested == nil and ft == "ruby" and vim.tbl_contains(restored or {}, "ruby_lsp") then
+        wait_ms = math.max(wait_ms, RUBY_RESTART_ATTACH_MS)
     end
     return wait_ms
 end
@@ -1077,10 +1100,13 @@ local function attached_client(root, ft)
     local okw, werr = pcall(function()
         if not okb then return end
         -- The sample may have been loaded before the server existed (the
-        -- open_workspace probe does that); re-setting the filetype fires
-        -- FileType again so vim.lsp.enable's autocmd gets a second chance.
+        -- open_workspace probe does that); explicitly replay FileType so
+        -- vim.lsp.enable's autocmd gets a second chance even when the option is unchanged.
         if #vim.lsp.get_clients({ bufnr = bufnr }) == 0 then
-            pcall(function() vim.bo[bufnr].filetype = ft end)
+            pcall(function()
+                vim.bo[bufnr].filetype = ft
+                vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
+            end)
         end
         local deadline = vim.uv.now() + INSTALL_ATTACH_MS
         while vim.uv.now() < deadline do
@@ -1237,6 +1263,27 @@ local function enable_system_server(ft, name, cmd, root, why)
 end
 
 local function server_prerequisite(package)
+    if package == "rust-analyzer" then
+        local cargo = vim.fn.exepath("cargo")
+        if cargo == "" then
+            return nil, "rust-analyzer requires Cargo, but cargo is absent from the embedded Neovim PATH; "
+                .. "install Rust or add its bin directory to the Huyang user service PATH, then restart the provider"
+        end
+        local result = vim.system({ cargo, "--version" }, { text = true }):wait(3000)
+        if not result then
+            return nil, ("rust-analyzer requires a working Cargo toolchain, but `%s --version` did not finish within 3s; "
+                .. "fix the Huyang user service PATH, then restart the provider"):format(cargo)
+        end
+        if result.code ~= 0 then
+            local detail = vim.trim((result.stderr or "") .. " " .. (result.stdout or "")):gsub("%s+", " ")
+            if #detail > 240 then detail = detail:sub(1, 237) .. "..." end
+            return nil, ("rust-analyzer requires a working Cargo toolchain, but `%s --version` exited %s%s; "
+                .. "make cargo usable in the Huyang user service PATH "
+                .. "(for mise, run `mise use -g rust@stable`), then restart the provider")
+                :format(cargo, tostring(result.code), detail ~= "" and (": " .. detail) or "")
+        end
+        return true
+    end
     if package ~= "csharp-language-server" then return true end
     local dotnet = vim.fn.exepath("dotnet")
     if dotnet == "" then
@@ -1250,6 +1297,7 @@ local function server_prerequisite(package)
 end
 
 local function install_server(ft, wanted, root)
+    ensure_mason_bin_on_path()
     local okreg, registry = pcall(require, "mason-registry")
     local okml, mlsp = pcall(require, "mason-lspconfig")
     if not okreg or not okml then
@@ -1405,13 +1453,21 @@ local function install_server(ft, wanted, root)
         end
         out.runtime_dependency = "bundler"
     end
-    pcall(vim.lsp.enable, lspname)
-    local cmd = vim.tbl_get(vim.lsp.config, lspname, "cmd")
-    if type(cmd) == "table" and type(cmd[1]) == "string" and vim.fn.executable(cmd[1]) == 0 then
+    local enabled, enable_err = pcall(vim.lsp.enable, lspname)
+    if not enabled then
         out.attached = false
-        out.note = cmd[1] .. " is not executable from this Neovim (Mason's bin dir "
-            .. "is added to PATH by mason.setup(); is that in the config?)"
+        out.note = "could not enable " .. lspname .. ": " .. tostring(enable_err)
         return out
+    end
+    local cmd = vim.tbl_get(vim.lsp.config, lspname, "cmd")
+    if type(cmd) == "table" and type(cmd[1]) == "string" then
+        local executable = vim.fn.exepath(cmd[1])
+        if executable == "" then
+            out.attached = false
+            out.note = cmd[1] .. " is not executable from this Neovim (Huyang prepended Mason's bin directory before enabling it)"
+            return out
+        end
+        out.executable = executable
     end
     if type(root) == "string" and root ~= "" then
         local client, why = attached_client(root, ft)
@@ -1458,6 +1514,8 @@ M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 M._enable_installed_servers = enable_installed_servers
 M._support_attach_wait = support_attach_wait
 M._server_prerequisite = server_prerequisite
+M._ensure_mason_bin_on_path = ensure_mason_bin_on_path
+M._attached_client = attached_client
 M._configure_jdtls_sandbox_safety = configure_jdtls_sandbox_safety
 
 return M

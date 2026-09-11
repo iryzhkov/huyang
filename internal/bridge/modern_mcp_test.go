@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,6 +142,38 @@ func TestDirectModeDoesNotAdvertiseTasksWithoutCapability(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(string(encoded)), "task") {
 		t.Fatalf("direct mode advertised unsupported Tasks capability: %s", encoded)
+	}
+}
+
+func TestReadPathImplicitlyOpensExactDocumentWorkspace(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"service.conf": "enabled=true\n", "notes.md": "# Notes\n", "event.json": "{}\n",
+		"events.jsonl": "{\"event\":1}\n", "journalctl": "Sep 11 12:00:00 host service[1]: ready\n",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		direct := newDirectWorkspaces(t.TempDir())
+		result := direct.executeScheduled(context.Background(), "req_implicit_read", "read", map[string]any{
+			"target": map[string]any{"path": path},
+		})
+		if result["outcome"] != "ok" {
+			t.Fatalf("implicit read %s failed: %#v", name, result)
+		}
+		identity, ok := result["workspace"].(workspacecore.Identity)
+		if !ok || identity.Kind != workspacecore.KindDocuments || identity.ID == "" {
+			t.Fatalf("implicit workspace = %#v", result["workspace"])
+		}
+		data, _ := result["data"].(map[string]any)
+		if data["implicit_workspace"] != true || !strings.Contains(fmt.Sprint(data["content"]), strings.TrimSpace(content)) {
+			t.Fatalf("implicit read data = %#v", data)
+		}
+		warnings, _ := result["warnings"].([]string)
+		if len(warnings) == 0 || !strings.Contains(warnings[0], "one-document") {
+			t.Fatalf("implicit read warning = %#v", warnings)
+		}
 	}
 }
 

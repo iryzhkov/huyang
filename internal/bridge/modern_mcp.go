@@ -229,11 +229,11 @@ func buildModernTools() []modernTool {
 		{Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 		}, "workspace_id", "relation", "target")},
-		{Name: "read", Description: "Read exact or line-bounded source by path or revision-bound handle, plus outlines, provenance, and commit changes.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Name: "read", Description: "Read exact or line-bounded source by path or revision-bound handle. A path may implicitly open an exact one-document workspace and returns its workspace ID and revision for guarded follow-up edits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
-		}, "workspace_id", "target")},
+		}, "target")},
 		{Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(),
 		}, "workspace_id")},
@@ -935,7 +935,7 @@ func normalizeToolTimeout(ctx context.Context, timeout time.Duration, name strin
 }
 
 func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
-	if name == "workspace_open" {
+	if name == "workspace_open" || (name == "read" && strings.TrimSpace(fmt.Sprint(arguments["workspace_id"])) == "") {
 		return d.execute(ctx, requestID, name, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
@@ -977,6 +977,29 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return d.open(ctx, requestID, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
+	if name == "read" && strings.TrimSpace(workspaceID) == "" {
+		target, _ := arguments["target"].(map[string]any)
+		path, _ := target["path"].(string)
+		if strings.TrimSpace(path) == "" {
+			return modernEnvelope(requestID, nil, "failed", "workspace_required", "workspace_id is required for handle, range, symbol, history, and changes reads", map[string]any{})
+		}
+		opened := d.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}})
+		if opened["outcome"] != "ok" {
+			return opened
+		}
+		identity, _ := opened["workspace"].(workspacecore.Identity)
+		implicitID := strings.TrimSpace(string(identity.ID))
+		if implicitID == "" {
+			return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
+		}
+		arguments["workspace_id"] = implicitID
+		result := d.execute(ctx, requestID, name, arguments)
+		result["warnings"] = append(result["warnings"].([]string), "Implicitly opened an exact one-document workspace; reuse the returned workspace_id and revision for guarded edits.")
+		if data, ok := result["data"].(map[string]any); ok {
+			data["implicit_workspace"] = true
+		}
+		return result
+	}
 	workspace := d.get(workspacecore.ID(workspaceID))
 	if workspace == nil {
 		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
@@ -1018,6 +1041,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			}}
 			return result
 		}
+		reconcilePipelineCapabilities(&inspection, policy)
 		view, _ := arguments["view"].(string)
 		if view == "" {
 			view = "status"
@@ -1038,6 +1062,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			"pipeline_state": map[string]any{
 				"state": pipelineState, "configured": policy.ProjectConfig != "", "trusted": policy.Trusted,
 				"reason": pipelineReason, "project_config": policy.ProjectConfig, "user_config": policy.UserConfig,
+				"configuration_scope": "The project .huyang.toml declares commands; execution trust is granted separately by [trust].roots in the user config.",
 			},
 		}
 		summary := "Workspace inspection is current"
@@ -1193,6 +1218,9 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 		capabilities.Optional["lsp"] = "probe_with_language_server_status"
 		semanticProvider = canonicalProviderStatus(canonicalBackend)
 	}
+	if policy, policyErr := workspacecore.LoadPipelinePolicy(opened.Identity().Root, ""); policyErr == nil {
+		reconcilePipelineCapabilities(&capabilities, policy)
+	}
 	action := "Opened"
 	if !created {
 		action = "Reopened"
@@ -1205,6 +1233,25 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 		"recent_commits": recent,
 		"registry":       map[string]any{"persistent": true, "reused": !created},
 	})
+}
+
+func reconcilePipelineCapabilities(inspection *workspacecore.Inspection, policy workspacecore.PipelinePolicy) {
+	inspection.Optional["parser"] = "available_for_go_json_jsonl_toml_yaml"
+	commandsConfigured := len(policy.Check) > 0 || len(policy.Tests) > 0
+	formatConfigured := len(policy.Format.Gate.Command) > 0 || len(policy.Format.Transform.Command) > 0
+	state := "unavailable"
+	if policy.ProjectConfig != "" {
+		state = "configured_untrusted"
+		if policy.Trusted {
+			state = "available"
+		}
+	}
+	if commandsConfigured {
+		inspection.Optional["project_commands"] = state
+	}
+	if formatConfigured {
+		inspection.Optional["formatter"] = state
+	}
 }
 
 func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
@@ -1694,7 +1741,7 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 		revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 		data["document_revision"] = after.Revision
 		verification := map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
-		backend, providerErr := d.restartCanonicalProvider(ctx, workspace)
+		backend, providerErr := d.resyncCanonicalProvider(ctx, workspace)
 		if providerErr == nil {
 			report, evidenceErr := recordProviderDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
 				Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
@@ -2265,7 +2312,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				result["warnings"] = append(result["warnings"].([]string), "The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted.")
 				result["data"].(map[string]any)["applied_from_provisional"] = true
 			}
-			if _, resyncErr := d.restartCanonicalProvider(ctx, workspace); resyncErr != nil {
+			if _, resyncErr := d.resyncCanonicalProvider(ctx, workspace); resyncErr != nil {
 				result["outcome"] = "provisional"
 				result["code"] = "provider_resync_failed"
 				result["summary"] = "Prepared plan applied, but canonical provider resynchronization failed"
@@ -2398,10 +2445,15 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	} else {
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		if revision != current {
-			return modernEnvelope(requestID, workspace, "conflict", "revision_changed",
+			result := modernEnvelope(requestID, workspace, "conflict", "revision_changed",
 				"Requested canonical revision is not current", map[string]any{
 					"revision_or_transaction": revision, "current_revision": current,
 				})
+			result["next"] = []any{
+				map[string]any{"tool": "revision_diff", "from_revision": revision, "to_revision_or_current": "current"},
+				map[string]any{"tool": "verify_run", "revision_or_transaction": current, "stages": stages, "test_scope": testScope, "use_new_idempotency_key": true},
+			}
+			return result
 		}
 		sandbox, materializeErr := workspacecore.MaterializeSandbox(
 			ctx, identity.Root, filepath.Join(d.stateDir, "sandboxes"), identity.ID,

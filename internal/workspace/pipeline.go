@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 type VerificationStatus string
@@ -143,7 +144,7 @@ func DefaultPipelinePolicy() PipelinePolicy {
 	policy.Format.Scope = "declared"
 	policy.Resource.TimeoutSeconds = 120
 	policy.Resource.MaxOutputBytes = 256 << 10
-	policy.Resource.MaxSnapshotBytes = 64 << 20
+	policy.Resource.MaxSnapshotBytes = 256 << 20
 	policy.Resource.MaxChangedFiles = 256
 	policy.Resource.MaxParallel = 1
 	return policy
@@ -159,8 +160,17 @@ func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig strin
 	policy := DefaultPipelinePolicy()
 	projectPath := filepath.Join(projectRoot, ".huyang.toml")
 	if content, err := os.ReadFile(projectPath); err == nil {
-		if _, err := toml.Decode(string(content), &policy); err != nil {
+		metadata, err := toml.Decode(string(content), &policy)
+		if err != nil {
 			return PipelinePolicy{}, fmt.Errorf("invalid project policy: %w", err)
+		}
+		if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
+			key := undecoded[0].String()
+			hint := ""
+			if strings.HasSuffix(key, ".affected") {
+				hint = "; use covers = [\"path/**\"] on the command instead"
+			}
+			return PipelinePolicy{}, fmt.Errorf("unknown project policy key %q%s", key, hint)
 		}
 		policy.ProjectConfig = projectPath
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -278,7 +288,7 @@ func captureTree(ctx context.Context, root string, maxBytes int64) (treeSnapshot
 			}
 			total += int64(len(content))
 			if total > maxBytes {
-				return errors.New("verification_snapshot_quota_exceeded")
+				return fmt.Errorf("verification_snapshot_quota_exceeded: observed_bytes=%d limit_bytes=%d at %s; raise resource.max_snapshot_bytes in .huyang.toml or remove generated dependencies from the verification root", total, maxBytes, relative)
 			}
 			kind := ObjectRegularText
 			if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
@@ -638,8 +648,9 @@ func parserStage(root, revision string, files []string) VerificationStage {
 	supported := 0
 	skipped := map[string]bool{}
 	for _, relative := range files {
-		extension := filepath.Ext(relative)
-		if extension != ".go" && extension != ".json" {
+		extension := strings.ToLower(filepath.Ext(relative))
+		supportedFormat := extension == ".go" || extension == ".json" || extension == ".jsonl" || extension == ".toml" || extension == ".yaml" || extension == ".yml"
+		if !supportedFormat {
 			reason := "parser_unavailable:" + extension
 			if extension == "" {
 				reason = "parser_unavailable:no_extension"
@@ -676,6 +687,32 @@ func parserStage(root, revision string, files []string) VerificationStage {
 		case ".json":
 			var value any
 			if err := json.Unmarshal(content, &value); err != nil {
+				stage.Status = VerificationFailed
+				stage.Exit = 1
+				stage.Output += relative + ": " + err.Error() + "\n"
+			}
+		case ".jsonl":
+			for lineNumber, line := range bytes.Split(content, []byte("\n")) {
+				if len(bytes.TrimSpace(line)) == 0 {
+					continue
+				}
+				var value any
+				if err := json.Unmarshal(line, &value); err != nil {
+					stage.Status = VerificationFailed
+					stage.Exit = 1
+					stage.Output += fmt.Sprintf("%s:%d: %v\n", relative, lineNumber+1, err)
+				}
+			}
+		case ".toml":
+			var value map[string]any
+			if _, err := toml.Decode(string(content), &value); err != nil {
+				stage.Status = VerificationFailed
+				stage.Exit = 1
+				stage.Output += relative + ": " + err.Error() + "\n"
+			}
+		case ".yaml", ".yml":
+			var value any
+			if err := yaml.Unmarshal(content, &value); err != nil {
 				stage.Status = VerificationFailed
 				stage.Exit = 1
 				stage.Output += relative + ": " + err.Error() + "\n"
@@ -838,11 +875,12 @@ func corroborateParserWithProjectCheck(result *VerificationResult) {
 		if stage.Stage != "parser" || stage.Status != VerificationSkipped {
 			continue
 		}
-		covered := len(stage.Coverage.Skipped) > 0
+		remaining := stage.Coverage.Skipped[:0]
+		coveredCount := 0
 		for _, reason := range stage.Coverage.Skipped {
 			if !strings.HasPrefix(reason, "parser_unavailable:") {
-				covered = false
-				break
+				remaining = append(remaining, reason)
+				continue
 			}
 			extension := strings.TrimPrefix(reason, "parser_unavailable:")
 			extensionCovered := false
@@ -852,21 +890,26 @@ func corroborateParserWithProjectCheck(result *VerificationResult) {
 					break
 				}
 			}
-			if !extensionCovered {
-				covered = false
-				break
+			if extensionCovered {
+				coveredCount++
+			} else {
+				remaining = append(remaining, reason)
 			}
 		}
-		if !covered {
+		stage.Coverage.Skipped = remaining
+		if coveredCount == 0 {
 			continue
 		}
-		stage.Status = VerificationPassed
-		stage.Exit = 0
-		stage.Implementation = []string{"configured_project_check"}
-		stage.Coverage.Complete = true
-		stage.Coverage.FilesRead = stage.Coverage.FilesConsidered
-		stage.Coverage.Skipped = nil
-		stage.Coverage.Semantic = "configured_project_check"
+		if len(remaining) == 0 {
+			stage.Status = VerificationPassed
+			stage.Exit = 0
+			stage.Coverage.Complete = true
+			stage.Coverage.FilesRead = stage.Coverage.FilesConsidered
+			stage.Coverage.Semantic = "configured_project_check"
+		} else {
+			stage.Coverage.Semantic = "native_parser_and_configured_project_check"
+		}
+		stage.Implementation = append(stage.Implementation, "configured_project_check")
 	}
 }
 

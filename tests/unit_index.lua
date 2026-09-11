@@ -197,6 +197,51 @@ check("references names the files no location above comes from",
     vim.deep_equal(refs.files_omitted, { "/tmp/agent99-cap-b.lua", "/tmp/agent99-cap-c.lua" }),
     refs.files_omitted)
 
+-- Parser-backed symbol lookup must not inherit the general 10-second LSP
+-- request deadline merely to enrich an already useful syntax-tree answer.
+do
+	-- Keep the regression deterministic when the smoke PATH exposes the
+	-- machine's real Mason lua-language-server.
+	pcall(vim.lsp.enable, "lua_ls", false)
+	vim.lsp.config("lua_ls", { cmd = { "huyang-test-missing-lua-language-server" } })
+	pcall(vim.lsp.enable, "lua_ls", true)
+    local root = vim.fn.tempname() .. "-huyang-index"
+    vim.fn.mkdir(root, "p")
+    local path = root .. "/service.lua"
+    vim.fn.writefile({
+        "local function known_symbol()",
+        "    return 1",
+        "end",
+    }, path)
+    local original_get_clients = vim.lsp.get_clients
+    local stalled = {
+        name = "stalled-symbol-server",
+        supports_method = function() return true end,
+        request = function() return true end,
+    }
+    vim.lsp.get_clients = function() return { stalled } end
+    local finished, answer
+    local started = vim.uv.hrtime()
+    local co = coroutine.create(function()
+        local ok, value = pcall(index.find_symbol, {
+            root = root, file = path, name = "known_symbol",
+        })
+        answer = { ok = ok, value = value }
+        finished = true
+    end)
+    coroutine.resume(co)
+    vim.wait(1500, function() return finished end, 10)
+    local elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+    vim.lsp.get_clients = original_get_clients
+    vim.fn.delete(root, "rf")
+    check("parser-backed find_symbol bounds optional LSP enrichment",
+        finished and answer.ok and elapsed_ms < 1000
+            and answer.value.count == 1 and answer.value.complete == false
+            and answer.value.enrichment.status == "pending"
+            and answer.value.enrichment.retry:find("language_server_status", 1, true) ~= nil,
+        { elapsed_ms = elapsed_ms, answer = answer })
+end
+
 if failures > 0 then
     io.stdout:write(("unit_index: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

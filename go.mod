@@ -8,6 +8,7 @@ require (
 	github.com/neovim/go-client v1.2.1
 	github.com/pkoukk/tiktoken-go v0.1.8
 	golang.org/x/sys v0.41.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

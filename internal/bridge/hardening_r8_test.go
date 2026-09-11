@@ -79,7 +79,7 @@ func newHardeningR8Provider() *hardeningR8Provider {
 	}}
 }
 
-func TestDirectEditRestartsCanonicalProviderBeforeDiagnostics(t *testing.T) {
+func TestDirectEditResyncsWarmCanonicalProviderBeforeDiagnostics(t *testing.T) {
 	backend := newHardeningR8Provider()
 	useHardeningR8Factory(t, backend)
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"main.go": "package main\nvar risk = 1\n"})
@@ -92,8 +92,8 @@ func TestDirectEditRestartsCanonicalProviderBeforeDiagnostics(t *testing.T) {
 		t.Fatalf("provider opens before edit = %d, want 1", backend.opens)
 	}
 	applied := applyLiteralProbeEdit(t, direct, workspaceID, "risk = 1", "risk = missing", "r8-provider-resync")
-	if applied["outcome"] != "ok" || backend.opens != 2 {
-		t.Fatalf("edit did not diagnose through a fresh provider: opens=%d result=%#v", backend.opens, applied)
+	if applied["outcome"] != "ok" || backend.opens != 1 {
+		t.Fatalf("edit did not diagnose through the warm resynced provider: opens=%d result=%#v", backend.opens, applied)
 	}
 }
 

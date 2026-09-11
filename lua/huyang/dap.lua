@@ -215,6 +215,14 @@ end
 -- Waiting for the session
 ------------------------------------------------------------------------
 
+local function adapter_start_budget(wait_ms)
+    return math.min(ADAPTER_START_MS, wait_ms)
+end
+
+local function sanitize_debug_notice(message)
+    return (message:gsub("%${port}", "<allocated-port>"))
+end
+
 local function clamp_wait(ms, default)
     ms = tonumber(ms)
     if ms == nil then ms = default or DEFAULT_WAIT_MS end
@@ -809,7 +817,8 @@ BUILTIN["js-debug"] = {
         else
             executable = { command = launcher, args = { "${port}" } }
         end
-        return { type = "server", host = "127.0.0.1", port = "${port}", executable = executable }
+        -- vscode-js-debug binds the IPv6 loopback by default.
+        return { type = "server", host = "::1", port = "${port}", executable = executable }
     end,
     launch = function(args, root)
         local program = args.program or args.file
@@ -1868,6 +1877,7 @@ local function start_session(dap, adapter_name, adapter, config, args, root, req
     local notices, notify_saved = state.notices, vim.notify
     local function notify_capture(msg, level, opts)
         if type(msg) == "string" then
+            msg = sanitize_debug_notice(msg)
             notices[#notices + 1] = msg
             if #notices > 10 then table.remove(notices, 1) end
         end
@@ -1896,14 +1906,14 @@ local function start_session(dap, adapter_name, adapter, config, args, root, req
         end
     end
     -- Phase 1: the adapter must come up and send `initialized`. The budget
-    -- is ADAPTER_START_MS of silence, whatever the caller's wait: a
+    -- is at most ADAPTER_START_MS and never exceeds the caller's wait: a
     -- missing binary or a wrong version shows up here, with the adapter's
     -- own output. A server adapter this module spawned and saw listening
     -- (Delve, whose `go build` runs before it answers the launch), or any
     -- adapter still producing output, is alive and keeps the phase going,
     -- up to the caller's wait.
     local tool = "debug_" .. request_kind
-    local phase_deadline = now() + math.max(ADAPTER_START_MS, wait_ms)
+    local phase_deadline = now() + adapter_start_budget(wait_ms)
     local kind
     while true do
         local seen = #state.output + state.output_dropped
@@ -2783,5 +2793,10 @@ end
 
 -- For tests.
 M._state = function() return state end
+M._test = {
+    adapter_start_budget = adapter_start_budget,
+    sanitize_debug_notice = sanitize_debug_notice,
+    js_debug_adapter = BUILTIN["js-debug"].adapter,
+}
 
 return M

@@ -760,11 +760,12 @@ local function get_client(bufnr, method, timeout_ms)
 end
 
 -- LSP request that yields until the reply (or a timeout) arrives.
-local function request(client, bufnr, method, params)
+local function request(client, bufnr, method, params, timeout_ms)
+    local request_timeout_ms = math.max(1, tonumber(timeout_ms) or REQUEST_TIMEOUT_MS)
     local timer = vim.uv.new_timer()
     local rpc_err, result = await(function(resume)
-        timer:start(REQUEST_TIMEOUT_MS, 0, vim.schedule_wrap(function()
-            resume({ message = ("timed out after %d ms"):format(REQUEST_TIMEOUT_MS) }, nil)
+        timer:start(request_timeout_ms, 0, vim.schedule_wrap(function()
+            resume({ message = ("timed out after %d ms"):format(request_timeout_ms) }, nil)
         end))
         local ok = client:request(method, params, function(e, r)
             resume(e, r)

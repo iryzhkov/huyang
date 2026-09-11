@@ -2068,13 +2068,17 @@ local WIDEN_TO_STATEMENT = {
     Object = true, Array = true, EnumMember = true,
 }
 
-local function lsp_index(bufnr)
-    local okc, client = pcall(get_client, bufnr, "textDocument/documentSymbol", 2000)
+local OPTIONAL_LSP_ATTACH_MS = 0
+local OPTIONAL_LSP_REQUEST_MS = 250
+
+local function lsp_index(bufnr, attach_timeout_ms, request_timeout_ms)
+    local okc, client = pcall(get_client, bufnr, "textDocument/documentSymbol",
+        attach_timeout_ms == nil and 2000 or attach_timeout_ms)
     if not okc then
         return nil
     end
     local okr, syms = pcall(request, client, bufnr, "textDocument/documentSymbol",
-        { textDocument = { uri = vim.uri_from_bufnr(bufnr) } })
+        { textDocument = { uri = vim.uri_from_bufnr(bufnr) } }, request_timeout_ms)
     if not okr then
         return nil
     end
@@ -2175,10 +2179,13 @@ local function merge_lsp_only_symbols(entries, bufnr)
     if #enabled_lsp_configs_for(vim.bo[bufnr].filetype) == 0 then
         return entries, true -- nothing will ever attach; this is as good as it gets
     end
-    if not pcall(get_client, bufnr, "textDocument/documentSymbol", ATTACH_TIMEOUT_MS) then
+    -- Treesitter already answered the structural query. LSP enrichment is
+    -- optional here: never make that useful answer wait for a server to
+    -- attach or for a cold server to spend its full navigation timeout.
+    if not pcall(get_client, bufnr, "textDocument/documentSymbol", OPTIONAL_LSP_ATTACH_MS) then
         return entries, false
     end
-    local from_lsp = lsp_index(bufnr)
+    local from_lsp = lsp_index(bufnr, OPTIONAL_LSP_ATTACH_MS, OPTIONAL_LSP_REQUEST_MS)
     if not from_lsp or #from_lsp == 0 then
         return entries, false
     end
@@ -2218,7 +2225,7 @@ local function symbol_index(bufnr)
     local cached = index_cache[bufnr]
     if cached and cached.tick == tick then
         if cached.complete then
-            return cached.entries
+            return cached.entries, true
         end
         -- An index assembled without the server is served again for a
         -- while rather than rebuilt: the rebuild would wait the attach
@@ -2227,7 +2234,7 @@ local function symbol_index(bufnr)
         -- once the grace period is over.
         if cached.retry_after and vim.uv.now() < cached.retry_after
             and #vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/documentSymbol" }) == 0 then
-            return cached.entries
+            return cached.entries, false
         end
     end
     local entries, complete
@@ -2250,7 +2257,7 @@ local function symbol_index(bufnr)
         tick = tick, entries = entries, complete = complete,
         retry_after = not complete and (vim.uv.now() + NO_SERVER_RETRY_MS) or nil,
     }
-    return entries
+    return entries, complete == true
 end
 
 -- Rank: 1 exact path, 2 path suffix / exact name, 3 name substring.
@@ -2452,12 +2459,14 @@ local function find_symbol(args)
     -- overflows, but the isolation is the part that keeps a search usable when
     -- one file is unreadable for any other reason.
     local failed, failed_seen = {}, {}
+    local enrichment_incomplete = false
     local function collect(query)
         for _, f in ipairs(files) do
             local okb, bufnr = pcall(load_buf, f)
             if okb then
-                local oki, entries = pcall(symbol_index, bufnr)
+                local oki, entries, complete = pcall(symbol_index, bufnr)
                 if oki then
+                    if complete == false then enrichment_incomplete = true end
                     for _, entry in ipairs(entries) do
                         local rank = match_rank(entry, query)
                         if rank then
@@ -2555,7 +2564,17 @@ local function find_symbol(args)
         count = #found,
         matches = out,
         note = note,
+        complete = not enrichment_incomplete,
     }
+    if enrichment_incomplete then
+        result.enrichment = {
+            status = "pending",
+            reason = "optional_lsp_document_symbols_unavailable",
+            retry = "retry find_symbol after language_server_status reports the server attached",
+        }
+        result.note = (result.note and (result.note .. "; ") or "")
+            .. "parser-backed matches are available, but optional LSP-only symbols are not complete yet"
+    end
     if clipped_path then
         result.name_paths_clipped = "some name paths were too long to print and are shown "
             .. "clipped; a clipped path is not one an edit tool can resolve - address those "

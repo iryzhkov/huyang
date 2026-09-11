@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -470,6 +471,31 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 			}
 			files = append(files, name)
 		}
+		return files, coverage, nil
+	}
+	if output, err := exec.Command("git", "-C", w.identity.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output(); err == nil {
+		var files []string
+		for _, raw := range bytes.Split(output, []byte{0}) {
+			relative := string(raw)
+			if relative == "" {
+				continue
+			}
+			coverage.FilesConsidered++
+			depth := len(strings.Split(filepath.Clean(relative), string(filepath.Separator)))
+			if depth > w.limits.MaxDepth {
+				coverage.Complete = false
+				coverage.Capped = true
+				coverage.Skipped = append(coverage.Skipped, relative+": depth limit")
+				continue
+			}
+			if len(files) >= w.limits.MaxFiles {
+				coverage.Complete = false
+				coverage.Capped = true
+				break
+			}
+			files = append(files, filepath.Join(w.identity.Root, filepath.FromSlash(relative)))
+		}
+		sort.Strings(files)
 		return files, coverage, nil
 	}
 	var files []string

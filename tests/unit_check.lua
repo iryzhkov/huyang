@@ -199,6 +199,8 @@ do
     check("restored jdtls gets a bounded cold-start readiness window",
         install._support_attach_wait("java", nil, { "jdtls" }) == 6000
             and install._support_attach_wait("java", 1200, { "jdtls" }) == 1200
+            and install._support_attach_wait("ruby", nil, { "ruby_lsp" }) == 8000
+            and install._support_attach_wait("ruby", 1200, { "ruby_lsp" }) == 1200
             and install._support_attach_wait("rust", nil, { "rust_analyzer" }) == 2500)
 end
 
@@ -247,6 +249,95 @@ do
         restored[1] == "ruby_lsp" and enabled[1] == "ruby_lsp"
             and configured.GEM_HOME == "/mason/packages/ruby-lsp",
         { restored = restored, enabled = enabled, cmd_env = configured })
+end
+
+
+do
+    local original_path = vim.env.PATH
+    local root = vim.fn.tempname()
+    local mason = root .. "/mason/bin"
+    local broken = root .. "/broken/mise/shims"
+    vim.fn.mkdir(mason, "p")
+    vim.fn.mkdir(broken, "p")
+    vim.fn.writefile({ "#!/bin/sh", "exit 0" }, mason .. "/rust-analyzer")
+    vim.fn.writefile({ "#!/bin/sh", "exit 1" }, broken .. "/rust-analyzer")
+    vim.fn.setfperm(mason .. "/rust-analyzer", "rwxr-xr-x")
+    vim.fn.setfperm(broken .. "/rust-analyzer", "rwxr-xr-x")
+    vim.env.PATH = broken .. ":/usr/bin"
+    local before = vim.fn.exepath("rust-analyzer")
+    local selected = install._ensure_mason_bin_on_path(mason)
+    local after = vim.fn.exepath("rust-analyzer")
+    local once = vim.env.PATH
+    install._ensure_mason_bin_on_path(mason)
+    local count = 0
+    for _, entry in ipairs(vim.split(vim.env.PATH, ":", { plain = true })) do
+        if entry == mason then count = count + 1 end
+    end
+    check("Mason launchers precede same-named version-manager shims",
+        selected == mason and before == broken .. "/rust-analyzer"
+            and after == mason .. "/rust-analyzer"
+            and once:sub(1, #mason + 1) == mason .. ":"
+            and vim.env.PATH == once and count == 1,
+        { selected = selected, path = vim.env.PATH })
+    vim.env.PATH = original_path
+    vim.fn.delete(root, "rf")
+end
+
+do
+    local original_exepath, original_system = vim.fn.exepath, vim.system
+    vim.fn.exepath = function(name)
+        if name == "cargo" then return "/home/test/.local/share/mise/shims/cargo" end
+        return original_exepath(name)
+    end
+    vim.system = function(command)
+        if command[1] == "/home/test/.local/share/mise/shims/cargo" and command[2] == "--version" then
+            return {
+                wait = function()
+                    return { code = 1, stdout = "", stderr = "mise ERROR No version is set for shim: cargo" }
+                end,
+            }
+        end
+        return original_system(command)
+    end
+    local ok, why = install._server_prerequisite("rust-analyzer")
+    vim.fn.exepath, vim.system = original_exepath, original_system
+    check("Rust administration rejects an executable but broken cargo shim actionably",
+        ok == nil
+            and why:find("/home/test/.local/share/mise/shims/cargo", 1, true) ~= nil
+            and why:find("No version is set", 1, true) ~= nil
+            and why:find("mise use -g rust@stable", 1, true) ~= nil,
+        why)
+end
+
+do
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local sample = root .. "/lib.rs"
+    vim.fn.writefile({ "pub fn reserve() {}" }, sample)
+    local bufnr = vim.fn.bufadd(sample)
+    vim.fn.bufload(bufnr)
+    vim.bo[bufnr].filetype = "rust"
+
+    local fired = false
+    local group = vim.api.nvim_create_augroup("huyang_unit_rust_retry", { clear = true })
+    vim.api.nvim_create_autocmd("FileType", {
+        group = group,
+        buffer = bufnr,
+        callback = function() fired = true end,
+    })
+    local original_clients = vim.lsp.get_clients
+    vim.lsp.get_clients = function(opts)
+        if fired and opts and opts.bufnr == bufnr then
+            return { { name = "rust-analyzer-test" } }
+        end
+        return {}
+    end
+    local client, why = install._attached_client(root, "rust")
+    vim.lsp.get_clients = original_clients
+    vim.api.nvim_del_augroup_by_id(group)
+    vim.fn.delete(root, "rf")
+    check("already-loaded samples replay FileType so a newly enabled server attaches",
+        client == "rust-analyzer-test", why)
 end
 
 if failures > 0 then

@@ -430,6 +430,24 @@ check("navigation does not wait when no LSP is configured",
 
 vim.fn.delete(latency_dir, "rf")
 
+-- Go-side canonical edits update disk behind the persistent provider. The
+-- internal resync operation must reload clean buffers without restarting it.
+do
+    local root = vim.fn.tempname() .. "-huyang-resync"
+    vim.fn.mkdir(root, "p")
+    local path = root .. "/service.lua"
+    vim.fn.writefile({ "return 1" }, path)
+    local bufnr = core.load_buf(path)
+    vim.fn.writefile({ "return 2" }, path)
+    local result = require("huyang.lsp").dispatch("huyang_workspace_resync", {})
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    check("workspace resync reloads an externally edited clean buffer",
+        result.resynced >= 1 and lines[1] == "return 2" and vim.bo[bufnr].modified == false,
+        { result = result, lines = lines })
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    vim.fn.delete(root, "rf")
+end
+
 if failures > 0 then
     io.stdout:write(("unit_edit: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

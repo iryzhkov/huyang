@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 func verificationParserAvailable(language string) bool {
 	switch language {
-	case "go", "json":
+	case "go", "json", "jsonl", "toml", "yaml", "yml":
 		return true
 	default:
 		return false
@@ -26,6 +27,17 @@ func reconcileParserSupport(entry map[string]any) {
 	if installed && !available {
 		entry["verification_parser_recovery"] = "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
 	}
+}
+
+func (d *directWorkspaces) resyncCanonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	backend, err := d.canonicalProvider(ctx, workspace)
+	if err == nil {
+		_, err = callCanonicalProvider(ctx, "provider_resync", workspace, backend, "workspace_resync", map[string]any{"root": workspace.Identity().Root})
+	}
+	if err == nil {
+		return backend, nil
+	}
+	return d.restartCanonicalProvider(ctx, workspace)
 }
 
 func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
@@ -142,6 +154,13 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	data := map[string]any{"installation": value, "provider": canonicalProviderStatus(backend)}
 	installation, _ := value.(map[string]any)
 	serverResult, _ := installation["server"].(map[string]any)
+	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
+	requestedServer := strings.TrimSpace(fmt.Sprint(arguments["server"]))
+	if requestedServer == "" && (len(serverResult) == 0 || status == "skipped" || status == "none") {
+		result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Parser support installation completed for %s; no language server was requested", language), data)
+		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_parser"}}
+		return result
+	}
 	if attached, present := serverResult["attached"]; present && attached == false {
 		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 		if note == "" {
@@ -160,8 +179,7 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 		}
 		return result
 	}
-	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
-	if status == "failed" || status == "unknown" {
+	if status == "failed" || status == "unknown" || status == "unsupported" || status == "skipped" {
 		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 		if note == "" {
 			note = "the provider did not supply installation diagnostics"
@@ -173,6 +191,17 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 			map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "server": arguments["server"], "use_new_idempotency_key": true},
 			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
 		}
+		return result
+	}
+	if attached, present := serverResult["attached"]; !present || attached != true {
+		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
+		if note == "" {
+			note = "the provider did not positively confirm attachment"
+		}
+		result := modernEnvelope(requestID, workspace, "provisional", "language_server_attachment_unconfirmed",
+			fmt.Sprintf("Language support was installed for %s, but server attachment is unconfirmed: %s", language, note), data)
+		result["warnings"] = []string{note}
+		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
 		return result
 	}
 	result := modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)

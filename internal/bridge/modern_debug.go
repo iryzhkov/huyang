@@ -498,7 +498,8 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 	}
 	lower := strings.ToLower(err.Error())
 	if strings.Contains(lower, "not installed") || strings.Contains(lower, "no debug adapter") ||
-		strings.Contains(lower, "could not start") || strings.Contains(lower, "executable") ||
+		strings.Contains(lower, "could not start") || strings.Contains(lower, "did not initialize") ||
+		strings.Contains(lower, "couldn't connect") || strings.Contains(lower, "executable") ||
 		strings.Contains(lower, "source map") || strings.Contains(lower, "runtime") {
 		return debugUnavailable(requestID, workspace, "debugger_unavailable", err)
 	}

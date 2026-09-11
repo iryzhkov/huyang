@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/provider"
@@ -213,6 +214,28 @@ func TestModernDebugUnavailableAndClosedActionSchemas(t *testing.T) {
 		"target": map[string]any{"handle": "h_test"},
 	}); err == nil {
 		t.Fatal("list action accepted a set-only target")
+	}
+}
+
+func TestModernDebugInitializationFailureIsActionable(t *testing.T) {
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: t.TempDir(), StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := debugProviderFailure("req_init", workspace,
+		errors.New("the js-debug adapter did not initialize within 3 s; nvim-dap: Couldn't connect to ::1:<allocated-port>: ECONNREFUSED"))
+	if result["outcome"] != "unavailable" || result["code"] != "debugger_unavailable" {
+		t.Fatalf("initialization failure was not classified as unavailable: %#v", result)
+	}
+	if next, ok := result["next"].([]any); !ok || len(next) != 2 {
+		t.Fatalf("initialization failure omitted actionable recovery: %#v", result)
+	}
+	repair := result["data"].(map[string]any)["repair"].(map[string]any)
+	if repair["action"] != "install_or_configure_dap_adapter" ||
+		!strings.Contains(repair["detail"].(string), "js-debug") {
+		t.Fatalf("initialization recovery did not retain adapter detail: %#v", result)
 	}
 }
 
