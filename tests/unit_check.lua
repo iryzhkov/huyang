@@ -196,6 +196,13 @@ do
 end
 
 do
+    check("restored jdtls gets a bounded cold-start readiness window",
+        install._support_attach_wait("java", nil, { "jdtls" }) == 6000
+            and install._support_attach_wait("java", 1200, { "jdtls" }) == 1200
+            and install._support_attach_wait("rust", nil, { "rust_analyzer" }) == 2500)
+end
+
+do
     install._configure_jdtls_sandbox_safety()
     local markers = vim.lsp.config.jdtls.root_markers or {}
     check("jdtls recognizes trusted safe-copy sandbox roots",

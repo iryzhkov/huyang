@@ -637,6 +637,7 @@ end
 local SUPPORT_MAX_FILETYPES = 10
 
 local SUPPORT_ATTACH_MS = 2500
+local JAVA_RESTART_ATTACH_MS = 6000
 
 -- A warning when a JavaScript or TypeScript project's dependencies are not
 -- where the language server will look, or are a symlink escaping the root:
@@ -771,8 +772,20 @@ local function enable_installed_servers(ft)
     return enabled
 end
 
+local function support_attach_wait(ft, requested, restored)
+    local wait_ms = math.min(15000, math.max(250, tonumber(requested) or SUPPORT_ATTACH_MS))
+    -- jdtls commonly needs longer than the generic probe window to import a
+    -- workspace after a fresh provider process. Only extend the implicit
+    -- status probe when this call actually restored installed jdtls; explicit
+    -- callers retain their requested bound.
+    if requested == nil and ft == "java" and vim.tbl_contains(restored or {}, "jdtls") then
+        wait_ms = math.max(wait_ms, JAVA_RESTART_ATTACH_MS)
+    end
+    return wait_ms
+end
+
 local function workspace_support(args)
-    local attach_wait_ms = math.min(15000, math.max(250, tonumber(args.attach_wait_ms) or SUPPORT_ATTACH_MS))
+	local requested_attach_wait = tonumber(args.attach_wait_ms)
     local root = args.root
     if type(root) ~= "string" or root == "" then
         err("missing project root")
@@ -830,7 +843,8 @@ local function workspace_support(args)
                 local _, why = ensure_java_home()
                 prerequisite = why
             end
-            enable_installed_servers(ft)
+			local restored_servers = enable_installed_servers(ft)
+			local attach_wait_ms = support_attach_wait(ft, requested_attach_wait, restored_servers)
             local configs = enabled_lsp_configs_for(ft)
             -- What could run this language under a debugger, so a client
             -- learns the option exists even when the debug tools are off.
@@ -1434,6 +1448,7 @@ M.workspace_support = workspace_support
 M.install_language = install_language
 M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 M._enable_installed_servers = enable_installed_servers
+M._support_attach_wait = support_attach_wait
 M._server_prerequisite = server_prerequisite
 M._configure_jdtls_sandbox_safety = configure_jdtls_sandbox_safety
 
