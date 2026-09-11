@@ -31,6 +31,6 @@ if $run_lua; then
 fi
 
 if $run_go; then
-    go test ./internal/bridge ./internal/provider/...
+    go test ./internal/service ./internal/handlers ./internal/mcpapi ./internal/providerpool ./internal/provider/...
 fi
 echo "huyang smoke: OK"
