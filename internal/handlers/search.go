@@ -115,6 +115,9 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	return envelope
 }
 
+// symbolFind answers from the native text core when it has parser coverage
+// and otherwise asks the semantic provider, registering its matches as
+// durable symbol handles so later locators can select them.
 func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	requested, _ := arguments["query"].(string)
 	query := canonicalNamePath(requested)
@@ -135,33 +138,12 @@ func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *
 			providerWarning = "Embedded semantic provider fallback failed: " + providerErr.Error()
 		} else {
 			value, _ := providerEvidence.(map[string]any)
-			providerRecords := make([]workspacecore.HandleRecord, 0, len(mcpapi.AnySlice(value["matches"])))
-			for _, raw := range mcpapi.AnySlice(value["matches"]) {
-				match, _ := raw.(map[string]any)
-				path, name, kind := fmt.Sprint(match["file"]), fmt.Sprint(match["name_path"]), fmt.Sprint(match["kind"])
-				read, readErr := workspace.Read(path)
-				if readErr != nil {
-					providerWarning = "Some embedded semantic provider matches could not be registered: " + readErr.Error()
-					continue
-				}
-				start, end, rangeErr := providerLineByteRange(read.Content, fmt.Sprint(match["lines"]))
-				if rangeErr != nil {
-					providerWarning = "Some embedded semantic provider matches could not be registered: " + rangeErr.Error()
-					continue
-				}
-				record, registerErr := workspace.RegisterSymbolHandle(path, name, kind, start, end)
-				if registerErr != nil {
-					providerWarning = "Some embedded semantic provider matches could not be registered: " + registerErr.Error()
-					continue
-				}
-				providerRecords = append(providerRecords, record)
-			}
-			records = providerRecords
+			records, providerWarning = registerProviderMatches(workspace, mcpapi.AnySlice(value["matches"]))
 			coverage = workspacecore.Coverage{Complete: providerWarning == "", Semantic: "embedded_nvim"}
 		}
 	}
-	items := make([]map[string]any, 0, len(records))
 	includeSource, _ := arguments["include_source"].(bool)
+	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		item := map[string]any{"handle": record}
 		if includeSource {
@@ -195,4 +177,33 @@ func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *
 		}
 	}
 	return result
+}
+
+// registerProviderMatches turns the kernel's find_symbol matches (file,
+// name path, kind and a first-last line range) into symbol handles. The
+// returned warning names the last match that could not be registered.
+func registerProviderMatches(workspace *workspacecore.Workspace, matches []any) ([]workspacecore.HandleRecord, string) {
+	records := make([]workspacecore.HandleRecord, 0, len(matches))
+	warning := ""
+	for _, raw := range matches {
+		match, _ := raw.(map[string]any)
+		path, name, kind := fmt.Sprint(match["file"]), fmt.Sprint(match["name_path"]), fmt.Sprint(match["kind"])
+		read, err := workspace.Read(path)
+		if err != nil {
+			warning = "Some embedded semantic provider matches could not be registered: " + err.Error()
+			continue
+		}
+		start, end, err := providerLineByteRange(read.Content, fmt.Sprint(match["lines"]))
+		if err != nil {
+			warning = "Some embedded semantic provider matches could not be registered: " + err.Error()
+			continue
+		}
+		record, err := workspace.RegisterSymbolHandle(path, name, kind, start, end)
+		if err != nil {
+			warning = "Some embedded semantic provider matches could not be registered: " + err.Error()
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, warning
 }
