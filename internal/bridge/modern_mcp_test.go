@@ -647,6 +647,30 @@ func TestDirectModeRejectsMalformedAndAcceptsLargeArguments(t *testing.T) {
 	}
 }
 
+func TestModernVerificationEnvelopeUsesEmptyEvidenceArray(t *testing.T) {
+	envelope := modernVerificationEnvelope(
+		"req_verify",
+		nil,
+		"ok",
+		"",
+		"verified",
+		"revision_miss",
+		workspacecore.VerificationResult{Revision: "wsrev_9"},
+	)
+	evidence := envelope["evidence"].(map[string]any)
+	ids, ok := evidence["ids"].([]string)
+	if !ok || ids == nil || len(ids) != 0 {
+		t.Fatalf("evidence ids = %#v, want non-nil empty []string", evidence["ids"])
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"ids":[]`)) || bytes.Contains(encoded, []byte(`"ids":null`)) {
+		t.Fatalf("encoded envelope has invalid empty evidence ids: %s", encoded)
+	}
+}
+
 func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 	const itemCount = modernVerificationListLimit + 25
 	paths := make([]string, 0, itemCount)

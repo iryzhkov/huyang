@@ -1804,7 +1804,7 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 	}
 	compacted["details_truncated"] = detailsTruncated
 	sort.Strings(evidenceIDs)
-	return compacted, uniqueStrings(evidenceIDs)
+	return compacted, nonNilStrings(uniqueStrings(evidenceIDs))
 }
 
 func modernVerificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult) map[string]any {

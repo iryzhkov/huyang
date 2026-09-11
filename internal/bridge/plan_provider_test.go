@@ -176,3 +176,59 @@ func TestProviderBackedPrepareReceiptIsNotReplayedAfterRestart(t *testing.T) {
 		t.Fatal("durable preview receipt was incorrectly invalidated")
 	}
 }
+
+func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.T) {
+	previousFactory := referenceProviders
+	referenceProviders = configuredProviderFactory{backend: "embed"}
+	defer func() { referenceProviders = previousFactory }()
+
+	runtimeRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENT99_RUNTIME_PATH", runtimeRoot)
+	t.Setenv("AGENT99_HEADLESS_INIT", filepath.Join(runtimeRoot, "tests", "minimal_init.lua"))
+
+	root, stateDir := t.TempDir(), t.TempDir()
+	direct := newDirectWorkspaces(stateDir)
+	defer direct.closeProviders()
+	session, cleanup := connectOfficialClient(t, profileFull, direct)
+	defer cleanup()
+
+	opened := callModern(t, session, "workspace_open", map[string]any{
+		"kind": "project", "root": root,
+	})
+	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	created := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "create-missing-plan", "action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "create-readme", "kind": "create_file",
+			"path": "README.md", "content": "# Created\n",
+		}},
+	})
+	plan := created["data"].(map[string]any)["plan"].(map[string]any)
+	planID, planRevision := plan["plan_id"].(string), plan["plan_revision"].(float64)
+	prepared := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "prepare-missing-plan", "action": "prepare",
+		"plan_id": planID, "plan_revision": planRevision,
+	})
+	if prepared["outcome"] != "provisional" || prepared["transaction"].(map[string]any)["state"] != "PROVISIONAL" {
+		t.Fatalf("prepare missing file = %#v", prepared)
+	}
+	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("prepare wrote missing file to canonical disk: %v", err)
+	}
+	stager := direct.sandboxStagers[planID]
+	request, _, ok := stager.PreparedRequest()
+	if !ok || len(request.Files) != 1 {
+		t.Fatalf("prepared request = %#v, available=%t", request, ok)
+	}
+	file := request.Files[0]
+	if file.Path != "README.md" || file.BeforeExists || len(file.Before) != 0 {
+		t.Fatalf("missing-file preimage path=%q exists=%t bytes=%q", file.Path, file.BeforeExists, file.Before)
+	}
+	staged, err := os.ReadFile(filepath.Join(stager.sandbox.Tree, "README.md"))
+	if err != nil || !bytes.Equal(staged, []byte("# Created\n")) {
+		t.Fatalf("sandbox missing staged create: %q, %v", staged, err)
+	}
+}
