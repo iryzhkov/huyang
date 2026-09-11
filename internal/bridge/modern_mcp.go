@@ -46,6 +46,10 @@ type modernTool struct {
 	ReadOnly    bool
 	Destructive bool
 	Idempotent  bool
+	// Class is the scheduler class the handler runs under. It is declared next
+	// to the schema so a tool cannot be registered without one; classForCall
+	// refines it for argument-dependent behaviour.
+	Class schedulerClass
 }
 
 const (
@@ -225,57 +229,57 @@ func buildModernTools() []modernTool {
 		schemaObject(searchProperties, "workspace_id", "git_history"),
 	}
 	return []modernTool{
-		{Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleProviderRead, Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":  enumSchema("project", "documents"),
 			"root":  stringSchema("Project root; required for kind=project."),
 			"files": map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
 		}, "kind")},
-		{Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
 		}, "workspace_id")},
-		{Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
-		{Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: schedulePureRead, Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema},
+		{Class: scheduleProviderRead, Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or path."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
-		{Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleProviderRead, Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 		}, "workspace_id", "relation", "target")},
-		{Name: "read", Description: "Read exact or line-bounded source by path or revision-bound handle. A path may implicitly open an exact one-document workspace and returns its workspace ID and revision for guarded follow-up edits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: schedulePureRead, Name: "read", Description: "Read exact or line-bounded source by path or revision-bound handle. A path may implicitly open an exact one-document workspace and returns its workspace ID and revision for guarded follow-up edits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 		}, "target")},
-		{Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(),
 		}, "workspace_id")},
-		{Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleCanonicalWrite, Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"action": enumSchema("install", "restart"), "language": stringSchema("Filetype or extension, required for install."),
 			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
 			"parser": map[string]any{"type": "boolean"},
 		}, "workspace_id", "idempotency_key", "action")},
-		{Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: schedulePureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
 		}, "workspace_id")},
-		{Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
-		{Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
+		{Class: scheduleCanonicalWrite, Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean"},
 			"operation": schemaObject(map[string]any{
 				"kind": enumSchema("replace_range"), "target": mutationRangeTargetSchema(), "content": stringSchema("Exact replacement bytes as UTF-8 text."),
 			}, "kind", "target"),
 		}, "workspace_id", "idempotency_key", "operation")},
-		{Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
-		{Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleSandboxWrite, Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
+		{Class: scheduleExternalJob, Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
 			"revision_or_transaction": stringSchema("Canonical revision, prepared revision, or transaction ID."),
 			"test_scope":              enumSchema("affected", "full"),
 		}, "workspace_id", "idempotency_key", "stages", "revision_or_transaction")},
-		{Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: scheduleCanonicalWrite, Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "from_revision": stringSchema("Earlier revision."), "to_revision_or_current": stringSchema("Later revision or current."),
 		}, "workspace_id", "from_revision", "to_revision_or_current")},
-		{Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: schedulePureRead, Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
 		}, "workspace_id", "evidence_id")},
 		modernDebugSessionTool(debug),
@@ -777,7 +781,62 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 	return direct
 }
 
+// maxNextEntries bounds the next array the output schema advertises.
+const maxNextEntries = 2
+
+// envelopeAudit, when set, observes every finalised envelope. The test suite
+// installs a validator against the output schema here so every envelope
+// produced anywhere in the package is checked.
+var envelopeAudit func(tool string, envelope map[string]any)
+
+// finalizeEnvelope is the single place every tool result passes through
+// before it leaves the service. It enforces the invariants the output schema
+// declares: the required keys exist with their declared types and next holds
+// at most maxNextEntries entries, keeping the earliest, most specific ones.
+func finalizeEnvelope(tool string, result map[string]any) map[string]any {
+	if result == nil {
+		result = map[string]any{}
+	}
+	if _, ok := result["api_version"]; !ok {
+		result["api_version"] = modernAPIVersion
+	}
+	if _, ok := result["warnings"].([]string); !ok {
+		result["warnings"] = []string{}
+	}
+	if _, ok := result["evidence"]; !ok {
+		result["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
+	}
+	if _, ok := result["data"]; !ok || result["data"] == nil {
+		result["data"] = map[string]any{}
+	}
+	switch next := result["next"].(type) {
+	case nil:
+		result["next"] = []any{}
+	case []any:
+		if len(next) > maxNextEntries {
+			result["next"] = next[:maxNextEntries]
+		}
+	case []map[string]any:
+		bounded := make([]any, 0, maxNextEntries)
+		for _, item := range next {
+			if len(bounded) == maxNextEntries {
+				break
+			}
+			bounded = append(bounded, item)
+		}
+		result["next"] = bounded
+	}
+	if envelopeAudit != nil {
+		envelopeAudit(tool, result)
+	}
+	return result
+}
+
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
+	return finalizeEnvelope(name, d.callUnfinalized(ctx, name, arguments))
+}
+
+func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arguments map[string]any) map[string]any {
 	ctx, cancel := context.WithTimeoutCause(ctx, d.toolTimeout, errGlobalToolCallTimeout)
 	defer cancel()
 	requestID := fmt.Sprintf("req_%d", d.requests.Add(1))
@@ -954,29 +1013,26 @@ func normalizeToolTimeout(ctx context.Context, timeout time.Duration, name strin
 
 func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
 	if name == "workspace_open" || (name == "read" && strings.TrimSpace(fmt.Sprint(arguments["workspace_id"])) == "") {
+		// No workspace lane exists before the workspace ID is known; the
+		// provider spawn inside open is serialised by the provider slot.
 		return d.execute(ctx, requestID, name, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
-	class := modernSchedulerClass(name)
-	if name == "change_plan" {
-		if action, _ := arguments["action"].(string); action != "prepare" {
-			class = scheduleCanonicalWrite
+	var result map[string]any
+	if name == "verify_run" {
+		result = d.executeVerify(ctx, requestID, workspaceID, arguments)
+	} else {
+		class := classForCall(name, arguments)
+		release, err := d.scheduler.acquire(ctx, workspaceID, class)
+		if err != nil {
+			return schedulerCancelled(requestID, workspaceID, class, err)
 		}
+		result = d.execute(ctx, requestID, name, arguments)
+		release()
 	}
-	release, err := d.scheduler.acquire(ctx, workspaceID, class)
-	if err != nil {
-		return modernEnvelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
-			"workspace_id": workspaceID,
-			"class":        class,
-		})
-	}
-	result := d.execute(ctx, requestID, name, arguments)
-	release()
 	if name != "diagnostics" {
 		if workspace := d.get(workspacecore.ID(workspaceID)); workspace != nil {
-			if notices := workspace.DiagnosticNotices(20); len(notices) > 0 {
-				result["diagnostic_updates"] = notices
-			}
+			d.attachDiagnosticUpdates(ctx, workspace, result)
 		}
 	}
 	if !isStatefulModernTool(name) {
@@ -985,6 +1041,48 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		}
 	}
 	return result
+}
+
+func schedulerCancelled(requestID, workspaceID string, class schedulerClass, err error) map[string]any {
+	return modernEnvelope(requestID, nil, "failed", "scheduler_wait_cancelled", err.Error(), map[string]any{
+		"workspace_id": workspaceID,
+		"class":        class,
+	})
+}
+
+// executeVerify runs verify_run in two scheduler phases: the canonical
+// document refresh and stager recovery hold the workspace lane, then the
+// pipeline itself runs as an external job without blocking the workspace.
+func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspaceID string, arguments map[string]any) map[string]any {
+	if err := ctx.Err(); err != nil {
+		return modernEnvelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
+	}
+	workspace := d.get(workspacecore.ID(workspaceID))
+	if workspace == nil {
+		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+	}
+	releaseLane, err := d.scheduler.acquire(ctx, workspaceID, scheduleCanonicalWrite)
+	if err != nil {
+		return schedulerCancelled(requestID, workspaceID, scheduleCanonicalWrite, err)
+	}
+	job, early := d.verifyPrepare(ctx, requestID, workspace, arguments)
+	releaseLane()
+	if early != nil {
+		return early
+	}
+	releaseJob, err := d.scheduler.acquire(ctx, workspaceID, scheduleExternalJob)
+	if err != nil {
+		return schedulerCancelled(requestID, workspaceID, scheduleExternalJob, err)
+	}
+	defer releaseJob()
+	return d.verifyRun(ctx, requestID, workspace, job)
+}
+
+// attachDiagnosticUpdates adds the pending diagnostic notices to a result.
+func (d *directWorkspaces) attachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
+	if notices := workspace.DiagnosticNotices(20); len(notices) > 0 {
+		result["diagnostic_updates"] = notices
+	}
 }
 
 func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
@@ -2100,12 +2198,15 @@ func modernVerificationEnvelope(requestID string, workspace *workspacecore.Works
 		"verification": compacted, "cache": cache,
 	})
 	envelope["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
-	next := make([]any, 0, len(evidenceIDs)+1)
+	next := make([]any, 0, 2)
 	if fallback := fullVerificationFallback(result); fallback != nil {
 		next = append(next, fallback)
 	}
-	for _, id := range evidenceIDs {
-		next = append(next, map[string]any{"tool": "evidence_get", "action": "inspect_verification_evidence", "evidence_id": id})
+	if len(evidenceIDs) > 0 {
+		next = append(next, map[string]any{
+			"tool": "evidence_get", "action": "inspect_verification_evidence",
+			"evidence_id": evidenceIDs[0], "evidence_count": len(evidenceIDs),
+		})
 	}
 	if len(next) > 0 {
 		envelope["next"] = next
@@ -2441,22 +2542,48 @@ func planStateNext(plan workspacecore.PlanRecord) []any {
 	}
 }
 
+// verifyJob carries the state of one verify_run between its two scheduler
+// phases: the canonical-lane refresh and stager recovery, and the external
+// job that runs the pipeline.
+type verifyJob struct {
+	request   workspacecore.VerificationRequest
+	stages    []string
+	testScope string
+	revision  string
+	cacheKey  string
+	identity  workspacecore.Identity
+	stager    *sandboxPlanStager
+}
+
+// verify runs both phases back to back for callers that already hold the
+// appropriate lanes; executeScheduled schedules the phases separately.
 func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	job, early := d.verifyPrepare(ctx, requestID, workspace, arguments)
+	if early != nil {
+		return early
+	}
+	return d.verifyRun(ctx, requestID, workspace, job)
+}
+
+// verifyPrepare resynchronises the canonical workspace, validates the request
+// and locates or recovers the prepared stager. It runs in the workspace's
+// canonical lane because the document refresh is an external resync.
+func (d *directWorkspaces) verifyPrepare(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) (*verifyJob, map[string]any) {
 	if err := workspace.PrimeDocuments(); err != nil {
-		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return nil, modernFailure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
-		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+		return nil, modernFailure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if err := d.persistWorkspaceIdentity(workspace.Identity().ID); err != nil {
-		return modernFailure(requestID, workspace, "service_state_persist_failed", err)
+		return nil, modernFailure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	revision := fmt.Sprint(arguments["revision_or_transaction"])
 	var stages []string
 	for _, value := range anySlice(arguments["stages"]) {
 		stage, ok := value.(string)
 		if !ok {
-			return modernFailure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
+			return nil, modernFailure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
 		}
 		stages = append(stages, stage)
 	}
@@ -2475,22 +2602,25 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 	}
 	testScope := fmt.Sprint(arguments["test_scope"])
-	request := workspacecore.VerificationRequest{
-		Stages: stages, Revision: revision, TestScope: testScope,
-		TestHistoryPath: filepath.Join(d.stateDir, "test-history", string(workspace.Identity().ID)+".json"),
-	}
 	identity := workspace.Identity()
-	cacheKey := strings.Join([]string{
-		string(identity.ID), revision, strings.Join(stages, "\x1f"), testScope, verificationPolicyFingerprint(identity.Root),
-	}, "\x00")
+	job := &verifyJob{
+		request: workspacecore.VerificationRequest{
+			Stages: stages, Revision: revision, TestScope: testScope,
+			TestHistoryPath: filepath.Join(d.stateDir, "test-history", string(identity.ID)+".json"),
+		},
+		stages: stages, testScope: testScope, revision: revision, identity: identity,
+		cacheKey: strings.Join([]string{
+			string(identity.ID), revision, strings.Join(stages, "\x1f"), testScope, verificationPolicyFingerprint(identity.Root),
+		}, "\x00"),
+	}
 	d.verificationMu.Lock()
-	cached, cacheHit := d.verificationCache[cacheKey]
+	cached, cacheHit := d.verificationCache[job.cacheKey]
 	d.verificationMu.Unlock()
 	if cacheHit {
-		return modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
+		return nil, modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
 	}
-	stager := d.preparedStager(workspace, revision)
-	if stager == nil {
+	job.stager = d.preparedStager(workspace, revision)
+	if job.stager == nil {
 		recoveredStager, recoveredPlan, recoverable, recoveryErr := d.recoverPreparedStager(ctx, workspace, revision)
 		if recoveryErr != nil {
 			result := modernFailure(requestID, workspace, "prepared_revision_recovery_failed", recoveryErr)
@@ -2500,18 +2630,13 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 					"plan_revision": recoveredPlan.PlanRevision, "use_new_idempotency_key": true,
 				}}
 			}
-			return result
+			return nil, result
 		}
 		if recoverable {
-			stager = recoveredStager
+			job.stager = recoveredStager
 		}
 	}
-
-	var result workspacecore.VerificationResult
-	var err error
-	if stager != nil {
-		result, err = stager.Verify(ctx, request)
-	} else {
+	if job.stager == nil {
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		if revision != current {
 			result := modernEnvelope(requestID, workspace, "conflict", "revision_changed",
@@ -2522,8 +2647,21 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 				map[string]any{"tool": "revision_diff", "from_revision": revision, "to_revision_or_current": "current"},
 				map[string]any{"tool": "verify_run", "revision_or_transaction": current, "stages": stages, "test_scope": testScope, "use_new_idempotency_key": true},
 			}
-			return result
+			return nil, result
 		}
+	}
+	return job, nil
+}
+
+// verifyRun executes the pipeline for a prepared job as an external job.
+func (d *directWorkspaces) verifyRun(ctx context.Context, requestID string, workspace *workspacecore.Workspace, job *verifyJob) map[string]any {
+	request, stages, testScope, revision, identity, stager := job.request, job.stages, job.testScope, job.revision, job.identity, job.stager
+	var result workspacecore.VerificationResult
+	var err error
+	if stager != nil {
+		result, err = stager.Verify(ctx, request)
+	} else {
+		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		sandbox, materializeErr := workspacecore.MaterializeSandbox(
 			ctx, identity.Root, filepath.Join(d.stateDir, "sandboxes"), identity.ID,
 			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
@@ -2615,7 +2753,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 			resultEnvelope["code"] = timeoutCode
 			resultEnvelope["summary"] = timeoutSummary
 			next, _ := resultEnvelope["next"].([]any)
-			resultEnvelope["next"] = append(next, recovery)
+			resultEnvelope["next"] = append([]any{recovery}, next...)
 		}
 		return resultEnvelope
 	}
@@ -2627,7 +2765,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 	}
 	d.verificationMu.Lock()
-	d.verificationCache[cacheKey] = cachedVerification{Result: result, Outcome: outcome}
+	d.verificationCache[job.cacheKey] = cachedVerification{Result: result, Outcome: outcome}
 	d.verificationMu.Unlock()
 	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
 }
@@ -2791,6 +2929,9 @@ func validateModernRegistry() error {
 		seen[descriptor.Name] = true
 		if descriptor.InputSchema["additionalProperties"] != false {
 			return fmt.Errorf("tool %s schema is not closed", descriptor.Name)
+		}
+		if !knownSchedulerClass(descriptor.Class) {
+			return fmt.Errorf("tool %s declares no scheduler class", descriptor.Name)
 		}
 	}
 	expected := map[mcpProfile]int{profileFull: 19, profileOrient: 8, profileEdit: 13, profileDebug: 12}

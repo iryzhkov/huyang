@@ -234,21 +234,6 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 	}
 }
 
-func assertModernOutputValid(t *testing.T, value map[string]any) {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateSchemaValue(outputEnvelopeSchema(), decoded, "result"); err != nil {
-		t.Fatalf("invalid modern output: %v\n%#v", err, value)
-	}
-}
-
 func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "note.txt")
@@ -849,7 +834,9 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 		t.Fatalf("stage summary = %#v", stage)
 	}
 	evidence := envelope["evidence"].(map[string]any)
-	if !slices.Equal(evidence["ids"].([]string), []string{"ev_impact", "ev_tests"}) || len(envelope["next"].([]any)) != 2 {
+	next := envelope["next"].([]any)
+	if !slices.Equal(evidence["ids"].([]string), []string{"ev_impact", "ev_tests"}) || len(next) != 1 ||
+		next[0].(map[string]any)["evidence_id"] != "ev_impact" || next[0].(map[string]any)["evidence_count"] != 2 {
 		t.Fatalf("evidence follow-up = %#v, next = %#v", evidence, envelope["next"])
 	}
 }
