@@ -101,3 +101,74 @@ func reconcilePipelineCapabilities(inspection *workspacecore.Inspection, policy 
 		inspection.Optional["formatter"] = state
 	}
 }
+
+// inspect answers workspace_inspect: the refreshed inspection, the provider
+// status when one is running, and the pipeline policy with its trust state.
+func (h *Handlers) inspect(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if _, refreshErr := workspace.RefreshKnownDocuments(); refreshErr != nil {
+		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", refreshErr)
+	}
+	inspection := workspace.Inspect()
+	var semanticProvider map[string]any
+	if backend, providerErr := h.pool.Canonical(ctx, workspace); providerErr == nil {
+		inspection.Optional["provider"] = "available"
+		inspection.Optional["lsp"] = "probe_with_language_server_status"
+		semanticProvider = providerpool.Status(ctx, backend)
+	}
+	policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
+	if policyErr != nil {
+		result := mcpapi.Failure(requestID, workspace, "workspace_policy_invalid", policyErr)
+		result["next"] = []any{map[string]any{
+			"tool": "workspace_inspect", "action": "repair_pipeline_configuration",
+			"project_config": filepath.Join(workspace.Identity().Root, ".huyang.toml"),
+		}}
+		return result
+	}
+	reconcilePipelineCapabilities(&inspection, policy)
+	view, _ := arguments["view"].(string)
+	if view == "" {
+		view = "status"
+	}
+	pipelineState, pipelineReason := describePipelineState(policy)
+	base := map[string]any{
+		"view": view, "revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+		"service_limits": map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
+		"inspection":     inspection, "semantic_provider": semanticProvider, "scheduler": h.schedulerInfo(), "pipeline_policy": policy,
+		"pipeline_state": map[string]any{
+			"state": pipelineState, "configured": policy.ProjectConfig != "", "trusted": policy.Trusted,
+			"reason": pipelineReason, "project_config": policy.ProjectConfig, "user_config": policy.UserConfig,
+			"configuration_scope": "The project .huyang.toml declares commands; execution trust is granted separately by [trust].roots in the user config.",
+		},
+	}
+	summary := "Workspace inspection is current"
+	if view == "overview" || view == "map" {
+		orientation, err := workspace.Orient()
+		if err != nil {
+			return mcpapi.Failure(requestID, workspace, "workspace_map_failed", err)
+		}
+		base["overview"] = orientation
+		summary = fmt.Sprintf("%d workspace entries", len(orientation.Entries))
+	}
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, base)
+	if pipelineState == "configured_untrusted" {
+		result["warnings"] = []string{pipelineReason}
+		result["next"] = []any{map[string]any{
+			"tool": "workspace_inspect", "action": "trust_workspace_root",
+			"root": workspace.Identity().Root, "user_config": policy.UserConfig,
+		}}
+	}
+	return result
+}
+
+// describePipelineState names whether project commands are configured and
+// trusted, with the reason a caller can act on.
+func describePipelineState(policy workspacecore.PipelinePolicy) (string, string) {
+	switch {
+	case policy.ProjectConfig != "" && policy.Trusted:
+		return "configured_trusted", "Project commands are configured and this workspace root is trusted."
+	case policy.ProjectConfig != "":
+		return "configured_untrusted", "Project commands are configured but disabled until this workspace root is trusted in the user policy."
+	default:
+		return "not_configured", "No project .huyang.toml is present; only built-in parser checks are available."
+	}
+}
