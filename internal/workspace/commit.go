@@ -336,42 +336,7 @@ func clobberRefusal(path string) error {
 }
 
 func commitWrite(path string, content []byte, mode fs.FileMode, replace bool) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".huyang-*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	remove := true
-	defer func() {
-		_ = temp.Close()
-		if remove {
-			_ = os.Remove(name)
-		}
-	}()
-	if _, err := temp.Write(content); err != nil {
-		return err
-	}
-	if err := temp.Chmod(mode & commitModeMask); err != nil {
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if replace {
-		if err := os.Rename(name, path); err != nil {
-			return err
-		}
-	} else if err := renameNoReplace(name, path); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return clobberRefusal(path)
-		}
-		return err
-	}
-	remove = false
-	return nil
+	return writeTempAndRename(path, content, mode&commitModeMask, replace)
 }
 
 func commitSymlink(path, target string, replace bool) error {

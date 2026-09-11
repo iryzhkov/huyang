@@ -946,13 +946,11 @@ func (w *Workspace) mutateFile(path string, preExists bool, preimage []byte, pos
 		return err
 	}
 	if postExists {
-		if err := atomicWrite(path, postimage, fs.FileMode(mode)); err != nil {
-			return err
-		}
-	} else if err := os.Remove(path); err != nil {
-		return err
+		err = atomicWriteFile(path, postimage, fs.FileMode(mode))
+	} else if err = os.Remove(path); err == nil {
+		err = syncDirectory(filepath.Dir(path))
 	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
+	if err != nil {
 		return err
 	}
 	cleanupJournal = true
@@ -972,38 +970,6 @@ func ensureCurrent(path string, expectedExists bool, expected []byte) error {
 	if exists != expectedExists || (exists && (disk.Kind != ObjectRegularText || !bytes.Equal(content, expected))) {
 		return fmt.Errorf("commit precondition changed for %s", path)
 	}
-	return nil
-}
-
-func atomicWrite(path string, content []byte, mode fs.FileMode) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".huyang-*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	remove := true
-	defer func() {
-		_ = temp.Close()
-		if remove {
-			_ = os.Remove(name)
-		}
-	}()
-	if _, err := temp.Write(content); err != nil {
-		return err
-	}
-	if err := temp.Chmod(mode.Perm()); err != nil {
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return err
-	}
-	remove = false
 	return nil
 }
 
@@ -1061,15 +1027,14 @@ func (w *Workspace) Recover() (RecoveryResult, error) {
 			result.Conflicts = append(result.Conflicts, target)
 			continue
 		}
+		var restoreErr error
 		if record.PreExists {
-			if writeErr := atomicWrite(target, preimage, fs.FileMode(record.Mode)); writeErr != nil {
-				return result, writeErr
-			}
-		} else if removeErr := os.Remove(target); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return result, removeErr
+			restoreErr = atomicWriteFile(target, preimage, fs.FileMode(record.Mode))
+		} else if restoreErr = os.Remove(target); restoreErr == nil || errors.Is(restoreErr, os.ErrNotExist) {
+			restoreErr = syncDirectory(filepath.Dir(target))
 		}
-		if syncErr := syncDirectory(filepath.Dir(target)); syncErr != nil {
-			return result, syncErr
+		if restoreErr != nil {
+			return result, restoreErr
 		}
 		if removeErr := os.Remove(journalPath); removeErr != nil {
 			return result, removeErr
