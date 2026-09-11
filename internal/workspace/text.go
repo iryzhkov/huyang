@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -478,10 +477,13 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 		}
 		return files, coverage, nil
 	}
-	if output, err := exec.Command("git", "-C", w.identity.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output(); err == nil {
+	// The inventory honours .gitignore through the sanitized Git runner so
+	// ambient GIT_DIR, GIT_CONFIG_* injection and core.fsmonitor hooks never
+	// reach the native text path. A truncated listing is not trusted; the
+	// bounded walk below takes over instead.
+	if output, truncated, err := runGitAt(w.identity.Root, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err == nil && !truncated {
 		var files []string
-		for _, raw := range bytes.Split(output, []byte{0}) {
-			relative := string(raw)
+		for _, relative := range strings.Split(output, "\x00") {
 			if relative == "" {
 				continue
 			}
