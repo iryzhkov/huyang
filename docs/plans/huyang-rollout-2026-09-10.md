@@ -61,3 +61,32 @@ The laptop deliberately accepts no inbound SSH from Normandy, Homelab, or Gaming
 Normandy has no laptop SSH alias for `t3-backlog --host`. On 2026-09-10 the user explicitly
 directed that Laptop be skipped for now. It remains on Agent99 and is outside this completed
 rollout; no laptop task was queued.
+
+## Addendum 2026-09-11: S20b redeploy
+
+The three deployed hosts above were installed at `4f87241`. Normandy was redeployed on
+2026-09-11 to the S20b tip, `fe143fe97dc7ac0060489c0d0840086a6c93122d` on
+`feature/huyang`. Homelab and gaming-pc are still at `4f87241` and need the same
+procedure; laptop remains deferred.
+
+The install location `~/.local/share/huyang` is a Git checkout of the repository, and the
+service loads the Lua kernel from `lua/` relative to the executable's parent directory
+(`shippedRuntimePath` in `internal/bridge/provider_factory.go`). Copying only the binary
+therefore leaves a stale kernel; on normandy that produced
+`provider_incompatible: kernel protocol version 1 is outside the accepted range 2-2` until
+the checkout itself was updated. The procedure that worked:
+
+1. `git -C ~/.local/share/huyang fetch <repo> feature/huyang`
+2. `git -C ~/.local/share/huyang checkout --detach FETCH_HEAD`
+3. `make -C ~/.local/share/huyang build`
+4. `systemctl --user restart huyang.service`
+5. Wait for `$XDG_RUNTIME_DIR/huyang/control.sock` to reappear.
+6. Confirm with a `workspace_open` and a `language_server_status` call through the
+   registered MCP command.
+
+On its first start the S20b build migrated the state directory: 2,237 legacy idempotency
+receipts were moved out of `registry.json` into per-workspace receipt files (6 dropped),
+and every plan file was converted to per-plan records. The state directory went from
+789 MB to 32 MB and the service's resident set from 4.2 GB to 60 MB after settling. The
+MCP `tools/list` check now expects 19 full-profile tools, not the 17 recorded in the host
+table above.
