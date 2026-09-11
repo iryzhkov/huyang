@@ -120,7 +120,8 @@ sandbox, start a sandbox provider, or change transaction behavior.
 
 ## Reproduction and scope
 
-The committed test-only package is `internal/sandboxspike`. Run its portable fallback gate:
+The spike source (formerly the test-only package `internal/sandboxspike`) was removed after
+this decision record was committed. It ran as a portable fallback gate:
 
 ```sh
 go test -v ./internal/sandboxspike -count=1

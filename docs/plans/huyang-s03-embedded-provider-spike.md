@@ -22,8 +22,7 @@ No custom MessagePack layer is justified by the spike.
 
 ## Compatibility exercise
 
-The hermetic test-only package `internal/provider/embedspike` starts an executable selected by
-`HUYANG_NVIM` with:
+The hermetic test-only spike package started an executable selected by `HUYANG_NVIM` with:
 
 ```text
 --clean --embed --headless -u NONE -n
@@ -89,6 +88,9 @@ was emitted during ordinary calls; the explicit 64 KiB stderr flood was drained 
 blocking and retention stayed at 32 KiB.
 
 ## Reproduction
+
+The spike source (formerly `internal/provider/embedspike`) was removed after this decision
+record was committed; the commands below are kept as a description of how it was run.
 
 Run the normal host test:
 

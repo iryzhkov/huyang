@@ -63,7 +63,7 @@ These tracked artifacts were read completely before implementation:
 - docs/plans/huyang-s13-crash-recovery.md
 - docs/plans/huyang-s14-sandbox-backend.md
 - docs/plans/fixtures/huyang-s14-sandbox-backends.json
-- internal/sandboxspike/sandbox_spike_test.go
+- internal/sandboxspike/sandbox_spike_test.go (spike source removed after its decision record was committed)
 - docs/plans/huyang-s15-isolated-sandbox.md
 - internal/workspace/sandbox.go
 - internal/workspace/sandbox_linux.go
