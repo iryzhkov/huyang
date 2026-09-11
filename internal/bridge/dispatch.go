@@ -16,10 +16,6 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// defaultToolCallTimeout bounds every tool call and every provider call
-// that carries no deadline of its own.
-const defaultToolCallTimeout = 2 * time.Minute
-
 var errGlobalToolCallTimeout = errors.New("global tool-call timeout exceeded")
 
 // directWorkspaces is the service-side dispatcher: it owns the workspace

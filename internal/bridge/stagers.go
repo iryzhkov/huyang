@@ -12,6 +12,11 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+// verificationProviderAttachWaitMS is how long a sandbox provider is given
+// to attach language servers before diagnostics are collected; it stays
+// well inside one tool call.
+const verificationProviderAttachWaitMS = 1500
+
 type providerPlanStager struct {
 	workspace *workspacecore.Workspace
 	provider  provider.Provider

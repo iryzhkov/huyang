@@ -8,6 +8,10 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+// defaultToolCallTimeout bounds every tool call and every provider call
+// that carries no deadline of its own.
+const defaultToolCallTimeout = 2 * time.Minute
+
 // providerCall names one request to a provider. TransactionID is set for
 // plan-scoped calls so the provider can label staged views; canonical calls
 // leave it empty.

@@ -16,13 +16,10 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// Provider waits during verification stay well inside one tool call: the
-// sandbox provider is given this long to attach language servers, and
-// diagnostics this long to settle, before the evidence is recorded as is.
-const (
-	verificationProviderAttachWaitMS = 1500
-	verificationDiagnosticSettleWait = 1500 * time.Millisecond
-)
+// verificationDiagnosticSettleWait is how long diagnostics may settle
+// during verification before the evidence is recorded as is; it stays well
+// inside one tool call.
+const verificationDiagnosticSettleWait = 1500 * time.Millisecond
 
 type cachedVerification struct {
 	Result  workspacecore.VerificationResult
