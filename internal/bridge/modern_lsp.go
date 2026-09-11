@@ -22,7 +22,10 @@ func reconcileParserSupport(entry map[string]any) {
 	available := installed && verificationParserAvailable(fmt.Sprint(entry["filetype"]))
 	entry["treesitter_parser_installed"] = installed
 	entry["verification_parser"] = available
-	entry["treesitter_parser"] = available
+	entry["treesitter_parser"] = installed
+	if installed && !available {
+		entry["verification_parser_recovery"] = "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+	}
 }
 
 func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {

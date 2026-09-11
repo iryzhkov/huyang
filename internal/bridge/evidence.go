@@ -15,6 +15,13 @@ type providerDiagnosticPayload struct {
 	Batches []workspacecore.DiagnosticBatch `json:"batches"`
 }
 
+func diagnosticSourcePath(path string) bool {
+	clean := filepath.ToSlash(filepath.Clean(path))
+	return clean != ".huyang.toml" &&
+		clean != ".huyang/pipeline.json" &&
+		filepath.Base(clean) != ".gitignore"
+}
+
 func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
 	if backend == nil {
 		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
@@ -26,9 +33,16 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
-		if file.AfterExists {
+		if file.AfterExists && diagnosticSourcePath(file.Path) {
 			paths = append(paths, filepath.Join(descriptor.Root, filepath.FromSlash(file.Path)))
 		}
+	}
+	if len(paths) == 0 {
+		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+			Kind: workspacecore.EvidenceProjectCheck, ProviderID: "not_applicable", Producer: "diagnostic_scope",
+			Document: workspace.Identity().Root, DocumentRevision: revision, TransactionID: transactionID,
+			Complete: true, Selected: true, Dimension: "no_lsp_applicable_edited_documents",
+		})
 	}
 	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
 	callCtx, cancel := context.WithDeadline(ctx, deadline)

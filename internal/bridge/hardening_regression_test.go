@@ -68,7 +68,7 @@ func TestVerificationProviderWaitsStayBounded(t *testing.T) {
 func TestReconcileParserSupportDistinguishesInstalledFromVerification(t *testing.T) {
 	ruby := map[string]any{"filetype": "ruby", "treesitter_parser": true}
 	reconcileParserSupport(ruby)
-	if ruby["treesitter_parser_installed"] != true || ruby["verification_parser"] != false || ruby["treesitter_parser"] != false {
+	if ruby["treesitter_parser_installed"] != true || ruby["verification_parser"] != false || ruby["treesitter_parser"] != true || ruby["verification_parser_recovery"] == "" {
 		t.Fatalf("ruby parser support = %#v", ruby)
 	}
 

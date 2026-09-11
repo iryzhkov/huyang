@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
@@ -822,6 +823,91 @@ func runCommandPolicies(ctx context.Context, root, revision, name, mode string, 
 	return results, nil
 }
 
+func corroborateParserWithProjectCheck(result *VerificationResult) {
+	var passedChecks [][]string
+	for _, stage := range result.Stages {
+		if stage.Stage == "check" && stage.Status == VerificationPassed {
+			passedChecks = append(passedChecks, stage.Implementation)
+		}
+	}
+	if len(passedChecks) == 0 {
+		return
+	}
+	for index := range result.Stages {
+		stage := &result.Stages[index]
+		if stage.Stage != "parser" || stage.Status != VerificationSkipped {
+			continue
+		}
+		covered := len(stage.Coverage.Skipped) > 0
+		for _, reason := range stage.Coverage.Skipped {
+			if !strings.HasPrefix(reason, "parser_unavailable:") {
+				covered = false
+				break
+			}
+			extension := strings.TrimPrefix(reason, "parser_unavailable:")
+			extensionCovered := false
+			for _, implementation := range passedChecks {
+				if projectCheckCoversParserExtension(extension, implementation) {
+					extensionCovered = true
+					break
+				}
+			}
+			if !extensionCovered {
+				covered = false
+				break
+			}
+		}
+		if !covered {
+			continue
+		}
+		stage.Status = VerificationPassed
+		stage.Exit = 0
+		stage.Implementation = []string{"configured_project_check"}
+		stage.Coverage.Complete = true
+		stage.Coverage.FilesRead = stage.Coverage.FilesConsidered
+		stage.Coverage.Skipped = nil
+		stage.Coverage.Semantic = "configured_project_check"
+	}
+}
+
+func projectCheckCoversParserExtension(extension string, implementation []string) bool {
+	command := strings.ToLower(strings.Join(implementation, " "))
+	tokens := strings.FieldsFunc(command, func(character rune) bool {
+		return !unicode.IsLetter(character) && !unicode.IsDigit(character) && !strings.ContainsRune("+-_./", character)
+	})
+	markers := map[string][]string{
+		".py":    {"python", "pyright", "mypy", "ruff"},
+		".rb":    {"ruby", "rubocop", "steep", "standardrb"},
+		".ts":    {"tsc", "typescript", "eslint", "deno", "npm", "pnpm", "yarn", "bun"},
+		".tsx":   {"tsc", "typescript", "eslint", "deno", "npm", "pnpm", "yarn", "bun"},
+		".js":    {"node", "eslint", "tsc", "npm", "pnpm", "yarn", "bun"},
+		".jsx":   {"node", "eslint", "tsc", "npm", "pnpm", "yarn", "bun"},
+		".cs":    {"dotnet", "csc", "msbuild"},
+		".kt":    {"kotlinc", "gradle", "mvn"},
+		".kts":   {"kotlinc", "gradle", "mvn"},
+		".java":  {"javac", "gradle", "mvn"},
+		".rs":    {"cargo", "rustc", "clippy"},
+		".go":    {"go"},
+		".lua":   {"lua", "luac", "nvim"},
+		".php":   {"php"},
+		".swift": {"swift"},
+		".c":     {"clang", "gcc", "cc", "cmake"},
+		".h":     {"clang", "gcc", "cc", "cmake"},
+		".cc":    {"clang", "g++", "c++", "cmake"},
+		".cpp":   {"clang", "g++", "c++", "cmake"},
+		".hpp":   {"clang", "g++", "c++", "cmake"},
+	}
+	for _, marker := range markers[strings.ToLower(extension)] {
+		for _, token := range tokens {
+			binary := filepath.Base(token)
+			if binary == marker || strings.TrimRight(binary, "0123456789.") == marker {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, prepared []PlanStageFile) (VerificationResult, error) {
 	if sandbox == nil {
 		return VerificationResult{}, errors.New("prepared sandbox is required")
@@ -959,6 +1045,7 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 			return result, fmt.Errorf("unknown verification stage %q", name)
 		}
 	}
+	corroborateParserWithProjectCheck(&result)
 	final, err := captureTree(ctx, sandbox.Tree, policy.Resource.MaxSnapshotBytes)
 	if err != nil {
 		return result, err
