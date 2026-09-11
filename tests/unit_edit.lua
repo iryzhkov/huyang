@@ -235,7 +235,7 @@ check("a text the pass removed a line of is left unpaired",
     edit.reindented_kept_line(dropped_before, dropped_after) == nil,
     edit.reindented_kept_line(dropped_before, dropped_after))
 
--- move_symbols loads the files that referenced a moved symbol so the server
+-- A move loads the files that referenced a moved symbol so the server
 -- checks them, and only a diagnostic naming one of those symbols is the move's
 -- doing. The two ways to get this wrong both shipped: charging the whole file
 -- to the move put three pre-existing warnings from an untouched Go test file

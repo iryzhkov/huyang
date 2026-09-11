@@ -1,5 +1,5 @@
 -- Minimal Neovim config for the test harness: no user config, just the
--- agent99 plugin on the runtimepath and lua_ls enabled through the native
+-- Huyang runtime on the runtimepath and lua_ls enabled through the native
 -- vim.lsp.config API (no lspconfig needed).
 
 local here = debug.getinfo(1, "S").source:sub(2)

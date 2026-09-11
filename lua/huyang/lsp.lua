@@ -1,9 +1,9 @@
 -- LSP query helpers for huyang.
 --
--- Every function here runs inside the user's Neovim instance, invoked over
--- RPC by the MCP bridge (see bridge/agent99_mcp.py). The point of this module
--- is to reuse the LSP clients that are already running and warm instead of
--- making the agent spawn its own language servers.
+-- Every function here runs inside the embedded Neovim instance, invoked over
+-- RPC by the Huyang service (internal/provider/embed). The point of this
+-- module is to reuse the LSP clients that are already running and warm
+-- instead of making the agent spawn its own language servers.
 --
 -- Addressing convention for the agent: a position is (file, line, symbol).
 -- `line` is 1-based; `symbol` is a piece of text on that line whose first
@@ -13,9 +13,9 @@
 --
 -- Concurrency model: every tool runs inside a coroutine started by
 -- huyang.rpc. Anything that must wait (LSP replies, attach polling) yields
--- via `await` and is resumed from a callback, so the user's UI never blocks
--- while a tool call is in flight; the bridge polls for the result with cheap
--- --remote-expr calls.
+-- via `await` and is resumed from a callback, so the editor's main loop never
+-- blocks while a tool call is in flight; the result reaches the service as an
+-- RPC notification.
 
 local M = {}
 
@@ -32,7 +32,6 @@ local symbol_kind, ts_outline, symbol_index = index.symbol_kind, index.ts_outlin
 local annotate_locations = index.annotate_locations
 local skim, workspace_map, document_symbols = index.skim, index.workspace_map, index.document_symbols
 local workspace_tree = index.workspace_tree
-local run_tests = require("huyang.testrun").run_tests
 local workspace_symbols, ts_query, find_symbol = index.workspace_symbols, index.ts_query, index.find_symbol
 local enclosing_symbols = index.enclosing_symbols
 
@@ -41,15 +40,10 @@ local code_actions, apply_code_action = edit.code_actions, edit.apply_code_actio
 local replace_symbol_body, replace_symbol_lines = edit.replace_symbol_body, edit.replace_symbol_lines
 local insert_symbol_tool, undo_edit, rename_symbol = edit.insert_symbol_tool, edit.undo_edit, edit.rename_symbol
 local insert_lines = edit.insert_lines
-local create_file, move_file, delete_file, move_symbols = edit.create_file, edit.move_file, edit.delete_file,
-    edit.move_symbols
 local replace_pattern = edit.replace_pattern
 
 local install = require("huyang.install")
-local check_project, workspace_support, install_language = install.check_project, install.workspace_support,
-    install.install_language
--- The headless bridge saves every modified buffer through this.
-M.save_all = core.save_all
+local workspace_support, install_language = install.workspace_support, install.install_language
 -- Normalize Location | Location[] | LocationLink[] into a compact list.
 local function format_locations(result)
     if result == nil then
@@ -1196,7 +1190,6 @@ local dispatch_table = {
     skim = skim,
     workspace_map = workspace_map,
     workspace_tree = workspace_tree,
-    run_tests = run_tests,
     workspace_support = workspace_support,
     install_language = install_language,
     ts_query = ts_query,
@@ -1209,11 +1202,6 @@ local dispatch_table = {
     undo_edit = undo_edit,
     rename_symbol = rename_symbol,
     replace_pattern = replace_pattern,
-    create_file = create_file,
-    move_file = move_file,
-    delete_file = delete_file,
-    move_symbols = move_symbols,
-    check_project = check_project,
     -- Internal Huyang transaction calls stage exact bytes without saving or emitting
     -- intermediate edit verdicts. The Go coordinator owns the lease and durable state.
     huyang_prepare = function(args)
