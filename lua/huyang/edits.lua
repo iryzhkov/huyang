@@ -95,17 +95,6 @@ function M.take()
     return out
 end
 
---- Record one file-lifecycle operation (create, move, delete). These do not
---- live in a buffer region, so the entry carries its own `undo` function,
---- which returns nil on success or a reason for refusing.
---- entry = { file, kind, file_op = true, undo = function() ... end }
-function M.record_file_op(entry)
-    entry.file_op = true
-    stamp(entry)
-    local current = ledger()
-    current[#current + 1] = entry
-end
-
 --- How many undo steps this client's ledger holds: tool calls, not files
 --- touched.
 function M.operations()

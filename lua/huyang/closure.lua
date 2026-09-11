@@ -226,7 +226,7 @@ function M.plan(spec)
     -- neither the edited symbol nor the edited file, and no first-hop
     -- closure reaches it. Only from a first hop small enough that the
     -- second is bounded - past that the edit is broad enough that
-    -- check_project is the honest answer, and the reply says so.
+    -- verify_run is the honest answer, and the reply says so.
     if #first_hop > 0 and #first_hop <= EXPAND_FROM and not cl.capped then
         for _, file in ipairs(first_hop) do
             local b = loaded[file]
@@ -321,7 +321,7 @@ function M.clause(cl, scope)
     local n = #cl.checked
     if not cl.computable then
         return (" in %s. Which other files depend on it could not be worked out here (%s), so "
-            .. "its importers were not checked; check_project runs the project's own build "
+            .. "its importers were not checked; verify_run runs the project's own build "
             .. "or check"):format(scope, cl.reason or "no reference information was available")
     end
     if n == 0 then
@@ -338,7 +338,7 @@ end
 function M.clause_gone(cl)
     if not cl or not cl.computable then
         return (". Which files used this one could not be worked out here (%s), so its "
-            .. "importers were not checked; check_project runs the project's own build "
+            .. "importers were not checked; verify_run runs the project's own build "
             .. "or check"):format((cl and cl.reason)
             or "no reference information was available")
     end

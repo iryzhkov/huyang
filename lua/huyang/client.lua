@@ -1,13 +1,13 @@
 -- Which client a call belongs to.
 --
 -- One headless Neovim serves every client that opened its root, and several
--- of the records kept here are per client rather than per project: the undo
--- ledger, the check_project and run_tests baselines, and the set of
--- diagnostics a client has already been shown. Keyed by the root alone they
--- leaked between clients - one agent's undo_edit() with no arguments popped
--- another agent's edit, reverted it, and reported success, and a client that
--- had never recorded a baseline was told what was "new since the baseline"
--- another client recorded.
+-- of the records kept in the kernel are per client rather than per project:
+-- the undo ledger, the deferred verdicts and watched buffers in edit.lua,
+-- the code-action cache, and the set of diagnostics a client has already
+-- been shown. Keyed by the root or the buffer alone they leaked between
+-- clients - one agent's undo with no arguments popped another agent's edit,
+-- reverted it, and reported success, and a client that had never been shown
+-- a report was told what was "new since" a report another client received.
 --
 -- The bridge puts the id in every call's arguments (bridge/client.go says
 -- where it comes from and what it can and cannot tell apart). Nothing is
@@ -85,16 +85,6 @@ function M.slot(store)
         store[id] = mine
     end
     return mine
-end
-
---- A key for a per-client, per-root record: the same command run by two
---- clients is two baselines.
-function M.key(...)
-    local parts = { M.current() }
-    for _, part in ipairs({ ... }) do
-        parts[#parts + 1] = tostring(part)
-    end
-    return table.concat(parts, "\0")
 end
 
 --- The id as a reply names it. Ids are opaque and a session id is a

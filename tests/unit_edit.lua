@@ -444,6 +444,14 @@ do
     check("workspace resync reloads an externally edited clean buffer",
         result.resynced >= 1 and lines[1] == "return 2" and vim.bo[bufnr].modified == false,
         { result = result, lines = lines })
+    -- The bridge sends the operation as workspace_resync; both names must
+    -- reach the same handler and answer with the same shape.
+    vim.fn.writefile({ "return 3" }, path)
+    local alias = require("huyang.lsp").dispatch("workspace_resync", {})
+    lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    check("workspace_resync is registered under the name the bridge sends",
+        type(alias) == "table" and alias.resynced >= 1 and lines[1] == "return 3",
+        { result = alias, lines = lines })
     vim.api.nvim_buf_delete(bufnr, { force = true })
     vim.fn.delete(root, "rf")
 end
