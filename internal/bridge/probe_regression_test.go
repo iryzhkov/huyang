@@ -104,6 +104,31 @@ func TestWorkspaceInspectViewsExposeAndAdvanceCanonicalRevision(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInspectRecordsExternalGapForPreviouslyUnreadFile(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{
+		"main.go":   "package sample\n",
+		"README.md": "before\n",
+	})
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inspected := callModern(t, session, "workspace_inspect", map[string]any{
+		"workspace_id": workspaceID, "view": "status",
+	})
+	if revision := inspected["data"].(map[string]any)["revision"]; revision != "wsrev_2" {
+		t.Fatalf("read-only inspection absorbed an external change without a revision: %#v", inspected)
+	}
+	diff := callModern(t, session, "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
+	})
+	gaps := diff["data"].(map[string]any)["gaps"].([]any)
+	if len(gaps) != 1 {
+		t.Fatalf("external read-only change did not produce one explicit gap: %#v", diff)
+	}
+}
+
 func TestReadSymbolLocatorDoesNotSilentlyReturnWholeFileWithoutParser(t *testing.T) {
 	direct, workspaceID, root := openProbeProject(t, map[string]string{
 		"main.rb": "class Widget\n  def call\n    :ok\n  end\nend\n",

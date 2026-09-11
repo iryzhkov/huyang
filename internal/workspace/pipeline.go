@@ -558,6 +558,7 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 	}
 	defer cleanupEnvironment()
 	process := exec.CommandContext(timed, command.Command[0], command.Command[1:]...)
+	configureCommandCancellation(process)
 	process.Dir = root
 	process.Env = append(environment, "HUYANG_SANDBOX=1")
 	var output cappedCommandOutput

@@ -1171,6 +1171,9 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 			return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
 		}
 	}
+	if err := opened.PrimeDocuments(); err != nil {
+		return modernFailure(requestID, opened, "workspace_baseline_failed", err)
+	}
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && shippedRuntimePath() != "" {
 		canonicalBackend, _ = d.canonicalProvider(ctx, opened)
@@ -2213,6 +2216,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		preparedRevision := fmt.Sprint(arguments["prepared_revision"])
 		wasProvisional := false
 		if current, inspectErr := workspace.InspectPlan(planID, revision); inspectErr == nil {
+			plan = current
 			wasProvisional = current.State == workspacecore.PlanProvisional
 		}
 		var stager workspacecore.PlanStager
@@ -2245,6 +2249,8 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			code, outcome = "plan_validation_conflicts", "conflict"
 		case strings.Contains(err.Error(), "commit_precondition_changed"), strings.Contains(err.Error(), "prepared_revision_changed"):
 			code, outcome = "commit_precondition_changed", "conflict"
+		case strings.Contains(err.Error(), "workspace_epoch_changed"):
+			code, outcome = "workspace_epoch_changed", "conflict"
 		case strings.Contains(err.Error(), "recovery"), plan.State == workspacecore.PlanRecoveryRequired:
 			code = "commit_recovery_required"
 		case strings.Contains(err.Error(), "provider"):
@@ -2259,6 +2265,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		result := modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
 		if action == "prepare" && plan.PlanID != "" {
+			result["next"] = []any{
+				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+			}
+		} else if action == "apply" && code == "workspace_epoch_changed" && plan.PlanID != "" {
 			result["next"] = []any{
 				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
 				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
@@ -2356,6 +2367,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 			var policy workspacecore.PipelinePolicy
 			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
 			var diagnosticProvider provider.Provider
+			var diagnosticReport *workspacecore.DiagnosticReport
 			providerOpened := false
 			wantsDiagnostics := false
 			for _, stage := range stages {
@@ -2380,12 +2392,18 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 
 					request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
 						report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
+						diagnosticReport = &report
 						return diagnosticVerificationStage(revision, report), evidenceErr
 					}
 				}
 			}
 			if filesErr == nil {
 				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+				if err == nil && diagnosticReport != nil {
+					if report, evidenceErr := corroborateDiagnosticsWithProjectCheck(workspace, revision, "verify_"+requestID, result.Stages, *diagnosticReport); evidenceErr == nil {
+						replaceDiagnosticVerificationStage(&result, revision, report)
+					}
+				}
 			}
 			if providerOpened {
 				if closeErr := diagnosticProvider.Close(context.Background()); err == nil && closeErr != nil {

@@ -66,6 +66,41 @@ func prepareCommitPlan(t *testing.T, ws *Workspace, operations []PlanOperation) 
 	return prepared, stager
 }
 
+type durablePreparedStager struct {
+	*fakePlanStager
+	request PlanStageRequest
+}
+
+func (s *durablePreparedStager) PreparedRequest() (PlanStageRequest, VerificationResult, bool) {
+	return s.request, VerificationResult{}, true
+}
+
+func TestJournaledCommitAcceptsDurablePreparationAcrossProviderEpochChange(t *testing.T) {
+	root, stateDir := t.TempDir(), t.TempDir()
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := openCommitWorkspace(t, root, stateDir)
+	prepared, provider := prepareCommitPlan(t, ws, []PlanOperation{fullRangeOperation(t, ws, "replace", "note.txt", "after\n")})
+	request, err := ws.planStageRequest(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.epoch++
+	stager := &durablePreparedStager{fakePlanStager: provider, request: request}
+	committed, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.State != PlanCommitted {
+		t.Fatalf("committed state = %s", committed.State)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "after\n" {
+		t.Fatalf("canonical bytes = %q, %v", got, err)
+	}
+}
+
 func TestJournaledCommitCreatesReplacesMovesDeletesModesAndSymlinks(t *testing.T) {
 	root, stateDir := t.TempDir(), t.TempDir()
 	script := filepath.Join(root, "script.sh")

@@ -64,6 +64,36 @@ func TestUnavailableDiagnosticReasonSurvivesJSONAndReachesStageCoverage(t *testi
 	}
 }
 
+func TestPassingProjectCheckCorroboratesTimedOutDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: root, ProviderEpoch: 1, StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
+		Kind: workspacecore.EvidencePush, ProviderID: "rust_analyzer#1", Producer: "rust_analyzer",
+		Document: filepath.Join(root, "src/lib.rs"), DocumentRevision: "prep_1", TransactionID: "plan_1",
+		TimedOut: true, Selected: true, Dimension: "edited_documents",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err = corroborateDiagnosticsWithProjectCheck(workspace, "prep_1", "plan_1", []workspacecore.VerificationStage{{
+		Stage: "check", Status: workspacecore.VerificationPassed,
+	}}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Confidence != workspacecore.ConfidenceCorroborated {
+		t.Fatalf("confidence = %s, want corroborated", report.Confidence)
+	}
+	if stage := diagnosticVerificationStage("prep_1", report); stage.Status != workspacecore.VerificationPassed {
+		t.Fatalf("diagnostic stage = %#v", stage)
+	}
+}
+
 func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

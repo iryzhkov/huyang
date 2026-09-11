@@ -291,6 +291,50 @@ func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) 
 	return records, coverage, nil
 }
 
+// ResolveSymbolLocator resolves an exact declaration locator from either the
+// built-in sectioner or declarations previously registered by a semantic
+// provider. Provider-backed symbol_find calls register durable opaque handles;
+// plans using the human-readable locator must be able to select the same
+// declaration without requiring callers to substitute the opaque handle.
+func (w *Workspace) ResolveSymbolLocator(path, namePath string) (HandleRecord, error) {
+	records, _, err := w.FindSymbols(namePath)
+	if err != nil {
+		return HandleRecord{}, err
+	}
+	store := w.handleRegistry()
+	store.mu.RLock()
+	for _, record := range store.handles {
+		if record.Kind == HandleSymbol && record.ExpiresAt.After(time.Now()) {
+			records = append(records, record)
+		}
+	}
+	store.mu.RUnlock()
+
+	unique := make(map[string]HandleRecord)
+	for _, record := range records {
+		if record.Locator.Path != path || record.Locator.NamePath != namePath {
+			continue
+		}
+		resolution, resolveErr := w.ResolveHandle(record.Handle)
+		if resolveErr != nil || resolution.Status == ResolutionConflicted {
+			continue
+		}
+		rangeHandle, rangeErr := resolution.RangeHandle()
+		if rangeErr != nil {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d:%d:%s", rangeHandle.Path, rangeHandle.ByteStart, rangeHandle.ByteEnd, rangeHandle.ExpectedSHA256)
+		unique[key] = record
+	}
+	if len(unique) != 1 {
+		return HandleRecord{}, fmt.Errorf("symbol locator resolved to %d declarations", len(unique))
+	}
+	for _, record := range unique {
+		return record, nil
+	}
+	panic("unreachable")
+}
+
 func (w *Workspace) InspectHandle(id HandleID) (HandleRecord, error) {
 	store := w.handleRegistry()
 	store.mu.RLock()

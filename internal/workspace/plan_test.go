@@ -82,6 +82,39 @@ func TestPlanPreviewPersistsDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestPlanPreviewResolvesFrozenResultSetReplacement(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("red blue red\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(OpenOptions{Kind: KindProject, Root: root, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	searched, err := opened.Search(SearchRequest{Query: "red", Mode: SearchLiteral})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := opened.CreatePlan([]PlanOperation{{
+		OpID: "replace-red", Kind: OperationReplaceMatches,
+		Target: &PlanTarget{Handle: HandleID(searched.ResultSet.Handle)}, Content: "green",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err = opened.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Preview == nil || plan.Preview.Outcome != "ok" || len(plan.Preview.Diffs) != 1 {
+		t.Fatalf("preview = %#v", plan.Preview)
+	}
+	if got := string(plan.Preview.Diffs[0].After); got != "green blue green\n" {
+		t.Fatalf("preview after = %q", got)
+	}
+}
+
 func TestPlanPreviewReportsEveryStaleOperationWithoutPartialApplication(t *testing.T) {
 	root := t.TempDir()
 	stateDir := t.TempDir()

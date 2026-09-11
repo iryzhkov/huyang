@@ -205,6 +205,23 @@ func (w *Workspace) RefreshKnownDocuments() (Identity, error) {
 	return w.Identity(), nil
 }
 
+// PrimeDocuments records a bounded baseline for every path currently visible
+// in the workspace. It lets later read-only refreshes distinguish an external
+// filesystem change from the first observation of a file, so revision history
+// can expose the otherwise-uncovered gap.
+func (w *Workspace) PrimeDocuments() error {
+	files, _, err := w.collectFiles()
+	if err != nil {
+		return err
+	}
+	for _, path := range files {
+		if _, err := w.Snapshot(path, ProviderLayer{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (w *Workspace) Refresh(path string, layer ProviderLayer) (DocumentSnapshot, error) {
 	return w.snapshot(path, layer, true)
 }

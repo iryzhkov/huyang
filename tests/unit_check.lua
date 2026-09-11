@@ -148,6 +148,51 @@ check("a plain Lua project is not started as a config",
     not any(lib_cmds, "nvim --headless"), lib_cmds)
 vim.fn.delete(lib_root, "rf")
 
+do
+    local original_exepath, original_system = vim.fn.exepath, vim.system
+    vim.fn.exepath = function(name)
+        return name == "dotnet" and "/usr/bin/dotnet" or original_exepath(name)
+    end
+    vim.system = function(command)
+        if command[1] == "/usr/bin/dotnet" and command[2] == "--list-sdks" then
+            return { wait = function() return { code = 0, stdout = "", stderr = "" } end }
+        end
+        return original_system(command)
+    end
+    local ok, why = install._server_prerequisite("csharp-language-server")
+    vim.fn.exepath, vim.system = original_exepath, original_system
+    check("C# administration distinguishes a runtime-only dotnet install from an SDK",
+        ok == nil and why:find("only the runtime is available", 1, true) ~= nil, why)
+end
+
+do
+    local old_registry, old_mlsp = package.loaded["mason-registry"], package.loaded["mason-lspconfig"]
+    local original_enable = vim.lsp.enable
+    local enabled = {}
+    package.loaded["mason-registry"] = {
+        get_package = function(name)
+            return { is_installed = function() return name == "jdtls" end }
+        end,
+    }
+    package.loaded["mason-lspconfig"] = {
+        get_mappings = function() return { lspconfig_to_package = { jdtls = "jdtls" } } end,
+        get_available_servers = function() return { "jdtls" } end,
+    }
+    vim.lsp.enable = function(name) enabled[#enabled + 1] = name end
+    local restored = install._enable_installed_servers("java")
+    vim.lsp.enable = original_enable
+    package.loaded["mason-registry"], package.loaded["mason-lspconfig"] = old_registry, old_mlsp
+    check("installed language servers are re-enabled after provider restart",
+        #restored == 1 and restored[1] == "jdtls" and enabled[1] == "jdtls", restored)
+end
+
+do
+    install._configure_jdtls_sandbox_safety()
+    local markers = vim.lsp.config.jdtls.root_markers or {}
+    check("jdtls recognizes trusted safe-copy sandbox roots",
+        vim.deep_equal(markers[1], { ".huyang.toml", ".huyang/pipeline.json" }), markers)
+end
+
 if failures > 0 then
     io.stdout:write(("unit_check: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

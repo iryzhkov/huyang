@@ -675,14 +675,26 @@ end
 -- as a shim name. JAVA_HOME makes the launcher select the real binary and also
 -- gives administration calls an actionable prerequisite failure.
 local function configure_jdtls_sandbox_safety()
-    local settings = vim.deepcopy((vim.lsp.config.jdtls or {}).settings or {})
+    local current = vim.lsp.config.jdtls or {}
+    local settings = vim.deepcopy(current.settings or {})
+    local root_markers = vim.deepcopy(current.root_markers or {})
     settings.java = settings.java or {}
     settings.java.import = settings.java.import or {}
     -- Eclipse metadata is editor state, not a source change. Ask jdtls not
     -- to generate it at the project root; provider shutdown also quiesces
     -- any background import before sandbox command auditing begins.
     settings.java.import.generatesMetadataFilesAtProjectRoot = false
-    vim.lsp.config("jdtls", { settings = settings })
+    -- Safe-copy sandboxes intentionally omit .git. The trusted project policy
+    -- remains at the sandbox root, so let it anchor jdtls there; otherwise
+    -- jdtls roots each source package too deeply and emits false "expected
+    -- package ''" diagnostics for conventional src/main/java trees.
+    local huyang_markers = { ".huyang.toml", ".huyang/pipeline.json" }
+    local already_present = false
+    for _, markers in ipairs(root_markers) do
+        if vim.deep_equal(markers, huyang_markers) then already_present = true end
+    end
+    if not already_present then table.insert(root_markers, 1, huyang_markers) end
+    vim.lsp.config("jdtls", { settings = settings, root_markers = root_markers })
 end
 
 local function ensure_java_home()
@@ -716,6 +728,33 @@ local function ensure_java_home()
     end
     vim.env.JAVA_HOME = home
     return home
+end
+
+-- A provider restart creates a fresh Neovim process, so vim.lsp.enable calls
+-- made by language_server_setup are gone. Mason's installed-package state is
+-- durable; re-enable installed servers before probing workspace buffers.
+local function enable_installed_servers(ft)
+    local okreg, registry = pcall(require, "mason-registry")
+    local okml, mlsp = pcall(require, "mason-lspconfig")
+    if not okreg or not okml then return {} end
+    local maps = mlsp.get_mappings()
+    local candidates = {}
+    pcall(function() candidates = mlsp.get_available_servers({ filetype = ft }) end)
+    local enabled, seen = {}, {}
+    for _, name in ipairs(candidates) do
+        if not seen[name] then
+            seen[name] = true
+            local package = maps.lspconfig_to_package[name]
+            local pkg
+            local okp = package and pcall(function() pkg = registry.get_package(package) end)
+            if okp and pkg and pkg:is_installed() then
+                pcall(vim.lsp.enable, name)
+                enabled[#enabled + 1] = name
+            end
+        end
+    end
+    table.sort(enabled)
+    return enabled
 end
 
 local function workspace_support(args)
@@ -777,6 +816,7 @@ local function workspace_support(args)
                 local _, why = ensure_java_home()
                 prerequisite = why
             end
+            enable_installed_servers(ft)
             local configs = enabled_lsp_configs_for(ft)
             -- What could run this language under a debugger, so a client
             -- learns the option exists even when the debug tools are off.
@@ -1159,6 +1199,20 @@ local function enable_system_server(ft, name, cmd, root, why)
     end
     return out
 end
+
+local function server_prerequisite(package)
+    if package ~= "csharp-language-server" then return true end
+    local dotnet = vim.fn.exepath("dotnet")
+    if dotnet == "" then
+        return nil, "csharp-language-server requires the .NET SDK; install an SDK so `dotnet --list-sdks` is non-empty, then retry"
+    end
+    local result = vim.system({ dotnet, "--list-sdks" }, { text = true }):wait(3000)
+    if not result or result.code ~= 0 or vim.trim(result.stdout or "") == "" then
+        return nil, "csharp-language-server requires the .NET SDK, but only the runtime is available; install an SDK so `dotnet --list-sdks` is non-empty, then retry"
+    end
+    return true
+end
+
 local function install_server(ft, wanted, root)
     local okreg, registry = pcall(require, "mason-registry")
     local okml, mlsp = pcall(require, "mason-lspconfig")
@@ -1230,15 +1284,19 @@ local function install_server(ft, wanted, root)
     if #candidates > 1 then
         out.alternatives = vim.tbl_filter(function(c) return c ~= lspname end, candidates)
     end
+    local ready, prerequisite = server_prerequisite(package)
+    if not ready then
+        out.status = "prerequisite missing"
+        out.attached = false
+        out.note = prerequisite
+        return out
+    end
     -- Mason lists a package it cannot always supply: qmlls has no build for
     -- every platform, and an install that fails leaves the language with no
     -- server at all. When the machine already carries one, enabling it is a
     -- better answer than reporting the failure and stopping there.
     local function or_system(failed)
         local sysname, syscmd = system_server(ft, lspname)
-        if not sysname then
-            sysname, syscmd = system_server(ft)
-        end
         if not sysname then
             return failed
         end
@@ -1361,5 +1419,8 @@ M.command_store = command_store
 M.workspace_support = workspace_support
 M.install_language = install_language
 M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
+M._enable_installed_servers = enable_installed_servers
+M._server_prerequisite = server_prerequisite
+M._configure_jdtls_sandbox_safety = configure_jdtls_sandbox_safety
 
 return M

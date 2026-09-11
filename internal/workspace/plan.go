@@ -478,21 +478,11 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 				operation.Target.FileRange = &handle
 			}
 			if operation.Target.FileRange == nil && operation.Target.SymbolLocator != nil {
-				matches, _, err := w.FindSymbols(operation.Target.SymbolLocator.NamePath)
+				selected, err := w.ResolveSymbolLocator(operation.Target.SymbolLocator.Path, operation.Target.SymbolLocator.NamePath)
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
 				}
-				var selected []HandleRecord
-				for _, match := range matches {
-					if match.Locator.NamePath == operation.Target.SymbolLocator.NamePath &&
-						match.Locator.Path == operation.Target.SymbolLocator.Path {
-						selected = append(selected, match)
-					}
-				}
-				if len(selected) != 1 {
-					return nil, fmt.Errorf("%s: symbol locator resolved to %d declarations", operation.OpID, len(selected))
-				}
-				resolution, err := w.ResolveHandle(selected[0].Handle)
+				resolution, err := w.ResolveHandle(selected.Handle)
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
 				}
@@ -560,9 +550,16 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 				}
 				operation.DestinationRevision = destination.Revision
 			}
-		case OperationRenameSymbol, OperationMoveSymbols, OperationReplaceMatches, OperationApplyCodeAction:
+		case OperationRenameSymbol, OperationMoveSymbols, OperationApplyCodeAction:
 			if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
 				return nil, fmt.Errorf("%s requires target", operation.OpID)
+			}
+		case OperationReplaceMatches:
+			if operation.Target == nil || operation.Target.Handle == "" {
+				return nil, fmt.Errorf("%s requires a result-set handle", operation.OpID)
+			}
+			if _, err := w.ResolveAllMatches(ResultSetID(operation.Target.Handle)); err != nil {
+				return nil, fmt.Errorf("%s: %w", operation.OpID, err)
 			}
 		default:
 			return nil, fmt.Errorf("%s has unknown operation kind %q", operation.OpID, operation.Kind)
@@ -859,6 +856,39 @@ func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 			_, _, _ = load(operation.To)
 			contents[operation.To], exists[operation.To], touched[operation.To] = append([]byte(nil), source...), true, true
 			contents[operation.From], exists[operation.From], touched[operation.From] = nil, false, true
+		case OperationReplaceMatches:
+			hits, err := w.ResolveAllMatches(ResultSetID(operation.Target.Handle))
+			if err != nil {
+				conflictFor(operation, "", "", err)
+				continue
+			}
+			sort.Slice(hits, func(i, j int) bool {
+				if hits[i].Path == hits[j].Path {
+					return hits[i].ByteStart > hits[j].ByteStart
+				}
+				return hits[i].Path < hits[j].Path
+			})
+			for _, hit := range hits {
+				content, present, loadErr := load(hit.Path)
+				if loadErr != nil || !present {
+					if loadErr == nil {
+						loadErr = errors.New("result-set target file is missing")
+					}
+					conflictFor(operation, hit.Path, hit.Range.Revision, loadErr)
+					continue
+				}
+				if hit.ByteStart < 0 || hit.ByteEnd < hit.ByteStart || hit.ByteEnd > len(content) ||
+					hashBytes(content[hit.ByteStart:hit.ByteEnd]) != hit.Range.ExpectedSHA256 {
+					conflictFor(operation, hit.Path, hit.Range.Revision, &Conflict{Code: ConflictDocumentChanged, Path: hit.Path, Expected: hit.Range.Revision})
+					continue
+				}
+				nextContent := make([]byte, 0, len(content)-(hit.ByteEnd-hit.ByteStart)+len(operation.Content))
+				nextContent = append(nextContent, content[:hit.ByteStart]...)
+				nextContent = append(nextContent, operation.Content...)
+				nextContent = append(nextContent, content[hit.ByteEnd:]...)
+				contents[hit.Path] = nextContent
+				touched[hit.Path] = true
+			}
 		default:
 			preview.Conflicts = append(preview.Conflicts, PlanConflict{
 				OpID: operation.OpID, Code: "operation_requires_later_stage",

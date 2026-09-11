@@ -36,3 +36,30 @@ func TestRegisterSymbolHandleFromProviderRange(t *testing.T) {
 		t.Fatalf("status = %s", resolution.Status)
 	}
 }
+
+func TestPlanSymbolLocatorResolvesProviderRegisteredDeclaration(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "Planner.cs")
+	content := []byte("public class DispatchPlanner { }\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := Open(OpenOptions{Kind: KindProject, Root: root, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.RegisterSymbolHandle("Planner.cs", "DispatchPlanner", "class", 0, len(content)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := ws.CreatePlan([]PlanOperation{{
+		OpID: "replace", Kind: OperationReplaceSymbol,
+		Target:  &PlanTarget{SymbolLocator: &PlanSymbolLocator{Path: "Planner.cs", NamePath: "DispatchPlanner"}},
+		Content: "public class DispatchPlanner { public int Count => 1; }\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Operations[0].Target.FileRange == nil {
+		t.Fatal("provider-backed symbol locator was not normalized to a range")
+	}
+}

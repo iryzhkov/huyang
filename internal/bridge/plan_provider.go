@@ -144,11 +144,18 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 	if err != nil {
 		return workspacecore.VerificationResult{}, err
 	}
+	var diagnosticReport *workspacecore.DiagnosticReport
 	request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, files []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
 		report, evidenceErr := recordProviderDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
+		diagnosticReport = &report
 		return diagnosticVerificationStage(revision, report), evidenceErr
 	}
 	result, err := workspacecore.RunVerificationPipeline(ctx, s.sandbox, policy, request, s.prepared.Files)
+	if err == nil && diagnosticReport != nil {
+		if report, evidenceErr := corroborateDiagnosticsWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
+			replaceDiagnosticVerificationStage(&result, request.Revision, report)
+		}
+	}
 	if len(result.Stages) > 0 {
 		s.verification.Stages = append(s.verification.Stages, result.Stages...)
 	}
@@ -258,10 +265,25 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	if err != nil {
 		return err
 	}
+	diagnosticReport, err = corroborateDiagnosticsWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
+	if err != nil {
+		return err
+	}
 
 	verification.Stages = append(verification.Stages, diagnosticVerificationStage(s.baseRevision, diagnosticReport))
 	s.prepared, s.verification = request, verification
 	return nil
+}
+
+func replaceDiagnosticVerificationStage(result *workspacecore.VerificationResult, revision string, report workspacecore.DiagnosticReport) {
+	replacement := diagnosticVerificationStage(revision, report)
+	for index := range result.Stages {
+		if result.Stages[index].Stage == "diagnostics" {
+			result.Stages[index] = replacement
+			return
+		}
+	}
+	result.Stages = append(result.Stages, replacement)
 }
 
 func (s *sandboxPlanStager) Commit(ctx context.Context, planID string) error {

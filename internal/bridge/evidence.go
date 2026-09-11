@@ -120,6 +120,19 @@ func corroborateDiagnosticsWithProjectCheck(workspace *workspacecore.Workspace, 
 	if report.Confidence != workspacecore.ConfidenceProvisional && report.Confidence != workspacecore.ConfidenceUnavailable {
 		return report, nil
 	}
+	// A project check can corroborate an attached provider whose freshness
+	// barrier was inconclusive. It must not turn a missing or unstartable LSP
+	// into evidence that the semantic provider ran.
+	corroboratable := false
+	for _, reason := range report.ProvisionalReasons {
+		switch reason {
+		case "diagnostic_barrier_timed_out", "push_missing_current_document_proof", "pull_incomplete_or_missing_result_id", "work_done_progress_pending":
+			corroboratable = true
+		}
+	}
+	if !corroboratable {
+		return report, nil
+	}
 	for _, stage := range stages {
 		if stage.Stage == "check" && stage.Status == workspacecore.VerificationPassed {
 			return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{

@@ -1128,10 +1128,12 @@ function M.diagnostic_evidence(args)
                 }
 
                 if client:supports_method("textDocument/diagnostic", bufnr) then
-                    local ok, pulled = pcall(request, client, bufnr, "textDocument/diagnostic", {
+                    local pull_remaining = math.max(1, attach_deadline - vim.uv.now())
+                    local response = client:request_sync("textDocument/diagnostic", {
                         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-                    })
-                    if ok and type(pulled) == "table" then
+                    }, pull_remaining, bufnr)
+                    local pulled = response and not response.err and response.result
+                    if type(pulled) == "table" then
                         local items = {}
                         for _, d in ipairs(pulled.items or {}) do
                             items[#items + 1] = finding(d)

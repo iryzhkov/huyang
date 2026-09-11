@@ -405,7 +405,11 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	if preparedRevision == "" || plan.Preparation.PreparedRevision != preparedRevision {
 		return PlanRecord{}, errors.New("prepared_revision_changed")
 	}
-	if plan.Preparation.ProviderEpoch != stager.Epoch() {
+	durablePreparation := false
+	if source, ok := stager.(PreparedPlanStager); ok {
+		_, _, durablePreparation = source.PreparedRequest()
+	}
+	if plan.Preparation.ProviderEpoch != stager.Epoch() && !durablePreparation {
 		return PlanRecord{}, errors.New("workspace_epoch_changed")
 	}
 	freshPreview := w.buildPreview(plan)

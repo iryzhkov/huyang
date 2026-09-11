@@ -83,6 +83,27 @@ func TestPipelinePolicyRequiresUserTrustAndTightensResources(t *testing.T) {
 	}
 }
 
+func TestVerificationTimeoutTerminatesCommandProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.txt": "unchanged\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.TimeoutSeconds = 1
+	policy.Check = []CommandPolicy{{Command: []string{"sh", "-c", "sleep 5"}}}
+	started := time.Now()
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{Revision: "prep_timeout", Stages: []string{"check"}}, prepared)
+	if err == nil {
+		t.Fatal("timed out command unexpectedly succeeded")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("timeout waited for descendant process: %s", elapsed)
+	}
+	if len(result.Stages) != 1 || result.Stages[0].Status != VerificationTimedOut {
+		t.Fatalf("timeout stages = %#v", result.Stages)
+	}
+}
+
 func TestVerificationTransformCapturesCompleteToolDelta(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-specific")
