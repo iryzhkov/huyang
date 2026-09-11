@@ -1,4 +1,4 @@
--- Shared primitives for agent99's tool modules: the coroutine helpers every
+-- Shared primitives for huyang's tool modules: the coroutine helpers every
 -- tool waits with, buffer loading with disk synchronisation, the LSP request
 -- wrapper, position addressing, and the small path and project helpers.
 --
@@ -24,7 +24,7 @@ end
 -- late second resume (e.g. an LSP reply after its timeout fired) is ignored,
 -- and so a resume that happens synchronously inside `start` works too.
 local function await(start)
-    local co = assert(coroutine.running(), "agent99: await called outside a coroutine")
+    local co = assert(coroutine.running(), "huyang: await called outside a coroutine")
     local resumed, yielded = false, false
     local sync_result
     start(function(...)
@@ -36,7 +36,7 @@ local function await(start)
         end
         local ok, e = coroutine.resume(co, ...)
         if not ok then
-            vim.notify("agent99 rpc: " .. tostring(e), vim.log.levels.ERROR)
+            vim.notify("huyang rpc: " .. tostring(e), vim.log.levels.ERROR)
         end
     end)
     if resumed then
@@ -69,7 +69,7 @@ end
 -- The walk every search shares.
 --
 -- A leading dot means "not interesting to a person browsing", and it used to
--- mean "not part of the project" to every searcher agent99 runs. It is not:
+-- mean "not part of the project" to every searcher huyang runs. It is not:
 -- a monorepo that vendors its dependencies under `.repos/` keeps most of its
 -- source there, and `git ls-files` - which is what the census, workspace_tree,
 -- workspace_map and list_files walk - has always listed those files. The
@@ -188,14 +188,14 @@ end
 -- Remember that `bufnr` now agrees with what is on disk.
 local function mark_synced(bufnr, path)
     path = path or vim.api.nvim_buf_get_name(bufnr)
-    vim.b[bufnr].agent99_disk = disk_fingerprint(path)
+    vim.b[bufnr].huyang_disk = disk_fingerprint(path)
 end
 
 -- Has the file changed behind the buffer's back since we last agreed with
 -- it? Unknown fingerprints (buffer loaded before this ran) count as clean:
 -- Neovim's own timestamp check still backs us up on the write.
 local function disk_moved_on(bufnr, path)
-    local seen = vim.b[bufnr].agent99_disk
+    local seen = vim.b[bufnr].huyang_disk
     if not seen then return false end
     local now = disk_fingerprint(path)
     return now ~= nil and now ~= seen
@@ -623,7 +623,7 @@ local function drop_mismatched_client(client, bufnr)
 end
 
 vim.api.nvim_create_autocmd("LspAttach", {
-    group = vim.api.nvim_create_augroup("agent99_dialect", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_dialect", { clear = true }),
     callback = function(ev)
         local id = ev.data and ev.data.client_id
         if type(id) ~= "number" then
@@ -903,7 +903,7 @@ end
 -- as ours; without this their next keystroke would look like a buffer that
 -- disagrees with the disk.
 vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost" }, {
-    group = vim.api.nvim_create_augroup("agent99_disk_state", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_disk_state", { clear = true }),
     callback = function(ev)
         local name = vim.api.nvim_buf_get_name(ev.buf)
         if name ~= "" then

@@ -468,7 +468,7 @@ func (b *Backend) bootstrap(ctx context.Context, g *generation) error {
 		}
 		var handshake map[string]any
 		if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
-			finished <- fail(provider.FailureBootstrap, "loading agent99 kernel: "+err.Error(), err)
+			finished <- fail(provider.FailureBootstrap, "loading huyang kernel: "+err.Error(), err)
 			return
 		}
 		versionValue, ok := integer(handshake["protocol_version"])

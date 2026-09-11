@@ -889,15 +889,15 @@ local function wrap_publish_handler(client)
     -- Per client, not on the global vim.lsp.handlers table. Client:_resolve_handler
     -- reads `self.handlers[method] or lsp.handlers[method]`, so a per-client entry
     -- is consulted first and needs no load-order luck: wrapping the global table
-    -- when agent99 loads did nothing at all, because that ran before vim.lsp had
+    -- when huyang loads did nothing at all, because that ran before vim.lsp had
     -- populated it and the wrap silently no-opped (publish_seen stayed 0 over a
     -- whole smoke run, which is how this was caught).
-    if not client or client._agent99_publish_wrapped then return end
+    if not client or client._huyang_publish_wrapped then return end
     client.handlers = client.handlers or {}
     local inner = client.handlers["textDocument/publishDiagnostics"]
         or vim.lsp.handlers["textDocument/publishDiagnostics"]
     if not inner then return end
-    client._agent99_publish_wrapped = true
+    client._huyang_publish_wrapped = true
     client.handlers["textDocument/publishDiagnostics"] = function(lsp_err, params, ctx, cfg)
         -- Every publish, whether or not it carries a version and whether or
         -- not it carries any diagnostics: an empty set for a file is the
@@ -935,7 +935,7 @@ function M.mark_diagnostic_change(bufnr)
 end
 
 vim.api.nvim_create_autocmd("LspAttach", {
-    group = vim.api.nvim_create_augroup("agent99_publish_version", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_publish_version", { clear = true }),
     callback = function(ev)
         wrap_publish_handler(ev.data and ev.data.client_id
             and vim.lsp.get_client_by_id(ev.data.client_id))
@@ -943,7 +943,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 })
 
 vim.api.nvim_create_autocmd("LspProgress", {
-    group = vim.api.nvim_create_augroup("agent99_progress", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_progress", { clear = true }),
     callback = function(ev)
         local data = ev.data or {}
         local client = data.client_id and vim.lsp.get_client_by_id(data.client_id)
@@ -1178,7 +1178,7 @@ local function client_names_of(diags)
 end
 
 vim.api.nvim_create_autocmd("DiagnosticChanged", {
-    group = vim.api.nvim_create_augroup("agent99_verdict", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_verdict", { clear = true }),
     callback = function(ev)
         local now = vim.uv.now()
         local rec = last_publish[ev.buf] or { by = {} }
@@ -1191,7 +1191,7 @@ vim.api.nvim_create_autocmd("DiagnosticChanged", {
             -- A publish this server made about this file, which is what says
             -- its silence about the file means something. Recorded here as
             -- well as in the publish handler: a server that attached before
-            -- agent99 wrapped its handler still lands here.
+            -- huyang wrapped its handler still lands here.
             note_published_for(name, path)
         end
         if next(names) == nil then
@@ -1833,7 +1833,7 @@ local settled_once = {}
 -- Buffer numbers are reused after a wipe, and a stale entry would skip the
 -- wait for the file that took the number over.
 vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
-    group = vim.api.nvim_create_augroup("agent99_settled", { clear = true }),
+    group = vim.api.nvim_create_augroup("huyang_settled", { clear = true }),
     callback = function(ev) settled_once[ev.buf] = nil end,
 })
 

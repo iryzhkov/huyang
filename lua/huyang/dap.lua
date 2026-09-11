@@ -1,4 +1,4 @@
--- Debugger tools for agent99: a Debug Adapter Protocol session driven
+-- Debugger tools for huyang: a Debug Adapter Protocol session driven
 -- through nvim-dap inside the Neovim instance the bridge already owns.
 --
 -- Everything here runs in the tool coroutine started by huyang.rpc, so a
@@ -308,7 +308,7 @@ local function try_request(session, command, arguments)
 end
 
 ------------------------------------------------------------------------
--- Listeners: one set, installed once, keyed "agent99"
+-- Listeners: one set, installed once, keyed "huyang"
 ------------------------------------------------------------------------
 
 -- Ours: the session we started or adopted, or a child of it (js-debug
@@ -359,7 +359,7 @@ local function install_listeners(dap)
     if listeners_installed then return end
     listeners_installed = true
     local L = dap.listeners
-    local key = "agent99"
+    local key = "huyang"
 
     L.before.event_initialized[key] = function(session)
         -- The session object exists now; a launch we started claims it.
@@ -451,7 +451,7 @@ local function install_listeners(dap)
     end
 
     vim.api.nvim_create_autocmd("VimLeavePre", {
-        group = vim.api.nvim_create_augroup("agent99_dap_exit", { clear = true }),
+        group = vim.api.nvim_create_augroup("huyang_dap_exit", { clear = true }),
         callback = function()
             pcall(M.shutdown_sync, 3000)
         end,
@@ -862,7 +862,7 @@ BUILTIN["js-debug"] = {
 -- server. The adapter asks the running jdtls for a debug port
 -- (vscode.java.startDebugSession); launching needs the main class and the
 -- classpath, which jdtls resolves too. So jdtls must be attached to the
--- workspace with the java-debug bundle in its init_options - agent99 adds
+-- workspace with the java-debug bundle in its init_options - huyang adds
 -- the Mason-installed bundle to the jdtls config when the user set none.
 local function java_debug_bundle()
     local dir = vim.fn.stdpath("data") .. "/mason/packages/java-debug-adapter/extension/server"
@@ -1761,7 +1761,7 @@ end
 
 local function need_session(dap, root)
     if dap.sessions and vim.tbl_count(dap.sessions()) > 1 and state.session == nil then
-        err("more than one debug session is active in this Neovim; agent99 operates on a single session")
+        err("more than one debug session is active in this Neovim; huyang operates on a single session")
     end
     local s = current_session(dap)
     if not s then

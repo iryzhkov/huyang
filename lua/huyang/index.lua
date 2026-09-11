@@ -1,4 +1,4 @@
--- The symbol index: what agent99 knows about a file's structure without a
+-- The symbol index: what huyang knows about a file's structure without a
 -- language server, and how it merges the server's view in when one is up.
 --
 -- Treesitter gives declaration-shaped nodes (functions, classes, sections of
@@ -2364,7 +2364,7 @@ function fallback_symbol_search(root, query)
                         file = rel_path(path),
                         line = entry.first,
                         container = entry.path ~= entry.name and entry.path or nil,
-                        server = "agent99 (project files)",
+                        server = "huyang (project files)",
                         rank = symbol_match_rank(entry.name or "", query),
                     }
                 end

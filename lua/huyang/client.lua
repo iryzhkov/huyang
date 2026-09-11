@@ -17,7 +17,7 @@
 local M = {}
 
 -- The editor itself: an interactive request, a keymap, a unit test, a
--- callback outside any request. Its edits are what :Agent99Revert reverts,
+-- callback outside any request. Its edits are what :HuyangRevert reverts,
 -- so the agent run inside a live Neovim shares this ledger with it on
 -- purpose (bridge/client.go maps embedded mode onto this id).
 M.EDITOR = "editor"

@@ -1,6 +1,6 @@
 -- Ledger of buffer edits made by the agent's symbol-edit tools during one
 -- request. lsp.lua records into it; init.lua takes the list when the request
--- finishes (for the summary notification) and keeps it for :Agent99Revert.
+-- finishes (for the summary notification) and keeps it for :HuyangRevert.
 -- Everything lives in editor buffers (unsaved), so reverting is just
 -- restoring the recorded lines in reverse order.
 --
@@ -8,7 +8,7 @@
 -- that opened its root, and with a single stack `undo_edit()` with no
 -- arguments popped whatever the newest edit in the editor was: one agent's
 -- undo reverted another agent's edit, reported success, and never told the
--- agent whose work had gone. See agent99/client.lua for where the id that
+-- agent whose work had gone. See huyang/client.lua for where the id that
 -- keys these comes from.
 
 local M = {}
