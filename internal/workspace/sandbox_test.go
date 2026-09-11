@@ -74,6 +74,24 @@ func TestSandboxMaterializesExactTreeAndPreparedBytesWithoutAliases(t *testing.T
 	}
 }
 
+func TestEqualSandboxContentIgnoresDirectoryAllocatorSize(t *testing.T) {
+	left := []sandboxEntry{
+		{Path: ".", Kind: ObjectDirectory, Size: 4096, Mode: 0o755},
+		{Path: "data.txt", Kind: ObjectRegularText, Size: 4, Mode: 0o644, Hash: [32]byte{1}},
+	}
+	right := []sandboxEntry{
+		{Path: ".", Kind: ObjectDirectory, Size: 8192, Mode: 0o755},
+		{Path: "data.txt", Kind: ObjectRegularText, Size: 4, Mode: 0o644, Hash: [32]byte{1}},
+	}
+	if !equalSandboxContent(left, right) {
+		t.Fatal("directory allocator size must not make identical trees unequal")
+	}
+	right[1].Size++
+	if equalSandboxContent(left, right) {
+		t.Fatal("regular-file size remains content-significant")
+	}
+}
+
 func TestSandboxPreservesReadOnlyFileModesUnderUmask(t *testing.T) {
 	source, base := t.TempDir(), t.TempDir()
 	path := filepath.Join(source, "packed-object")

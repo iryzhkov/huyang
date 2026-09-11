@@ -279,14 +279,22 @@ func equalSandboxContent(left, right []sandboxEntry) bool {
 		return false
 	}
 	for index := range left {
-		a, b := left[index], right[index]
-		a.Device, a.Inode, a.MTimeNS = 0, 0, 0
-		b.Device, b.Inode, b.MTimeNS = 0, 0, 0
+		a, b := comparableSandboxEntry(left[index]), comparableSandboxEntry(right[index])
 		if !reflect.DeepEqual(a, b) {
 			return false
 		}
 	}
 	return true
+}
+
+func comparableSandboxEntry(entry sandboxEntry) sandboxEntry {
+	entry.Device, entry.Inode, entry.MTimeNS = 0, 0, 0
+	// Directory size is allocator metadata, not content: recreating the same
+	// children can legitimately use a different number of directory blocks.
+	if entry.Kind == ObjectDirectory {
+		entry.Size = 0
+	}
+	return entry
 }
 
 func stableFileHash(path string, before os.FileInfo) ([sha256.Size]byte, ObjectKind, error) {

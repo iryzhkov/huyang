@@ -700,7 +700,7 @@ func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult
 		if x != nil {
 			continue
 		}
-		s, x = w.rememberCommit(g, s)
+		s, x = w.summary(g, s.ObjectID)
 		if x != nil {
 			return HistorySearchResult{}, x
 		}

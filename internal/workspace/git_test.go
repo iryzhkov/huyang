@@ -122,6 +122,9 @@ func TestGitRecentHistoryDirtyPreparedAndSearch(t *testing.T) {
 	if len(search.Hits) == 0 || search.ResultSet.Kind != ResultSetHistorical || search.ResultSet.AllMatchesEligible {
 		t.Fatalf("historical search = %+v", search)
 	}
+	if search.Hits[0].Commit.ChangedPathCount != 1 {
+		t.Fatalf("history search changed path count = %d, want 1", search.Hits[0].Commit.ChangedPathCount)
+	}
 	changes, err := workspace.CommitChanges(search.Hits[0].Commit.Handle, 20)
 	if err != nil {
 		t.Fatal(err)
