@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -39,17 +38,6 @@ func languageServerAttachmentConfirmed(value any) bool {
 	default:
 		return false
 	}
-}
-
-func (d *directWorkspaces) resyncCanonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
-	backend, err := d.canonicalProvider(ctx, workspace)
-	if err == nil {
-		_, err = callCanonicalProvider(ctx, "provider_resync", workspace, backend, "workspace_resync", map[string]any{"root": workspace.Identity().Root})
-	}
-	if err == nil {
-		return backend, nil
-	}
-	return d.restartCanonicalProvider(ctx, workspace)
 }
 
 func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
@@ -140,6 +128,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	return result
 }
+
 func failedLanguageServerInstallNext(status, language, requestedServer string) []any {
 	statusAction := map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}
 	if status != "failed" {

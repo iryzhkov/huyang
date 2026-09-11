@@ -2,23 +2,11 @@ package bridge
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
-
-// openReferenceProvider starts one owned Neovim provider rooted at root with
-// the shipped runtime and the configured headless init file. Every provider
-// the bridge spawns, canonical, debug, sandbox or verification, goes through
-// this constructor so the configuration cannot drift between call sites.
-func openReferenceProvider(root string, debug bool) (provider.Provider, error) {
-	return referenceProviders.Open(providerOpenConfig{
-		Root: root, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: debug,
-	})
-}
 
 // providerCall names one request to a provider. TransactionID is set for
 // plan-scoped calls so the provider can label staged views; canonical calls
@@ -72,29 +60,6 @@ func callCanonicalProvider(ctx context.Context, requestID string, workspace *wor
 		return nil, err
 	}
 	return result.Value, nil
-}
-
-// modernProviderFailure maps a kernel operation failure onto a tool result
-// using the provider's stable error code rather than its message text. The
-// fallback code names the operation that failed when the kernel gave none.
-func modernProviderFailure(requestID string, workspace *workspacecore.Workspace, fallbackCode string, err error) map[string]any {
-	switch provider.ErrorCode(err) {
-	case "workspace_busy":
-		return modernEnvelope(requestID, workspace, "conflict", "workspace_busy", err.Error(), map[string]any{})
-	case "lsp_not_configured":
-		result := modernEnvelope(requestID, workspace, "unavailable", "language_server_unavailable", err.Error(), map[string]any{
-			"coverage": map[string]any{"complete": false, "unavailable": []string{"language_server"}},
-		})
-		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"}}
-		return result
-	case "provider_cancelled":
-		return modernEnvelope(requestID, workspace, "failed", "request_cancelled", err.Error(), map[string]any{})
-	}
-	var failure *provider.Failure
-	if errors.As(err, &failure) && failure.Code != "" {
-		return modernFailure(requestID, workspace, string(failure.Code), err)
-	}
-	return modernFailure(requestID, workspace, fallbackCode, err)
 }
 
 // canonicalProviderStatus reports the provider descriptor and its health as

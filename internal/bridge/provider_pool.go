@@ -1,24 +1,13 @@
 package bridge
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
-
-func huyangHeadlessInit() string {
-	if value := os.Getenv("HUYANG_HEADLESS_INIT"); value != "" {
-		return value
-	}
-	return os.Getenv("AGENT99_HEADLESS_INIT")
-}
 
 // providerSlot owns the canonical provider of one workspace. Spawning and
 // health-checking a provider can take seconds, so each slot has its own lock:
@@ -109,83 +98,30 @@ func (d *directWorkspaces) closeProviders() {
 	}
 }
 
-func modernProviderTarget(workspace *workspacecore.Workspace, target map[string]any) (map[string]any, error) {
-	if locator, ok := target["symbol_locator"].(map[string]any); ok {
-		path, _ := locator["path"].(string)
-		name, _ := locator["name_path"].(string)
-		if path == "" || name == "" {
-			return nil, fmt.Errorf("symbol_locator requires path and name_path")
-		}
-		read, err := workspace.Read(path)
-		if err != nil {
-			return nil, err
-		}
-		leaf := name
-		if slash := strings.LastIndexAny(leaf, "/."); slash >= 0 {
-			leaf = leaf[slash+1:]
-		}
-		offset := bytes.Index(read.Content, []byte(leaf))
-		if offset < 0 {
-			return nil, fmt.Errorf("symbol %q is not present in %s; refresh the locator", name, path)
-		}
-		lineStart := bytes.LastIndex(read.Content[:offset], []byte{'\n'}) + 1
-		return map[string]any{
-			"file": filepath.Join(workspace.Identity().Root, filepath.FromSlash(path)),
-			"line": bytes.Count(read.Content[:offset], []byte{'\n'}) + 1,
-			"col":  offset - lineStart + 1, "symbol": leaf,
-		}, nil
+// openReferenceProvider starts one owned Neovim provider rooted at root with
+// the shipped runtime and the configured headless init file. Every provider
+// the bridge spawns, canonical, debug, sandbox or verification, goes through
+// this constructor so the configuration cannot drift between call sites.
+func openReferenceProvider(root string, debug bool) (provider.Provider, error) {
+	return referenceProviders.Open(providerOpenConfig{
+		Root: root, InitFile: huyangHeadlessInit(),
+		RuntimePath: shippedRuntimePath(), Debug: debug,
+	})
+}
+
+func (d *directWorkspaces) resyncCanonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	backend, err := d.canonicalProvider(ctx, workspace)
+	if err == nil {
+		_, err = callCanonicalProvider(ctx, "provider_resync", workspace, backend, "workspace_resync", map[string]any{"root": workspace.Identity().Root})
 	}
-	var handle workspacecore.RangeHandle
-	symbolName := ""
-	if opaque, ok := target["handle"].(string); ok && opaque != "" {
-		resolution, err := workspace.ResolveHandle(workspacecore.HandleID(opaque))
-		if err != nil {
-			return nil, err
-		}
-		if resolution.Status == workspacecore.ResolutionConflicted {
-			return nil, fmt.Errorf("%s", resolution.Code)
-		}
-		handle, err = resolution.RangeHandle()
-		if err != nil {
-			return nil, err
-		}
-		if resolution.Current != nil {
-			symbolName = resolution.Current.NamePath
-		} else {
-			symbolName = resolution.Original.NamePath
-		}
-	} else if encoded, ok := target["file_range"].(map[string]any); ok {
-		decoded, err := decodeRangeHandle(encoded)
-		if err != nil {
-			return nil, err
-		}
-		handle = decoded
-	} else {
-		return nil, fmt.Errorf("target must contain handle, file_range, or symbol_locator")
+	if err == nil {
+		return backend, nil
 	}
-	read, err := workspace.Read(handle.Path)
-	if err != nil {
-		return nil, err
-	}
-	if handle.ByteStart < 0 || handle.ByteStart > len(read.Content) || handle.ByteEnd < handle.ByteStart || handle.ByteEnd > len(read.Content) {
-		return nil, fmt.Errorf("semantic target is outside the current document")
-	}
-	targetStart := handle.ByteStart
-	selected := strings.TrimSpace(string(read.Content[handle.ByteStart:handle.ByteEnd]))
-	if symbolName != "" {
-		leaf := symbolName
-		if slash := strings.LastIndexAny(leaf, "/."); slash >= 0 {
-			leaf = leaf[slash+1:]
-		}
-		if relative := bytes.Index(read.Content[handle.ByteStart:handle.ByteEnd], []byte(leaf)); relative >= 0 {
-			targetStart += relative
-			selected = leaf
-		}
-	}
-	lineStart := bytes.LastIndex(read.Content[:targetStart], []byte{'\n'}) + 1
-	return map[string]any{
-		"file": filepath.Join(workspace.Identity().Root, filepath.FromSlash(handle.Path)),
-		"line": bytes.Count(read.Content[:targetStart], []byte{'\n'}) + 1,
-		"col":  targetStart - lineStart + 1, "symbol": selected,
-	}, nil
+	return d.restartCanonicalProvider(ctx, workspace)
+}
+
+// debugProvider returns the workspace provider, starting it in debug mode
+// when no provider is running yet. A healthy canonical provider is reused.
+func (d *directWorkspaces) debugProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	return d.workspaceProvider(ctx, workspace, true)
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -429,87 +428,4 @@ func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace, planID
 	d.sandboxStagers[key] = stager
 	d.providerMu.Unlock()
 	return stager, nil
-}
-
-type recordedRevisionDiff struct {
-	from, to                  uint64
-	path, beforeSHA, afterSHA string
-	diff                      any
-}
-
-func exactDiffReceiptMap(diff workspacecore.ExactDiff) map[string]any {
-	return map[string]any{
-		"path": diff.Path, "before_sha256": diff.BeforeSHA256, "after_sha256": diff.AfterSHA256,
-		"before": diff.Before, "after": diff.After, "patch": diff.Patch,
-	}
-}
-
-func (d *directWorkspaces) recordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
-	d.replayMu.Lock()
-	defer d.replayMu.Unlock()
-
-	var recorded []recordedRevisionDiff
-	seen := map[string]bool{}
-	prefix := workspaceID + "\x00"
-	for key, replay := range d.replays {
-		if !replay.complete || !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		data, _ := replay.result["data"].(map[string]any)
-		if changed, _ := data["canonical_changed"].(bool); !changed {
-			continue
-		}
-		left, leftErr := workspaceRevisionSequence(fmt.Sprint(data["from_revision"]))
-		right, rightErr := workspaceRevisionSequence(fmt.Sprint(data["revision"]))
-		if leftErr != nil || rightErr != nil || left < fromSeq || right > toSeq {
-			continue
-		}
-
-		var diffs []any
-		switch {
-		case strings.HasPrefix(key, prefix+"edit_apply\x00"):
-			change, _ := data["change"].(map[string]any)
-			if diff, ok := change["diff"].(map[string]any); ok {
-				diffs = []any{diff}
-			}
-		case strings.HasPrefix(key, prefix+"change_plan\x00"):
-			switch plan := data["plan"].(type) {
-			case workspacecore.PlanRecord:
-				if plan.Preparation != nil {
-					for _, diff := range plan.Preparation.CommittedDiffs {
-						diffs = append(diffs, exactDiffReceiptMap(diff))
-					}
-				}
-			case map[string]any:
-				preparation, _ := plan["preparation"].(map[string]any)
-				switch committed := preparation["committed_diffs"].(type) {
-				case []any:
-					diffs = committed
-				case []workspacecore.ExactDiff:
-					for _, diff := range committed {
-						diffs = append(diffs, exactDiffReceiptMap(diff))
-					}
-				}
-			}
-		}
-		for _, raw := range diffs {
-			diff, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			path := fmt.Sprint(diff["path"])
-			beforeSHA := fmt.Sprint(diff["before_sha256"])
-			afterSHA := fmt.Sprint(diff["after_sha256"])
-			identity := fmt.Sprintf("%d\x00%d\x00%s\x00%s\x00%s\x00%s", left, right, path, beforeSHA, afterSHA, fmt.Sprint(diff["patch"]))
-			if seen[identity] {
-				continue
-			}
-			seen[identity] = true
-			recorded = append(recorded, recordedRevisionDiff{
-				from: left, to: right, diff: diff, path: path,
-				beforeSHA: beforeSHA, afterSHA: afterSHA,
-			})
-		}
-	}
-	return recorded
 }

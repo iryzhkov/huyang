@@ -74,3 +74,10 @@ func providerBackend() string {
 }
 
 var referenceProviders providerFactory = configuredProviderFactory{backend: providerBackend()}
+
+func huyangHeadlessInit() string {
+	if value := os.Getenv("HUYANG_HEADLESS_INIT"); value != "" {
+		return value
+	}
+	return os.Getenv("AGENT99_HEADLESS_INIT")
+}
