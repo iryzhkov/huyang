@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +101,14 @@ func TestJournaledCommitAcceptsDurablePreparationAcrossProviderEpochChange(t *te
 	if got, err := os.ReadFile(path); err != nil || string(got) != "after\n" {
 		t.Fatalf("canonical bytes = %q, %v", got, err)
 	}
+}
+
+// holdsLease reports whether the plan still owns the exclusive provider lease.
+func (w *Workspace) holdsLease(planID string) bool {
+	w.prepareMu.Lock()
+	defer w.prepareMu.Unlock()
+	_, held := w.activePlans[planID]
+	return held
 }
 
 func TestJournaledCommitCreatesReplacesMovesDeletesModesAndSymlinks(t *testing.T) {
@@ -387,7 +397,24 @@ func TestCommitExplicitlyAcceptedProvisionalPreparedRevision(t *testing.T) {
 	if prepared.State != PlanProvisional {
 		t.Fatalf("prepared state = %s, want %s", prepared.State, PlanProvisional)
 	}
-	committed, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager)
+	refused, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager)
+	if ErrorCode(err) != CodeProvisionalNotAccepted {
+		t.Fatalf("default provisional commit = %#v, %v", refused, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "before\n" {
+		t.Fatalf("refused commit touched canonical bytes = %q, %v", got, err)
+	}
+	current, err := ws.InspectPlan(prepared.PlanID, prepared.PlanRevision)
+	if err != nil || current.State != PlanProvisional {
+		t.Fatalf("refused plan = %#v, %v", current, err)
+	}
+	if stager.rollbacks != 0 || !ws.holdsLease(prepared.PlanID) {
+		t.Fatalf("refusal before admission released the preparation: rollbacks=%d lease=%t", stager.rollbacks, ws.holdsLease(prepared.PlanID))
+	}
+	if _, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager, AcceptProvisional("tests")); ErrorCode(err) != CodeProvisionalNotAccepted {
+		t.Fatalf("accepting an unrelated dimension committed: %v", err)
+	}
+	committed, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager, AcceptProvisional("diagnostics"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,5 +423,15 @@ func TestCommitExplicitlyAcceptedProvisionalPreparedRevision(t *testing.T) {
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != "after\n" {
 		t.Fatalf("canonical bytes = %q, %v", got, err)
+	}
+	if want := []string{"diagnostics"}; !reflect.DeepEqual(committed.Preparation.ProvisionalAccepted, want) {
+		t.Fatalf("provisional acceptance = %#v, want %v", committed.Preparation.ProvisionalAccepted, want)
+	}
+	if len(committed.Preparation.MissingCoverage) != 1 || committed.Preparation.MissingCoverage[0].Dimension != "diagnostics" ||
+		!strings.Contains(committed.Preparation.MissingCoverage[0].Detail, "lsp_not_configured") {
+		t.Fatalf("missing coverage = %#v", committed.Preparation.MissingCoverage)
+	}
+	if ws.holdsLease(prepared.PlanID) {
+		t.Fatal("successful commit retained the lease")
 	}
 }

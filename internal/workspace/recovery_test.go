@@ -64,22 +64,29 @@ func TestStartupRecoveryHandlesEveryIncompleteJournalState(t *testing.T) {
 	} {
 		t.Run(string(state), func(t *testing.T) {
 			root, stateDir := t.TempDir(), t.TempDir()
-			_, journalPath := journalFixture(t, root, stateDir, state, state != CommitJournalPrepared)
+			// A prepared journal never wrote anything, so the fixture leaves the postimage on
+			// disk to prove that startup closes it without touching the file. Applying and
+			// recovery-required journals must be rolled back to the exact preimage.
+			_, journalPath := journalFixture(t, root, stateDir, state, true)
 			reopened, err := Open(OpenOptions{
 				Kind: KindProject, Root: root, StateDir: stateDir, Identity: crashWorkspaceID,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			want, wantProgress := "old\n", CommitPathRestored
+			if state == CommitJournalPrepared {
+				want, wantProgress = "new\n", CommitPathPending
+			}
 			got, err := os.ReadFile(filepath.Join(root, "value.txt"))
-			if err != nil || string(got) != "old\n" {
-				t.Fatalf("recovered bytes = %q, %v", got, err)
+			if err != nil || string(got) != want {
+				t.Fatalf("recovered bytes = %q, %v; want %q", got, err, want)
 			}
 			journal, err := loadCommitJournalFile(journalPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if journal.State != CommitJournalRolledBack || journal.Entries[0].Progress != CommitPathRestored {
+			if journal.State != CommitJournalRolledBack || journal.Entries[0].Progress != wantProgress {
 				t.Fatalf("recovered journal = %#v", journal)
 			}
 			if reopened.Identity().ID != crashWorkspaceID {

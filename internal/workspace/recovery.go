@@ -15,6 +15,17 @@ import (
 
 const compensationPrefix = "undo_"
 
+// Journal retention. Completed journals (committed or rolled back) are receipts: a
+// committed journal is what CompensatePlan undoes from, and a rolled-back journal records
+// that recovery finished. They are garbage-collected on workspace open and after each
+// successful commit once they are older than commitJournalRetention, and the newest
+// commitJournalRetainCount are kept beyond that only until the cap is exceeded. Prepared,
+// applying and recovery-required journals are never collected.
+const (
+	commitJournalRetention   = 7 * 24 * time.Hour
+	commitJournalRetainCount = 64
+)
+
 type CompensationResult struct {
 	TransactionID     string             `json:"transaction_id"`
 	CompensatesPlanID string             `json:"compensates_plan_id"`
@@ -53,27 +64,87 @@ func (w *Workspace) recoverCommitJournals() error {
 		path := filepath.Join(directory, entry.Name())
 		journal, err := loadCommitJournalFile(path)
 		if err != nil {
-			return fmt.Errorf("commit_recovery_required: load %s: %w", entry.Name(), err)
+			return Codedf(CodeCommitRecoveryRequired, "load %s: %w", entry.Name(), err)
 		}
 		if journal.WorkspaceID != w.Identity().ID {
-			return fmt.Errorf("commit_recovery_required: journal %s belongs to workspace %s", entry.Name(), journal.WorkspaceID)
+			return Codedf(CodeCommitRecoveryRequired, "journal %s belongs to workspace %s", entry.Name(), journal.WorkspaceID)
 		}
 		switch journal.State {
 		case CommitJournalCommitted:
-			continue
+			// The committed journal is written before the plan record claims COMMITTED, so a
+			// plan still marked COMMITTING or RECOVERY_REQUIRED here finished its canonical
+			// writes and only lost the receipt transition.
+			if err := w.markPlanCommitted(journal); err != nil {
+				return err
+			}
 		case CommitJournalRolledBack:
 			if err := w.markPlanRecovered(journal.PlanID, journal.PlanRevision); err != nil {
 				return err
 			}
-		case CommitJournalPrepared, CommitJournalApplying, CommitJournalRecoveryRequired:
+		case CommitJournalPrepared:
+			// A prepared journal never reached applying, so no canonical byte was written and
+			// there is nothing to restore; the journal is closed without touching any file.
+			journal.State = CommitJournalRolledBack
+			if journal.LastError == "" {
+				journal.LastError = "commit interrupted before any canonical write"
+			}
+			if err := w.persistCommitJournal(path, &journal, "recovered_journal"); err != nil {
+				return w.recoveryConflict(path, &journal, fmt.Errorf("persist unstarted journal: %w", err))
+			}
+			if err := w.markPlanRecovered(journal.PlanID, journal.PlanRevision); err != nil {
+				return err
+			}
+		case CommitJournalApplying, CommitJournalRecoveryRequired:
 			if err := w.recoverCommitJournal(path, &journal); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("commit_recovery_required: journal %s has unknown state %q", entry.Name(), journal.State)
+			return Codedf(CodeCommitRecoveryRequired, "journal %s has unknown state %q", entry.Name(), journal.State)
 		}
 	}
+	w.collectCommitJournals()
 	return nil
+}
+
+// collectCommitJournals removes completed journals beyond the retention window or the
+// count cap. It is best effort: a journal that cannot be read or removed is left alone, and
+// no journal in prepared, applying or recovery-required state is ever touched.
+func (w *Workspace) collectCommitJournals() {
+	if w.stateDir == "" {
+		return
+	}
+	directory := filepath.Join(w.stateDir, "commit-journals", string(w.Identity().ID))
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	type completed struct {
+		path      string
+		updatedAt time.Time
+	}
+	var finished []completed
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		journal, err := loadCommitJournalFile(path)
+		if err != nil || journal.WorkspaceID != w.Identity().ID {
+			continue
+		}
+		if journal.State != CommitJournalCommitted && journal.State != CommitJournalRolledBack {
+			continue
+		}
+		finished = append(finished, completed{path: path, updatedAt: journal.UpdatedAt})
+	}
+	sort.Slice(finished, func(i, j int) bool { return finished[i].updatedAt.After(finished[j].updatedAt) })
+	cutoff := time.Now().UTC().Add(-commitJournalRetention)
+	for index, journal := range finished {
+		if index < commitJournalRetainCount && !journal.updatedAt.Before(cutoff) {
+			continue
+		}
+		_ = os.Remove(journal.path)
+	}
 }
 
 func loadCommitJournalFile(path string) (CommitJournal, error) {
@@ -195,23 +266,60 @@ func (w *Workspace) recoveryConflict(path string, journal *CommitJournal, cause 
 	if err := w.writeCommitJournal(path, journal); err != nil {
 		cause = fmt.Errorf("%w; persist recovery conflict: %v", cause, err)
 	}
-	return fmt.Errorf("commit_recovery_required: %w", cause)
+	return Coded(CodeCommitRecoveryRequired, cause)
 }
 
+// markPlanRecovered reconciles a plan with a rolled-back journal. Only a plan still waiting
+// on recovery moves; a plan already reconciled, or one that refused its commit before any
+// write, keeps its state so repeated opens do not rewrite it.
 func (w *Workspace) markPlanRecovered(planID string, revision uint64) error {
 	w.plansMu.Lock()
 	defer w.plansMu.Unlock()
 	plan, ok := w.plans[planID]
-	if !ok {
+	if !ok || plan.PlanRevision != revision {
 		return nil
+	}
+	if plan.State != PlanCommitting && plan.State != PlanRecoveryRequired {
+		return nil
+	}
+	if !canTransition(plan.State, PlanRolledBack) {
+		return illegalTransition(planID, plan.State, PlanRolledBack)
 	}
 	plan.State = PlanRolledBack
 	plan.Preparation = nil
-	plan.UpdatedAt = time.Now().UTC()
-	plan.Events = append(plan.Events, PlanEvent{
-		Action: "startup_recovery", PlanRevision: revision, Outcome: "preimages_restored", At: plan.UpdatedAt,
-	})
+	plan.Conflict = nil
+	recordPlanEvent(&plan, "startup_recovery", "preimages_restored")
 	w.plans[planID] = plan
+	return w.persistPlansLocked()
+}
+
+// markPlanCommitted reconciles a plan whose committed journal outlived its COMMITTED
+// transition, as happens when the process dies between the two durable writes.
+func (w *Workspace) markPlanCommitted(journal CommitJournal) error {
+	w.plansMu.Lock()
+	defer w.plansMu.Unlock()
+	plan, ok := w.plans[journal.PlanID]
+	if !ok || plan.PlanRevision != journal.PlanRevision {
+		return nil
+	}
+	if plan.State != PlanCommitting && plan.State != PlanRecoveryRequired {
+		return nil
+	}
+	if !canTransition(plan.State, PlanCommitted) {
+		return illegalTransition(journal.PlanID, plan.State, PlanCommitted)
+	}
+	preparation := PlanPreparation{}
+	if plan.Preparation != nil {
+		preparation = *plan.Preparation
+	}
+	preparation.CanonicalChanged = true
+	preparation.CanonicalRevision = journal.CanonicalRevision
+	preparation.JournalID = journal.PlanID
+	plan.State = PlanCommitted
+	plan.Preparation = &preparation
+	plan.Conflict = nil
+	recordPlanEvent(&plan, "startup_reconcile", "committed_journal_found")
+	w.plans[journal.PlanID] = plan
 	return w.persistPlansLocked()
 }
 
@@ -255,7 +363,7 @@ func (w *Workspace) compensationStageRequest(journal CommitJournal) PlanStageReq
 // committed postimages, stages the inverse view in the provider, and records its own journal.
 func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager PlanStager) (CompensationResult, error) {
 	if stager == nil {
-		return CompensationResult{}, errors.New("provider_unavailable: compensation requires a provider")
+		return CompensationResult{}, Coded(CodeProviderUnavailable, errors.New("compensation requires a provider"))
 	}
 	w.plansMu.Lock()
 	plan, known := w.plans[planID]
@@ -296,72 +404,95 @@ func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager Pl
 			if matchErr != nil {
 				return result, matchErr
 			}
-			return result, fmt.Errorf("commit_precondition_changed: %s no longer matches committed postimage", entry.Path)
+			return result, Codedf(CodeCommitPreconditionChanged, "%s no longer matches committed postimage", entry.Path)
 		}
 	}
 	w.prepareMu.Lock()
 	if _, exists := w.activePlans[transactionID]; exists {
 		w.prepareMu.Unlock()
-		return result, fmt.Errorf("workspace_busy: transaction %s is already active", transactionID)
+		return result, Codedf(CodeWorkspaceBusy, "transaction %s is already active", transactionID)
 	}
 	w.activePlans[transactionID] = struct{}{}
 	w.prepareMu.Unlock()
-	release := true
+	// The lease is released on every exit; the staged provider view is rolled back unless
+	// its own commit already succeeded.
+	stagerCommitted := false
 	defer func() {
-		if release {
-			w.prepareMu.Lock()
-			delete(w.activePlans, transactionID)
-			w.prepareMu.Unlock()
+		if !stagerCommitted {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = stager.Rollback(rollbackCtx, transactionID)
+			cancel()
 		}
+		w.prepareMu.Lock()
+		delete(w.activePlans, transactionID)
+		w.prepareMu.Unlock()
 	}()
 	if err := stager.Stage(ctx, w.compensationStageRequest(journal)); err != nil {
-		_ = stager.Rollback(context.Background(), transactionID)
 		return result, err
 	}
 	if err := w.persistCommitJournal(compensationPath, &journal, "prepare_journal"); err != nil {
-		_ = stager.Rollback(context.Background(), transactionID)
 		return result, err
 	}
-	release = false
+	written := false
+	failure := func(cause error) (CompensationResult, error) {
+		if !written {
+			journal.State = CommitJournalRolledBack
+			journal.LastError = cause.Error()
+			_ = w.writeCommitJournal(compensationPath, &journal)
+			return result, cause
+		}
+		return w.compensationRecovery(result, compensationPath, &journal, cause)
+	}
 	journal.State = CommitJournalApplying
 	if err := w.persistCommitJournal(compensationPath, &journal, "applying_journal"); err != nil {
-		return w.compensationRecovery(result, compensationPath, &journal, err)
+		return failure(err)
 	}
 	for _, index := range commitEntryOrder(journal.Entries) {
 		entry := &journal.Entries[index]
 		if err := ctx.Err(); err != nil {
-			return w.compensationRecovery(result, compensationPath, &journal, err)
+			return failure(err)
 		}
 		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
-			return w.compensationRecovery(result, compensationPath, &journal, err)
+			return failure(err)
 		}
 		absolute, pathErr := w.confinedPath(entry.Path)
-		if pathErr == nil {
-			pathErr = applyCommitEntry(absolute, *entry)
-		}
 		if pathErr != nil {
-			return w.compensationRecovery(result, compensationPath, &journal, pathErr)
+			return failure(pathErr)
+		}
+		// Committed postimages carry no inode or mtime identity, so the recheck before the
+		// durable replacement compares kind, mode, size, target and bytes, as recovery does.
+		matches, matchErr := stateMatchesJournalImage(absolute, entry.Before, entry.Preimage)
+		if matchErr != nil {
+			return failure(matchErr)
+		}
+		if !matches {
+			return failure(Codedf(CodeCommitPreconditionChanged, "%s changed during compensation", entry.Path))
+		}
+		written = true
+		if err := applyCommitEntry(absolute, *entry); err != nil {
+			return failure(err)
 		}
 		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
-			return w.compensationRecovery(result, compensationPath, &journal, err)
+			return failure(err)
 		}
 		entry.Progress = CommitPathApplied
 		if err := w.persistCommitJournal(compensationPath, &journal, "progress_journal"); err != nil {
-			return w.compensationRecovery(result, compensationPath, &journal, err)
+			return failure(err)
 		}
 	}
 	if err := stager.Commit(ctx, transactionID); err != nil {
-		return w.compensationRecovery(result, compensationPath, &journal, fmt.Errorf("provider resync: %w", err))
+		return failure(fmt.Errorf("provider resync: %w", err))
 	}
-	identity := w.recordCanonicalCommit()
+	stagerCommitted = true
+	identity := w.recordCanonicalCommit(journal.Entries)
 	journal.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
 	journal.State = CommitJournalCommitted
 	if err := w.persistCommitJournal(compensationPath, &journal, "committed_journal"); err != nil {
-		return w.compensationRecovery(result, compensationPath, &journal, err)
+		return failure(err)
 	}
 	result.State = journal.State
 	result.CanonicalRevision = journal.CanonicalRevision
-	release = true
+	w.collectCommitJournals()
 	return result, nil
 }
 
