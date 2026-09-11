@@ -53,7 +53,8 @@ func TestVerifyRunObservesExternalBytesBeforeRevisionCheck(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package sample\nvar Value = 2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := direct.handlers.verify(context.Background(), "external-verify", workspace, map[string]any{
+	result := direct.call(context.Background(), "verify_run", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "external-verify",
 		"revision_or_transaction": revision, "stages": []any{"parser"},
 	})
 	if result["outcome"] != "conflict" || result["code"] != "revision_changed" {
@@ -115,7 +116,7 @@ func TestCanonicalChangedPathsComeFromTheReceiptOfTheTargetRevision(t *testing.T
 			},
 		},
 	}
-	got, err := direct.receipts.canonicalChangedPaths(workspaceID, 20)
+	got, err := direct.receipts.CanonicalChangedPaths(workspaceID, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

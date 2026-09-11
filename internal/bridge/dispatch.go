@@ -45,16 +45,14 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		receipts:    receipts,
 		scheduler:   scheduler,
 		toolTimeout: providerpool.DefaultCallTimeout,
-		handlers: &toolHandlers{
-			registry:      registry,
-			provenance:    receipts,
-			pool:          providerpool.New(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory),
-			verification:  newVerificationCache(),
-			notices:       newNoticeDelivery(),
-			stateDir:      stateDir,
-			toolTimeout:   providerpool.DefaultCallTimeout,
-			schedulerInfo: scheduler.description,
-		},
+		handlers: newToolHandlers(handlerConfig{
+			Registry:      registry,
+			Provenance:    receipts,
+			Pool:          providerpool.New(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory),
+			StateDir:      stateDir,
+			ToolTimeout:   providerpool.DefaultCallTimeout,
+			SchedulerInfo: scheduler.description,
+		}),
 	}
 	direct.loadErr = direct.loadState()
 	return direct
@@ -79,22 +77,22 @@ func (d *directWorkspaces) loadState() error {
 			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
-	return workspacecore.ReapSandboxes(d.handlers.pool.SandboxBaseDir(), nil)
+	return workspacecore.ReapSandboxes(d.handlers.providerPool().SandboxBaseDir(), nil)
 }
 
 // setToolTimeout changes the global tool-call timeout the dispatcher
 // enforces and the handlers advertise.
 func (d *directWorkspaces) setToolTimeout(timeout time.Duration) {
 	d.toolTimeout = timeout
-	d.handlers.toolTimeout = timeout
+	d.handlers.setToolTimeout(timeout)
 }
 
 func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
-	return d.registry.lookup(id)
+	return d.registry.Lookup(id)
 }
 
 func (d *directWorkspaces) closeProviders() {
-	d.handlers.pool.Close()
+	d.handlers.providerPool().Close()
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
@@ -272,12 +270,12 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		release()
 	}
 	if name != "diagnostics" {
-		if workspace := d.registry.lookup(workspacecore.ID(workspaceID)); workspace != nil {
+		if workspace := d.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
 			d.handlers.attachDiagnosticUpdates(ctx, workspace, result)
 		}
 	}
 	if !isStatefulModernTool(name) {
-		if err := d.registry.persistIdentity(workspacecore.ID(workspaceID)); err != nil {
+		if err := d.registry.PersistIdentity(workspacecore.ID(workspaceID)); err != nil {
 			result["warnings"] = append(result["warnings"].([]string), "workspace state was not persisted: "+err.Error())
 		}
 	}
@@ -298,7 +296,7 @@ func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspa
 	if err := ctx.Err(); err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
-	workspace := d.registry.lookup(workspacecore.ID(workspaceID))
+	workspace := d.registry.Lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}

@@ -104,7 +104,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
 		return nil, mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
-	if err := h.registry.persistIdentity(workspace.Identity().ID); err != nil {
+	if err := h.registry.PersistIdentity(workspace.Identity().ID); err != nil {
 		return nil, mcpapi.Failure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	revision := fmt.Sprint(arguments["revision_or_transaction"])
@@ -199,7 +199,7 @@ func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspac
 		files, filesErr := sandbox.BaseStageFiles()
 		if filesErr == nil {
 			var changedPaths []string
-			changedPaths, provenanceErr := h.provenance.canonicalChangedPaths(identity.ID, identity.StateSeq)
+			changedPaths, provenanceErr := h.provenance.CanonicalChangedPaths(identity.ID, identity.StateSeq)
 			if provenanceErr != nil && testScope != "affected" {
 				for _, file := range files {
 					changedPaths = append(changedPaths, file.Path)

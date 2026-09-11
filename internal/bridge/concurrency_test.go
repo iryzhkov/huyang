@@ -110,23 +110,23 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 		}
 	}
 	promptly("canonicalProvider(B)", func() {
-		if _, err := direct.handlers.pool.Canonical(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.providerPool().Canonical(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("canonicalProvider(B): %v", err)
 		}
 	})
 	promptly("restartCanonicalProvider(B)", func() {
-		if _, err := direct.handlers.pool.Restart(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.providerPool().Restart(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("restartCanonicalProvider(B): %v", err)
 		}
 	})
 	promptly("planStager lookup", func() {
-		if _, err := direct.handlers.pool.PlanStager(workspaceBRecord, "missing", 1, false); err == nil {
+		if _, err := direct.handlers.providerPool().PlanStager(workspaceBRecord, "missing", 1, false); err == nil {
 			t.Error("missing stager lookup succeeded")
 		}
 	})
 	promptly("preparedStager(A) bookkeeping", func() {
-		stager := direct.handlers.pool.Stager(workspacecore.ID(workspaceA), "blocked-plan")
-		for _, candidate := range direct.handlers.pool.StagersFor(workspacecore.ID(workspaceA)) {
+		stager := direct.handlers.providerPool().Stager(workspacecore.ID(workspaceA), "blocked-plan")
+		for _, candidate := range direct.handlers.providerPool().StagersFor(workspacecore.ID(workspaceA)) {
 			stager = candidate
 		}
 		if stager == nil {
@@ -165,13 +165,13 @@ func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
 	}
 	revision := plan.Preparation.PreparedRevision
 
-	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
+	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
 		t.Fatal("workspace A cannot find its own prepared revision")
 	}
-	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
+	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
 		t.Fatal("workspace B resolved a prepared revision that belongs to workspace A")
 	}
-	if stager := direct.handlers.pool.PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
+	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
 		t.Fatal("workspace B resolved a plan ID that belongs to workspace A")
 	}
 	result := direct.call(context.Background(), "verify_run", map[string]any{

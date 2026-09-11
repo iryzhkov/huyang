@@ -110,7 +110,8 @@ func TestChangePlanDiscardsFailedPrepareWithoutRemainingSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := direct.handlers.changePlan(context.Background(), "req_discard_failed_prepare", workspace, map[string]any{
+	result := direct.call(context.Background(), "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "discard-failed-prepare",
 		"action": "discard", "plan_id": plan.PlanID, "plan_revision": float64(failed.PlanRevision),
 	})
 	if result["outcome"] != "ok" {

@@ -16,7 +16,7 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
 		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
-	if err := h.registry.persistIdentity(workspace.Identity().ID); err != nil {
+	if err := h.registry.PersistIdentity(workspace.Identity().ID); err != nil {
 		return mcpapi.Failure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	from := fmt.Sprint(arguments["from_revision"])
@@ -33,15 +33,15 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	if toSeq > workspace.Identity().StateSeq {
 		return mcpapi.Envelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
 	}
-	recorded := h.provenance.recordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
+	recorded := h.provenance.RecordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
 	sort.Slice(recorded, func(i, j int) bool {
-		if recorded[i].from != recorded[j].from {
-			return recorded[i].from < recorded[j].from
+		if recorded[i].From != recorded[j].From {
+			return recorded[i].From < recorded[j].From
 		}
-		if recorded[i].to != recorded[j].to {
-			return recorded[i].to < recorded[j].to
+		if recorded[i].To != recorded[j].To {
+			return recorded[i].To < recorded[j].To
 		}
-		return recorded[i].path < recorded[j].path
+		return recorded[i].Path < recorded[j].Path
 	})
 	known := make([]recordedRevisionDiff, 0, len(recorded))
 	segments := make([]any, 0, len(recorded))
@@ -49,29 +49,29 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	cursor := fromSeq
 	for _, item := range recorded {
 		sameRevision := len(known) > 0 &&
-			known[len(known)-1].from == item.from &&
-			known[len(known)-1].to == item.to
-		if item.to <= cursor {
+			known[len(known)-1].From == item.From &&
+			known[len(known)-1].To == item.To
+		if item.To <= cursor {
 			if !sameRevision {
 				continue
 			}
-		} else if item.from < cursor {
+		} else if item.From < cursor {
 			continue
 		}
-		if item.from > cursor {
+		if item.From > cursor {
 			gaps = append(gaps, map[string]any{
 				"from_revision": fmt.Sprintf("wsrev_%d", cursor),
-				"to_revision":   fmt.Sprintf("wsrev_%d", item.from),
+				"to_revision":   fmt.Sprintf("wsrev_%d", item.From),
 			})
 		}
 		known = append(known, item)
 		segments = append(segments, map[string]any{
-			"from_revision": fmt.Sprintf("wsrev_%d", item.from),
-			"to_revision":   fmt.Sprintf("wsrev_%d", item.to),
-			"path":          item.path,
+			"from_revision": fmt.Sprintf("wsrev_%d", item.From),
+			"to_revision":   fmt.Sprintf("wsrev_%d", item.To),
+			"path":          item.Path,
 		})
-		if item.to > cursor {
-			cursor = item.to
+		if item.To > cursor {
+			cursor = item.To
 		}
 	}
 	if cursor < toSeq {
@@ -84,9 +84,9 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 		diffs := make([]any, 0, len(known))
 		paths := make([]string, 0, len(known))
 		for _, item := range known {
-			diffs = append(diffs, mcpapi.CompactRevisionDiff(item.diff))
-			if item.path != "" {
-				paths = append(paths, item.path)
+			diffs = append(diffs, mcpapi.CompactRevisionDiff(item.Diff))
+			if item.Path != "" {
+				paths = append(paths, item.Path)
 			}
 		}
 		sort.Strings(paths)
@@ -106,20 +106,20 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	type endpoints struct{ before, after string }
 	byPath := map[string]endpoints{}
 	for _, item := range known {
-		ends, exists := byPath[item.path]
+		ends, exists := byPath[item.Path]
 		if !exists {
-			ends.before = item.beforeSHA
+			ends.before = item.BeforeSHA
 		}
-		ends.after = item.afterSHA
-		byPath[item.path] = ends
+		ends.after = item.AfterSHA
+		byPath[item.Path] = ends
 	}
 	diffs := make([]any, 0, len(known))
 	for _, item := range known {
-		ends := byPath[item.path]
+		ends := byPath[item.Path]
 		if ends.before != "" && ends.before == ends.after {
 			continue
 		}
-		diffs = append(diffs, mcpapi.CompactRevisionDiff(item.diff))
+		diffs = append(diffs, mcpapi.CompactRevisionDiff(item.Diff))
 	}
 	netChangedPaths := 0
 	for _, ends := range byPath {

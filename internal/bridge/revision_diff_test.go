@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +23,8 @@ func TestRevisionDiffObservesExternalChangeWithoutPriorInspect(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package changed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := direct.handlers.revisionDiff("external-diff", workspace, map[string]any{
-		"from_revision": from, "to_revision_or_current": "current",
+	result := direct.call(context.Background(), "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": from, "to_revision_or_current": "current",
 	})
 	if result["outcome"] != "partial" || result["code"] != "diff_evidence_incomplete" {
 		t.Fatalf("revision diff did not report the external gap precisely: %#v", result)
@@ -121,9 +122,8 @@ func TestRevisionDiffIncludesEveryCommittedPlanDiff(t *testing.T) {
 	}
 	direct.receipts.mu.Unlock()
 
-	workspace := direct.get(workspacecore.ID(workspaceID))
-	result := direct.handlers.revisionDiff("req_plan_receipt", workspace, map[string]any{
-		"from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
+	result := direct.call(context.Background(), "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
 	})
 	if result["outcome"] != "ok" {
 		t.Fatalf("revision diff outcome = %#v", result)
@@ -155,7 +155,7 @@ func TestRecordedRevisionDiffsDeduplicateRepeatedPlanReceipts(t *testing.T) {
 	direct.receipts.replays[prefix+"apply"] = &directReplay{complete: true, result: result()}
 	direct.receipts.replays[prefix+"inspect"] = &directReplay{complete: true, result: result()}
 
-	recorded := direct.receipts.recordedRevisionDiffs("workspace", 2, 3)
+	recorded := direct.receipts.RecordedRevisionDiffs("workspace", 2, 3)
 	if len(recorded) != 1 {
 		t.Fatalf("duplicate committed plan receipts produced %d revision diffs: %#v", len(recorded), recorded)
 	}

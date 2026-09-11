@@ -99,21 +99,21 @@ func TestWorkspaceReopenRecordsExternalNewFileAsRevisionGap(t *testing.T) {
 	}
 	direct := newDirectWorkspaces(t.TempDir())
 	defer direct.closeProviders()
-	opened := direct.handlers.open(context.Background(), "req_open", map[string]any{"kind": "project", "root": root})
+	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	identity := opened["workspace"].(workspacecore.Identity)
 	workspaceID := string(identity.ID)
 	from := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("external\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	reopened := direct.handlers.open(context.Background(), "req_reopen", map[string]any{"kind": "project", "root": root})
+	reopened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	toIdentity := reopened["workspace"].(workspacecore.Identity)
 	to := fmt.Sprintf("wsrev_%d", toIdentity.StateSeq)
 	if to == from {
 		t.Fatalf("external inventory addition left revision unchanged at %s", from)
 	}
-	diff := direct.handlers.revisionDiff("req_diff", direct.get(workspacecore.ID(workspaceID)), map[string]any{
-		"from_revision": from, "to_revision_or_current": to,
+	diff := direct.call(context.Background(), "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": from, "to_revision_or_current": to,
 	})
 	gaps := mcpapi.AnySlice(diff["data"].(map[string]any)["gaps"])
 	if len(gaps) != 1 {

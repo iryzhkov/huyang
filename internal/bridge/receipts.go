@@ -504,7 +504,7 @@ func writeDurableFile(path string, content []byte) error {
 	return directory.Sync()
 }
 
-func (s *receiptStore) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {
+func (s *receiptStore) CanonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {
 	if target == 1 {
 		return []string{}, nil
 	}
@@ -575,7 +575,7 @@ func exactDiffReceiptMap(diff workspacecore.ExactDiff) map[string]any {
 	}
 }
 
-func (s *receiptStore) recordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
+func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -637,8 +637,8 @@ func (s *receiptStore) recordedRevisionDiffs(workspaceID string, fromSeq, toSeq 
 			}
 			seen[identity] = true
 			recorded = append(recorded, recordedRevisionDiff{
-				from: left, to: right, diff: diff, path: path,
-				beforeSHA: beforeSHA, afterSHA: afterSHA,
+				From: left, To: right, Diff: diff, Path: path,
+				BeforeSHA: beforeSHA, AfterSHA: afterSHA,
 			})
 		}
 	}

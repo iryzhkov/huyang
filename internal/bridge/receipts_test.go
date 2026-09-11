@@ -146,11 +146,11 @@ func TestTrimmedReceiptsKeepRevisionProvenance(t *testing.T) {
 	if !trimmed || size > 1024 || data["bulk"] != nil || data[receiptTrimmedDataMarker] != true {
 		t.Fatalf("receipt was not trimmed: trimmed=%v bytes=%d data=%#v", trimmed, size, data)
 	}
-	diffs := direct.receipts.recordedRevisionDiffs(workspaceID, 1, 2)
-	if len(diffs) != 1 || diffs[0].path != "main.go" || diffs[0].afterSHA != "bb" {
+	diffs := direct.receipts.RecordedRevisionDiffs(workspaceID, 1, 2)
+	if len(diffs) != 1 || diffs[0].Path != "main.go" || diffs[0].AfterSHA != "bb" {
 		t.Fatalf("provenance after trim = %#v", diffs)
 	}
-	paths, err := direct.receipts.canonicalChangedPaths(workspacecore.ID(workspaceID), 2)
+	paths, err := direct.receipts.CanonicalChangedPaths(workspacecore.ID(workspaceID), 2)
 	if err != nil || len(paths) != 1 || paths[0] != "main.go" {
 		t.Fatalf("changed paths after trim = %#v, %v", paths, err)
 	}
@@ -211,7 +211,7 @@ func TestLegacyRegistryReceiptsMigrateIntoPerWorkspaceFiles(t *testing.T) {
 	if migrated == nil || !migrated.trimmed || pendingKept {
 		t.Fatalf("migrated receipts = %#v, provider-backed kept=%v", migrated, pendingKept)
 	}
-	if diffs := direct.receipts.recordedRevisionDiffs(workspaceID, 1, 2); len(diffs) != 1 {
+	if diffs := direct.receipts.RecordedRevisionDiffs(workspaceID, 1, 2); len(diffs) != 1 {
 		t.Fatalf("provenance lost in migration: %#v", diffs)
 	}
 }

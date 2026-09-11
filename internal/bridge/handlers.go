@@ -17,24 +17,24 @@ import (
 // open workspace, register a newly opened one, and persist an identity that
 // moved. The service owns the registry and its durable file.
 type workspaceLookup interface {
-	lookup(id workspacecore.ID) *workspacecore.Workspace
-	adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error)
-	persistIdentity(id workspacecore.ID) error
+	Lookup(id workspacecore.ID) *workspacecore.Workspace
+	Adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error)
+	PersistIdentity(id workspacecore.ID) error
 }
 
 // revisionProvenance answers the two receipt-backed questions the handlers
 // ask: which native edits produced the revisions in a range, and which
 // paths changed at one revision.
 type revisionProvenance interface {
-	recordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff
-	canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error)
+	RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff
+	CanonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error)
 }
 
 // recordedRevisionDiff is one native edit receipt in revision order.
 type recordedRevisionDiff struct {
-	from, to                  uint64
-	path, beforeSHA, afterSHA string
-	diff                      any
+	From, To                  uint64
+	Path, BeforeSHA, AfterSHA string
+	Diff                      any
 }
 
 // replayCheckpoint persists an early receipt for a canonical mutation before
@@ -73,6 +73,40 @@ type toolHandlers struct {
 	schedulerInfo func() map[string]any
 }
 
+// handlerConfig wires the handlers to what the service owns.
+type handlerConfig struct {
+	Registry   workspaceLookup
+	Provenance revisionProvenance
+	Pool       *providerpool.Pool
+	StateDir   string
+	// ToolTimeout is advertised in service_limits; the service enforces it.
+	ToolTimeout   time.Duration
+	SchedulerInfo func() map[string]any
+}
+
+func newToolHandlers(config handlerConfig) *toolHandlers {
+	return &toolHandlers{
+		registry:      config.Registry,
+		provenance:    config.Provenance,
+		pool:          config.Pool,
+		verification:  newVerificationCache(),
+		notices:       newNoticeDelivery(),
+		stateDir:      config.StateDir,
+		toolTimeout:   config.ToolTimeout,
+		schedulerInfo: config.SchedulerInfo,
+	}
+}
+
+// providerPool exposes the pool so the service can close it on shutdown.
+func (h *toolHandlers) providerPool() *providerpool.Pool {
+	return h.pool
+}
+
+// setToolTimeout changes the advertised tool-call timeout.
+func (h *toolHandlers) setToolTimeout(timeout time.Duration) {
+	h.toolTimeout = timeout
+}
+
 // execute runs one tool call against the workspace it names. workspace_open
 // and a path-only read need no workspace ID; every other tool fails without
 // a registered one.
@@ -107,7 +141,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 		}
 		return result
 	}
-	workspace := h.registry.lookup(workspacecore.ID(workspaceID))
+	workspace := h.registry.Lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}

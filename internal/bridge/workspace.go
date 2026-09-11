@@ -36,7 +36,7 @@ func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map
 	if err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 	}
-	opened, created, err := h.registry.adopt(opened, options.Files)
+	opened, created, err := h.registry.Adopt(opened, options.Files)
 	if err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
 	}

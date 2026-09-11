@@ -93,19 +93,19 @@ func (r *workspaceRegistry) load() (legacy []persistedReplay, migrate bool, err 
 	return state.Replays, state.Version == legacyRegistryStateVersion, nil
 }
 
-// lookup returns the open workspace with the given ID, or nil.
-func (r *workspaceRegistry) lookup(id workspacecore.ID) *workspacecore.Workspace {
+// Lookup returns the open workspace with the given ID, or nil.
+func (r *workspaceRegistry) Lookup(id workspacecore.ID) *workspacecore.Workspace {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.items[id]
 }
 
-// adopt records a freshly opened workspace unless an equivalent definition
+// Adopt records a freshly opened workspace unless an equivalent definition
 // (same kind, root and file allowlist) is already registered, in which case
 // the registered workspace is returned and created is false. A new record
 // is persisted before it is reported; a persist failure leaves the registry
 // unchanged.
-func (r *workspaceRegistry) adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error) {
+func (r *workspaceRegistry) Adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error) {
 	identity := opened.Identity()
 	record := persistedWorkspace{
 		ID: identity.ID, Kind: identity.Kind, Root: identity.Root, Files: append([]string(nil), files...),
@@ -162,9 +162,9 @@ func (r *workspaceRegistry) persist() error {
 	return writeDurableFile(r.path, append(content, '\n'))
 }
 
-// persistIdentity rewrites the registry when the workspace's epoch or state
+// PersistIdentity rewrites the registry when the workspace's epoch or state
 // sequence moved since the last write; an unchanged identity is a no-op.
-func (r *workspaceRegistry) persistIdentity(id workspacecore.ID) error {
+func (r *workspaceRegistry) PersistIdentity(id workspacecore.ID) error {
 	r.mu.Lock()
 	record, ok := r.records[id]
 	opened := r.items[id]
@@ -185,12 +185,12 @@ func (r *workspaceRegistry) persistIdentity(id workspacecore.ID) error {
 }
 
 func (r *workspaceRegistry) syncProviderEpoch(id workspacecore.ID, epoch uint64) error {
-	opened := r.lookup(id)
+	opened := r.Lookup(id)
 	if opened == nil {
 		return fmt.Errorf("workspace %s not found", id)
 	}
 	opened.SyncProviderEpoch(epoch)
-	return r.persistIdentity(id)
+	return r.PersistIdentity(id)
 }
 
 func samePersistedWorkspace(left, right persistedWorkspace) bool {

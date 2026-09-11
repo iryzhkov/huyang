@@ -67,7 +67,7 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
 		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
 	}
-	sandboxStager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
+	sandboxStager := direct.handlers.providerPool().Stager(workspaceIDValue(workspaceID), planID)
 	sandboxFile := filepath.Join(sandboxStager.Sandbox().Tree, "note.txt")
 	staged, err := os.ReadFile(sandboxFile)
 	if err != nil || !bytes.Equal(staged, []byte("alpha DELTA gamma\n")) {
@@ -150,7 +150,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
 		t.Fatalf("canonical apply = %q, %v", current, err)
 	}
-	sandboxStager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
+	sandboxStager := direct.handlers.providerPool().Stager(workspaceIDValue(workspaceID), planID)
 	if _, err := os.Stat(sandboxStager.Sandbox().Root); !os.IsNotExist(err) {
 		t.Fatalf("commit did not remove owned sandbox: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestOfficialClientPreparesMissingFileWithoutRevisionPlaceholder(t *testing.
 	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
 		t.Fatalf("prepare wrote missing file to canonical disk: %v", err)
 	}
-	stager := direct.handlers.pool.Stager(workspaceIDValue(workspaceID), planID)
+	stager := direct.handlers.providerPool().Stager(workspaceIDValue(workspaceID), planID)
 	request, _, ok := stager.PreparedRequest()
 	if !ok || len(request.Files) != 1 {
 		t.Fatalf("prepared request = %#v, available=%t", request, ok)
