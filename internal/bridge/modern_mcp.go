@@ -1679,6 +1679,150 @@ func compactTextChange(change workspacecore.TextChange) map[string]any {
 	}
 }
 
+const (
+	modernVerificationListLimit   = 20
+	modernVerificationOutputLimit = 4096
+)
+
+func boundedVerificationStrings(values []string) ([]string, bool) {
+	if len(values) <= modernVerificationListLimit {
+		return nonNilStrings(values), false
+	}
+	return append([]string(nil), values[:modernVerificationListLimit]...), true
+}
+
+func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any, bool) {
+	if graph == nil {
+		return nil, false
+	}
+	changed, changedTruncated := boundedVerificationStrings(graph.Changed)
+	affected, affectedTruncated := boundedVerificationStrings(graph.Affected)
+	untested, untestedTruncated := boundedVerificationStrings(graph.Untested)
+	riskKinds := map[string]int{}
+	for _, risk := range graph.Risks {
+		riskKinds[risk.Kind]++
+	}
+	truncated := changedTruncated || affectedTruncated || untestedTruncated ||
+		len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Risks) > 0
+	return map[string]any{
+		"revision": graph.Revision,
+		"changed":  changed, "changed_count": len(graph.Changed), "changed_truncated": changedTruncated,
+		"affected": affected, "affected_count": len(graph.Affected), "affected_truncated": affectedTruncated,
+		"affected_without_tests": untested, "affected_without_tests_count": len(graph.Untested),
+		"affected_without_tests_truncated": untestedTruncated,
+		"node_count":                       len(graph.Nodes), "edge_count": len(graph.Edges),
+		"risk_count": len(graph.Risks), "risk_kind_counts": riskKinds,
+		"coverage": graph.Coverage, "adapters": nonNilStrings(graph.Adapters),
+		"variants_included": nonNilStrings(graph.Included), "variants_omitted": nonNilStrings(graph.Omitted),
+		"recommend_full": graph.RecommendFull, "details_truncated": truncated,
+	}, truncated
+}
+
+func compactVerificationResult(result workspacecore.VerificationResult) (map[string]any, []string) {
+	compacted := map[string]any{"revision": result.Revision}
+	var evidenceIDs []string
+	detailsTruncated := false
+	stages := make([]any, 0, len(result.Stages))
+	for _, stage := range result.Stages {
+		output := stage.Output
+		outputTruncated := len(output) > modernVerificationOutputLimit
+		if outputTruncated {
+			output = output[:modernVerificationOutputLimit]
+			detailsTruncated = true
+		}
+		scope, scopeTruncated := boundedVerificationStrings(stage.Scope)
+		writes, writesTruncated := boundedVerificationStrings(stage.Writes)
+		executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
+		selected := make([]any, 0, min(len(stage.SelectedTests), modernVerificationListLimit))
+		for _, test := range stage.SelectedTests[:min(len(stage.SelectedTests), modernVerificationListLimit)] {
+			selected = append(selected, map[string]any{
+				"name": test.Name, "reasons": nonNilStrings(test.Reasons), "variants": nonNilStrings(test.Variants),
+			})
+		}
+		selectedTruncated := len(stage.SelectedTests) > modernVerificationListLimit
+		detailsTruncated = detailsTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
+		stageData := map[string]any{
+			"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
+			"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
+			"coverage": stage.Coverage, "evidence_ids": nonNilStrings(stage.EvidenceIDs),
+			"scope": scope, "scope_count": len(stage.Scope), "scope_truncated": scopeTruncated,
+			"writes": writes, "writes_count": len(stage.Writes), "writes_truncated": writesTruncated,
+			"output": output, "output_bytes": len(stage.Output), "output_truncated": outputTruncated,
+			"test_scope": stage.TestScope, "test_verdict": stage.TestVerdict,
+			"selected_tests": selected, "selected_test_count": len(stage.SelectedTests),
+			"selected_tests_truncated": selectedTruncated,
+			"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
+			"executed_tests_truncated": executedTruncated,
+		}
+		stages = append(stages, stageData)
+		evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
+	}
+	compacted["stages"] = stages
+	compacted["stage_count"] = len(result.Stages)
+	if impact, truncated := compactVerificationImpact(result.Impact); impact != nil {
+		compacted["impact"] = impact
+		detailsTruncated = detailsTruncated || truncated
+	}
+	if result.Targeted != nil {
+		selected := make([]any, 0, min(len(result.Targeted.Selected), modernVerificationListLimit))
+		for _, test := range result.Targeted.Selected[:min(len(result.Targeted.Selected), modernVerificationListLimit)] {
+			selected = append(selected, map[string]any{
+				"name": test.Name, "reasons": nonNilStrings(test.Reasons), "variants": nonNilStrings(test.Variants),
+			})
+		}
+		executed, executedTruncated := boundedVerificationStrings(result.Targeted.Executed)
+		selectedTruncated := len(result.Targeted.Selected) > modernVerificationListLimit
+		compacted["targeted_tests"] = map[string]any{
+			"status": result.Targeted.Status, "selected": selected,
+			"selected_count": len(result.Targeted.Selected), "selected_truncated": selectedTruncated,
+			"executed": executed, "executed_count": len(result.Targeted.Executed),
+			"executed_truncated": executedTruncated,
+			"graph_revision":     result.Targeted.Graph.Revision,
+		}
+		detailsTruncated = detailsTruncated || selectedTruncated || executedTruncated || len(result.Targeted.Graph.Nodes) > 0 ||
+			len(result.Targeted.Graph.Edges) > 0 || len(result.Targeted.Graph.Risks) > 0
+	}
+	if len(result.ToolDelta) > 0 {
+		deltas := make([]any, 0, min(len(result.ToolDelta), modernVerificationListLimit))
+		for _, delta := range result.ToolDelta[:min(len(result.ToolDelta), modernVerificationListLimit)] {
+			deltas = append(deltas, map[string]any{
+				"path": delta.Path, "classification": delta.Classification,
+				"before_exists": delta.BeforeExists, "after_exists": delta.AfterExists,
+				"before_kind": delta.BeforeKind, "after_kind": delta.AfterKind,
+				"before_mode": delta.BeforeMode, "after_mode": delta.AfterMode,
+				"before_target": delta.BeforeTarget, "after_target": delta.AfterTarget,
+				"before_bytes": len(delta.Before), "after_bytes": len(delta.After),
+			})
+		}
+		compacted["tool_delta"] = deltas
+		compacted["tool_delta_count"] = len(result.ToolDelta)
+		compacted["tool_delta_truncated"] = len(result.ToolDelta) > modernVerificationListLimit
+		detailsTruncated = true
+	}
+	if result.FullTestGate != "" {
+		compacted["full_test_gate"] = result.FullTestGate
+	}
+	compacted["details_truncated"] = detailsTruncated
+	sort.Strings(evidenceIDs)
+	return compacted, uniqueStrings(evidenceIDs)
+}
+
+func modernVerificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult) map[string]any {
+	compacted, evidenceIDs := compactVerificationResult(result)
+	envelope := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
+		"verification": compacted, "cache": cache,
+	})
+	envelope["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
+	if len(evidenceIDs) > 0 {
+		next := make([]any, 0, len(evidenceIDs))
+		for _, id := range evidenceIDs {
+			next = append(next, map[string]any{"tool": "evidence_get", "action": "inspect_verification_evidence", "evidence_id": id})
+		}
+		envelope["next"] = next
+	}
+	return envelope
+}
+
 func nonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -1878,9 +2022,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	cached, cacheHit := d.verificationCache[cacheKey]
 	d.verificationMu.Unlock()
 	if cacheHit {
-		return modernEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", map[string]any{
-			"verification": cached.Result, "cache": "revision_hit",
-		})
+		return modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
 	}
 	d.providerMu.Lock()
 	var stager *sandboxPlanStager
@@ -1956,7 +2098,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 	}
 	if err != nil {
-		return modernEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), map[string]any{"verification": result})
+		return modernVerificationEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), "", result)
 	}
 	outcome := "ok"
 	for _, stage := range result.Stages {
@@ -1968,9 +2110,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	d.verificationMu.Lock()
 	d.verificationCache[cacheKey] = cachedVerification{Result: result, Outcome: outcome}
 	d.verificationMu.Unlock()
-	return modernEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", map[string]any{
-		"verification": result, "cache": "revision_miss",
-	})
+	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
 }
 
 func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {

@@ -273,6 +273,8 @@ func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
 }
 
 func TestCommandStageProvidesIsolatedCacheEnvironment(t *testing.T) {
+	miseData := t.TempDir()
+	t.Setenv("MISE_DATA_DIR", miseData)
 	environment, cleanup, err := isolatedCommandEnv()
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +287,7 @@ func TestCommandStageProvidesIsolatedCacheEnvironment(t *testing.T) {
 			values[parts[0]] = parts[1]
 		}
 	}
-	for _, name := range []string{"HOME", "USERPROFILE", "XDG_CACHE_HOME", "LOCALAPPDATA", "GOCACHE"} {
+	for _, name := range []string{"HOME", "USERPROFILE", "XDG_CACHE_HOME", "LOCALAPPDATA", "GOCACHE", "MISE_DATA_DIR"} {
 		path := values[name]
 		if path == "" {
 			t.Fatalf("%s was not configured: %v", name, environment)

@@ -299,6 +299,37 @@ func TestMalformedCompletionIsClassified(t *testing.T) {
 	}
 }
 
+func TestTransactionPrepareAcceptsMissingFileWithEmptyPreimage(t *testing.T) {
+	backend, first, _ := testBackend(t, false)
+	created := filepath.Join(filepath.Dir(first), "created.lua")
+	after := []byte("return created\n")
+	_, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "transaction-create"},
+		Operation: "huyang_prepare",
+		Arguments: map[string]any{
+			"plan_id": "plan_create", "plan_revision": 1,
+			"files": []map[string]any{{
+				"path":          created,
+				"before_b64":    base64.StdEncoding.EncodeToString(nil),
+				"after_b64":     base64.StdEncoding.EncodeToString(after),
+				"before_exists": false, "after_exists": true,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepare missing file: %v", err)
+	}
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Fatalf("prepare wrote missing file to disk: %v", err)
+	}
+	if _, err := backend.Call(context.Background(), provider.Request{
+		Context:   provider.RequestContext{RequestID: "transaction-create-rollback"},
+		Operation: "huyang_rollback", Arguments: map[string]any{"plan_id": "plan_create"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTransactionBatchFailureRestoresEveryUnsavedBuffer(t *testing.T) {
 	backend, first, _ := testBackend(t, false)
 	second := filepath.Join(filepath.Dir(first), "second.lua")

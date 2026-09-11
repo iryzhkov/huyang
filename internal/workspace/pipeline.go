@@ -453,11 +453,37 @@ func (w *cappedCommandOutput) String() string {
 	return value
 }
 func isolatedCommandEnv() ([]string, func(), error) {
-	allowed := []string{"PATH", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "PATHEXT"}
+	allowed := []string{
+		"PATH", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "PATHEXT",
+		"MISE_DATA_DIR", "MISE_CACHE_DIR", "MISE_CONFIG_DIR", "RUSTUP_HOME",
+		"CARGO_HOME", "GRADLE_USER_HOME", "GOMODCACHE", "NUGET_PACKAGES",
+	}
 	var result []string
+	present := map[string]bool{}
 	for _, key := range allowed {
 		if value, ok := os.LookupEnv(key); ok {
 			result = append(result, key+"="+value)
+			present[key] = true
+		}
+	}
+	if userHome, err := os.UserHomeDir(); err == nil && userHome != "" {
+		defaults := map[string]string{
+			"MISE_DATA_DIR":    filepath.Join(userHome, ".local", "share", "mise"),
+			"MISE_CACHE_DIR":   filepath.Join(userHome, ".cache", "mise"),
+			"MISE_CONFIG_DIR":  filepath.Join(userHome, ".config", "mise"),
+			"RUSTUP_HOME":      filepath.Join(userHome, ".rustup"),
+			"CARGO_HOME":       filepath.Join(userHome, ".cargo"),
+			"GRADLE_USER_HOME": filepath.Join(userHome, ".gradle"),
+			"GOMODCACHE":       filepath.Join(userHome, "go", "pkg", "mod"),
+			"NUGET_PACKAGES":   filepath.Join(userHome, ".nuget", "packages"),
+		}
+		for key, path := range defaults {
+			if present[key] {
+				continue
+			}
+			if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+				result = append(result, key+"="+path)
+			}
 		}
 	}
 	runtimeRoot, err := os.MkdirTemp("", "huyang-command-env-*")
