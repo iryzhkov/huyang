@@ -32,7 +32,6 @@ func (p *scriptedDebugProvider) Call(_ context.Context, request provider.Request
 	value, err := p.call(request)
 	return provider.Result{Value: value}, err
 }
-func (p *scriptedDebugProvider) Save(context.Context) error { return nil }
 func (p *scriptedDebugProvider) Close(context.Context) error {
 	select {
 	case <-p.done:

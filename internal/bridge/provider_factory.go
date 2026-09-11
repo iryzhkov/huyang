@@ -8,7 +8,6 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/provider"
 	embedprovider "github.com/iryzhkov/huyang/internal/provider/embed"
-	socketprovider "github.com/iryzhkov/huyang/internal/provider/socket"
 )
 
 type providerOpenConfig struct {
@@ -20,11 +19,11 @@ type providerOpenConfig struct {
 
 type providerFactory interface {
 	Open(providerOpenConfig) (provider.Provider, error)
-	Attach(root, endpoint string) provider.Provider
-	FindForeign(root string) (endpoint string, processID int)
-	SweepStale()
 }
 
+// configuredProviderFactory opens the embedded Neovim backend, the only
+// backend that ships. The backend name is still read from the environment so
+// that an explicit "embed" keeps working and anything else fails loudly.
 type configuredProviderFactory struct {
 	backend string
 }
@@ -36,32 +35,11 @@ func (f configuredProviderFactory) Open(config providerOpenConfig) (provider.Pro
 			Root: config.Root, InitFile: config.InitFile,
 			RuntimePath: config.RuntimePath, Debug: config.Debug,
 		})
-	case "socket":
-		return socketprovider.Open(socketprovider.Config{
-			Root: config.Root, InitFile: config.InitFile, Debug: config.Debug,
-		})
 	default:
 		return nil, fmt.Errorf(
-			"unknown HUYANG_PROVIDER_BACKEND %q (want embed or socket)", f.backend,
+			"unknown HUYANG_PROVIDER_BACKEND %q (want embed)", f.backend,
 		)
 	}
-}
-
-// Existing editor attachments always use the socket transport, independently
-// from the backend selected for newly owned headless workspaces.
-func (configuredProviderFactory) Attach(root, endpoint string) provider.Provider {
-	return socketprovider.Attach(root, endpoint)
-}
-
-func (f configuredProviderFactory) FindForeign(root string) (string, int) {
-	if f.backend == "embed" {
-		return embedprovider.FindForeign(root)
-	}
-	return socketprovider.FindForeign(root)
-}
-
-func (configuredProviderFactory) SweepStale() {
-	socketprovider.SweepStale()
 }
 
 func shippedRuntimePath() string {

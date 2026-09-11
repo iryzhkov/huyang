@@ -14,7 +14,6 @@ func (f *fakeProvider) Health(context.Context) Health {
 	return Health{State: HealthHealthy}
 }
 func (f *fakeProvider) Call(context.Context, Request) (Result, error) { return Result{}, nil }
-func (f *fakeProvider) Save(context.Context) error                    { return nil }
 func (f *fakeProvider) Close(context.Context) error                   { return nil }
 func (f *fakeProvider) Done() <-chan struct{}                         { return make(chan struct{}) }
 

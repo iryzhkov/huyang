@@ -37,7 +37,6 @@ func (p *editDiagnosticProvider) Call(_ context.Context, request provider.Reques
 	}
 	return provider.Result{Value: map[string]any{"batches": batches}}, nil
 }
-func (p *editDiagnosticProvider) Save(context.Context) error  { return nil }
 func (p *editDiagnosticProvider) Close(context.Context) error { return nil }
 func (p *editDiagnosticProvider) Done() <-chan struct{}       { return make(chan struct{}) }
 
@@ -47,9 +46,6 @@ func (f editDiagnosticFactory) Open(config providerOpenConfig) (provider.Provide
 	f.backend.descriptor.Root = config.Root
 	return f.backend, nil
 }
-func (f editDiagnosticFactory) Attach(string, string) provider.Provider { return f.backend }
-func (editDiagnosticFactory) FindForeign(string) (string, int)          { return "", 0 }
-func (editDiagnosticFactory) SweepStale()                               {}
 
 func useEditDiagnosticFactory(t *testing.T, backend *editDiagnosticProvider) {
 	t.Helper()

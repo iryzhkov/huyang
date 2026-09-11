@@ -47,7 +47,6 @@ func (p *hardeningR8Provider) Call(_ context.Context, request provider.Request) 
 		return provider.Result{Value: map[string]any{}}, nil
 	}
 }
-func (p *hardeningR8Provider) Save(context.Context) error  { return nil }
 func (p *hardeningR8Provider) Close(context.Context) error { return nil }
 func (p *hardeningR8Provider) Done() <-chan struct{}       { return make(chan struct{}) }
 
@@ -59,9 +58,6 @@ func (f hardeningR8Factory) Open(config providerOpenConfig) (provider.Provider, 
 	f.backend.descriptor.Epoch = uint64(f.backend.opens)
 	return f.backend, nil
 }
-func (f hardeningR8Factory) Attach(string, string) provider.Provider { return f.backend }
-func (hardeningR8Factory) FindForeign(string) (string, int)          { return "", 0 }
-func (hardeningR8Factory) SweepStale()                               {}
 
 func useHardeningR8Factory(t *testing.T, backend *hardeningR8Provider) {
 	t.Helper()

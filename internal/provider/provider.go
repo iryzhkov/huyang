@@ -148,7 +148,6 @@ type Provider interface {
 	Descriptor() Descriptor
 	Health(context.Context) Health
 	Call(context.Context, Request) (Result, error)
-	Save(context.Context) error
 	Close(context.Context) error
 	Done() <-chan struct{}
 }

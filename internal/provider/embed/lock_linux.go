@@ -69,22 +69,3 @@ func (l *rootLock) release() {
 	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 	_ = l.file.Close()
 }
-
-func FindForeign(root string) (string, int) {
-	path, err := rootLockPath(root)
-	if err != nil {
-		return "", 0
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return "", 0
-	}
-	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		return "", 0
-	}
-	data, _ := os.ReadFile(path)
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
-	return path, pid
-}

@@ -247,35 +247,6 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 	}
 }
 
-// Save writes every modified named buffer through the current generation.
-func (b *Backend) Save(ctx context.Context) error {
-	g, err := b.ensureGeneration(ctx)
-	if err != nil {
-		return err
-	}
-	finished := make(chan error, 1)
-	go func() {
-		var messages []string
-		err := g.nvim.ExecLua(`return require("huyang.lsp").save_all()`, &messages)
-		if err == nil && len(messages) != 0 {
-			err = errors.New(strings.Join(messages, "; "))
-		}
-		finished <- err
-	}()
-	select {
-	case err := <-finished:
-		if err != nil {
-			return &provider.Failure{Code: provider.FailureProtocol, Epoch: g.epoch, Detail: "saving buffers: " + err.Error(), Err: err}
-		}
-		return nil
-	case err := <-g.done:
-		return deathFailure(g, err)
-	case <-ctx.Done():
-		b.terminate(g)
-		return contextFailure(ctx.Err(), g.epoch)
-	}
-}
-
 // Close gracefully stops the current generation and permanently closes the backend.
 func (b *Backend) Close(context.Context) error {
 	b.closeOnce.Do(func() {
