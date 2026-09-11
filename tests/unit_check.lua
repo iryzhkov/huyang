@@ -169,14 +169,23 @@ do
     local old_registry, old_mlsp = package.loaded["mason-registry"], package.loaded["mason-lspconfig"]
     local original_enable = vim.lsp.enable
     local enabled = {}
+	vim.lsp.config("jdtls", { cmd = { "jdtls" }, filetypes = { "java" } })
     package.loaded["mason-registry"] = {
         get_package = function(name)
             return { is_installed = function() return name == "jdtls" end }
         end,
+		get_installed_packages = function() return { { name = "jdtls" } } end,
     }
     package.loaded["mason-lspconfig"] = {
-        get_mappings = function() return { lspconfig_to_package = { jdtls = "jdtls" } } end,
-        get_available_servers = function() return { "jdtls" } end,
+        get_mappings = function()
+			return {
+				lspconfig_to_package = { jdtls = "jdtls" },
+				package_to_lspconfig = { jdtls = "jdtls" },
+			}
+		end,
+        -- Fresh mason-lspconfig discovery can omit a configured server until
+        -- it is enabled; the persisted installed package must still win.
+        get_available_servers = function() return {} end,
     }
     vim.lsp.enable = function(name) enabled[#enabled + 1] = name end
     local restored = install._enable_installed_servers("java")

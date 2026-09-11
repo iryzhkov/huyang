@@ -119,15 +119,17 @@ type cachedDocument struct {
 }
 
 type Workspace struct {
-	mu        sync.Mutex
-	identity  Identity
-	documents map[string]cachedDocument
-	revisions map[RevisionID]DocumentSnapshot
-	allowlist map[string]struct{}
-	limits    Limits
-	stateDir  string
-	sectioner Sectioner
-	failures  []EnvironmentFailure
+	mu          sync.Mutex
+	identity    Identity
+	documents   map[string]cachedDocument
+	revisions   map[RevisionID]DocumentSnapshot
+	knownPaths  map[string]struct{}
+	pathsPrimed bool
+	allowlist   map[string]struct{}
+	limits      Limits
+	stateDir    string
+	sectioner   Sectioner
+	failures    []EnvironmentFailure
 
 	handlesMu   sync.Mutex
 	handles     *handleStore
@@ -214,6 +216,25 @@ func (w *Workspace) PrimeDocuments() error {
 	if err != nil {
 		return err
 	}
+	current := make(map[string]struct{}, len(files))
+	for _, path := range files {
+		current[path] = struct{}{}
+	}
+	w.mu.Lock()
+	if w.pathsPrimed {
+		for path := range current {
+			if _, known := w.knownPaths[path]; !known {
+				// The file appeared outside a Huyang mutation. There is no exact
+				// native diff for the uncovered transition, so advance once and
+				// let revision_diff expose the resulting external gap.
+				w.identity.StateSeq++
+				break
+			}
+		}
+	}
+	w.knownPaths = current
+	w.pathsPrimed = true
+	w.mu.Unlock()
 	for _, path := range files {
 		if _, err := w.Snapshot(path, ProviderLayer{}); err != nil {
 			return err

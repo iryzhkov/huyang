@@ -259,6 +259,7 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 		identity:    Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
 		documents:   make(map[string]cachedDocument),
 		revisions:   make(map[RevisionID]DocumentSnapshot),
+		knownPaths:  make(map[string]struct{}),
 		allowlist:   make(map[string]struct{}),
 		limits:      limits,
 		stateDir:    options.StateDir,

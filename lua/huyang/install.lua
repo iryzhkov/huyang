@@ -738,8 +738,22 @@ local function enable_installed_servers(ft)
     local okml, mlsp = pcall(require, "mason-lspconfig")
     if not okreg or not okml then return {} end
     local maps = mlsp.get_mappings()
-    local candidates = {}
+    local candidates = enabled_lsp_configs_for(ft)
     pcall(function() candidates = mlsp.get_available_servers({ filetype = ft }) end)
+    for _, name in ipairs(enabled_lsp_configs_for(ft)) do
+        if not vim.tbl_contains(candidates, name) then candidates[#candidates + 1] = name end
+    end
+	local installed = {}
+	pcall(function() installed = registry.get_installed_packages() end)
+	for _, pkg in ipairs(installed) do
+		local package = pkg.name or (pkg.get_name and pkg:get_name())
+		local name = package and maps.package_to_lspconfig[package]
+		local cfg = name and vim.lsp.config[name]
+		if cfg and (not cfg.filetypes or vim.tbl_contains(cfg.filetypes, ft))
+			and not vim.tbl_contains(candidates, name) then
+			candidates[#candidates + 1] = name
+		end
+	end
     local enabled, seen = {}, {}
     for _, name in ipairs(candidates) do
         if not seen[name] then
