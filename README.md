@@ -58,6 +58,28 @@ declares the scheduler class it runs under. The contract is described in
   `vim.lsp.config` and `vim.lsp.enable` functions the kernel depends on; Neovim 0.12 also
   satisfies the check.
 - The language servers, parsers, formatters, and debugger adapters required by your projects.
+- [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap) installed in the host
+  Neovim for the four debugger tools (`debug_session`, `debug_breakpoints`,
+  `debug_control`, `debug_inspect`). nvim-dap is GPL-3.0 and is not distributed with
+  Huyang; the kernel discovers it at provider start, first hit wins:
+  1. `HUYANG_NVIM_DAP_PATH` (alias `AGENT99_NVIM_DAP_PATH`), a checkout directory holding
+     `lua/dap.lua`. When set it is authoritative: nothing else is searched.
+  2. A `lua/dap.lua` already on the runtimepath, for example loaded by a
+     `HUYANG_HEADLESS_INIT` file, or a `require("dap")` that already succeeds.
+  3. `$XDG_DATA_HOME/nvim/lazy/nvim-dap` (lazy.nvim; `$XDG_DATA_HOME` defaults to
+     `~/.local/share`).
+  4. `$XDG_DATA_HOME/nvim/site/pack/*/start/nvim-dap` and
+     `$XDG_DATA_HOME/nvim/site/pack/*/opt/nvim-dap` (packer, paq, `vim.pack`, manual packs).
+
+  The outcome is recorded in the provider health detail shown by `workspace_inspect`
+  (`nvim-dap runtime: <path> (<commit>)` or `nvim-dap runtime: absent (...)`). Without
+  nvim-dap the provider still starts and every other tool works; the four debugger tools
+  answer `unavailable` with a message that lists the searched locations and the override
+  variable. The test harness resolves nvim-dap the same way from `HUYANG_NVIM_DAP_PATH`,
+  then `tests/.deps/nvim-dap`, then the lazy.nvim clone; `tests/fetch-nvim-dap.sh` clones
+  the pinned upstream commit into `tests/.deps/` (gitignored, network needed), and
+  `.luarc.json` points lua-language-server at that test dependency for editor diagnostics
+  only.
 
 The native text core does not require Neovim or an LSP.
 
@@ -127,6 +149,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_POST_EDIT_WAIT` | wait | `0`, `false`, or `off` defers the provider's post-edit diagnostic verdict. Read by the Lua kernel. | `AGENT99_POST_EDIT_WAIT` |
 | `HUYANG_DEBUG_VERDICT` | unset | Any value makes the kernel report which signal ended a post-edit wait. Read by the Lua kernel. | `AGENT99_DEBUG_VERDICT` |
 | `HUYANG_DEBUG_IDLE_MS` | 600000 | Idle timeout of a debugger session in milliseconds. Read by the Lua kernel. | `AGENT99_DEBUG_IDLE_MS` |
+| `HUYANG_NVIM_DAP_PATH` | unset | nvim-dap checkout for the debugger tools; when set, the discovery in [Requirements](#requirements) searches nothing else. Read by the Lua kernel. | `AGENT99_NVIM_DAP_PATH` |
 | `CLAUDE_CODE_SESSION_ID` | random per process | Session identifier recorded in friction events when the client is Claude Code. | no |
 | `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | XDG defaults | Bases for the socket, state directory, friction spool, and `huyang/config.toml` trust policy. | no |
 
@@ -276,9 +299,10 @@ See:
 
 MIT. See [LICENSE](LICENSE).
 
-The debugger runtime under `lua/dap.lua`, `lua/dap/`, and `plugin/dap.lua` is a vendored
-copy of [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap), which is
-licensed under the GNU General Public License version 3. Its license text is preserved in
-[third_party/nvim-dap/LICENSE.txt](third_party/nvim-dap/LICENSE.txt) and the pinned
-upstream commit is recorded in
-[third_party/nvim-dap/README.md](third_party/nvim-dap/README.md).
+Huyang does not distribute [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap),
+which is licensed under the GNU General Public License version 3. It is a runtime
+dependency discovered from the host Neovim installation at provider start (search order
+and the `HUYANG_NVIM_DAP_PATH` override are listed under [Requirements](#requirements));
+without it the four debugger tools report `unavailable` and everything else works. The
+clone that `tests/fetch-nvim-dap.sh` makes under `tests/.deps/` is a test dependency and
+is not part of the repository.
