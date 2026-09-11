@@ -478,6 +478,10 @@ func debugFailureNext(tool, action string) []any {
 }
 
 func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, err error) map[string]any {
+	switch provider.ErrorCode(err) {
+	case "workspace_busy", "provider_cancelled":
+		return modernProviderFailure(requestID, workspace, "debugger_failed", err)
+	}
 	var failure *provider.Failure
 	if errors.As(err, &failure) {
 		if failure.Code == provider.FailureCancelled || failure.Code == provider.FailureDeadline {

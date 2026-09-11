@@ -47,15 +47,9 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	result, err := backend.Call(callCtx, provider.Request{
-		Context: provider.RequestContext{
-			RequestID: fmt.Sprintf("diagnostics_%s", transactionID), WorkspaceID: string(workspace.Identity().ID),
-			Epoch: workspace.Identity().Epoch, TransactionID: transactionID, Deadline: deadline,
-			Cancellation: descriptor.Cancellation,
-		},
-		Operation: "huyang_diagnostic_evidence",
-		Arguments: map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS},
-	})
+	result, err := callProvider(callCtx, workspace, backend, providerCall{
+		RequestID: fmt.Sprintf("diagnostics_%s", transactionID), TransactionID: transactionID,
+	}, "huyang_diagnostic_evidence", map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS})
 	if err != nil {
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidencePush, ProviderID: string(descriptor.ID), Producer: descriptor.Backend, ProducerVersion: err.Error(),
@@ -63,12 +57,8 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 			TimedOut: true, Selected: true, Dimension: "edited_documents",
 		})
 	}
-	encoded, err := json.Marshal(result.Value)
+	payload, err := diagnosticPayload(result)
 	if err != nil {
-		return workspacecore.DiagnosticReport{}, err
-	}
-	var payload providerDiagnosticPayload
-	if err := json.Unmarshal(encoded, &payload); err != nil {
 		return workspacecore.DiagnosticReport{}, err
 	}
 	if len(payload.Batches) == 0 {
@@ -92,6 +82,32 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 		}
 	}
 	return report, nil
+}
+
+// diagnosticPayload reads the diagnostic batches of a provider result. The
+// kernel reports them as typed Result.Evidence; the untyped Value is decoded
+// only for a provider that predates that field.
+func diagnosticPayload(result provider.Result) (providerDiagnosticPayload, error) {
+	if len(result.Evidence) > 0 {
+		encoded, err := json.Marshal(result.Evidence)
+		if err != nil {
+			return providerDiagnosticPayload{}, err
+		}
+		var batches []workspacecore.DiagnosticBatch
+		if err := json.Unmarshal(encoded, &batches); err != nil {
+			return providerDiagnosticPayload{}, err
+		}
+		return providerDiagnosticPayload{Batches: batches}, nil
+	}
+	encoded, err := json.Marshal(result.Value)
+	if err != nil {
+		return providerDiagnosticPayload{}, err
+	}
+	var payload providerDiagnosticPayload
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return providerDiagnosticPayload{}, err
+	}
+	return payload, nil
 }
 
 // diagnosticEvidenceTimeout bounds provider overhead while still allowing the

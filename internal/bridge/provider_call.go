@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/provider"
@@ -58,14 +59,42 @@ func callProvider(ctx context.Context, workspace *workspacecore.Workspace, backe
 	return result, err
 }
 
-// callCanonicalProvider issues one canonical (non-transactional) provider call
-// bounded by the default tool-call timeout.
+// callCanonicalProvider issues one canonical provider call bounded by the
+// default tool-call timeout. A transaction_id argument, when the caller asks
+// for a staged view, is carried on the request context so the kernel can
+// label the view it serves.
 func callCanonicalProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
-	result, err := callProvider(ctx, workspace, backend, providerCall{RequestID: requestID, Timeout: defaultToolCallTimeout}, operation, arguments)
+	transactionID, _ := arguments["transaction_id"].(string)
+	result, err := callProvider(ctx, workspace, backend, providerCall{
+		RequestID: requestID, TransactionID: transactionID, Timeout: defaultToolCallTimeout,
+	}, operation, arguments)
 	if err != nil {
 		return nil, err
 	}
 	return result.Value, nil
+}
+
+// modernProviderFailure maps a kernel operation failure onto a tool result
+// using the provider's stable error code rather than its message text. The
+// fallback code names the operation that failed when the kernel gave none.
+func modernProviderFailure(requestID string, workspace *workspacecore.Workspace, fallbackCode string, err error) map[string]any {
+	switch provider.ErrorCode(err) {
+	case "workspace_busy":
+		return modernEnvelope(requestID, workspace, "conflict", "workspace_busy", err.Error(), map[string]any{})
+	case "lsp_not_configured":
+		result := modernEnvelope(requestID, workspace, "unavailable", "language_server_unavailable", err.Error(), map[string]any{
+			"coverage": map[string]any{"complete": false, "unavailable": []string{"language_server"}},
+		})
+		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"}}
+		return result
+	case "provider_cancelled":
+		return modernEnvelope(requestID, workspace, "failed", "request_cancelled", err.Error(), map[string]any{})
+	}
+	var failure *provider.Failure
+	if errors.As(err, &failure) && failure.Code != "" {
+		return modernFailure(requestID, workspace, string(failure.Code), err)
+	}
+	return modernFailure(requestID, workspace, fallbackCode, err)
 }
 
 // canonicalProviderStatus reports the provider descriptor and its health as

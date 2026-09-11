@@ -61,7 +61,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "workspace_support", map[string]any{"root": workspace.Identity().Root})
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_probe_failed", err)
+		result := modernProviderFailure(requestID, workspace, "language_server_probe_failed", err)
 		result["data"] = map[string]any{"provider": canonicalProviderStatus(ctx, backend)}
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
 		return result
@@ -218,7 +218,7 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "install_language", providerArguments)
 	if err != nil {
-		return modernFailure(requestID, workspace, "language_server_install_failed", err)
+		return modernProviderFailure(requestID, workspace, "language_server_install_failed", err)
 	}
 	data := map[string]any{"installation": value, "provider": canonicalProviderStatus(ctx, backend)}
 	installation, _ := value.(map[string]any)
@@ -288,7 +288,7 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, relation, providerArguments)
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_unavailable", err)
+		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
@@ -323,7 +323,7 @@ func (d *directWorkspaces) codeActionsProvider(ctx context.Context, requestID st
 	}
 	value, err := callCanonicalProvider(ctx, requestID, workspace, backend, "code_actions", providerArguments)
 	if err != nil {
-		result := modernFailure(requestID, workspace, "language_server_unavailable", err)
+		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
