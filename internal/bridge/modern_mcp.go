@@ -33,7 +33,6 @@ var errGlobalToolCallTimeout = errors.New("global tool-call timeout exceeded")
 type mcpProfile string
 
 const (
-	profileLegacy mcpProfile = "legacy"
 	profileFull   mcpProfile = "full"
 	profileOrient mcpProfile = "orient"
 	profileEdit   mcpProfile = "edit"
@@ -301,22 +300,6 @@ func modernCatalog(profile mcpProfile) []modernTool {
 	return catalog
 }
 
-func requestedMCPProfile(arguments []string) (mcpProfile, error) {
-	if len(arguments) == 0 {
-		return profileLegacy, nil
-	}
-	if len(arguments) != 2 || arguments[0] != "--profile" {
-		return "", errors.New("usage: huyang mcp [--profile full|orient|edit|debug|legacy]")
-	}
-	profile := mcpProfile(arguments[1])
-	switch profile {
-	case profileLegacy, profileFull, profileOrient, profileEdit, profileDebug:
-		return profile, nil
-	default:
-		return "", fmt.Errorf("unknown MCP profile %q", arguments[1])
-	}
-}
-
 func outputEnvelopeSchema() map[string]any {
 	return schemaObject(map[string]any{
 		"api_version": map[string]any{"const": modernAPIVersion},
@@ -348,57 +331,10 @@ func newSDKServer(profile mcpProfile, direct *directWorkspaces) *mcp.Server {
 		Name: "huyang", Title: "Huyang", Version: serverVersion,
 		Description: "Transactional semantic workspace for coding agents.",
 	}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{}})
-	if profile == profileLegacy {
-		advertised := map[string]bool{}
-		for _, descriptor := range servedTools() {
-			advertised[descriptor.Name] = true
-			registerLegacyTool(server, descriptor)
-		}
-		server.AddReceivingMiddleware(legacyHiddenToolMiddleware(advertised))
-		return server
-	}
 	for _, descriptor := range modernCatalog(profile) {
 		registerModernTool(server, descriptor, direct)
 	}
 	return server
-}
-
-func registerLegacyTool(server *mcp.Server, descriptor tool) {
-	server.AddTool(&mcp.Tool{
-		Name: descriptor.Name, Description: descriptor.Description, InputSchema: descriptor.InputSchema,
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    !writingTools[descriptor.Name],
-			DestructiveHint: boolPointer(writingTools[descriptor.Name]),
-			IdempotentHint:  !writingTools[descriptor.Name],
-			OpenWorldHint:   boolPointer(false),
-		},
-	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		arguments, err := decodeArguments(request.Params.Arguments)
-		if err != nil {
-			return nil, err
-		}
-		meta := map[string]any{"_meta": map[string]any(request.Params.Meta)}
-		result := callMCPToolContext(ctx, descriptor.Name, arguments, callClient(metaClient(meta)))
-		return legacySDKResult(result), nil
-	})
-}
-
-func legacyHiddenToolMiddleware(advertised map[string]bool) mcp.Middleware {
-	return func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
-			call, ok := request.(*mcp.CallToolRequest)
-			if method != "tools/call" || !ok || advertised[call.Params.Name] || !lspToolNames[call.Params.Name] {
-				return next(ctx, method, request)
-			}
-			arguments, err := decodeArguments(call.Params.Arguments)
-			if err != nil {
-				return nil, err
-			}
-			meta := map[string]any{"_meta": map[string]any(call.Params.Meta)}
-			result := callMCPToolContext(ctx, call.Params.Name, arguments, callClient(metaClient(meta)))
-			return legacySDKResult(result), nil
-		}
-	}
 }
 
 func registerModernTool(server *mcp.Server, descriptor modernTool, direct *directWorkspaces) {
@@ -749,19 +685,6 @@ func validateToolArgumentSize(raw json.RawMessage) error {
 	}
 	return fmt.Errorf("tool arguments are %d bytes, exceeding the %d-byte safe transport limit; split a large change plan into batches of at most %d operations using action=edit and edit.mode=add",
 		len(raw), maxToolArgumentBytes, maxPlanOperations)
-}
-
-func legacySDKResult(result map[string]any) *mcp.CallToolResult {
-	sdkResult := &mcp.CallToolResult{}
-	if value, ok := result["isError"].(bool); ok {
-		sdkResult.IsError = value
-	}
-	for _, item := range result["content"].([]map[string]any) {
-		if item["type"] == "text" {
-			sdkResult.Content = append(sdkResult.Content, &mcp.TextContent{Text: fmt.Sprint(item["text"])})
-		}
-	}
-	return sdkResult
 }
 
 type directWorkspaces struct {

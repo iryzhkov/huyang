@@ -84,8 +84,8 @@ func TestFrictionOutcomeClassification(t *testing.T) {
 		{name: "modern unavailable", outcome: "unavailable", wantOK: false},
 		{name: "modern failed", outcome: "failed", wantOK: false},
 		{name: "modern conflict", outcome: "conflict", wantOK: false},
-		{name: "legacy success", wantOK: true},
-		{name: "legacy error", isError: true, wantOK: false},
+		{name: "no outcome success", wantOK: true},
+		{name: "no outcome error", isError: true, wantOK: false},
 		{name: "unknown success follows error bit", outcome: "future", wantOK: true},
 		{name: "unknown error follows error bit", outcome: "future", isError: true, wantOK: false},
 	}
@@ -243,5 +243,13 @@ func TestModernToolCallsWriteFrictionEvents(t *testing.T) {
 	}
 	if event.Tool != "workspace_open" || !event.OK || event.Root != filepath.Base(root) {
 		t.Fatalf("wrong modern MCP friction event: %+v", event)
+	}
+}
+
+// textResult builds the content/isError shape that logFriction inspects.
+func textResult(text string, isError bool) map[string]any {
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": text}},
+		"isError": isError,
 	}
 }

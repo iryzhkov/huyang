@@ -239,19 +239,11 @@ func TestModernDebugInitializationFailureIsActionable(t *testing.T) {
 	}
 }
 
-func TestModernDebugCatalogIsCompactAndContainsNoLegacyRoster(t *testing.T) {
-	modernNames := map[string]bool{}
+func TestModernDebugCatalogIsCompact(t *testing.T) {
 	modernDescriptors := make([]modernTool, 0, 4)
 	for _, descriptor := range modernCatalog(profileDebug) {
-		modernNames[descriptor.Name] = true
 		if len(descriptor.Name) >= len("debug_") && descriptor.Name[:len("debug_")] == "debug_" {
 			modernDescriptors = append(modernDescriptors, descriptor)
-		}
-	}
-	modernFacade := map[string]bool{"debug_session": true, "debug_breakpoints": true, "debug_control": true, "debug_inspect": true}
-	for _, legacy := range debugTools {
-		if modernNames[legacy.Name] && !modernFacade[legacy.Name] {
-			t.Fatalf("legacy debugger tool %q leaked into modern catalog", legacy.Name)
 		}
 	}
 	if len(modernDescriptors) != 4 {
@@ -263,16 +255,5 @@ func TestModernDebugCatalogIsCompactAndContainsNoLegacyRoster(t *testing.T) {
 			t.Fatal(marshalErr)
 		}
 		t.Logf("%s descriptor bytes = %d", descriptor.Name, len(encoded))
-	}
-	modernJSON, err := json.Marshal(modernDescriptors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyJSON, err := json.Marshal(debugTools)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(modernJSON) >= len(legacyJSON) {
-		t.Fatalf("modern debugger schema bytes = %d, legacy = %d", len(modernJSON), len(legacyJSON))
 	}
 }

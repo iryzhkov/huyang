@@ -60,14 +60,13 @@ type frictionEvent struct {
 }
 
 var (
-	frictionMu     sync.Mutex
-	frictionSeq    int
-	frictionClient string
-	frictionOnce   sync.Once
-	frictionSess   string
-	frictionProc   string
-	frictionVer    string
-	frictionHost   string
+	frictionMu   sync.Mutex
+	frictionSeq  int
+	frictionOnce sync.Once
+	frictionSess string
+	frictionProc string
+	frictionVer  string
+	frictionHost string
 
 	revMu    sync.Mutex
 	revCache = map[string]string{}
@@ -184,24 +183,6 @@ func buildVersion() string {
 	return serverVersion + "/" + revision
 }
 
-// noteFrictionClient records who is on the other end of the connection, from
-// the clientInfo of the initialize handshake. Which client made a call is
-// worth knowing: the same tool is used differently by different harnesses.
-func noteFrictionClient(params map[string]any) {
-	info, _ := params["clientInfo"].(map[string]any)
-	if info == nil {
-		return
-	}
-	name, _ := info["name"].(string)
-	version, _ := info["version"].(string)
-	switch {
-	case name != "" && version != "":
-		frictionClient = name + "/" + version
-	case name != "":
-		frictionClient = name
-	}
-}
-
 var (
 	// Relative paths count too: an error naming internal/bridge/mcp.go has to
 	// fold the same way as one naming /home/igor/src/x.go, or the same failure
@@ -312,9 +293,6 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 	isError, _ := res["isError"].(bool)
 	outcome, _ := res["outcome"].(string)
 	client, _ := res["client"].(string)
-	if client == "" {
-		client = frictionClient
-	}
 
 	frictionMu.Lock()
 	frictionSeq++
@@ -349,7 +327,7 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 // frictionOutcomeOK keeps MCP's tool-error bit separate from the usability
 // signal recorded in the spool. A partial or unavailable application result
 // can be a valid MCP response while still representing friction for the agent.
-// Legacy results do not carry an outcome, so they retain their isError
+// Results without an outcome retain their isError
 // behavior. Unknown future outcomes do the same until their semantics are
 // deliberately classified here.
 func frictionOutcomeOK(outcome string, isError bool) bool {

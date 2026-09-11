@@ -54,28 +54,6 @@ func TestModernRegistryMatchesFrozenProfiles(t *testing.T) {
 	}
 }
 
-func TestRequestedMCPProfileIsExplicit(t *testing.T) {
-	tests := []struct {
-		arguments []string
-		want      mcpProfile
-		wantError bool
-	}{
-		{nil, profileLegacy, false},
-		{[]string{"--profile", "full"}, profileFull, false},
-		{[]string{"--profile", "orient"}, profileOrient, false},
-		{[]string{"--profile", "edit"}, profileEdit, false},
-		{[]string{"--profile", "debug"}, profileDebug, false},
-		{[]string{"--profile", "future"}, "", true},
-		{[]string{"--profile"}, "", true},
-	}
-	for _, test := range tests {
-		got, err := requestedMCPProfile(test.arguments)
-		if (err != nil) != test.wantError || got != test.want {
-			t.Fatalf("requestedMCPProfile(%v) = %q, %v; want %q, error=%v", test.arguments, got, err, test.want, test.wantError)
-		}
-	}
-}
-
 func connectOfficialClient(t *testing.T, profile mcpProfile, direct *directWorkspaces) (*mcp.ClientSession, func()) {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
