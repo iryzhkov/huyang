@@ -570,58 +570,9 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	if expected == 0 || plan.PlanRevision != expected {
 		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
 	}
-	operations := cloneOperations(plan.Operations)
-	switch edit.Mode {
-	case "add":
-		operations = append(operations, edit.Operations...)
-	case "update":
-		updates := make(map[string]PlanOperation, len(edit.Operations))
-		for _, operation := range edit.Operations {
-			updates[operation.OpID] = operation
-		}
-		for i := range operations {
-			if update, found := updates[operations[i].OpID]; found {
-				operations[i] = update
-				delete(updates, operations[i].OpID)
-			}
-		}
-		if len(updates) != 0 {
-			return PlanRecord{}, errors.New("update names an unknown op_id")
-		}
-	case "remove":
-		remove := make(map[string]bool, len(edit.OpIDs))
-		for _, id := range edit.OpIDs {
-			remove[id] = true
-		}
-		filtered := operations[:0]
-		for _, operation := range operations {
-			if !remove[operation.OpID] {
-				filtered = append(filtered, operation)
-			}
-		}
-		operations = filtered
-	case "reorder":
-		if len(edit.OpIDs) != len(operations) {
-			return PlanRecord{}, errors.New("reorder must name every op_id exactly once")
-		}
-		byID := make(map[string]PlanOperation, len(operations))
-		for _, operation := range operations {
-			byID[operation.OpID] = operation
-		}
-		reordered := make([]PlanOperation, 0, len(operations))
-		for _, id := range edit.OpIDs {
-			operation, found := byID[id]
-			if !found {
-				return PlanRecord{}, errors.New("reorder contains an unknown or duplicate op_id")
-			}
-			reordered = append(reordered, operation)
-			delete(byID, id)
-		}
-		operations = reordered
-	case "replace_all":
-		operations = edit.Operations
-	default:
-		return PlanRecord{}, fmt.Errorf("unknown plan edit mode %q", edit.Mode)
+	operations, err := applyPlanEdit(cloneOperations(plan.Operations), edit)
+	if err != nil {
+		return PlanRecord{}, err
 	}
 	normalized, err := w.normalizeOperations(operations)
 	if err != nil {
@@ -639,6 +590,64 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 		return PlanRecord{}, err
 	}
 	return clonePlan(plan), nil
+}
+
+// applyPlanEdit returns the operation list after one edit mode is applied to a private
+// copy of the current operations.
+func applyPlanEdit(operations []PlanOperation, edit PlanEdit) ([]PlanOperation, error) {
+	switch edit.Mode {
+	case "add":
+		return append(operations, edit.Operations...), nil
+	case "update":
+		updates := make(map[string]PlanOperation, len(edit.Operations))
+		for _, operation := range edit.Operations {
+			updates[operation.OpID] = operation
+		}
+		for i := range operations {
+			if update, found := updates[operations[i].OpID]; found {
+				operations[i] = update
+				delete(updates, operations[i].OpID)
+			}
+		}
+		if len(updates) != 0 {
+			return nil, errors.New("update names an unknown op_id")
+		}
+		return operations, nil
+	case "remove":
+		remove := make(map[string]bool, len(edit.OpIDs))
+		for _, id := range edit.OpIDs {
+			remove[id] = true
+		}
+		filtered := operations[:0]
+		for _, operation := range operations {
+			if !remove[operation.OpID] {
+				filtered = append(filtered, operation)
+			}
+		}
+		return filtered, nil
+	case "reorder":
+		if len(edit.OpIDs) != len(operations) {
+			return nil, errors.New("reorder must name every op_id exactly once")
+		}
+		byID := make(map[string]PlanOperation, len(operations))
+		for _, operation := range operations {
+			byID[operation.OpID] = operation
+		}
+		reordered := make([]PlanOperation, 0, len(operations))
+		for _, id := range edit.OpIDs {
+			operation, found := byID[id]
+			if !found {
+				return nil, errors.New("reorder contains an unknown or duplicate op_id")
+			}
+			reordered = append(reordered, operation)
+			delete(byID, id)
+		}
+		return reordered, nil
+	case "replace_all":
+		return edit.Operations, nil
+	default:
+		return nil, fmt.Errorf("unknown plan edit mode %q", edit.Mode)
+	}
 }
 
 func (w *Workspace) DiscardPlan(planID string, expected uint64) (PlanRecord, error) {
@@ -711,123 +720,15 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 			return nil, fmt.Errorf("duplicate op_id %q", operation.OpID)
 		}
 		seen[operation.OpID] = true
-		if operation.Indentation == "" {
-			operation.Indentation = "exact"
+		if err := normalizeIndentation(operation); err != nil {
+			return nil, err
 		}
-		if operation.Indentation != "exact" && operation.Indentation != "syntax_anchor" && operation.Indentation != "formatter" {
-			return nil, fmt.Errorf("%s has invalid indentation mode %q", operation.OpID, operation.Indentation)
-		}
-		if operation.Indentation == "syntax_anchor" && (operation.Target == nil || operation.Target.Handle == "") {
-			return nil, fmt.Errorf("%s syntax_anchor requires one semantic node handle", operation.OpID)
-		}
-		switch operation.Kind {
-		case OperationReplaceSymbol, OperationDeleteSymbol, OperationInsertBefore, OperationInsertAfter, OperationReplaceRange:
-			if operation.Target == nil {
-				return nil, fmt.Errorf("%s requires target", operation.OpID)
-			}
-			if operation.Target.FileRange == nil && operation.Target.Handle != "" {
-				resolution, err := w.ResolveHandle(operation.Target.Handle)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-				}
-				if resolution.Status == ResolutionConflicted {
-					return nil, fmt.Errorf("%s: %s", operation.OpID, resolution.Code)
-				}
-				if operation.Indentation == "syntax_anchor" && (resolution.Original.Kind == "range" || resolution.Original.Kind == "match") {
-					return nil, fmt.Errorf("%s syntax_anchor target is not one parsed node", operation.OpID)
-				}
-				handle, err := resolution.RangeHandle()
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-				}
-				operation.Target.FileRange = &handle
-			}
-			if operation.Target.FileRange == nil && operation.Target.SymbolLocator != nil {
-				selected, err := w.ResolveSymbolLocator(operation.Target.SymbolLocator.Path, operation.Target.SymbolLocator.NamePath)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-				}
-				resolution, err := w.ResolveHandle(selected.Handle)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-				}
-				handle, err := resolution.RangeHandle()
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-				}
-				operation.Target.FileRange = &handle
-			}
-			if operation.Target.FileRange == nil {
-				return nil, fmt.Errorf("%s requires a resolvable handle or file_range", operation.OpID)
-			}
-			if operation.Kind == OperationDeleteSymbol {
-				operation.Content = ""
-			}
-		case OperationCreateFile:
-			if operation.Path == "" {
-				return nil, fmt.Errorf("%s requires path", operation.OpID)
-			}
-			if operation.Revision == "" {
-				snapshot, err := w.Snapshot(operation.Path, ProviderLayer{})
-				if err != nil {
-					return nil, fmt.Errorf("%s: snapshot create target: %w", operation.OpID, err)
-				}
-				if snapshot.Disk.Kind != ObjectMissing {
-					return nil, fmt.Errorf("%s: create target already exists", operation.OpID)
-				}
-				operation.Revision = snapshot.Revision
-			}
-		case OperationDeleteFile:
-			if operation.Path == "" {
-				return nil, fmt.Errorf("%s requires path", operation.OpID)
-			}
-			if operation.Revision == "" {
-				snapshot, err := w.Snapshot(operation.Path, ProviderLayer{})
-				if err != nil {
-					return nil, fmt.Errorf("%s: snapshot delete target: %w", operation.OpID, err)
-				}
-				if snapshot.Disk.Kind == ObjectMissing {
-					return nil, fmt.Errorf("%s: delete target is missing", operation.OpID)
-				}
-				operation.Revision = snapshot.Revision
-			}
-		case OperationMoveFile:
-			if operation.From == "" || operation.To == "" {
-				return nil, fmt.Errorf("%s requires from and to", operation.OpID)
-			}
-			if operation.Revision == "" {
-				source, err := w.Snapshot(operation.From, ProviderLayer{})
-				if err != nil {
-					return nil, fmt.Errorf("%s: snapshot move source: %w", operation.OpID, err)
-				}
-				if source.Disk.Kind == ObjectMissing {
-					return nil, fmt.Errorf("%s: move source is missing", operation.OpID)
-				}
-				operation.Revision = source.Revision
-			}
-			if operation.DestinationRevision == "" {
-				destination, err := w.Snapshot(operation.To, ProviderLayer{})
-				if err != nil {
-					return nil, fmt.Errorf("%s: snapshot move destination: %w", operation.OpID, err)
-				}
-				if destination.Disk.Kind != ObjectMissing {
-					return nil, fmt.Errorf("%s: move destination already exists", operation.OpID)
-				}
-				operation.DestinationRevision = destination.Revision
-			}
-		case OperationRenameSymbol, OperationMoveSymbols, OperationApplyCodeAction:
-			if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
-				return nil, fmt.Errorf("%s requires target", operation.OpID)
-			}
-		case OperationReplaceMatches:
-			if operation.Target == nil || operation.Target.Handle == "" {
-				return nil, fmt.Errorf("%s requires a result-set handle", operation.OpID)
-			}
-			if _, err := w.ResolveAllMatches(ResultSetID(operation.Target.Handle)); err != nil {
-				return nil, fmt.Errorf("%s: %w", operation.OpID, err)
-			}
-		default:
+		normalize, known := operationNormalizers[operation.Kind]
+		if !known {
 			return nil, fmt.Errorf("%s has unknown operation kind %q", operation.OpID, operation.Kind)
+		}
+		if err := normalize(w, operation); err != nil {
+			return nil, err
 		}
 		for _, dependency := range operation.DependsOn {
 			if dependency == operation.OpID {
@@ -846,6 +747,184 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 		return nil, err
 	}
 	return result, nil
+}
+
+// operationNormalizers validates and completes one operation per kind. Edit kinds bind
+// their target to an exact file range; file kinds bind a missing revision to the current
+// document; provider kinds only check that a target is named.
+var operationNormalizers = map[OperationKind]func(*Workspace, *PlanOperation) error{
+	OperationReplaceSymbol:   (*Workspace).normalizeEditTarget,
+	OperationDeleteSymbol:    (*Workspace).normalizeEditTarget,
+	OperationInsertBefore:    (*Workspace).normalizeEditTarget,
+	OperationInsertAfter:     (*Workspace).normalizeEditTarget,
+	OperationReplaceRange:    (*Workspace).normalizeEditTarget,
+	OperationCreateFile:      (*Workspace).normalizeCreateFile,
+	OperationDeleteFile:      (*Workspace).normalizeDeleteFile,
+	OperationMoveFile:        (*Workspace).normalizeMoveFile,
+	OperationRenameSymbol:    normalizeProviderTarget,
+	OperationMoveSymbols:     normalizeProviderTarget,
+	OperationApplyCodeAction: normalizeProviderTarget,
+	OperationReplaceMatches:  (*Workspace).normalizeReplaceMatches,
+}
+
+func normalizeIndentation(operation *PlanOperation) error {
+	if operation.Indentation == "" {
+		operation.Indentation = "exact"
+	}
+	if operation.Indentation != "exact" && operation.Indentation != "syntax_anchor" && operation.Indentation != "formatter" {
+		return fmt.Errorf("%s has invalid indentation mode %q", operation.OpID, operation.Indentation)
+	}
+	if operation.Indentation == "syntax_anchor" && (operation.Target == nil || operation.Target.Handle == "") {
+		return fmt.Errorf("%s syntax_anchor requires one semantic node handle", operation.OpID)
+	}
+	return nil
+}
+
+func (w *Workspace) normalizeEditTarget(operation *PlanOperation) error {
+	if operation.Target == nil {
+		return fmt.Errorf("%s requires target", operation.OpID)
+	}
+	if operation.Target.FileRange == nil && operation.Target.Handle != "" {
+		handle, err := w.editRangeFromHandle(operation)
+		if err != nil {
+			return err
+		}
+		operation.Target.FileRange = &handle
+	}
+	if operation.Target.FileRange == nil && operation.Target.SymbolLocator != nil {
+		handle, err := w.editRangeFromLocator(operation)
+		if err != nil {
+			return err
+		}
+		operation.Target.FileRange = &handle
+	}
+	if operation.Target.FileRange == nil {
+		return fmt.Errorf("%s requires a resolvable handle or file_range", operation.OpID)
+	}
+	if operation.Kind == OperationDeleteSymbol {
+		operation.Content = ""
+	}
+	return nil
+}
+
+func (w *Workspace) editRangeFromHandle(operation *PlanOperation) (RangeHandle, error) {
+	resolution, err := w.ResolveHandle(operation.Target.Handle)
+	if err != nil {
+		return RangeHandle{}, fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	if resolution.Status == ResolutionConflicted {
+		return RangeHandle{}, fmt.Errorf("%s: %s", operation.OpID, resolution.Code)
+	}
+	if operation.Indentation == "syntax_anchor" && (resolution.Original.Kind == "range" || resolution.Original.Kind == "match") {
+		return RangeHandle{}, fmt.Errorf("%s syntax_anchor target is not one parsed node", operation.OpID)
+	}
+	handle, err := resolution.RangeHandle()
+	if err != nil {
+		return RangeHandle{}, fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	return handle, nil
+}
+
+func (w *Workspace) editRangeFromLocator(operation *PlanOperation) (RangeHandle, error) {
+	locator := operation.Target.SymbolLocator
+	selected, err := w.ResolveSymbolLocator(locator.Path, locator.NamePath)
+	if err != nil {
+		return RangeHandle{}, fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	resolution, err := w.ResolveHandle(selected.Handle)
+	if err != nil {
+		return RangeHandle{}, fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	handle, err := resolution.RangeHandle()
+	if err != nil {
+		return RangeHandle{}, fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	return handle, nil
+}
+
+// snapshotRevision binds a file operation that named no revision to the current revision
+// of its target, refusing a target whose presence contradicts the operation.
+func (w *Workspace) snapshotRevision(opID, label, path string, expectMissing bool) (RevisionID, error) {
+	snapshot, err := w.Snapshot(path, ProviderLayer{})
+	if err != nil {
+		return "", fmt.Errorf("%s: snapshot %s: %w", opID, label, err)
+	}
+	missing := snapshot.Disk.Kind == ObjectMissing
+	if expectMissing && !missing {
+		return "", fmt.Errorf("%s: %s already exists", opID, label)
+	}
+	if !expectMissing && missing {
+		return "", fmt.Errorf("%s: %s is missing", opID, label)
+	}
+	return snapshot.Revision, nil
+}
+
+func (w *Workspace) normalizeCreateFile(operation *PlanOperation) error {
+	if operation.Path == "" {
+		return fmt.Errorf("%s requires path", operation.OpID)
+	}
+	if operation.Revision != "" {
+		return nil
+	}
+	revision, err := w.snapshotRevision(operation.OpID, "create target", operation.Path, true)
+	if err != nil {
+		return err
+	}
+	operation.Revision = revision
+	return nil
+}
+
+func (w *Workspace) normalizeDeleteFile(operation *PlanOperation) error {
+	if operation.Path == "" {
+		return fmt.Errorf("%s requires path", operation.OpID)
+	}
+	if operation.Revision != "" {
+		return nil
+	}
+	revision, err := w.snapshotRevision(operation.OpID, "delete target", operation.Path, false)
+	if err != nil {
+		return err
+	}
+	operation.Revision = revision
+	return nil
+}
+
+func (w *Workspace) normalizeMoveFile(operation *PlanOperation) error {
+	if operation.From == "" || operation.To == "" {
+		return fmt.Errorf("%s requires from and to", operation.OpID)
+	}
+	if operation.Revision == "" {
+		revision, err := w.snapshotRevision(operation.OpID, "move source", operation.From, false)
+		if err != nil {
+			return err
+		}
+		operation.Revision = revision
+	}
+	if operation.DestinationRevision == "" {
+		revision, err := w.snapshotRevision(operation.OpID, "move destination", operation.To, true)
+		if err != nil {
+			return err
+		}
+		operation.DestinationRevision = revision
+	}
+	return nil
+}
+
+func normalizeProviderTarget(_ *Workspace, operation *PlanOperation) error {
+	if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
+		return fmt.Errorf("%s requires target", operation.OpID)
+	}
+	return nil
+}
+
+func (w *Workspace) normalizeReplaceMatches(operation *PlanOperation) error {
+	if operation.Target == nil || operation.Target.Handle == "" {
+		return fmt.Errorf("%s requires a result-set handle", operation.OpID)
+	}
+	if _, err := w.ResolveAllMatches(ResultSetID(operation.Target.Handle)); err != nil {
+		return fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	return nil
 }
 
 func orderOperations(operations []PlanOperation) ([]PlanOperation, error) {
@@ -977,200 +1056,261 @@ func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 	for _, operation := range ordered {
 		preview.NormalizedOrder = append(preview.NormalizedOrder, operation.OpID)
 	}
-	contents := make(map[string][]byte)
-	exists := make(map[string]bool)
-	before := make(map[string][]byte)
-	touched := make(map[string]bool)
-	conflictFor := func(operation PlanOperation, path string, expected RevisionID, err error) {
-		conflict := PlanConflict{OpID: operation.OpID, Code: ConflictDocumentChanged, Path: path, Expected: expected, Message: err.Error()}
-		var typed *Conflict
-		if errors.As(err, &typed) {
-			conflict.Code, conflict.Current = typed.Code, typed.Current
-		}
-		preview.Conflicts = append(preview.Conflicts, conflict)
-	}
-	load := func(path string) ([]byte, bool, error) {
-		if content, ok := contents[path]; ok {
-			return content, exists[path], nil
-		}
-		read, err := w.Read(path)
-		if err != nil {
-			snapshot, snapshotErr := w.Refresh(path, ProviderLayer{})
-			if snapshotErr == nil && snapshot.Disk.Kind == ObjectMissing {
-				contents[path], before[path], exists[path] = nil, nil, false
-				return nil, false, nil
-			}
-			if snapshotErr == nil && snapshot.Disk.Kind == ObjectBinary {
-				absolute := filepath.Join(w.Identity().Root, filepath.FromSlash(path))
-				content, binaryErr := os.ReadFile(absolute)
-				if binaryErr != nil {
-					return nil, false, binaryErr
-				}
-				if int64(len(content)) != snapshot.Disk.Size || hashBytes(content) != snapshot.ContentSHA256 {
-					return nil, false, &Conflict{
-						Code:     ConflictDocumentChanged,
-						Path:     path,
-						Expected: snapshot.Revision,
-						Current:  snapshot.Revision,
-					}
-				}
-				contents[path], before[path], exists[path] = content, append([]byte(nil), content...), true
-				return content, true, nil
-			}
-			if snapshotErr == nil && snapshot.Disk.Kind == ObjectSymlink {
-				content := []byte(snapshot.Disk.SymlinkTarget)
-				contents[path], before[path], exists[path] = content, append([]byte(nil), content...), true
-				return content, true, nil
-			}
-			return nil, false, err
-		}
-		content := append([]byte(nil), read.Content...)
-		contents[path], before[path], exists[path] = content, append([]byte(nil), content...), true
-		return content, true, nil
+	builder := &previewBuilder{
+		w: w, preview: preview,
+		contents: make(map[string][]byte), exists: make(map[string]bool),
+		before: make(map[string][]byte), touched: make(map[string]bool),
 	}
 	for _, operation := range ordered {
-		switch operation.Kind {
-		case OperationReplaceSymbol, OperationDeleteSymbol, OperationInsertBefore, OperationInsertAfter, OperationReplaceRange:
-			handle := *operation.Target.FileRange
-			current, err := w.ValidateMutation(w.Identity().ID, handle.Path, handle.Revision, ProviderLayer{})
-			if err != nil {
-				conflictFor(operation, handle.Path, handle.Revision, err)
-				continue
+		builder.apply(operation)
+	}
+	return builder.finish()
+}
+
+// previewBuilder simulates one ordered plan against the current documents without
+// writing. contents and exists hold the simulated state per path, before the bytes first
+// read for the path, and touched the paths some operation changed.
+type previewBuilder struct {
+	w        *Workspace
+	preview  PlanPreview
+	contents map[string][]byte
+	exists   map[string]bool
+	before   map[string][]byte
+	touched  map[string]bool
+}
+
+func (b *previewBuilder) apply(operation PlanOperation) {
+	switch operation.Kind {
+	case OperationReplaceSymbol, OperationDeleteSymbol, OperationInsertBefore, OperationInsertAfter, OperationReplaceRange:
+		b.applyEdit(operation)
+	case OperationCreateFile:
+		b.applyCreate(operation)
+	case OperationDeleteFile:
+		b.applyDelete(operation)
+	case OperationMoveFile:
+		b.applyMove(operation)
+	case OperationReplaceMatches:
+		b.applyReplaceMatches(operation)
+	default:
+		b.preview.Conflicts = append(b.preview.Conflicts, PlanConflict{
+			OpID: operation.OpID, Code: "operation_requires_later_stage",
+			Message: fmt.Sprintf("%s requires provider or result-set validation unavailable before its named stage", operation.Kind),
+		})
+	}
+}
+
+func (b *previewBuilder) conflict(operation PlanOperation, path string, expected RevisionID, err error) {
+	conflict := PlanConflict{OpID: operation.OpID, Code: ConflictDocumentChanged, Path: path, Expected: expected, Message: err.Error()}
+	var typed *Conflict
+	if errors.As(err, &typed) {
+		conflict.Code, conflict.Current = typed.Code, typed.Current
+	}
+	b.preview.Conflicts = append(b.preview.Conflicts, conflict)
+}
+
+// set records the simulated content and presence of a path touched by an operation.
+func (b *previewBuilder) set(path string, content []byte, exists bool) {
+	b.contents[path], b.exists[path], b.touched[path] = content, exists, true
+}
+
+// remember records content as both the before image and the simulated content of path.
+func (b *previewBuilder) remember(path string, content []byte) []byte {
+	b.contents[path], b.before[path], b.exists[path] = content, append([]byte(nil), content...), true
+	return content
+}
+
+func (b *previewBuilder) load(path string) ([]byte, bool, error) {
+	if content, ok := b.contents[path]; ok {
+		return content, b.exists[path], nil
+	}
+	read, err := b.w.Read(path)
+	if err != nil {
+		return b.loadUnreadable(path, err)
+	}
+	return b.remember(path, append([]byte(nil), read.Content...)), true, nil
+}
+
+// loadUnreadable resolves a path the text reader refused: a missing document previews as
+// absent, a binary or symlink document previews with its raw bytes or target.
+func (b *previewBuilder) loadUnreadable(path string, readErr error) ([]byte, bool, error) {
+	snapshot, snapshotErr := b.w.Refresh(path, ProviderLayer{})
+	if snapshotErr != nil {
+		return nil, false, readErr
+	}
+	switch snapshot.Disk.Kind {
+	case ObjectMissing:
+		b.contents[path], b.before[path], b.exists[path] = nil, nil, false
+		return nil, false, nil
+	case ObjectBinary:
+		absolute := filepath.Join(b.w.Identity().Root, filepath.FromSlash(path))
+		content, binaryErr := os.ReadFile(absolute)
+		if binaryErr != nil {
+			return nil, false, binaryErr
+		}
+		if int64(len(content)) != snapshot.Disk.Size || hashBytes(content) != snapshot.ContentSHA256 {
+			return nil, false, &Conflict{
+				Code:     ConflictDocumentChanged,
+				Path:     path,
+				Expected: snapshot.Revision,
+				Current:  snapshot.Revision,
 			}
-			content, present, err := load(handle.Path)
-			if err != nil || !present {
-				if err == nil {
-					err = errors.New("target file is missing")
-				}
-				conflictFor(operation, handle.Path, handle.Revision, err)
-				continue
-			}
-			if handle.ByteStart < 0 || handle.ByteEnd < handle.ByteStart || handle.ByteEnd > len(content) ||
-				hashBytes(content[handle.ByteStart:handle.ByteEnd]) != handle.ExpectedSHA256 {
-				conflictFor(operation, handle.Path, handle.Revision, &Conflict{Code: ConflictDocumentChanged, Path: handle.Path, Expected: handle.Revision, Current: current.Revision})
-				continue
-			}
-			start, end := handle.ByteStart, handle.ByteEnd
-			switch operation.Kind {
-			case OperationInsertBefore:
-				end = start
-			case OperationInsertAfter:
-				start = end
-			}
-			replacement := []byte(operation.Content)
-			if operation.Indentation == "syntax_anchor" {
-				replacement, err = syntaxAnchorReplacement(content, start, replacement)
-				if err != nil {
-					conflictFor(operation, handle.Path, handle.Revision, err)
-					continue
-				}
-			}
-			nextContent := make([]byte, 0, len(content)-(end-start)+len(replacement))
-			nextContent = append(nextContent, content[:start]...)
-			nextContent = append(nextContent, replacement...)
-			nextContent = append(nextContent, content[end:]...)
-			contents[handle.Path] = nextContent
-			touched[handle.Path] = true
-		case OperationCreateFile:
-			current, err := w.ValidateMutation(w.Identity().ID, operation.Path, operation.Revision, ProviderLayer{})
-			if err != nil {
-				conflictFor(operation, operation.Path, operation.Revision, err)
-				continue
-			}
-			if current.Disk.Kind != ObjectMissing {
-				conflictFor(operation, operation.Path, operation.Revision, errors.New("create target already exists"))
-				continue
-			}
-			_, _, _ = load(operation.Path)
-			contents[operation.Path], exists[operation.Path], touched[operation.Path] = []byte(operation.Content), true, true
-		case OperationDeleteFile:
-			if _, err := w.ValidateMutation(w.Identity().ID, operation.Path, operation.Revision, ProviderLayer{}); err != nil {
-				conflictFor(operation, operation.Path, operation.Revision, err)
-				continue
-			}
-			if _, present, err := load(operation.Path); err != nil || !present {
-				if err == nil {
-					err = errors.New("delete target is missing")
-				}
-				conflictFor(operation, operation.Path, operation.Revision, err)
-				continue
-			}
-			contents[operation.Path], exists[operation.Path], touched[operation.Path] = nil, false, true
-		case OperationMoveFile:
-			if _, err := w.ValidateMutation(w.Identity().ID, operation.From, operation.Revision, ProviderLayer{}); err != nil {
-				conflictFor(operation, operation.From, operation.Revision, err)
-				continue
-			}
-			destination, err := w.ValidateMutation(w.Identity().ID, operation.To, operation.DestinationRevision, ProviderLayer{})
-			if err != nil {
-				conflictFor(operation, operation.To, operation.DestinationRevision, err)
-				continue
-			}
-			if destination.Disk.Kind != ObjectMissing {
-				conflictFor(operation, operation.To, operation.DestinationRevision, errors.New("move destination exists"))
-				continue
-			}
-			source, present, err := load(operation.From)
-			if err != nil || !present {
-				if err == nil {
-					err = errors.New("move source is missing")
-				}
-				conflictFor(operation, operation.From, operation.Revision, err)
-				continue
-			}
-			_, _, _ = load(operation.To)
-			contents[operation.To], exists[operation.To], touched[operation.To] = append([]byte(nil), source...), true, true
-			contents[operation.From], exists[operation.From], touched[operation.From] = nil, false, true
-		case OperationReplaceMatches:
-			hits, err := w.ResolveAllMatches(ResultSetID(operation.Target.Handle))
-			if err != nil {
-				conflictFor(operation, "", "", err)
-				continue
-			}
-			sort.Slice(hits, func(i, j int) bool {
-				if hits[i].Path == hits[j].Path {
-					return hits[i].ByteStart > hits[j].ByteStart
-				}
-				return hits[i].Path < hits[j].Path
-			})
-			for _, hit := range hits {
-				content, present, loadErr := load(hit.Path)
-				if loadErr != nil || !present {
-					if loadErr == nil {
-						loadErr = errors.New("result-set target file is missing")
-					}
-					conflictFor(operation, hit.Path, hit.Range.Revision, loadErr)
-					continue
-				}
-				if hit.ByteStart < 0 || hit.ByteEnd < hit.ByteStart || hit.ByteEnd > len(content) ||
-					hashBytes(content[hit.ByteStart:hit.ByteEnd]) != hit.Range.ExpectedSHA256 {
-					conflictFor(operation, hit.Path, hit.Range.Revision, &Conflict{Code: ConflictDocumentChanged, Path: hit.Path, Expected: hit.Range.Revision})
-					continue
-				}
-				nextContent := make([]byte, 0, len(content)-(hit.ByteEnd-hit.ByteStart)+len(operation.Content))
-				nextContent = append(nextContent, content[:hit.ByteStart]...)
-				nextContent = append(nextContent, operation.Content...)
-				nextContent = append(nextContent, content[hit.ByteEnd:]...)
-				contents[hit.Path] = nextContent
-				touched[hit.Path] = true
-			}
-		default:
-			preview.Conflicts = append(preview.Conflicts, PlanConflict{
-				OpID: operation.OpID, Code: "operation_requires_later_stage",
-				Message: fmt.Sprintf("%s requires provider or result-set validation unavailable before its named stage", operation.Kind),
-			})
+		}
+		return b.remember(path, content), true, nil
+	case ObjectSymlink:
+		return b.remember(path, []byte(snapshot.Disk.SymlinkTarget)), true, nil
+	}
+	return nil, false, readErr
+}
+
+// loadPresent loads path and reports an absent document as the given error.
+func (b *previewBuilder) loadPresent(path, missing string) ([]byte, error) {
+	content, present, err := b.load(path)
+	if err == nil && !present {
+		err = errors.New(missing)
+	}
+	return content, err
+}
+
+// rangeMatches reports whether content[start:end] is a valid range with the expected hash.
+func rangeMatches(content []byte, start, end int, expectedSHA256 string) bool {
+	if start < 0 || end < start || end > len(content) {
+		return false
+	}
+	return hashBytes(content[start:end]) == expectedSHA256
+}
+
+// splice returns content with [start:end] replaced by replacement.
+func splice(content []byte, start, end int, replacement []byte) []byte {
+	next := make([]byte, 0, len(content)-(end-start)+len(replacement))
+	next = append(next, content[:start]...)
+	next = append(next, replacement...)
+	return append(next, content[end:]...)
+}
+
+func (b *previewBuilder) applyEdit(operation PlanOperation) {
+	handle := *operation.Target.FileRange
+	current, err := b.w.ValidateMutation(b.w.Identity().ID, handle.Path, handle.Revision, ProviderLayer{})
+	if err != nil {
+		b.conflict(operation, handle.Path, handle.Revision, err)
+		return
+	}
+	content, err := b.loadPresent(handle.Path, "target file is missing")
+	if err != nil {
+		b.conflict(operation, handle.Path, handle.Revision, err)
+		return
+	}
+	if !rangeMatches(content, handle.ByteStart, handle.ByteEnd, handle.ExpectedSHA256) {
+		b.conflict(operation, handle.Path, handle.Revision, &Conflict{Code: ConflictDocumentChanged, Path: handle.Path, Expected: handle.Revision, Current: current.Revision})
+		return
+	}
+	start, end := handle.ByteStart, handle.ByteEnd
+	switch operation.Kind {
+	case OperationInsertBefore:
+		end = start
+	case OperationInsertAfter:
+		start = end
+	}
+	replacement := []byte(operation.Content)
+	if operation.Indentation == "syntax_anchor" {
+		replacement, err = syntaxAnchorReplacement(content, start, replacement)
+		if err != nil {
+			b.conflict(operation, handle.Path, handle.Revision, err)
+			return
 		}
 	}
+	b.set(handle.Path, splice(content, start, end, replacement), true)
+}
+
+func (b *previewBuilder) applyCreate(operation PlanOperation) {
+	current, err := b.w.ValidateMutation(b.w.Identity().ID, operation.Path, operation.Revision, ProviderLayer{})
+	if err != nil {
+		b.conflict(operation, operation.Path, operation.Revision, err)
+		return
+	}
+	if current.Disk.Kind != ObjectMissing {
+		b.conflict(operation, operation.Path, operation.Revision, errors.New("create target already exists"))
+		return
+	}
+	_, _, _ = b.load(operation.Path)
+	b.set(operation.Path, []byte(operation.Content), true)
+}
+
+func (b *previewBuilder) applyDelete(operation PlanOperation) {
+	if _, err := b.w.ValidateMutation(b.w.Identity().ID, operation.Path, operation.Revision, ProviderLayer{}); err != nil {
+		b.conflict(operation, operation.Path, operation.Revision, err)
+		return
+	}
+	if _, err := b.loadPresent(operation.Path, "delete target is missing"); err != nil {
+		b.conflict(operation, operation.Path, operation.Revision, err)
+		return
+	}
+	b.set(operation.Path, nil, false)
+}
+
+func (b *previewBuilder) applyMove(operation PlanOperation) {
+	if _, err := b.w.ValidateMutation(b.w.Identity().ID, operation.From, operation.Revision, ProviderLayer{}); err != nil {
+		b.conflict(operation, operation.From, operation.Revision, err)
+		return
+	}
+	destination, err := b.w.ValidateMutation(b.w.Identity().ID, operation.To, operation.DestinationRevision, ProviderLayer{})
+	if err != nil {
+		b.conflict(operation, operation.To, operation.DestinationRevision, err)
+		return
+	}
+	if destination.Disk.Kind != ObjectMissing {
+		b.conflict(operation, operation.To, operation.DestinationRevision, errors.New("move destination exists"))
+		return
+	}
+	source, err := b.loadPresent(operation.From, "move source is missing")
+	if err != nil {
+		b.conflict(operation, operation.From, operation.Revision, err)
+		return
+	}
+	_, _, _ = b.load(operation.To)
+	b.set(operation.To, append([]byte(nil), source...), true)
+	b.set(operation.From, nil, false)
+}
+
+func (b *previewBuilder) applyReplaceMatches(operation PlanOperation) {
+	hits, err := b.w.ResolveAllMatches(ResultSetID(operation.Target.Handle))
+	if err != nil {
+		b.conflict(operation, "", "", err)
+		return
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].Path == hits[j].Path {
+			return hits[i].ByteStart > hits[j].ByteStart
+		}
+		return hits[i].Path < hits[j].Path
+	})
+	for _, hit := range hits {
+		content, loadErr := b.loadPresent(hit.Path, "result-set target file is missing")
+		if loadErr != nil {
+			b.conflict(operation, hit.Path, hit.Range.Revision, loadErr)
+			continue
+		}
+		if !rangeMatches(content, hit.ByteStart, hit.ByteEnd, hit.Range.ExpectedSHA256) {
+			b.conflict(operation, hit.Path, hit.Range.Revision, &Conflict{Code: ConflictDocumentChanged, Path: hit.Path, Expected: hit.Range.Revision})
+			continue
+		}
+		b.set(hit.Path, splice(content, hit.ByteStart, hit.ByteEnd, []byte(operation.Content)), true)
+	}
+}
+
+// finish turns the simulated state into affected files and exact diffs, or reports the
+// collected conflicts.
+func (b *previewBuilder) finish() PlanPreview {
+	preview := b.preview
 	if len(preview.Conflicts) > 0 {
 		preview.Outcome = "conflict"
 		return finalizePreview(preview)
 	}
-	for path := range touched {
+	for path := range b.touched {
 		preview.AffectedFiles = append(preview.AffectedFiles, path)
-		if exists[path] {
-			preview.Diffs = append(preview.Diffs, exactDiff(path, before[path], contents[path], 0, len(before[path]), contents[path]))
+		if b.exists[path] {
+			preview.Diffs = append(preview.Diffs, exactDiff(path, b.before[path], b.contents[path], 0, len(b.before[path]), b.contents[path]))
 		} else {
-			preview.Diffs = append(preview.Diffs, exactDiff(path, before[path], nil, 0, len(before[path]), nil))
+			preview.Diffs = append(preview.Diffs, exactDiff(path, b.before[path], nil, 0, len(b.before[path]), nil))
 		}
 	}
 	sort.Strings(preview.AffectedFiles)
