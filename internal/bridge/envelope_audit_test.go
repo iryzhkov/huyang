@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,24 +17,12 @@ import (
 // produces, so any test that drives a tool, directly or through a client
 // session, fails when the result would violate the advertised schema.
 func TestMain(m *testing.M) {
-	envelopeAudit = func(tool string, envelope map[string]any) {
+	setEnvelopeAudit(func(tool string, envelope map[string]any) {
 		if err := validateModernOutput(envelope); err != nil {
 			panic(fmt.Sprintf("tool %s produced an envelope that violates the output schema: %v\n%#v", tool, err, envelope))
 		}
-	}
+	})
 	os.Exit(m.Run())
-}
-
-func validateModernOutput(value map[string]any) error {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	var decoded any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return err
-	}
-	return validateSchemaValue(outputEnvelopeSchema(), decoded, "result")
 }
 
 func assertModernOutputValid(t *testing.T, value map[string]any) {

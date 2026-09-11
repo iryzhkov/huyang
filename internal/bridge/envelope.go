@@ -1,6 +1,8 @@
 package bridge
 
 import (
+	"encoding/json"
+
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -10,10 +12,34 @@ const modernAPIVersion = "huyang.workspace/v1alpha1"
 // maxNextEntries bounds the next array the output schema advertises.
 const maxNextEntries = 2
 
-// envelopeAudit, when set, observes every finalised envelope. The test suite
-// installs a validator against the output schema here so every envelope
-// produced anywhere in the package is checked.
+// envelopeAudit, when set, observes every finalised envelope. Production
+// never sets it: the output schema is enforced structurally by
+// finalizeEnvelope, and full validation against the schema is test-only. The
+// test suites install validateModernOutput here through setEnvelopeAudit so
+// every envelope produced by any package is checked.
 var envelopeAudit func(tool string, envelope map[string]any)
+
+// setEnvelopeAudit installs the envelope observer. It exists for the test
+// suites; see envelopeAudit.
+func setEnvelopeAudit(audit func(tool string, envelope map[string]any)) {
+	envelopeAudit = audit
+}
+
+// validateModernOutput checks an envelope against the advertised output
+// schema after a JSON round trip, exactly as a client would see it. It is
+// the test-only half of output-schema validation: production relies on
+// finalizeEnvelope and never validates its own results.
+func validateModernOutput(value map[string]any) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var decoded any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return err
+	}
+	return validateSchemaValue(outputEnvelopeSchema(), decoded, "result")
+}
 
 // finalizeEnvelope is the single place every tool result passes through
 // before it leaves the service. It enforces the invariants the output schema
