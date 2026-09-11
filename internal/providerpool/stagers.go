@@ -170,6 +170,10 @@ func (s *SandboxStager) Verify(ctx context.Context, request workspacecore.Verifi
 	return result, err
 }
 
+// Stage prepares the plan in three phases: the operations are written into
+// a fresh sandbox through a disposable provider transaction, the
+// configured formatter and pipeline transform the staged files, and a
+// second provider records diagnostics for the transformed bytes.
 func (s *SandboxStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -178,106 +182,137 @@ func (s *SandboxStager) Stage(ctx context.Context, request workspacecore.PlanSta
 	} else if current != nil {
 		return workspacecore.Coded(workspacecore.CodePlanStateInvalid, errors.New("sandbox preparation is already staged"))
 	}
+	sandbox, err := s.stageIntoSandbox(ctx, request)
+	if err != nil {
+		return err
+	}
+	verification, err := s.transformStaged(ctx, sandbox, &request)
+	if err != nil {
+		return err
+	}
+	verification, err = s.recordStagedDiagnostics(ctx, sandbox, request.Files, verification)
+	if err != nil {
+		return err
+	}
+	s.stateMu.Lock()
+	s.prepared, s.verification = request, verification
+	s.stateMu.Unlock()
+	return nil
+}
+
+// stageIntoSandbox materialises the sandbox, stages the operations through
+// a provider transaction, writes the durable sandbox copy and commits the
+// provider's disposable transaction so its buffers are marked synchronized.
+// Any failure removes the sandbox and leaves the stager empty.
+func (s *SandboxStager) stageIntoSandbox(ctx context.Context, request workspacecore.PlanStageRequest) (*workspacecore.Sandbox, error) {
 	sandbox, err := workspacecore.MaterializeSandbox(
 		ctx, s.workspace.Identity().Root, s.sandboxBase, s.workspace.Identity().ID,
 		s.planID, s.planRevision, s.baseRevision, workspacecore.DefaultSandboxLimits(),
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.setResources(sandbox, nil, nil)
 	backend, err := s.pool.Open(sandbox.Tree, false)
 	if err != nil {
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
-		return err
+		return nil, err
 	}
 	stager := &providerPlanStager{workspace: s.workspace, provider: backend, epoch: backend.Descriptor().Epoch}
 	s.setResources(sandbox, backend, stager)
 	_, _ = Call(ctx, s.workspace, backend, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
 	}, "workspace_support", map[string]any{"root": sandbox.Tree})
-	if err := stager.Stage(ctx, request); err != nil {
+	abandon := func(err error) (*workspacecore.Sandbox, error) {
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
-		return err
+		return nil, err
+	}
+	if err := stager.Stage(ctx, request); err != nil {
+		return abandon(err)
 	}
 	if err := sandbox.ApplyPrepared(request); err != nil {
 		_ = stager.Rollback(context.Background(), request.PlanID)
-		_ = backend.Close(context.Background())
-		_ = sandbox.Cleanup()
-		s.setResources(nil, nil, nil)
-		return err
+		return abandon(err)
 	}
 	// The provider staged identical bytes in modified buffers while the
 	// coordinator wrote the durable sandbox copy. Commit only the disposable
 	// provider transaction now so its buffers are marked synchronized before
 	// diagnostics; the sandbox remains the rollback boundary for the plan.
 	if err := stager.Commit(ctx, request.PlanID); err != nil {
-		_ = backend.Close(context.Background())
-		_ = sandbox.Cleanup()
-		s.setResources(nil, nil, nil)
-		return err
+		return abandon(err)
 	}
 	s.setResources(sandbox, backend, nil)
 	if err := backend.Close(context.Background()); err != nil {
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
-		return err
+		return nil, err
 	}
 	s.setResources(sandbox, nil, nil)
+	return sandbox, nil
+}
+
+// transformStaged runs the formatter and pipeline over the staged files and
+// folds every path a tool wrote into the request, so the prepared set is
+// exactly what will be committed.
+func (s *SandboxStager) transformStaged(ctx context.Context, sandbox *workspacecore.Sandbox, request *workspacecore.PlanStageRequest) (workspacecore.VerificationResult, error) {
 	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
-		return err
+		return workspacecore.VerificationResult{}, err
 	}
 	verification, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, workspacecore.VerificationRequest{
 		Stages: []string{"format_gate", "parser", "check", "tests"}, Revision: s.baseRevision,
 		Transform: request.RequiresFormatter, ApplyConfiguredTransform: true,
 	}, request.Files)
 	if err != nil {
-		return err
+		return verification, err
 	}
-	if len(verification.ToolDelta) > 0 {
-		request.Files = verification.PreparedFiles
-		known := make(map[string]bool, len(request.Files))
-		for _, file := range request.Files {
-			known[file.Path] = true
-		}
-		for _, delta := range verification.ToolDelta {
-			if known[delta.Path] {
-				continue
-			}
-			file, fileErr := sandbox.StageFileForToolDelta(delta)
-			if fileErr != nil {
-				return fileErr
-			}
-			request.Files = append(request.Files, file)
-			known[delta.Path] = true
-		}
+	if len(verification.ToolDelta) == 0 {
+		return verification, nil
 	}
+	request.Files = verification.PreparedFiles
+	known := make(map[string]bool, len(request.Files))
+	for _, file := range request.Files {
+		known[file.Path] = true
+	}
+	for _, delta := range verification.ToolDelta {
+		if known[delta.Path] {
+			continue
+		}
+		file, fileErr := sandbox.StageFileForToolDelta(delta)
+		if fileErr != nil {
+			return verification, fileErr
+		}
+		request.Files = append(request.Files, file)
+		known[delta.Path] = true
+	}
+	return verification, nil
+}
+
+// recordStagedDiagnostics opens a provider over the transformed sandbox,
+// records the diagnostics of the staged files, corroborates them with a
+// passing project check, and appends the diagnostics stage.
+func (s *SandboxStager) recordStagedDiagnostics(ctx context.Context, sandbox *workspacecore.Sandbox, files []workspacecore.PlanStageFile, verification workspacecore.VerificationResult) (workspacecore.VerificationResult, error) {
 	replacement, err := s.pool.Open(sandbox.Tree, false)
 	if err != nil {
-		return err
+		return verification, err
 	}
 	s.setResources(sandbox, replacement, nil)
 	_, _ = Call(ctx, s.workspace, replacement, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
 	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": VerificationAttachWaitMS})
-	diagnosticReport, err := RecordDiagnostics(ctx, s.workspace, replacement, request.Files, s.baseRevision, s.planID)
+	diagnosticReport, err := RecordDiagnostics(ctx, s.workspace, replacement, files, s.baseRevision, s.planID)
 	if err != nil {
-		return err
+		return verification, err
 	}
 	diagnosticReport, err = CorroborateWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
 	if err != nil {
-		return err
+		return verification, err
 	}
-
 	verification.Stages = append(verification.Stages, DiagnosticVerificationStage(s.baseRevision, diagnosticReport))
-	s.stateMu.Lock()
-	s.prepared, s.verification = request, verification
-	s.stateMu.Unlock()
-	return nil
+	return verification, nil
 }
 
 // Sandbox returns the materialised sandbox, or nil before Stage or after
