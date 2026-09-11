@@ -61,6 +61,7 @@ end
 -- gives administration calls an actionable prerequisite failure.
 local function configure_jdtls_sandbox_safety()
     local current = vim.lsp.config.jdtls or {}
+    ---@type table
     local settings = vim.deepcopy(current.settings or {})
     local root_markers = vim.deepcopy(current.root_markers or {})
     settings.java = settings.java or {}
@@ -505,10 +506,12 @@ local function attached_client(root, ft)
             notices[#notices + 1] = msg:gsub("%s+", " ")
         end
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     vim.notify = function(msg, level, opts)
         collect(msg, level)
         return orig_notify(msg, level, opts)
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     vim.notify_once = function(msg, level, opts)
         collect(msg, level)
         return orig_once(msg, level, opts)
@@ -878,8 +881,8 @@ local function install_server(ft, wanted, root)
         end
         out.java_home = java_home
     elseif lspname == "ruby_lsp" then
-        local ready, why = ensure_ruby_lsp_bundler(pkg)
-        if not ready then
+        local bundler_ready, why = ensure_ruby_lsp_bundler(pkg)
+        if not bundler_ready then
             out.status = "prerequisite missing"
             out.attached = false
             out.note = why

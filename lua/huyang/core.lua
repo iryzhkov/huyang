@@ -8,8 +8,6 @@
 
 local M = {}
 
-
-
 local ATTACH_TIMEOUT_MS = 5000
 
 local REQUEST_TIMEOUT_MS = 10000
@@ -20,14 +18,27 @@ local function err(fmt, ...)
     error(fmt:format(...), 0)
 end
 
+local function pack(...)
+    return { n = select("#", ...), ... }
+end
+
 -- Run `start(resume)` and yield until `resume(...)` is called. Guarded so a
 -- late second resume (e.g. an LSP reply after its timeout fired) is ignored,
 -- and so a resume that happens synchronously inside `start` works too.
+--
+-- This is also the cancellation point: a request the service cancelled
+-- (huyang.rpc.cancel) raises its structured error here, before the wait
+-- starts and again when the coroutine comes back from the yield. The rpc
+-- module keeps the resume function while the coroutine is parked, so a
+-- cancel wakes it at once instead of after the LSP reply or timer it was
+-- waiting for; the guard below makes that late reply a no-op.
 local function await(start)
     local co = assert(coroutine.running(), "huyang: await called outside a coroutine")
+    local rpc = require("huyang.rpc")
+    rpc.check_cancelled()
     local resumed, yielded = false, false
     local sync_result
-    start(function(...)
+    local function resume(...)
         if resumed then return end
         resumed = true
         if not yielded then
@@ -38,12 +49,18 @@ local function await(start)
         if not ok then
             vim.notify("huyang rpc: " .. tostring(e), vim.log.levels.ERROR)
         end
-    end)
+    end
+    start(resume)
     if resumed then
         return unpack(sync_result, 1, sync_result.n)
     end
     yielded = true
-    return coroutine.yield()
+    rpc.suspend(resume)
+    local results = pack(coroutine.yield())
+    -- Back from the yield: a cancelled wake raises here, a normal wake
+    -- passes the values through.
+    rpc.resume()
+    return unpack(results, 1, results.n)
 end
 
 local function sleep(ms)
@@ -603,8 +620,8 @@ local function dialect_note(bufnr)
         return "this is QML JavaScript (a .pragma/.import header), which no JavaScript "
             .. "or TypeScript server can parse; the one that attached was detached and "
             .. "its errors on this file discarded. Nothing checked this edit - qmllint "
-            .. "over the .qml files that import this one is the gate (check_project "
-            .. "runs it)."
+            .. "over the .qml files that import this one is the gate (verify_run "
+            .. "runs it as the project's check stage)."
     end
     return nil
 end

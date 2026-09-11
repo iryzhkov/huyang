@@ -75,7 +75,8 @@ end
 local function options()
     local ok, config = pcall(require, "huyang.config")
     local opts = ok and config.options and config.options.debug or {}
-    local idle = tonumber(os.getenv("AGENT99_DEBUG_IDLE_MS")) or opts.idle_ms or 600000
+    local idle = tonumber(os.getenv("HUYANG_DEBUG_IDLE_MS"))
+        or tonumber(os.getenv("AGENT99_DEBUG_IDLE_MS")) or opts.idle_ms or 600000
     return { idle_ms = idle }
 end
 
