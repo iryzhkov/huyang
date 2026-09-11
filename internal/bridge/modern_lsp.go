@@ -29,6 +29,18 @@ func reconcileParserSupport(entry map[string]any) {
 	}
 }
 
+func languageServerAttachmentConfirmed(value any) bool {
+	switch attached := value.(type) {
+	case bool:
+		return attached
+	case string:
+		attached = strings.TrimSpace(attached)
+		return attached != "" && attached != "false" && attached != "none"
+	default:
+		return false
+	}
+}
+
 func (d *directWorkspaces) resyncCanonicalProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
 	backend, err := d.canonicalProvider(ctx, workspace)
 	if err == nil {
@@ -193,9 +205,9 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 		}
 		return result
 	}
-	if attached, present := serverResult["attached"]; !present || attached != true {
+	if attached, present := serverResult["attached"]; !present || !languageServerAttachmentConfirmed(attached) {
 		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
-		if note == "" {
+		if note == "" || note == "<nil>" {
 			note = "the provider did not positively confirm attachment"
 		}
 		result := modernEnvelope(requestID, workspace, "provisional", "language_server_attachment_unconfirmed",

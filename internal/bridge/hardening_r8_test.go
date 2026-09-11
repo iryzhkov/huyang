@@ -117,6 +117,17 @@ func TestFailedLanguageServerInstallCannotReportAttached(t *testing.T) {
 	}
 }
 
+func TestLanguageServerAttachmentAcceptsProviderServerName(t *testing.T) {
+	if !languageServerAttachmentConfirmed("rust_analyzer") || !languageServerAttachmentConfirmed(true) {
+		t.Fatal("positive provider attachment was not recognized")
+	}
+	for _, value := range []any{nil, false, "", "none", "false"} {
+		if languageServerAttachmentConfirmed(value) {
+			t.Fatalf("false attachment %#v was recognized", value)
+		}
+	}
+}
+
 func TestPlanCreateResolvesProviderBackedSymbolWithoutPriorFind(t *testing.T) {
 	backend := newHardeningR8Provider()
 	useHardeningR8Factory(t, backend)
