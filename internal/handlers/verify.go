@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -71,10 +71,10 @@ func modernVerificationEnvelope(requestID string, workspace *workspacecore.Works
 	return envelope
 }
 
-// verifyJob carries the state of one verify_run between its two scheduler
+// VerifyJob carries the state of one verify_run between its two scheduler
 // phases: the canonical-lane refresh and stager recovery, and the external
 // job that runs the pipeline.
-type verifyJob struct {
+type VerifyJob struct {
 	request   workspacecore.VerificationRequest
 	stages    []string
 	testScope string
@@ -86,18 +86,18 @@ type verifyJob struct {
 
 // verify runs both phases back to back for callers that already hold the
 // appropriate lanes; executeScheduled schedules the phases separately.
-func (h *toolHandlers) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
-	job, early := h.verifyPrepare(ctx, requestID, workspace, arguments)
+func (h *Handlers) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	job, early := h.VerifyPrepare(ctx, requestID, workspace, arguments)
 	if early != nil {
 		return early
 	}
-	return h.verifyRun(ctx, requestID, workspace, job)
+	return h.VerifyRun(ctx, requestID, workspace, job)
 }
 
 // verifyPrepare resynchronises the canonical workspace, validates the request
 // and locates or recovers the prepared stager. It runs in the workspace's
 // canonical lane because the document refresh is an external resync.
-func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) (*verifyJob, map[string]any) {
+func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) (*VerifyJob, map[string]any) {
 	if err := workspace.PrimeDocuments(); err != nil {
 		return nil, mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
@@ -132,7 +132,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 	}
 	testScope := fmt.Sprint(arguments["test_scope"])
 	identity := workspace.Identity()
-	job := &verifyJob{
+	job := &VerifyJob{
 		request: workspacecore.VerificationRequest{
 			Stages: stages, Revision: revision, TestScope: testScope,
 			TestHistoryPath: filepath.Join(h.stateDir, "test-history", string(identity.ID)+".json"),
@@ -181,7 +181,7 @@ func (h *toolHandlers) verifyPrepare(ctx context.Context, requestID string, work
 }
 
 // verifyRun executes the pipeline for a prepared job as an external job.
-func (h *toolHandlers) verifyRun(ctx context.Context, requestID string, workspace *workspacecore.Workspace, job *verifyJob) map[string]any {
+func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *workspacecore.Workspace, job *VerifyJob) map[string]any {
 	request, stages, testScope, revision, identity, stager := job.request, job.stages, job.testScope, job.revision, job.identity, job.stager
 	var result workspacecore.VerificationResult
 	var err error

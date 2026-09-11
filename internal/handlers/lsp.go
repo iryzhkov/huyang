@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func languageServerAttachmentConfirmed(value any) bool {
 	}
 }
 
-func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
+func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
 	backend, err := h.pool.Canonical(ctx, workspace)
 	if err != nil {
 		result := mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
@@ -146,7 +146,7 @@ func failedLanguageServerInstallNext(status, language, requestedServer string) [
 	return []any{retry, statusAction}
 }
 
-func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if action == "restart" {
 		before := h.languageServerStatus(ctx, requestID, workspace)
@@ -266,7 +266,7 @@ func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string
 	return result
 }
 
-func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	relation, _ := arguments["relation"].(string)
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
@@ -302,7 +302,7 @@ func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, w
 	})
 }
 
-func (h *toolHandlers) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {

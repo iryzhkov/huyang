@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/handlers"
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	"github.com/iryzhkov/huyang/internal/providerpool"
@@ -37,16 +38,16 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID, workspace := openTestProject(t, direct, map[string]string{"main.go": "package main\n"})
 	file := filepath.Join(workspace.Identity().Root, "main.go")
-	for index := 0; index < maxDiagnosticUpdates+5; index++ {
+	for index := 0; index < handlers.MaxDiagnosticUpdates+5; index++ {
 		recordTestFinding(t, workspace, file, index)
 	}
-	clientA := withClientIdentity(context.Background(), "client-a")
+	clientA := handlers.WithClientIdentity(context.Background(), "client-a")
 	inspect := func(ctx context.Context) map[string]any {
 		return direct.call(ctx, "workspace_inspect", map[string]any{"workspace_id": workspaceID, "view": "status"})
 	}
 	// Each recorded finding supersedes the previous one for the same
 	// document, so 25 findings leave 25 new and 24 resolved notices.
-	total := 2*(maxDiagnosticUpdates+5) - 1
+	total := 2*(handlers.MaxDiagnosticUpdates+5) - 1
 	seen := map[string]bool{}
 	deliveries := 0
 	for {
@@ -56,7 +57,7 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 			break
 		}
 		deliveries++
-		if len(updates) > maxDiagnosticUpdates {
+		if len(updates) > handlers.MaxDiagnosticUpdates {
 			t.Fatalf("delivery %d carried %d notices", deliveries, len(updates))
 		}
 		for _, notice := range updates {
@@ -75,16 +76,16 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 	if len(seen) != total || deliveries != 3 {
 		t.Fatalf("delivered %d notices in %d replies, want %d in 3", len(seen), deliveries, total)
 	}
-	other := inspect(withClientIdentity(context.Background(), "client-b"))
+	other := inspect(handlers.WithClientIdentity(context.Background(), "client-b"))
 	updates, _ := other["diagnostic_updates"].([]workspacecore.DiagnosticNotice)
-	if len(updates) != maxDiagnosticUpdates || other["diagnostic_updates_truncated"] != true {
+	if len(updates) != handlers.MaxDiagnosticUpdates || other["diagnostic_updates_truncated"] != true {
 		t.Fatalf("another client saw %d notices", len(updates))
 	}
 	// Acknowledging through the diagnostics cursor clears the inbox for everyone.
 	report := direct.call(clientA, "diagnostics", map[string]any{"workspace_id": workspaceID})
 	cursor := report["data"].(map[string]any)["diagnostics"].(map[string]any)["cursor"].(string)
 	direct.call(clientA, "diagnostics", map[string]any{"workspace_id": workspaceID, "since": cursor})
-	if after := inspect(withClientIdentity(context.Background(), "client-c")); after["diagnostic_updates"] != nil {
+	if after := inspect(handlers.WithClientIdentity(context.Background(), "client-c")); after["diagnostic_updates"] != nil {
 		t.Fatalf("acknowledged notices were still delivered: %#v", after["diagnostic_updates"])
 	}
 }

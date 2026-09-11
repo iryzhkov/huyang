@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/handlers"
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -522,8 +523,8 @@ func (s *receiptStore) CanonicalChangedPaths(workspaceID workspacecore.ID, targe
 		if changed, _ := data["canonical_changed"].(bool); !changed {
 			continue
 		}
-		from, fromErr := workspaceRevisionSequence(fmt.Sprint(data["from_revision"]))
-		to, toErr := workspaceRevisionSequence(fmt.Sprint(data["revision"]))
+		from, fromErr := handlers.RevisionSequence(fmt.Sprint(data["from_revision"]))
+		to, toErr := handlers.RevisionSequence(fmt.Sprint(data["revision"]))
 		if fromErr != nil || toErr != nil || from+1 != to || to != target {
 			continue
 		}
@@ -575,11 +576,11 @@ func exactDiffReceiptMap(diff workspacecore.ExactDiff) map[string]any {
 	}
 }
 
-func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
+func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []handlers.RecordedRevisionDiff {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var recorded []recordedRevisionDiff
+	var recorded []handlers.RecordedRevisionDiff
 	seen := map[string]bool{}
 	prefix := workspaceID + "\x00"
 	for key, replay := range s.replays {
@@ -590,8 +591,8 @@ func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq 
 		if changed, _ := data["canonical_changed"].(bool); !changed {
 			continue
 		}
-		left, leftErr := workspaceRevisionSequence(fmt.Sprint(data["from_revision"]))
-		right, rightErr := workspaceRevisionSequence(fmt.Sprint(data["revision"]))
+		left, leftErr := handlers.RevisionSequence(fmt.Sprint(data["from_revision"]))
+		right, rightErr := handlers.RevisionSequence(fmt.Sprint(data["revision"]))
 		if leftErr != nil || rightErr != nil || left < fromSeq || right > toSeq {
 			continue
 		}
@@ -636,7 +637,7 @@ func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq 
 				continue
 			}
 			seen[identity] = true
-			recorded = append(recorded, recordedRevisionDiff{
+			recorded = append(recorded, handlers.RecordedRevisionDiff{
 				From: left, To: right, Diff: diff, Path: path,
 				BeforeSHA: beforeSHA, AfterSHA: afterSHA,
 			})

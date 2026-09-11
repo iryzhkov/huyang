@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, ok := arguments["target"].(map[string]any)
 	if !ok {
 		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
@@ -146,7 +146,7 @@ func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *wo
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the
 // declaration when the native text core cannot section the document.
-func (h *toolHandlers) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
+func (h *Handlers) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
 	if record, err := workspace.ResolveSymbolLocator(path, name); err == nil {
 		return record, true
 	}

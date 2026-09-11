@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -13,56 +13,56 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// workspaceLookup is the handlers' view of the workspace registry: find an
+// WorkspaceLookup is the handlers' view of the workspace registry: find an
 // open workspace, register a newly opened one, and persist an identity that
 // moved. The service owns the registry and its durable file.
-type workspaceLookup interface {
+type WorkspaceLookup interface {
 	Lookup(id workspacecore.ID) *workspacecore.Workspace
 	Adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error)
 	PersistIdentity(id workspacecore.ID) error
 }
 
-// revisionProvenance answers the two receipt-backed questions the handlers
+// RevisionProvenance answers the two receipt-backed questions the handlers
 // ask: which native edits produced the revisions in a range, and which
 // paths changed at one revision.
-type revisionProvenance interface {
-	RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff
+type RevisionProvenance interface {
+	RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []RecordedRevisionDiff
 	CanonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error)
 }
 
-// recordedRevisionDiff is one native edit receipt in revision order.
-type recordedRevisionDiff struct {
+// RecordedRevisionDiff is one native edit receipt in revision order.
+type RecordedRevisionDiff struct {
 	From, To                  uint64
 	Path, BeforeSHA, AfterSHA string
 	Diff                      any
 }
 
-// replayCheckpoint persists an early receipt for a canonical mutation before
+// ReplayCheckpoint persists an early receipt for a canonical mutation before
 // its post-mutation work runs. The service installs it in the request
 // context of every stateful call; edit_apply invokes it once the canonical
 // bytes are written.
-type replayCheckpoint func(map[string]any) error
+type ReplayCheckpoint func(map[string]any) error
 
 type replayCheckpointKey struct{}
 
-func withReceiptCheckpoint(ctx context.Context, checkpoint replayCheckpoint) context.Context {
+func WithReceiptCheckpoint(ctx context.Context, checkpoint ReplayCheckpoint) context.Context {
 	return context.WithValue(ctx, replayCheckpointKey{}, checkpoint)
 }
 
 func checkpointStatefulReceipt(ctx context.Context, result map[string]any) error {
-	checkpoint, _ := ctx.Value(replayCheckpointKey{}).(replayCheckpoint)
+	checkpoint, _ := ctx.Value(replayCheckpointKey{}).(ReplayCheckpoint)
 	if checkpoint == nil {
 		return nil
 	}
 	return checkpoint(result)
 }
 
-// toolHandlers implements every tool over the workspace core and the
+// Handlers implements every tool over the workspace core and the
 // provider pool. It holds no replay or scheduling state: the service
 // decides when a handler runs, the handlers decide what it does.
-type toolHandlers struct {
-	registry     workspaceLookup
-	provenance   revisionProvenance
+type Handlers struct {
+	registry     WorkspaceLookup
+	provenance   RevisionProvenance
 	pool         *providerpool.Pool
 	verification *verificationCache
 	notices      *noticeDelivery
@@ -73,10 +73,10 @@ type toolHandlers struct {
 	schedulerInfo func() map[string]any
 }
 
-// handlerConfig wires the handlers to what the service owns.
-type handlerConfig struct {
-	Registry   workspaceLookup
-	Provenance revisionProvenance
+// Config wires the handlers to what the service owns.
+type Config struct {
+	Registry   WorkspaceLookup
+	Provenance RevisionProvenance
 	Pool       *providerpool.Pool
 	StateDir   string
 	// ToolTimeout is advertised in service_limits; the service enforces it.
@@ -84,8 +84,8 @@ type handlerConfig struct {
 	SchedulerInfo func() map[string]any
 }
 
-func newToolHandlers(config handlerConfig) *toolHandlers {
-	return &toolHandlers{
+func New(config Config) *Handlers {
+	return &Handlers{
 		registry:      config.Registry,
 		provenance:    config.Provenance,
 		pool:          config.Pool,
@@ -98,19 +98,19 @@ func newToolHandlers(config handlerConfig) *toolHandlers {
 }
 
 // providerPool exposes the pool so the service can close it on shutdown.
-func (h *toolHandlers) providerPool() *providerpool.Pool {
+func (h *Handlers) ProviderPool() *providerpool.Pool {
 	return h.pool
 }
 
 // setToolTimeout changes the advertised tool-call timeout.
-func (h *toolHandlers) setToolTimeout(timeout time.Duration) {
+func (h *Handlers) SetToolTimeout(timeout time.Duration) {
 	h.toolTimeout = timeout
 }
 
 // execute runs one tool call against the workspace it names. workspace_open
 // and a path-only read need no workspace ID; every other tool fails without
 // a registered one.
-func (h *toolHandlers) execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
+func (h *Handlers) Execute(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
 	if err := ctx.Err(); err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
@@ -134,7 +134,7 @@ func (h *toolHandlers) execute(ctx context.Context, requestID, name string, argu
 			return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
 		}
 		arguments["workspace_id"] = implicitID
-		result := h.execute(ctx, requestID, name, arguments)
+		result := h.Execute(ctx, requestID, name, arguments)
 		result["warnings"] = append(result["warnings"].([]string), "Implicitly opened an exact one-document workspace; reuse the returned workspace_id and revision for guarded edits.")
 		if data, ok := result["data"].(map[string]any); ok {
 			data["implicit_workspace"] = true

@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operation, ok := arguments["operation"].(map[string]any)
 	if !ok || operation["kind"] != "replace_range" {
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})

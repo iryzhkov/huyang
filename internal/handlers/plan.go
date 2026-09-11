@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	decode := func(value any, target any) error {
 		encoded, err := json.Marshal(value)

@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -47,7 +47,7 @@ func (p *scriptedDebugProvider) Close(context.Context) error {
 
 func (p *scriptedDebugProvider) Done() <-chan struct{} { return p.done }
 
-func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) (*directWorkspaces, *workspacecore.Workspace, *scriptedDebugProvider, workspacecore.HandleRecord) {
+func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) (*Handlers, *workspacecore.Workspace, *scriptedDebugProvider, workspacecore.HandleRecord) {
 	t.Helper()
 	root := t.TempDir()
 	source := []byte("package main\nfunc main() {}\n")
@@ -78,10 +78,7 @@ func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) 
 		call: call,
 		done: make(chan struct{}),
 	}
-	useFixedProvider(t, backend)
-	direct := newDirectWorkspaces(t.TempDir())
-	t.Cleanup(direct.closeProviders)
-	return direct, workspace, backend, record
+	return newTestHandlers(t, fixedFactory{backend: backend}), workspace, backend, record
 }
 
 func TestModernDebugSessionInitialBreakpointAndStopContext(t *testing.T) {
@@ -99,7 +96,7 @@ func TestModernDebugSessionInitialBreakpointAndStopContext(t *testing.T) {
 			return nil, errors.New("unexpected operation " + request.Operation)
 		}
 	})
-	result := direct.handlers.debug(context.Background(), "req_debug", "debug_session", workspace, map[string]any{
+	result := direct.debug(context.Background(), "req_debug", "debug_session", workspace, map[string]any{
 		"action": "start", "file": "main.go",
 		"initial_breakpoints": []any{map[string]any{"target": map[string]any{"handle": string(record.Handle)}}},
 	})
@@ -156,12 +153,12 @@ func TestModernDebugActionMappingAndEvaluatePolicy(t *testing.T) {
 		if test.action == "set" || test.action == "remove" || test.action == "run_to" {
 			arguments["target"] = target
 		}
-		operation, _, err := direct.handlers.debugOperation(workspace, test.tool, test.action, arguments)
+		operation, _, err := direct.debugOperation(workspace, test.tool, test.action, arguments)
 		if err != nil || operation != test.operation {
 			t.Fatalf("%s/%s operation = %q, %v", test.tool, test.action, operation, err)
 		}
 	}
-	runTo := direct.handlers.debug(context.Background(), "req_run_to", "debug_control", workspace, map[string]any{
+	runTo := direct.debug(context.Background(), "req_run_to", "debug_control", workspace, map[string]any{
 		"action": "run_to", "target": map[string]any{"handle": string(record.Handle)},
 	})
 	if runTo["outcome"] != "ok" || backend.requests[0].Operation != "debug_continue" {
@@ -173,13 +170,13 @@ func TestModernDebugActionMappingAndEvaluatePolicy(t *testing.T) {
 	}
 
 	before := len(backend.requests)
-	refused := direct.handlers.debug(context.Background(), "req_read_only", "debug_inspect", workspace, map[string]any{
+	refused := direct.debug(context.Background(), "req_read_only", "debug_inspect", workspace, map[string]any{
 		"action": "evaluate", "expression": "counter++",
 	})
 	if refused["outcome"] != "unavailable" || refused["code"] != "approval_required" || len(backend.requests) != before {
 		t.Fatalf("read-only evaluate = %#v requests=%d", refused, len(backend.requests))
 	}
-	allowed := direct.handlers.debug(context.Background(), "req_effectful", "debug_inspect", workspace, map[string]any{
+	allowed := direct.debug(context.Background(), "req_effectful", "debug_inspect", workspace, map[string]any{
 		"action": "evaluate", "expression": "counter++", "policy": "allow_side_effects",
 	})
 	if allowed["outcome"] != "ok" || backend.requests[len(backend.requests)-1].Operation != "debug_evaluate" {
@@ -195,7 +192,7 @@ func TestModernDebugUnavailableAndClosedActionSchemas(t *testing.T) {
 	direct, workspace, _, _ := modernDebugFixture(t, func(request provider.Request) (any, error) {
 		return nil, errors.New("nvim-dap is not installed; add it to the runtime path")
 	})
-	result := direct.handlers.debug(context.Background(), "req_missing", "debug_session", workspace, map[string]any{
+	result := direct.debug(context.Background(), "req_missing", "debug_session", workspace, map[string]any{
 		"action": "start", "file": "main.go",
 	})
 	if result["outcome"] != "unavailable" || result["code"] != "debugger_unavailable" {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/handlers"
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
@@ -52,7 +53,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
-		envelope := direct.call(withClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
+		envelope := direct.call(handlers.WithClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
 		logFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
 			map[string]any{

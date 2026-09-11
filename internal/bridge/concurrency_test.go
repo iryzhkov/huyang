@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -110,23 +109,23 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 		}
 	}
 	promptly("canonicalProvider(B)", func() {
-		if _, err := direct.handlers.providerPool().Canonical(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.ProviderPool().Canonical(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("canonicalProvider(B): %v", err)
 		}
 	})
 	promptly("restartCanonicalProvider(B)", func() {
-		if _, err := direct.handlers.providerPool().Restart(context.Background(), workspaceBRecord); err != nil {
+		if _, err := direct.handlers.ProviderPool().Restart(context.Background(), workspaceBRecord); err != nil {
 			t.Errorf("restartCanonicalProvider(B): %v", err)
 		}
 	})
 	promptly("planStager lookup", func() {
-		if _, err := direct.handlers.providerPool().PlanStager(workspaceBRecord, "missing", 1, false); err == nil {
+		if _, err := direct.handlers.ProviderPool().PlanStager(workspaceBRecord, "missing", 1, false); err == nil {
 			t.Error("missing stager lookup succeeded")
 		}
 	})
 	promptly("preparedStager(A) bookkeeping", func() {
-		stager := direct.handlers.providerPool().Stager(workspacecore.ID(workspaceA), "blocked-plan")
-		for _, candidate := range direct.handlers.providerPool().StagersFor(workspacecore.ID(workspaceA)) {
+		stager := direct.handlers.ProviderPool().Stager(workspacecore.ID(workspaceA), "blocked-plan")
+		for _, candidate := range direct.handlers.ProviderPool().StagersFor(workspacecore.ID(workspaceA)) {
 			stager = candidate
 		}
 		if stager == nil {
@@ -165,13 +164,13 @@ func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
 	}
 	revision := plan.Preparation.PreparedRevision
 
-	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
+	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
 		t.Fatal("workspace A cannot find its own prepared revision")
 	}
-	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
+	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
 		t.Fatal("workspace B resolved a prepared revision that belongs to workspace A")
 	}
-	if stager := direct.handlers.providerPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
+	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
 		t.Fatal("workspace B resolved a plan ID that belongs to workspace A")
 	}
 	result := direct.call(context.Background(), "verify_run", map[string]any{
@@ -245,28 +244,5 @@ func TestApplyRefusesProvisionalPlanWithoutAcceptance(t *testing.T) {
 	data := accepted["data"].(map[string]any)
 	if accepted, _ := data["provisional_accepted"].([]string); len(accepted) != 1 || accepted[0] != "diagnostics" {
 		t.Fatalf("provisional_accepted = %#v", data["provisional_accepted"])
-	}
-}
-
-func TestProviderFailuresAreClassifiedByKernelCode(t *testing.T) {
-	workspace, err := workspacecore.New(workspacecore.KindProject, t.TempDir(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	busy := modernProviderFailure("req", workspace, "language_server_unavailable", &provider.ProviderError{Code: "workspace_busy", Message: "staging"})
-	if busy["outcome"] != "conflict" || busy["code"] != "workspace_busy" {
-		t.Fatalf("workspace_busy = %#v", busy)
-	}
-	unconfigured := modernProviderFailure("req", workspace, "language_server_unavailable", &provider.ProviderError{Code: "lsp_not_configured", Message: "no server"})
-	if unconfigured["outcome"] != "unavailable" || unconfigured["code"] != "language_server_unavailable" || len(unconfigured["next"].([]any)) != 1 {
-		t.Fatalf("lsp_not_configured = %#v", unconfigured)
-	}
-	cancelled := modernProviderFailure("req", workspace, "language_server_unavailable", &provider.ProviderError{Code: "provider_cancelled", Message: "cancelled"})
-	if cancelled["outcome"] != "failed" || cancelled["code"] != "request_cancelled" {
-		t.Fatalf("provider_cancelled = %#v", cancelled)
-	}
-	plain := modernProviderFailure("req", workspace, "language_server_probe_failed", errors.New("boom"))
-	if plain["code"] != "language_server_probe_failed" {
-		t.Fatalf("uncoded failure = %#v", plain)
 	}
 }

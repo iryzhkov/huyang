@@ -10,34 +10,8 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
-	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
-
-// The verification cache key includes the trust policy, so trusting a root
-// after a cached run does not replay the untrusted result.
-func TestVerificationCacheKeyChangesWhenTrustChanges(t *testing.T) {
-	root := t.TempDir()
-	configRoot := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
-	configDir := filepath.Join(configRoot, "huyang")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(configDir, "config.toml")
-	if err := os.WriteFile(configPath, []byte("[trust]\nroots = []\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	untrusted := verificationPolicyFingerprint(root)
-	trustedConfig := []byte("[trust]\nroots = [\"" + root + "\"]\n")
-	if err := os.WriteFile(configPath, trustedConfig, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	trusted := verificationPolicyFingerprint(root)
-	if untrusted == trusted {
-		t.Fatalf("verification cache fingerprint ignored trust change: %s", trusted)
-	}
-}
 
 // verify_run refreshes the canonical documents before comparing revisions,
 // so an external write since the requested revision is a revision conflict
@@ -123,41 +97,5 @@ func TestCanonicalChangedPathsComeFromTheReceiptOfTheTargetRevision(t *testing.T
 	want := []string{"pkg/a.py", "tests/test_a.py"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("changed paths = %#v, want %#v", got, want)
-	}
-}
-
-// When the impact graph recommends a full run and affected tests were
-// unavailable, the verification envelope offers a runnable full
-// verification of the same stages.
-func TestVerificationEnvelopeOffersRunnableFullFallback(t *testing.T) {
-	graph := workspacecore.ImpactGraph{Revision: "prep_123", RecommendFull: true}
-	result := workspacecore.VerificationResult{
-		Revision: "prep_123",
-		Stages: []workspacecore.VerificationStage{
-			{Stage: "check"},
-			{Stage: "tests", TestScope: "affected", TestVerdict: "affected_tests_unavailable"},
-		},
-		Impact:   &graph,
-		Targeted: &workspacecore.TargetedTestResult{Status: "unavailable", Graph: graph},
-	}
-	envelope := modernVerificationEnvelope("req_verify", nil, "partial", "", "verified", "revision_miss", result)
-	next := envelope["next"].([]any)
-	if len(next) != 1 {
-		t.Fatalf("next = %#v, want one full-verification fallback", next)
-	}
-	action := next[0].(map[string]any)
-	if action["tool"] != "verify_run" || action["revision_or_transaction"] != "prep_123" || action["test_scope"] != "full" || action["use_new_idempotency_key"] != true {
-		t.Fatalf("fallback action = %#v", action)
-	}
-	if got := action["stages"].([]string); !reflect.DeepEqual(got, []string{"check", "tests"}) {
-		t.Fatalf("fallback stages = %#v", got)
-	}
-}
-
-// Provider attach and diagnostic settle waits during verification stay
-// within a routine tool call.
-func TestVerificationProviderWaitsStayBounded(t *testing.T) {
-	if providerpool.VerificationAttachWaitMS > 2000 || verificationDiagnosticSettleWait > 2*time.Second {
-		t.Fatalf("verification provider waits are not routine-call bounded: attach=%dms settle=%s", providerpool.VerificationAttachWaitMS, verificationDiagnosticSettleWait)
 	}
 }

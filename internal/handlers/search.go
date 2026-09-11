@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if source, ok := arguments["git_history"].(map[string]any); ok {
 		fields := make([]string, 0)
 		for _, value := range mcpapi.AnySlice(source["fields"]) {
@@ -102,7 +102,7 @@ func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspa
 	return envelope
 }
 
-func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
 	records, coverage, err := workspace.FindSymbols(query)
 	if err != nil {

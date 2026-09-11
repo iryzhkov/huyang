@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if err := workspace.PrimeDocuments(); err != nil {
 		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
@@ -25,8 +25,8 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	if to == "current" {
 		to = current
 	}
-	fromSeq, fromErr := workspaceRevisionSequence(from)
-	toSeq, toErr := workspaceRevisionSequence(to)
+	fromSeq, fromErr := RevisionSequence(from)
+	toSeq, toErr := RevisionSequence(to)
 	if fromErr != nil || toErr != nil || fromSeq > toSeq {
 		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_revision_range", "revision_diff requires an ordered wsrev_N range", map[string]any{"from_revision": from, "to_revision": to})
 	}
@@ -43,7 +43,7 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 		}
 		return recorded[i].Path < recorded[j].Path
 	})
-	known := make([]recordedRevisionDiff, 0, len(recorded))
+	known := make([]RecordedRevisionDiff, 0, len(recorded))
 	segments := make([]any, 0, len(recorded))
 	gaps := make([]any, 0)
 	cursor := fromSeq
@@ -134,7 +134,8 @@ func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.W
 	})
 }
 
-func workspaceRevisionSequence(revision string) (uint64, error) {
+// RevisionSequence parses a wsrev_N workspace revision token.
+func RevisionSequence(revision string) (uint64, error) {
 	var sequence uint64
 	if _, err := fmt.Sscanf(revision, "wsrev_%d", &sequence); err != nil || sequence == 0 {
 		return 0, errors.New("invalid workspace revision")

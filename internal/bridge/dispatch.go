@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/handlers"
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -26,7 +27,7 @@ type directWorkspaces struct {
 	registry    *workspaceRegistry
 	receipts    *receiptStore
 	scheduler   *workspaceScheduler
-	handlers    *toolHandlers
+	handlers    *handlers.Handlers
 	toolTimeout time.Duration
 	requests    atomic.Uint64
 	loadErr     error
@@ -45,7 +46,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		receipts:    receipts,
 		scheduler:   scheduler,
 		toolTimeout: providerpool.DefaultCallTimeout,
-		handlers: newToolHandlers(handlerConfig{
+		handlers: handlers.New(handlers.Config{
 			Registry:      registry,
 			Provenance:    receipts,
 			Pool:          providerpool.New(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory),
@@ -77,14 +78,14 @@ func (d *directWorkspaces) loadState() error {
 			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
-	return workspacecore.ReapSandboxes(d.handlers.providerPool().SandboxBaseDir(), nil)
+	return workspacecore.ReapSandboxes(d.handlers.ProviderPool().SandboxBaseDir(), nil)
 }
 
 // setToolTimeout changes the global tool-call timeout the dispatcher
 // enforces and the handlers advertise.
 func (d *directWorkspaces) setToolTimeout(timeout time.Duration) {
 	d.toolTimeout = timeout
-	d.handlers.setToolTimeout(timeout)
+	d.handlers.SetToolTimeout(timeout)
 }
 
 func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
@@ -92,7 +93,7 @@ func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
 }
 
 func (d *directWorkspaces) closeProviders() {
-	d.handlers.providerPool().Close()
+	d.handlers.ProviderPool().Close()
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
@@ -136,7 +137,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 		}
 	}
 
-	ctx = withReceiptCheckpoint(ctx, func(receipt map[string]any) error {
+	ctx = handlers.WithReceiptCheckpoint(ctx, func(receipt map[string]any) error {
 		persisted := mcpapi.CloneEnvelope(receipt)
 		persisted["idempotency"] = "created"
 		persisted["idempotency_persisted"] = true
@@ -254,7 +255,7 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	if name == "workspace_open" || (name == "read" && strings.TrimSpace(fmt.Sprint(arguments["workspace_id"])) == "") {
 		// No workspace lane exists before the workspace ID is known; the
 		// provider spawn inside open is serialised by the provider slot.
-		return d.handlers.execute(ctx, requestID, name, arguments)
+		return d.handlers.Execute(ctx, requestID, name, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
 	var result map[string]any
@@ -266,12 +267,12 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		if err != nil {
 			return schedulerCancelled(requestID, workspaceID, class, err)
 		}
-		result = d.handlers.execute(ctx, requestID, name, arguments)
+		result = d.handlers.Execute(ctx, requestID, name, arguments)
 		release()
 	}
 	if name != "diagnostics" {
 		if workspace := d.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
-			d.handlers.attachDiagnosticUpdates(ctx, workspace, result)
+			d.handlers.AttachDiagnosticUpdates(ctx, workspace, result)
 		}
 	}
 	if !isStatefulModernTool(name) {
@@ -304,7 +305,7 @@ func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspa
 	if err != nil {
 		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassCanonicalWrite, err)
 	}
-	job, early := d.handlers.verifyPrepare(ctx, requestID, workspace, arguments)
+	job, early := d.handlers.VerifyPrepare(ctx, requestID, workspace, arguments)
 	releaseLane()
 	if early != nil {
 		return early
@@ -314,7 +315,7 @@ func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspa
 		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassExternalJob, err)
 	}
 	defer releaseJob()
-	return d.handlers.verifyRun(ctx, requestID, workspace, job)
+	return d.handlers.VerifyRun(ctx, requestID, workspace, job)
 }
 
 func directStateDir() (string, error) {

@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) recoverPreparedStager(
+func (h *Handlers) recoverPreparedStager(
 	ctx context.Context,
 	workspace *workspacecore.Workspace,
 	reference string,

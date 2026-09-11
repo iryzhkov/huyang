@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
 	kind, _ := arguments["kind"].(string)
 	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1}
 	switch kind {

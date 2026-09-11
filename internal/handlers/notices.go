@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxDiagnosticUpdates = 20
+	MaxDiagnosticUpdates = 20
 	maxNoticeClients     = 64
 )
 
@@ -17,7 +17,7 @@ const (
 // context so per-client delivery state can be keyed without a session object.
 type clientIdentityKey struct{}
 
-func withClientIdentity(ctx context.Context, identity string) context.Context {
+func WithClientIdentity(ctx context.Context, identity string) context.Context {
 	return context.WithValue(ctx, clientIdentityKey{}, identity)
 }
 
@@ -81,16 +81,16 @@ func diagnosticCursorSequence(cursor string) uint64 {
 }
 
 // attachDiagnosticUpdates adds the diagnostic notices this client has not yet
-// seen, capped at maxDiagnosticUpdates with a truncation marker, and omits the
+// seen, capped at MaxDiagnosticUpdates with a truncation marker, and omits the
 // field entirely when nothing is new. The delta is computed from the
 // workspace's notices-after-cursor query against the last cursor delivered to
 // this client; acknowledgement through the diagnostics cursor prunes notices
 // for every client.
-func (h *toolHandlers) attachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
+func (h *Handlers) AttachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
 	workspaceID := workspace.Identity().ID
 	client := clientIdentity(ctx)
 	last := h.notices.last(workspaceID, client)
-	page, err := workspace.DiagnosticNoticesSince(fmt.Sprintf("diagcur_%d", last), maxDiagnosticUpdates)
+	page, err := workspace.DiagnosticNoticesSince(fmt.Sprintf("diagcur_%d", last), MaxDiagnosticUpdates)
 	if err != nil || len(page.Notices) == 0 {
 		return
 	}

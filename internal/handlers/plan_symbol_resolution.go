@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *toolHandlers) resolvePlanSymbolLocators(ctx context.Context, requestID string, workspace *workspacecore.Workspace, operations []workspacecore.PlanOperation) error {
+func (h *Handlers) resolvePlanSymbolLocators(ctx context.Context, requestID string, workspace *workspacecore.Workspace, operations []workspacecore.PlanOperation) error {
 	for _, operation := range operations {
 		if operation.Target == nil || operation.Target.SymbolLocator == nil {
 			continue

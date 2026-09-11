@@ -1,4 +1,4 @@
-package bridge
+package handlers
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 
 const modernDebugTimeout = 5 * time.Minute
 
-func (h *toolHandlers) debug(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) debug(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if name == "debug_inspect" && action == "evaluate" {
 		policy, _ := arguments["policy"].(string)
@@ -96,7 +96,7 @@ func callModernDebugProvider(ctx context.Context, requestID string, workspace *w
 	return result.Value, nil
 }
 
-func (h *toolHandlers) debugOperation(workspace *workspacecore.Workspace, name, action string, arguments map[string]any) (string, map[string]any, error) {
+func (h *Handlers) debugOperation(workspace *workspacecore.Workspace, name, action string, arguments map[string]any) (string, map[string]any, error) {
 	copied := copyDebugArguments(arguments)
 	switch name {
 	case "debug_session":
@@ -184,7 +184,7 @@ func copyDebugArguments(arguments map[string]any) map[string]any {
 	return copied
 }
 
-func (h *toolHandlers) debugTargetArguments(workspace *workspacecore.Workspace, target map[string]any, arguments map[string]any) (map[string]any, error) {
+func (h *Handlers) debugTargetArguments(workspace *workspacecore.Workspace, target map[string]any, arguments map[string]any) (map[string]any, error) {
 	if target == nil {
 		return nil, errors.New("missing source target")
 	}
