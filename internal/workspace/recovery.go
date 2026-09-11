@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -160,18 +159,6 @@ func loadCommitJournalFile(path string) (CommitJournal, error) {
 		return journal, fmt.Errorf("unsupported commit journal version %d", journal.Version)
 	}
 	return journal, nil
-}
-
-func stateMatchesJournalImage(path string, expected DiskSnapshot, content []byte) (bool, error) {
-	current, currentBytes, err := inspectPath(path)
-	if err != nil {
-		return false, err
-	}
-	if current.Kind != expected.Kind || current.Mode != expected.Mode ||
-		current.Size != expected.Size || current.SymlinkTarget != expected.SymlinkTarget {
-		return false, nil
-	}
-	return bytes.Equal(currentBytes, content), nil
 }
 
 func jsonUnmarshalCommitJournal(content []byte, journal *CommitJournal) error {
@@ -365,19 +352,9 @@ func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager Pl
 	if stager == nil {
 		return CompensationResult{}, Coded(CodeProviderUnavailable, errors.New("compensation requires a provider"))
 	}
-	w.plansMu.Lock()
-	plan, known := w.plans[planID]
-	w.plansMu.Unlock()
-	if !known || plan.State != PlanCommitted || plan.Preparation == nil || plan.Preparation.JournalID != planID {
-		return CompensationResult{}, errors.New("committed transaction is not available for compensation")
-	}
-	source, err := w.loadCommitJournal(planID)
+	source, err := w.compensationSource(planID)
 	if err != nil {
 		return CompensationResult{}, err
-	}
-	if source.State != CommitJournalCommitted || source.WorkspaceID != w.Identity().ID ||
-		source.PlanID != planID || source.PlanRevision != plan.PlanRevision {
-		return CompensationResult{}, errors.New("committed transaction journal does not match the plan")
 	}
 	transactionID := compensationPrefix + planID
 	result := CompensationResult{
@@ -394,18 +371,8 @@ func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager Pl
 	if err := w.validateRecoveryJournal(journal); err != nil {
 		return result, err
 	}
-	for _, entry := range journal.Entries {
-		absolute, pathErr := w.confinedPath(entry.Path)
-		if pathErr != nil {
-			return result, pathErr
-		}
-		matches, matchErr := stateMatchesJournalImage(absolute, entry.Before, entry.Preimage)
-		if matchErr != nil || !matches {
-			if matchErr != nil {
-				return result, matchErr
-			}
-			return result, Codedf(CodeCommitPreconditionChanged, "%s no longer matches committed postimage", entry.Path)
-		}
+	if err := w.revalidateCompensation(journal); err != nil {
+		return result, err
 	}
 	w.prepareMu.Lock()
 	if _, exists := w.activePlans[transactionID]; exists {
@@ -435,65 +402,91 @@ func (w *Workspace) CompensatePlan(ctx context.Context, planID string, stager Pl
 	}
 	written := false
 	failure := func(cause error) (CompensationResult, error) {
-		if !written {
-			journal.State = CommitJournalRolledBack
-			journal.LastError = cause.Error()
-			_ = w.writeCommitJournal(compensationPath, &journal)
-			return result, cause
-		}
-		return w.compensationRecovery(result, compensationPath, &journal, cause)
+		return w.compensationFailure(result, compensationPath, &journal, written, cause)
 	}
 	journal.State = CommitJournalApplying
 	if err := w.persistCommitJournal(compensationPath, &journal, "applying_journal"); err != nil {
 		return failure(err)
 	}
-	for _, index := range commitEntryOrder(journal.Entries) {
-		entry := &journal.Entries[index]
-		if err := ctx.Err(); err != nil {
-			return failure(err)
-		}
-		if err := w.fireCommitFault("before_apply", entry.Path); err != nil {
-			return failure(err)
-		}
-		absolute, pathErr := w.confinedPath(entry.Path)
-		if pathErr != nil {
-			return failure(pathErr)
-		}
-		// Committed postimages carry no inode or mtime identity, so the recheck before the
-		// durable replacement compares kind, mode, size, target and bytes, as recovery does.
-		matches, matchErr := stateMatchesJournalImage(absolute, entry.Before, entry.Preimage)
-		if matchErr != nil {
-			return failure(matchErr)
-		}
-		if !matches {
-			return failure(Codedf(CodeCommitPreconditionChanged, "%s changed during compensation", entry.Path))
-		}
-		written = true
-		if err := applyCommitEntry(absolute, *entry); err != nil {
-			return failure(err)
-		}
-		if err := w.fireCommitFault("after_apply", entry.Path); err != nil {
-			return failure(err)
-		}
-		entry.Progress = CommitPathApplied
-		if err := w.persistCommitJournal(compensationPath, &journal, "progress_journal"); err != nil {
-			return failure(err)
-		}
+	if written, err = w.applyJournalEntries(ctx, compensationPath, &journal, recheckCompensationEntry); err != nil {
+		return failure(err)
 	}
 	if err := stager.Commit(ctx, transactionID); err != nil {
 		return failure(fmt.Errorf("provider resync: %w", err))
 	}
 	stagerCommitted = true
-	identity := w.recordCanonicalCommit(journal.Entries)
-	journal.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
-	journal.State = CommitJournalCommitted
-	if err := w.persistCommitJournal(compensationPath, &journal, "committed_journal"); err != nil {
+	if _, err := w.sealCommittedJournal(compensationPath, &journal); err != nil {
 		return failure(err)
 	}
 	result.State = journal.State
 	result.CanonicalRevision = journal.CanonicalRevision
 	w.collectCommitJournals()
 	return result, nil
+}
+
+// compensationSource returns the committed journal a compensation undoes, refusing a plan
+// that is not COMMITTED or whose journal does not describe that plan.
+func (w *Workspace) compensationSource(planID string) (CommitJournal, error) {
+	w.plansMu.Lock()
+	plan, known := w.plans[planID]
+	w.plansMu.Unlock()
+	if !known || plan.State != PlanCommitted || plan.Preparation == nil || plan.Preparation.JournalID != planID {
+		return CommitJournal{}, errors.New("committed transaction is not available for compensation")
+	}
+	source, err := w.loadCommitJournal(planID)
+	if err != nil {
+		return CommitJournal{}, err
+	}
+	if source.State != CommitJournalCommitted || source.WorkspaceID != w.Identity().ID ||
+		source.PlanID != planID || source.PlanRevision != plan.PlanRevision {
+		return CommitJournal{}, errors.New("committed transaction journal does not match the plan")
+	}
+	return source, nil
+}
+
+// revalidateCompensation refuses the undo when any canonical object no longer matches the
+// committed postimage it would replace.
+func (w *Workspace) revalidateCompensation(journal CommitJournal) error {
+	for _, entry := range journal.Entries {
+		absolute, pathErr := w.confinedPath(entry.Path)
+		if pathErr != nil {
+			return pathErr
+		}
+		matches, matchErr := stateMatchesJournalImage(absolute, entry.Before, entry.Preimage)
+		if matchErr != nil {
+			return matchErr
+		}
+		if !matches {
+			return Codedf(CodeCommitPreconditionChanged, "%s no longer matches committed postimage", entry.Path)
+		}
+	}
+	return nil
+}
+
+// recheckCompensationEntry compares the canonical object with the committed postimage the
+// compensation undoes, immediately before the durable replacement. Committed postimages
+// carry no inode or mtime identity, so the comparison is the lenient journal-image one.
+func recheckCompensationEntry(absolute string, entry CommitJournalEntry) error {
+	matches, err := stateMatchesJournalImage(absolute, entry.Before, entry.Preimage)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return Codedf(CodeCommitPreconditionChanged, "%s changed during compensation", entry.Path)
+	}
+	return nil
+}
+
+// compensationFailure closes a failed compensation: before the first canonical write the
+// journal is rolled back and the cause returned as is; after it both need recovery.
+func (w *Workspace) compensationFailure(result CompensationResult, path string, journal *CommitJournal, written bool, cause error) (CompensationResult, error) {
+	if !written {
+		journal.State = CommitJournalRolledBack
+		journal.LastError = cause.Error()
+		_ = w.writeCommitJournal(path, journal)
+		return result, cause
+	}
+	return w.compensationRecovery(result, path, journal, cause)
 }
 
 func (w *Workspace) compensationRecovery(result CompensationResult, path string, journal *CommitJournal, cause error) (CompensationResult, error) {
