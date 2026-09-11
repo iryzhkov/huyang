@@ -8,9 +8,12 @@
 -- live in one module-level table, mirroring check_baseline: one instance,
 -- one session, dying with the instance.
 --
--- Huyang ships nvim-dap on its production runtimepath. Keep the explicit
--- availability error below so corrupted or incomplete installations fail with
--- actionable recovery instead of a Lua module traceback.
+-- nvim-dap is not distributed with Huyang (it is GPL-3.0, Huyang is MIT). It
+-- is a runtime dependency discovered from the host Neovim installation by
+-- M.discover_runtime, which the Go provider calls during bootstrap. Every
+-- debugger entry point raises the structured `dap_runtime_unavailable` error
+-- below when the module cannot be loaded, so a missing plugin surfaces as an
+-- actionable "unavailable" reply rather than a Lua traceback.
 
 local M = {}
 
@@ -61,15 +64,152 @@ local function has_dap()
     return nil
 end
 
-local NO_DAP = "nvim-dap is not on the runtimepath of Huyang's embedded Neovim; add "
-    .. "`mfussenegger/nvim-dap` to the Neovim init used by Huyang, restart "
-    .. "the Huyang user service, then retry. language_server_setup installs "
+------------------------------------------------------------------------
+-- Runtime discovery
+------------------------------------------------------------------------
+
+-- Environment overrides, first one set wins. A set override is authoritative:
+-- when it does not hold nvim-dap, nothing else is searched, so a test or an
+-- operator can pin the runtime (or its absence) exactly.
+local DAP_PATH_VARS = { "HUYANG_NVIM_DAP_PATH", "AGENT99_NVIM_DAP_PATH" }
+local DAP_MARKER = "/lua/dap.lua"
+
+-- The last discovery report, so the unavailable error can list what was
+-- searched without walking the disk again.
+local runtime_report = nil
+
+local function has_dap_dir(path)
+    return type(path) == "string" and path ~= ""
+        and vim.fn.filereadable(path .. DAP_MARKER) == 1
+end
+
+local function read_file(path)
+    local f = io.open(path, "r")
+    if not f then return nil end
+    local text = f:read("*a")
+    f:close()
+    return text
+end
+
+-- The upstream commit of a checkout, when its .git directory says so; plugin
+-- managers clone with git, so this is usually readable. Nil otherwise.
+local function read_commit(path)
+    local head = read_file(path .. "/.git/HEAD")
+    if not head then return nil end
+    head = vim.trim(head)
+    local ref = head:match("^ref:%s*(%S+)")
+    if not ref then
+        return head:match("^%x+$") and head or nil
+    end
+    local direct = read_file(path .. "/.git/" .. ref)
+    if direct then
+        direct = vim.trim(direct)
+        return direct:match("^%x+$") and direct or nil
+    end
+    local packed = read_file(path .. "/.git/packed-refs")
+    if packed then
+        for line in packed:gmatch("[^\n]+") do
+            local sha, name = line:match("^(%x+)%s+(%S+)")
+            if name == ref then return sha end
+        end
+    end
+    return nil
+end
+
+-- Where the host Neovim installation may keep nvim-dap, after the overrides
+-- and the running runtimepath: lazy.nvim's clone, then every native package
+-- (packer, paq, vim.pack and a manual site pack all live under site/pack).
+local function candidate_dirs()
+    local data = vim.fn.stdpath("data")
+    local out = { { path = data .. "/lazy/nvim-dap", source = "lazy.nvim" } }
+    for _, kind in ipairs({ "start", "opt" }) do
+        local pattern = data .. "/site/pack/*/" .. kind .. "/nvim-dap"
+        local hits = vim.fn.glob(pattern, true, true)
+        if #hits == 0 then
+            out[#out + 1] = { path = pattern, source = "site pack", missing = true }
+        end
+        for _, hit in ipairs(hits) do
+            out[#out + 1] = { path = hit, source = "site pack" }
+        end
+    end
+    return out
+end
+
+-- Find nvim-dap for this Neovim instance, put it on the runtimepath when it
+-- was not there already, and return a report the provider records in its
+-- handshake: { available = true, path, commit, source } or { available =
+-- false, searched = { "..." }, detail }. Never raises; absence is a normal
+-- outcome and the debugger tools report it per call.
+function M.discover_runtime()
+    if runtime_report then return runtime_report end
+    local searched = {}
+    local function found(path, source)
+        vim.opt.runtimepath:prepend(path)
+        runtime_report = {
+            available = true, path = path, source = source, commit = read_commit(path),
+        }
+        return runtime_report
+    end
+    local function absent(detail)
+        runtime_report = { available = false, searched = searched, detail = detail }
+        return runtime_report
+    end
+    for _, var in ipairs(DAP_PATH_VARS) do
+        local value = os.getenv(var)
+        if value and value ~= "" then
+            if has_dap_dir(value) then return found(value, var) end
+            searched[#searched + 1] = var .. "=" .. value .. " (no lua/dap.lua)"
+            return absent(var .. " is set to " .. value
+                .. " but that directory has no lua/dap.lua; point it at an nvim-dap checkout")
+        end
+        searched[#searched + 1] = var .. " (unset)"
+    end
+    local on_rtp = vim.api.nvim_get_runtime_file("lua/dap.lua", false)[1]
+    if on_rtp then
+        local path = vim.fn.fnamemodify(on_rtp, ":h:h")
+        runtime_report = {
+            available = true, path = path, source = "runtimepath", commit = read_commit(path),
+        }
+        return runtime_report
+    end
+    searched[#searched + 1] = "runtimepath (no lua/dap.lua)"
+    if has_dap() then
+        runtime_report = { available = true, path = nil, source = "package.path" }
+        return runtime_report
+    end
+    for _, candidate in ipairs(candidate_dirs()) do
+        if not candidate.missing and has_dap_dir(candidate.path) then
+            return found(candidate.path, candidate.source)
+        end
+        searched[#searched + 1] = candidate.path .. " (missing)"
+    end
+    return absent("nvim-dap was not found in " .. #searched .. " searched locations")
+end
+
+local NO_DAP = "nvim-dap runtime is not available to Huyang's embedded Neovim; "
+    .. "install `mfussenegger/nvim-dap` in the host Neovim (lazy.nvim or a site pack "
+    .. "under the Neovim data directory), or set HUYANG_NVIM_DAP_PATH to a checkout, "
+    .. "then restart the Huyang user service and retry. language_server_setup installs "
     .. "parsers and language servers, not debugger plugins"
+
+local function unavailable_detail()
+    local report = M.discover_runtime()
+    if report.available then
+        return "nvim-dap at " .. tostring(report.path) .. " failed to load"
+    end
+    return report.detail .. "; searched: " .. table.concat(report.searched, ", ")
+        .. "; override with HUYANG_NVIM_DAP_PATH"
+end
 
 local function need_dap()
     local dap = has_dap()
-    if not dap then err("%s", NO_DAP) end
-    return dap
+    if dap then return dap end
+    local detail = unavailable_detail()
+    error({
+        code = "dap_runtime_unavailable",
+        message = NO_DAP .. " (" .. detail .. ")",
+        detail = detail,
+    }, 0)
 end
 
 local function options()
@@ -1148,7 +1288,7 @@ function M.debugger_for(ft, root)
     local dap = has_dap()
     if not dap then
         if BY_FILETYPE[ft] then
-            return "none (" .. NO_DAP .. ")"
+            return "none (" .. NO_DAP .. "; " .. unavailable_detail() .. ")"
         end
         return nil
     end

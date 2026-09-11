@@ -1,7 +1,7 @@
 {
   "runtime": { "version": "LuaJIT", "path": ["lua/?.lua", "lua/?/init.lua"] },
   "workspace": {
-    "library": ["$VIMRUNTIME/lua", "lua/dap"],
+    "library": ["$VIMRUNTIME/lua", "tests/.deps/nvim-dap/lua"],
     "checkThirdParty": false
   },
   "diagnostics": {

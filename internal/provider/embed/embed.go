@@ -78,6 +78,39 @@ type Config struct {
 	CancelGrace time.Duration
 }
 
+// DapRuntime is the outcome of the nvim-dap discovery the kernel runs during
+// bootstrap. nvim-dap is not distributed with Huyang; the kernel searches the
+// HUYANG_NVIM_DAP_PATH override, the running runtimepath and the host
+// Neovim's plugin directories, in that order. Absence never fails bootstrap:
+// the debugger tools answer with the dap_runtime_unavailable code instead.
+type DapRuntime struct {
+	Available bool
+	Path      string
+	Commit    string
+	Source    string
+	Searched  []string
+	Detail    string
+}
+
+// String is the one-line form recorded in the healthy Health.Detail.
+func (r DapRuntime) String() string {
+	if !r.Available {
+		detail := r.Detail
+		if detail == "" {
+			detail = "not found"
+		}
+		return "nvim-dap runtime: absent (" + detail + ")"
+	}
+	out := "nvim-dap runtime: " + r.Path
+	if r.Path == "" {
+		out = "nvim-dap runtime: loaded from " + r.Source
+	}
+	if r.Commit != "" {
+		out += " (" + r.Commit + ")"
+	}
+	return out
+}
+
 type completion struct {
 	payload map[string]any
 }
@@ -99,6 +132,7 @@ type Backend struct {
 	config     Config
 	descriptor provider.Descriptor
 	health     provider.Health
+	dapRuntime DapRuntime
 	generation *generation
 	pending    map[string]chan completion
 	done       chan struct{}
@@ -494,18 +528,27 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 		Cancellation: provider.CancellationCooperative,
 	}
 	go b.serve(g)
-	capabilities, err := b.bootstrap(ctx, g)
+	bootstrapped, err := b.bootstrap(ctx, g)
 	if err != nil {
 		b.terminate(g)
 		<-g.done
 		return nil, err
 	}
-	b.descriptor.Capabilities = capabilities
+	b.descriptor.Capabilities = bootstrapped.capabilities
+	b.dapRuntime = bootstrapped.dapRuntime
 	b.health = provider.Health{
 		State: provider.HealthHealthy, Epoch: epoch, ObservedAt: time.Now(),
-		Cancellation: provider.CancellationCooperative,
+		Detail: b.dapRuntime.String(), Cancellation: provider.CancellationCooperative,
 	}
 	return g, nil
+}
+
+// DapRuntime reports the nvim-dap discovery outcome of the current
+// generation. Before the first bootstrap it is the zero value (absent).
+func (b *Backend) DapRuntime() DapRuntime {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.dapRuntime
 }
 
 func (b *Backend) serve(g *generation) {
@@ -537,11 +580,11 @@ func (b *Backend) serve(g *generation) {
 
 // bootstrap follows the documented embed sequence: client info, API level
 // check, VimEnter, shipped runtime, kernel handshake. It returns the
-// capabilities the kernel advertised.
-func (b *Backend) bootstrap(ctx context.Context, g *generation) ([]provider.Capability, error) {
+// capabilities the kernel advertised and the nvim-dap discovery outcome.
+func (b *Backend) bootstrap(ctx context.Context, g *generation) (bootstrapResult, error) {
 	type outcome struct {
-		capabilities []provider.Capability
-		failure      *provider.Failure
+		result  bootstrapResult
+		failure *provider.Failure
 	}
 	finished := make(chan outcome, 1)
 	go func() {
@@ -603,19 +646,59 @@ func (b *Backend) bootstrap(ctx context.Context, g *generation) ([]provider.Capa
 			finished <- outcome{failure: failure}
 			return
 		}
-		finished <- outcome{capabilities: capabilities}
+		// nvim-dap is discovered by the kernel after the Huyang runtime is
+		// on the runtimepath. A missing plugin is a normal outcome recorded
+		// in the handshake, never a bootstrap failure.
+		var discovered map[string]any
+		dapRuntime := DapRuntime{}
+		if err := g.nvim.ExecLua(dapDiscoveryLua, &discovered); err != nil {
+			dapRuntime.Detail = "nvim-dap discovery failed: " + err.Error()
+		} else {
+			dapRuntime = decodeDapRuntime(discovered)
+		}
+		finished <- outcome{result: bootstrapResult{capabilities: capabilities, dapRuntime: dapRuntime}}
 	}()
 	select {
 	case result := <-finished:
 		if result.failure != nil {
-			return nil, result.failure
+			return bootstrapResult{}, result.failure
 		}
-		return result.capabilities, nil
+		return result.result, nil
 	case err := <-g.done:
-		return nil, deathFailure(g, err)
+		return bootstrapResult{}, deathFailure(g, err)
 	case <-ctx.Done():
-		return nil, contextFailure(ctx.Err(), g.epoch)
+		return bootstrapResult{}, contextFailure(ctx.Err(), g.epoch)
 	}
+}
+
+// bootstrapResult is what a successful bootstrap learned from the kernel.
+type bootstrapResult struct {
+	capabilities []provider.Capability
+	dapRuntime   DapRuntime
+}
+
+// dapDiscoveryLua asks the kernel to locate nvim-dap. A kernel that cannot
+// even load its debugger module reports that as an absent runtime rather
+// than raising, so the semantic provider still comes up.
+const dapDiscoveryLua = `
+local ok, report = pcall(function() return require("huyang.dap").discover_runtime() end)
+if ok and type(report) == "table" then return report end
+return { available = false, detail = "huyang.dap failed to load: " .. tostring(report) }
+`
+
+func decodeDapRuntime(report map[string]any) DapRuntime {
+	out := DapRuntime{}
+	if report == nil {
+		out.Detail = "nvim-dap discovery returned nothing"
+		return out
+	}
+	out.Available, _ = report["available"].(bool)
+	out.Path, _ = report["path"].(string)
+	out.Commit, _ = report["commit"].(string)
+	out.Source, _ = report["source"].(string)
+	out.Detail, _ = report["detail"].(string)
+	out.Searched = stringList(report["searched"])
+	return out
 }
 
 // checkAPILevel accepts any Neovim whose API level is at least minAPILevel.
