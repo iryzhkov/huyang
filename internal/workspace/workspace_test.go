@@ -284,6 +284,58 @@ func TestMetadataOnlyChangesKeepRevisionAndHandles(t *testing.T) {
 	}
 }
 
+func TestConfinementRefusesSymlinkedParentsThatLeaveTheRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs additional privileges on Windows")
+	}
+	ws, root := testWorkspace(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "real", "kept.go"), "package real\n")
+
+	escaped := filepath.Join(root, "linkdir", "x.go")
+	if _, err := ws.Snapshot(escaped, ProviderLayer{}); err == nil {
+		t.Fatal("snapshot through an escaping symlinked directory was accepted")
+	}
+	if _, err := ws.Read("linkdir/x.go"); err == nil {
+		t.Fatal("read through an escaping symlinked directory was accepted")
+	}
+	writeFile(t, filepath.Join(outside, "x.go"), "package outside\n")
+	_, _, err := ws.ApplyFile(ws.Identity().ID, "linkdir/x.go", RevisionID("docrev_any"), FileReplace, []byte("package hacked\n"))
+	if err == nil {
+		t.Fatal("write through an escaping symlinked directory was accepted")
+	}
+	content, readErr := os.ReadFile(filepath.Join(outside, "x.go"))
+	if readErr != nil || string(content) != "package outside\n" {
+		t.Fatalf("file outside the root was modified: %q, %v", content, readErr)
+	}
+
+	// A symlinked directory that stays inside the root is fine, and the
+	// final element may itself be a symlink because it is observed, not
+	// followed.
+	if _, err := ws.Read("alias/kept.go"); err != nil {
+		t.Fatalf("in-root symlinked directory refused: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "x.go"), filepath.Join(root, "leaf")); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := ws.Snapshot("leaf", ProviderLayer{})
+	if err != nil || leaf.Disk.Kind != ObjectSymlink {
+		t.Fatalf("leaf symlink snapshot = %+v, %v", leaf, err)
+	}
+	if _, _, err := ws.ApplyFile(ws.Identity().ID, "leaf", leaf.Revision, FileReplace, []byte("x")); err == nil {
+		t.Fatal("replace through a leaf symlink was accepted")
+	}
+}
+
 func TestUnknownRevisionIsReportedAsEpochConflictNotContentChange(t *testing.T) {
 	ws, root := testWorkspace(t)
 	path := filepath.Join(root, "known.txt")

@@ -453,12 +453,55 @@ func (w *Workspace) confinedPath(path string) (string, error) {
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("document %s is outside workspace root %s", absolute, w.identity.Root)
 	}
+	if err := w.parentChainStaysInside(absolute, rel); err != nil {
+		return "", err
+	}
 	if w.identity.Kind == KindDocuments {
 		if _, allowed := w.allowlist[absolute]; !allowed {
 			return "", fmt.Errorf("document %s is not in the workspace allowlist", absolute)
 		}
 	}
 	return absolute, nil
+}
+
+// parentChainStaysInside walks every directory component between the root
+// and the final path element with Lstat. A symlinked component is allowed
+// only when it resolves inside the (already symlink-resolved) root; a link
+// that leaves the root is refused, because a lexical check alone would let
+// a read or write pass through it into a foreign tree. The final element is
+// left alone: inspectPath observes it with Lstat and treats a symlink as an
+// object of its own, so a write never follows it. Components that do not
+// exist yet cannot be symlinks and end the walk.
+func (w *Workspace) parentChainStaysInside(absolute, rel string) error {
+	if rel == "." {
+		return nil
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	current := w.identity.Root
+	for _, part := range parts[:len(parts)-1] {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			return fmt.Errorf("document %s passes through unresolvable symlink %s: %w", absolute, current, err)
+		}
+		if !insidePath(w.identity.Root, resolved) {
+			return fmt.Errorf("document %s passes through symlink %s that leaves workspace root %s", absolute, current, w.identity.Root)
+		}
+		// Continue from the real directory so later components are judged
+		// where they actually live.
+		current = resolved
+	}
+	return nil
 }
 
 func inspectPath(path string) (DiskSnapshot, []byte, error) {

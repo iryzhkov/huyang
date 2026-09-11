@@ -174,6 +174,9 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return nil, err
 			}
+			if err := refuseSymlinkIntoCanonical(sourceRoot, sandbox.Tree, entry.Path, entry.Target); err != nil {
+				return nil, err
+			}
 			if err := os.Symlink(entry.Target, target); err != nil {
 				return nil, err
 			}
@@ -215,6 +218,60 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 	}
 	failed = false
 	return sandbox, nil
+}
+
+// refuseSymlinkIntoCanonical rejects a symlink that, recreated verbatim at
+// its sandbox location, would resolve into the canonical workspace. Such a
+// link lets a sandbox-only formatter, generator or test write canonical
+// files without the tree diff noticing, because captureTree and the
+// manifest compare link targets rather than what lies behind them.
+//
+// Policy: links are reproduced verbatim except when they reach the
+// canonical root. An absolute target inside the canonical root, a relative
+// target that lands inside the canonical root when evaluated from the
+// sandbox location, or a target whose existing prefix resolves into the
+// canonical root is refused with sandbox_symlink_escape rather than
+// rewritten, so the sandbox never claims to model a tree it cannot copy
+// faithfully. Links that point elsewhere outside both trees are kept: they
+// reach exactly what the canonical link already reached.
+func refuseSymlinkIntoCanonical(sourceRoot, sandboxTree, relative, target string) error {
+	var resolved string
+	if filepath.IsAbs(target) {
+		resolved = filepath.Clean(target)
+	} else {
+		resolved = filepath.Clean(filepath.Join(filepath.Dir(filepath.Join(sandboxTree, filepath.FromSlash(relative))), target))
+	}
+	if insidePath(sourceRoot, resolved) {
+		return fmt.Errorf("sandbox_symlink_escape: %s links to %s inside the canonical workspace", relative, target)
+	}
+	// Follow the longest existing prefix so a link routed through another
+	// symlink outside both trees is judged by where it really lands.
+	if real, err := resolveExistingPrefix(resolved); err == nil && insidePath(sourceRoot, real) {
+		return fmt.Errorf("sandbox_symlink_escape: %s links to %s which resolves into the canonical workspace", relative, target)
+	}
+	return nil
+}
+
+// resolveExistingPrefix evaluates symlinks in the longest existing prefix of
+// path and re-attaches the missing remainder lexically.
+func resolveExistingPrefix(path string) (string, error) {
+	remainder := ""
+	current := path
+	for {
+		real, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(real, remainder), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent, base := filepath.Dir(current), filepath.Base(current)
+		if parent == current {
+			return "", err
+		}
+		remainder = filepath.Join(base, remainder)
+		current = parent
+	}
 }
 
 func inventorySandboxTree(ctx context.Context, root string, limits SandboxLimits) ([]sandboxEntry, int64, error) {
