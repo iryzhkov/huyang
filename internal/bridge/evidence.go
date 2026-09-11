@@ -79,12 +79,23 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 func diagnosticVerificationStage(revision string, report workspacecore.DiagnosticReport) workspacecore.VerificationStage {
 	status := workspacecore.VerificationPassed
 	complete := true
+	errorCount := 0
+	for _, item := range report.Current {
+		if item.Finding.Severity == 0 || item.Finding.Severity == 1 {
+			errorCount++
+		}
+	}
 	if report.Confidence == workspacecore.ConfidenceProvisional || report.Confidence == workspacecore.ConfidenceUnavailable {
 		status = workspacecore.VerificationSkipped
 		complete = false
 	}
+	output := ""
+	if errorCount > 0 {
+		status = workspacecore.VerificationFailed
+		output = fmt.Sprintf("%d error diagnostics", errorCount)
+	}
 	return workspacecore.VerificationStage{
-		Stage: "diagnostics", Mode: "provider", StartedRevision: revision, Status: status,
+		Stage: "diagnostics", Mode: "provider", StartedRevision: revision, Status: status, Output: output,
 		Coverage:    workspacecore.Coverage{Complete: complete, Skipped: append([]string(nil), report.ProvisionalReasons...), Semantic: string(report.Confidence)},
 		EvidenceIDs: append([]string(nil), report.EvidenceIDs...),
 	}

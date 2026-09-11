@@ -81,7 +81,7 @@ required = true
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-prepare", "action": "prepare",
 		"plan_id": planID, "plan_revision": planRevision,
 	})
-	if prepared["outcome"] != "ok" {
+	if prepared["outcome"] != "provisional" {
 		t.Fatalf("prepare = %#v", prepared)
 	}
 	preparedPlan := prepared["data"].(map[string]any)["plan"].(map[string]any)
@@ -128,7 +128,7 @@ required = true
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-apply", "action": "apply",
 		"plan_id": planID, "plan_revision": planRevision, "prepared_revision": preparedRevision,
 	})
-	if applied["outcome"] != "ok" {
+	if applied["outcome"] != "provisional" {
 		t.Fatalf("apply = %#v", applied)
 	}
 	appliedPlan := applied["data"].(map[string]any)["plan"].(map[string]any)

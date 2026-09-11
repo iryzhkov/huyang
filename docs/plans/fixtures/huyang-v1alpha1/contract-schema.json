@@ -1,7 +1,7 @@
 {
   "fixture_version": "huyang.tools/v1alpha1-s00",
   "catalogs": {
-    "full": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"],
+    "full": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get", "language_server_status", "language_server_setup", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"],
     "orient": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get"],
     "edit": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get", "code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff"],
     "debug": ["workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect"]

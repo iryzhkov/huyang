@@ -523,12 +523,42 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 				operation.Revision = snapshot.Revision
 			}
 		case OperationDeleteFile:
-			if operation.Path == "" || operation.Revision == "" {
-				return nil, fmt.Errorf("%s requires path and revision_id", operation.OpID)
+			if operation.Path == "" {
+				return nil, fmt.Errorf("%s requires path", operation.OpID)
+			}
+			if operation.Revision == "" {
+				snapshot, err := w.Snapshot(operation.Path, ProviderLayer{})
+				if err != nil {
+					return nil, fmt.Errorf("%s: snapshot delete target: %w", operation.OpID, err)
+				}
+				if snapshot.Disk.Kind == ObjectMissing {
+					return nil, fmt.Errorf("%s: delete target is missing", operation.OpID)
+				}
+				operation.Revision = snapshot.Revision
 			}
 		case OperationMoveFile:
-			if operation.From == "" || operation.To == "" || operation.Revision == "" || operation.DestinationRevision == "" {
-				return nil, fmt.Errorf("%s requires from, to, revision_id, and destination_revision_id", operation.OpID)
+			if operation.From == "" || operation.To == "" {
+				return nil, fmt.Errorf("%s requires from and to", operation.OpID)
+			}
+			if operation.Revision == "" {
+				source, err := w.Snapshot(operation.From, ProviderLayer{})
+				if err != nil {
+					return nil, fmt.Errorf("%s: snapshot move source: %w", operation.OpID, err)
+				}
+				if source.Disk.Kind == ObjectMissing {
+					return nil, fmt.Errorf("%s: move source is missing", operation.OpID)
+				}
+				operation.Revision = source.Revision
+			}
+			if operation.DestinationRevision == "" {
+				destination, err := w.Snapshot(operation.To, ProviderLayer{})
+				if err != nil {
+					return nil, fmt.Errorf("%s: snapshot move destination: %w", operation.OpID, err)
+				}
+				if destination.Disk.Kind != ObjectMissing {
+					return nil, fmt.Errorf("%s: move destination already exists", operation.OpID)
+				}
+				operation.DestinationRevision = destination.Revision
 			}
 		case OperationRenameSymbol, OperationMoveSymbols, OperationReplaceMatches, OperationApplyCodeAction:
 			if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
@@ -577,6 +607,16 @@ func orderOperations(operations []PlanOperation) ([]PlanOperation, error) {
 	}
 	for _, operation := range operations {
 		for _, dependency := range operation.DependsOn {
+			dependencyOperation := byID[dependency]
+			dependencyPath, dependencyStart, dependencyEdit := operationRange(dependencyOperation)
+			operationPath, operationStart, operationEdit := operationRange(operation)
+			if dependencyEdit && operationEdit && dependencyPath == operationPath && dependencyStart != operationStart {
+				// Revision-bound ranges must be applied from the end of a file
+				// toward the beginning so earlier edits cannot shift later offsets.
+				// A logical dependency between disjoint ranges does not override
+				// that deterministic positional ordering.
+				continue
+			}
 			addEdge(dependency, operation.OpID)
 		}
 	}
@@ -697,6 +737,23 @@ func (w *Workspace) buildPreview(plan PlanRecord) PlanPreview {
 			if snapshotErr == nil && snapshot.Disk.Kind == ObjectMissing {
 				contents[path], before[path], exists[path] = nil, nil, false
 				return nil, false, nil
+			}
+			if snapshotErr == nil && snapshot.Disk.Kind == ObjectBinary {
+				absolute := filepath.Join(w.Identity().Root, filepath.FromSlash(path))
+				content, binaryErr := os.ReadFile(absolute)
+				if binaryErr != nil {
+					return nil, false, binaryErr
+				}
+				if int64(len(content)) != snapshot.Disk.Size || hashBytes(content) != snapshot.ContentSHA256 {
+					return nil, false, &Conflict{
+						Code:     ConflictDocumentChanged,
+						Path:     path,
+						Expected: snapshot.Revision,
+						Current:  snapshot.Revision,
+					}
+				}
+				contents[path], before[path], exists[path] = content, append([]byte(nil), content...), true
+				return content, true, nil
 			}
 			if snapshotErr == nil && snapshot.Disk.Kind == ObjectSymlink {
 				content := []byte(snapshot.Disk.SymlinkTarget)

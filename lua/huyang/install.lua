@@ -740,12 +740,21 @@ local function workspace_support(args)
                     end
                 end
             end
+            local install_options = {}
+            local okml, mlsp = pcall(require, "mason-lspconfig")
+            if #clients == 0 and okml then
+                pcall(function()
+                    install_options = mlsp.get_available_servers({ filetype = ft })
+                    table.sort(install_options)
+                end)
+            end
             local entry = {
                 filetype = ft,
                 files = by_ft[ft],
                 treesitter_parser = parser,
                 lsp = #clients > 0 and table.concat(clients, ",") or "none",
                 debugger = debugger,
+                install_options = install_options,
             }
             if #clients == 0 and #configs > 0 then
                 entry.lsp = "none (configured: " .. table.concat(configs, ",") .. ", did not attach)"
@@ -810,7 +819,7 @@ local PREFERRED_SERVER = {
     swift = "sourcekit",
     zig = "zls",
     sh = "bashls",
-    html = "html", css = "cssls", json = "jsonls", yaml = "yamlls",
+    html = "html", css = "cssls", json = "jsonls", yaml = "yamlls", toml = "taplo",
     dockerfile = "dockerls",
     terraform = "terraformls",
     elixir = "elixirls",

@@ -65,6 +65,7 @@ local function capture(path, before_exists)
         else
             buf = vim.api.nvim_create_buf(true, false)
             vim.api.nvim_buf_set_name(buf, path)
+            vim.bo[buf].filetype = vim.filetype.match({ filename = path }) or ""
             set_buffer_bytes(buf, "")
             vim.bo[buf].modified = false
         end
@@ -127,6 +128,7 @@ function M.prepare(args)
             local pre = preimages[index]
             local after = vim.base64.decode(file.after_b64 or "")
             set_buffer_bytes(pre.buf, after)
+            require("huyang.edit").mark_diagnostic_change(pre.buf)
             vim.b[pre.buf].huyang_deleted = file.after_exists ~= true
             if tonumber(args.exit_provider_after) == index then
                 vim.cmd("qa!")

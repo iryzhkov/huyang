@@ -112,8 +112,15 @@ func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing
 			stage := diagnosticVerificationStage("wsrev_1", report)
 			switch report.Confidence {
 			case workspacecore.ConfidenceAuthoritative, workspacecore.ConfidenceCorroborated:
-				if stage.Status != workspacecore.VerificationPassed {
-					t.Fatalf("complete evidence not passed: %#v", report)
+				want := workspacecore.VerificationPassed
+				for _, item := range report.Current {
+					if item.Finding.Severity == 0 || item.Finding.Severity == 1 {
+						want = workspacecore.VerificationFailed
+						break
+					}
+				}
+				if stage.Status != want {
+					t.Fatalf("diagnostic stage=%s want %s: %#v", stage.Status, want, report)
 				}
 			case workspacecore.ConfidenceProvisional, workspacecore.ConfidenceUnavailable:
 				if stage.Status == workspacecore.VerificationPassed {

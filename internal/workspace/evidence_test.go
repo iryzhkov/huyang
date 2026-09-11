@@ -103,6 +103,41 @@ func TestDiagnosticBarrierPermutationsNeverCallIncompleteEvidenceClean(t *testin
 	}
 }
 
+func TestDiagnosticPushAcceptsFreshPublishWithOrderedChangeBarrier(t *testing.T) {
+	workspace, _ := evidenceWorkspace(t)
+	report, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
+		Kind: EvidencePush, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
+		Complete: true, ChangeBarrier: true, Selected: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Confidence != ConfidenceAuthoritative {
+		t.Fatalf("confidence=%s want %s", report.Confidence, ConfidenceAuthoritative)
+	}
+}
+
+func TestDiagnosticRecordReportsCurrentObservationDespiteHistoricalUnavailableEvidence(t *testing.T) {
+	workspace, _ := evidenceWorkspace(t)
+	_, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
+		Kind: EvidenceUnavailable, ProviderID: "nvim_lsp", Producer: "nvim_lsp", Document: "main.go",
+		Reason: "lsp_not_configured", Selected: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
+		Kind: EvidencePush, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
+		Complete: true, ChangeBarrier: true, Selected: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Confidence != ConfidenceAuthoritative {
+		t.Fatalf("current confidence poisoned by history: %s", report.Confidence)
+	}
+}
+
 func TestUnavailableEvidenceUsesExplicitReasonForKnownAndUnknownKinds(t *testing.T) {
 	for _, kind := range []DiagnosticEvidenceKind{EvidenceUnavailable, DiagnosticEvidenceKind("future_evidence")} {
 		confidence, reasons := confidenceFor(DiagnosticBatch{Kind: kind, Selected: true, Reason: "lsp_not_configured"})

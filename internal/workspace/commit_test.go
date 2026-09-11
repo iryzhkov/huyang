@@ -309,3 +309,57 @@ func TestCommitPreparedTransactionJournalsSingleLegacyOperation(t *testing.T) {
 		t.Fatalf("journal = %+v", journal)
 	}
 }
+
+type provisionalCommitStager struct {
+	*fakePlanStager
+	request PlanStageRequest
+}
+
+func (s *provisionalCommitStager) Stage(ctx context.Context, request PlanStageRequest) error {
+	s.request = request
+	return s.fakePlanStager.Stage(ctx, request)
+}
+
+func (s *provisionalCommitStager) PreparedRequest() (PlanStageRequest, VerificationResult, bool) {
+	return s.request, VerificationResult{Stages: []VerificationStage{{
+		Stage: "diagnostics", Status: VerificationSkipped,
+		Coverage: Coverage{Complete: false, Semantic: string(ConfidenceUnavailable), Skipped: []string{"lsp_not_configured"}},
+	}}}, true
+}
+
+func TestCommitExplicitlyAcceptedProvisionalPreparedRevision(t *testing.T) {
+	root, stateDir := t.TempDir(), t.TempDir()
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := openCommitWorkspace(t, root, stateDir)
+	operation := fullRangeOperation(t, ws, "replace", path, "after\n")
+	plan, err := ws.CreatePlan([]PlanOperation{operation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewed, err := ws.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &fakePlanStager{epoch: ws.Identity().Epoch, buffers: map[string][]byte{"note.txt": []byte("before\n")}}
+	stager := &provisionalCommitStager{fakePlanStager: base}
+	prepared, err := ws.PreparePlan(context.Background(), previewed.PlanID, previewed.PlanRevision, stager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.State != PlanProvisional {
+		t.Fatalf("prepared state = %s, want %s", prepared.State, PlanProvisional)
+	}
+	committed, err := ws.CommitPlan(context.Background(), prepared.PlanID, prepared.PlanRevision, prepared.Preparation.PreparedRevision, stager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.State != PlanCommitted {
+		t.Fatalf("committed state = %s", committed.State)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "after\n" {
+		t.Fatalf("canonical bytes = %q, %v", got, err)
+	}
+}

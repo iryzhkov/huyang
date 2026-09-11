@@ -382,7 +382,7 @@ func (w *Workspace) CommitPreparedTransaction(ctx context.Context, transactionID
 	return identity, nil
 }
 
-// CommitPlan applies one READY prepared revision through a durable per-path write-ahead
+// CommitPlan applies one READY or explicitly accepted PROVISIONAL prepared revision through a durable per-path write-ahead
 // journal. The journal is fsynced before canonical mutation; incomplete applications remain
 // recorded for S13 startup recovery.
 func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint64, preparedRevision string, stager PlanStager) (PlanRecord, error) {
@@ -399,8 +399,8 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	if plan.State == PlanCommitted && plan.Preparation != nil && plan.Preparation.PreparedRevision == preparedRevision {
 		return plan, nil
 	}
-	if plan.State != PlanReady || plan.Preparation == nil {
-		return PlanRecord{}, errors.New("plan is not READY")
+	if (plan.State != PlanReady && plan.State != PlanProvisional) || plan.Preparation == nil {
+		return PlanRecord{}, errors.New("plan is not READY or PROVISIONAL")
 	}
 	if preparedRevision == "" || plan.Preparation.PreparedRevision != preparedRevision {
 		return PlanRecord{}, errors.New("prepared_revision_changed")

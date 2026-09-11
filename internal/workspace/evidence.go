@@ -81,6 +81,7 @@ type DiagnosticBatch struct {
 	TimedOut         bool                   `json:"timed_out,omitempty"`
 	Reason           string                 `json:"reason,omitempty"`
 	ProgressPending  bool                   `json:"progress_pending,omitempty"`
+	ChangeBarrier    bool                   `json:"change_barrier,omitempty"`
 	Selected         bool                   `json:"selected"`
 	Dimension        string                 `json:"dimension,omitempty"`
 	Findings         []DiagnosticFinding    `json:"findings,omitempty"`
@@ -126,6 +127,7 @@ type DiagnosticReport struct {
 	Confidence         DiagnosticConfidence           `json:"confidence"`
 	Coverage           map[string]DiagnosticDimension `json:"coverage"`
 	New                []DiagnosticItem               `json:"new"`
+	Current            []DiagnosticItem               `json:"current,omitempty"`
 	Resolved           []DiagnosticItem               `json:"resolved"`
 	PreexistingCount   int                            `json:"preexisting_count"`
 	ProvisionalReasons []string                       `json:"provisional_reasons,omitempty"`
@@ -247,10 +249,11 @@ func confidenceFor(batch DiagnosticBatch) (DiagnosticConfidence, []string) {
 	}
 	switch batch.Kind {
 	case EvidencePush:
-		if batch.Complete && batch.DocumentVersion != nil && batch.ExpectedVersion != nil && *batch.DocumentVersion == *batch.ExpectedVersion {
+		if batch.Complete && (batch.ChangeBarrier ||
+			(batch.DocumentVersion != nil && batch.ExpectedVersion != nil && *batch.DocumentVersion == *batch.ExpectedVersion)) {
 			return ConfidenceAuthoritative, nil
 		}
-		return ConfidenceProvisional, []string{"push_missing_or_wrong_document_version"}
+		return ConfidenceProvisional, []string{"push_missing_current_document_proof"}
 	case EvidencePull:
 		if batch.Complete && batch.ResultID != "" {
 			return ConfidenceAuthoritative, nil
@@ -412,7 +415,13 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	if err := s.save(); err != nil {
 		return DiagnosticReport{}, err
 	}
-	return s.reportLocked(added, resolved, evID, reasons), nil
+	report := s.reportLocked(added, resolved, evID, reasons)
+	// Mutation-time verification needs the confidence of this observation. The
+	// persisted coverage remains historical and is returned by diagnostics queries.
+	report.Confidence = confidence
+	report.Current = append([]DiagnosticItem(nil), current...)
+	report.ProvisionalReasons = append([]string(nil), reasons...)
+	return report, nil
 }
 
 func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {

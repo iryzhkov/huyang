@@ -52,7 +52,7 @@ var modernProfileNames = map[mcpProfile][]string{
 	profileFull: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics",
 		"code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get",
-		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
+		"language_server_status", "language_server_setup", "debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
 	},
 	profileOrient: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
@@ -231,6 +231,15 @@ func buildModernTools() []modernTool {
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100},
 		}, "workspace_id", "target")},
+		{Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+			"workspace_id": workspaceIDProperty(),
+		}, "workspace_id")},
+		{Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
+			"action": enumSchema("install", "restart"), "language": stringSchema("Filetype or extension, required for install."),
+			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
+			"parser": map[string]any{"type": "boolean"},
+		}, "workspace_id", "idempotency_key", "action")},
 		{Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
 		}, "workspace_id")},
@@ -882,7 +891,7 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 
 func isStatefulModernTool(name string) bool {
 	switch name {
-	case "edit_apply", "change_plan", "verify_run", "debug_session", "debug_breakpoints", "debug_control":
+	case "edit_apply", "change_plan", "verify_run", "language_server_setup", "debug_session", "debug_breakpoints", "debug_control":
 		return true
 	default:
 		return false
@@ -962,7 +971,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		return modernEnvelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
 	if name == "workspace_open" {
-		return d.open(requestID, arguments)
+		return d.open(ctx, requestID, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
 	workspace := d.get(workspacecore.ID(workspaceID))
@@ -978,8 +987,22 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		}
 	}
 	switch name {
+	case "language_server_status":
+		return d.languageServerStatus(ctx, requestID, workspace)
+	case "language_server_setup":
+		return d.languageServerSetup(ctx, requestID, workspace, arguments)
+	case "navigate":
+		return d.navigateProvider(ctx, requestID, workspace, arguments)
+	case "code_actions":
+		return d.codeActionsProvider(ctx, requestID, workspace, arguments)
 	case "workspace_inspect":
 		inspection := workspace.Inspect()
+		var semanticProvider map[string]any
+		if backend, providerErr := d.canonicalProvider(ctx, workspace); providerErr == nil {
+			inspection.Optional["provider"] = "available"
+			inspection.Optional["lsp"] = "probe_with_language_server_status"
+			semanticProvider = canonicalProviderStatus(backend)
+		}
 		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
 		if policyErr != nil {
 			result := modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
@@ -1005,7 +1028,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		base := map[string]any{
 			"view": view, "revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
 			"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
-			"inspection":     inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
+			"inspection":     inspection, "semantic_provider": semanticProvider, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
 			"pipeline_state": map[string]any{
 				"state": pipelineState, "configured": policy.ProjectConfig != "", "trusted": policy.Trusted,
 				"reason": pipelineReason, "project_config": policy.ProjectConfig, "user_config": policy.UserConfig,
@@ -1089,7 +1112,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	}
 }
 
-func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[string]any {
+func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
 	kind, _ := arguments["kind"].(string)
 	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: d.stateDir, ProviderEpoch: 1}
 	switch kind {
@@ -1142,6 +1165,10 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 			return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
 		}
 	}
+	var canonicalBackend provider.Provider
+	if opened.Identity().Kind == workspacecore.KindProject && shippedRuntimePath() != "" {
+		canonicalBackend, _ = d.canonicalProvider(ctx, opened)
+	}
 	orientation, err := opened.Orient()
 	if err != nil {
 		return modernFailure(requestID, opened, "workspace_overview_failed", err)
@@ -1150,13 +1177,20 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 	if recentErr != nil {
 		recent = workspacecore.CommitList{Coverage: workspacecore.GitCoverage{Complete: false, Unavailable: []string{"git_history"}}}
 	}
+	capabilities := opened.Inspect()
+	var semanticProvider map[string]any
+	if canonicalBackend != nil {
+		capabilities.Optional["provider"] = "available"
+		capabilities.Optional["lsp"] = "probe_with_language_server_status"
+		semanticProvider = canonicalProviderStatus(canonicalBackend)
+	}
 	action := "Opened"
 	if !created {
 		action = "Reopened"
 	}
 	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
-		"revision":       fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
-		"capabilities":   opened.Inspect(),
+		"revision":     fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
+		"capabilities": capabilities, "semantic_provider": semanticProvider,
 		"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
 		"overview":       orientation,
 		"recent_commits": recent,
@@ -2001,13 +2035,24 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		planID := fmt.Sprint(arguments["plan_id"])
 		revision := uintArgument(arguments["plan_revision"])
 		preparedRevision := fmt.Sprint(arguments["prepared_revision"])
+		wasProvisional := false
+		if current, inspectErr := workspace.InspectPlan(planID, revision); inspectErr == nil {
+			wasProvisional = current.State == workspacecore.PlanProvisional
+		}
 		var stager workspacecore.PlanStager
 		stager, err = d.planStager(workspace, planID, revision, false)
 		if err == nil {
 			plan, err = workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager)
 		}
 		if err == nil {
-			return planResult("Prepared plan applied through the durable commit journal; canonical provider resynced", plan)
+			result := planResult("Prepared plan applied through the durable commit journal; canonical provider resynced", plan)
+			if wasProvisional {
+				result["outcome"] = "provisional"
+				result["summary"] = "Prepared plan applied with explicitly accepted incomplete diagnostic evidence; canonical provider resynced"
+				result["warnings"] = append(result["warnings"].([]string), "The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted.")
+				result["data"].(map[string]any)["applied_from_provisional"] = true
+			}
+			return result
 		}
 	default:
 		err = fmt.Errorf("unknown change_plan action %q", action)
@@ -2309,7 +2354,7 @@ func validateModernRegistry() error {
 			return fmt.Errorf("tool %s schema is not closed", descriptor.Name)
 		}
 	}
-	expected := map[mcpProfile]int{profileFull: 17, profileOrient: 8, profileEdit: 13, profileDebug: 12}
+	expected := map[mcpProfile]int{profileFull: 19, profileOrient: 8, profileEdit: 13, profileDebug: 12}
 	for _, profile := range modernProfileOrder {
 		if len(modernCatalog(profile)) != expected[profile] {
 			return fmt.Errorf("profile %s has %d tools, want %d", profile, len(modernCatalog(profile)), expected[profile])

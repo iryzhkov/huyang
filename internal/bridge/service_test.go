@@ -186,8 +186,8 @@ func TestHuyangMCPAdapterDefaultsToFullAndProxiesService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 17 {
-		t.Fatalf("default adapter catalog = %d tools, want 17", len(listed.Tools))
+	if len(listed.Tools) != 19 {
+		t.Fatalf("default adapter catalog = %d tools, want 19", len(listed.Tools))
 	}
 	_ = session.Close()
 	_ = toAdapterWriter.Close()
@@ -213,7 +213,7 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", response.StatusCode)
 	}
 
-	for route, expected := range map[string]int{"/mcp": 17, "/mcp/orient": 8, "/mcp/edit": 13, "/mcp/debug": 12} {
+	for route, expected := range map[string]int{"/mcp": 19, "/mcp/orient": 8, "/mcp/edit": 13, "/mcp/debug": 12} {
 		httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 		client := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
 		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{

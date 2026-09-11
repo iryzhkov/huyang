@@ -895,11 +895,11 @@ local function wrap_publish_handler(client)
     -- populated it and the wrap silently no-opped (publish_seen stayed 0 over a
     -- whole smoke run, which is how this was caught).
     if not client or client._agent99_publish_wrapped then return end
-    client._agent99_publish_wrapped = true
     client.handlers = client.handlers or {}
     local inner = client.handlers["textDocument/publishDiagnostics"]
         or vim.lsp.handlers["textDocument/publishDiagnostics"]
     if not inner then return end
+    client._agent99_publish_wrapped = true
     client.handlers["textDocument/publishDiagnostics"] = function(lsp_err, params, ctx, cfg)
         -- Every publish, whether or not it carries a version and whether or
         -- not it carries any diagnostics: an empty set for a file is the
@@ -923,6 +923,16 @@ local function wrap_publish_handler(client)
             end
         end
         return inner(lsp_err, params, ctx, cfg)
+    end
+end
+
+-- Called immediately after programmatic plan bytes change, before Neovim can
+-- dispatch another LSP message. A later publish is therefore for this change.
+function M.mark_diagnostic_change(bufnr)
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    publish_version[bufnr] = nil
+    for _, files in pairs(published_for) do
+        files[path] = nil
     end
 end
 
@@ -1059,6 +1069,28 @@ function M.diagnostic_evidence(args)
             local expected = vim.api.nvim_buf_get_changedtick(bufnr)
             for _, client in ipairs(clients) do
                 wrap_publish_handler(client)
+                local remaining = math.max(1, attach_deadline - vim.uv.now())
+                local barrier_acked = false
+                if client:supports_method("textDocument/documentSymbol", bufnr) then
+                    local response = client:request_sync("textDocument/documentSymbol", {
+                        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+                    }, remaining, bufnr)
+                    barrier_acked = response ~= nil and response.err == nil
+                end
+                -- The transaction marker cleared prior publish state immediately
+                -- after the buffer change. Wait for a later publish; when the server
+                -- omits the optional version, the ordered request above proves it has
+                -- consumed the preceding didChange.
+                local function fresh_publish()
+                    local published = published_for[client.name]
+                        and published_for[client.name][vim.api.nvim_buf_get_name(bufnr)] == true
+                    local version = (publish_version[bufnr] or {})[client.name]
+                    return published and (version == nil or version == expected)
+                end
+                while vim.uv.now() < attach_deadline and not fresh_publish() do
+                    remaining = attach_deadline - vim.uv.now()
+                    sleep(math.min(25, math.max(1, remaining)))
+                end
                 local namespace = vim.lsp.diagnostic.get_namespace(client.id, false)
                 local diagnostics = {}
                 for _, d in ipairs(vim.diagnostic.get(bufnr, { namespace = namespace })) do
@@ -1077,6 +1109,7 @@ function M.diagnostic_evidence(args)
                     expected_version = expected,
                     transaction_id = transaction_id,
                     complete = published,
+                    change_barrier = barrier_acked,
                     progress_pending = progress_since({ client.name }, 0),
                     selected = true,
                     dimension = "edited_documents",

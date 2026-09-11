@@ -180,6 +180,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		return err
 	}
 	s.provider = backend
+	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, backend, "workspace_support", map[string]any{"root": sandbox.Tree})
 	s.stager = &providerPlanStager{
 		workspaceID: s.workspace.Identity().ID, provider: backend, epoch: backend.Descriptor().Epoch,
 	}
@@ -235,6 +236,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			return err
 		}
 		s.provider = replacement
+		_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree})
 		s.stager = &providerPlanStager{
 			workspaceID: s.workspace.Identity().ID, provider: replacement, epoch: replacement.Descriptor().Epoch,
 		}
@@ -243,10 +245,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	if err != nil {
 		return err
 	}
-	diagnosticReport, err = corroborateDiagnosticsWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
-	if err != nil {
-		return err
-	}
+
 	verification.Stages = append(verification.Stages, diagnosticVerificationStage(s.baseRevision, diagnosticReport))
 	s.prepared, s.verification = request, verification
 	return nil

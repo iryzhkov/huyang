@@ -205,7 +205,7 @@ func TestPlanLifecycleEditsAndDiscardAreDurable(t *testing.T) {
 func TestPlanRejectsDuplicateOperationsAndDependencyCycles(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "note.txt")
-	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("abcdef\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opened, err := Open(OpenOptions{Kind: KindProject, Root: root})
@@ -223,6 +223,24 @@ func TestPlanRejectsDuplicateOperationsAndDependencyCycles(t *testing.T) {
 	right.OpID, right.DependsOn = "right", []string{"left"}
 	if _, err := opened.CreatePlan([]PlanOperation{left, right}); err == nil {
 		t.Fatal("dependency cycle accepted")
+	}
+
+	earlyTarget, err := opened.NewRange("note.txt", 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lateTarget, err := opened.NewRange("note.txt", 4, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	early := PlanOperation{OpID: "early", Kind: OperationReplaceRange, Target: &PlanTarget{FileRange: &earlyTarget}}
+	late := PlanOperation{OpID: "late", Kind: OperationReplaceRange, Target: &PlanTarget{FileRange: &lateTarget}, DependsOn: []string{"early"}}
+	ordered, err := orderOperations([]PlanOperation{early, late})
+	if err != nil {
+		t.Fatalf("logical dependency between disjoint ranges created a false cycle: %v", err)
+	}
+	if len(ordered) != 2 || ordered[0].OpID != "late" || ordered[1].OpID != "early" {
+		t.Fatalf("range-safe order = %#v, want late then early", ordered)
 	}
 }
 
@@ -281,5 +299,36 @@ func TestCreateFileInfersMissingRevisionAndPreservesAbsencePrecondition(t *testi
 	}
 	if conflicted.Preview == nil || conflicted.Preview.Outcome != "conflict" {
 		t.Fatalf("create absence race was not rejected: %#v", conflicted)
+	}
+}
+
+func TestMoveAndDeleteInferRevisionsIncludingMissingDestination(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "source.bin"), []byte{0xff, 0x00, 0x7f}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "delete.bin"), []byte{0xfe, 0x01}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(OpenOptions{Kind: KindProject, Root: root, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := opened.CreatePlan([]PlanOperation{
+		{OpID: "move", Kind: OperationMoveFile, From: "source.bin", To: "destination.bin"},
+		{OpID: "delete", Kind: OperationDeleteFile, Path: "delete.bin"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Operations[0].Revision == "" || plan.Operations[0].DestinationRevision == "" || plan.Operations[1].Revision == "" {
+		t.Fatalf("inferred revisions = %#v", plan.Operations)
+	}
+	previewed, err := opened.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewed.Preview == nil || previewed.Preview.Outcome != "ok" || len(previewed.Preview.Diffs) != 3 {
+		t.Fatalf("move/delete preview = %#v", previewed)
 	}
 }

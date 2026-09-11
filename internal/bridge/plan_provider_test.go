@@ -139,7 +139,7 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 		"workspace_id": workspaceID, "idempotency_key": "apply", "action": "apply",
 		"plan_id": planID, "plan_revision": planRevision, "prepared_revision": preparedRevision,
 	})
-	if applied["outcome"] != "ok" || applied["transaction"].(map[string]any)["state"] != "COMMITTED" {
+	if applied["outcome"] != "provisional" || applied["transaction"].(map[string]any)["state"] != "COMMITTED" {
 		t.Fatalf("apply = %#v", applied)
 	}
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, []byte("alpha DELTA gamma\n")) {
