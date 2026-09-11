@@ -55,8 +55,11 @@ func pipelineSandbox(t *testing.T, files map[string]string) (*Sandbox, []PlanSta
 }
 
 func TestPipelinePolicyRequiresUserTrustAndTightensResources(t *testing.T) {
+	if got := DefaultPipelinePolicy().Resource.MaxParallel; got != 1 {
+		t.Fatalf("default max_parallel = %d, want 1", got)
+	}
 	root := t.TempDir()
-	project := "version = 1\n[format]\nmode = \"transform\"\nscope = \"declared\"\n[format.transform]\ncommand = [\"tool\", \"--write\"]\ndeclared_writes = [\"*.go\"]\n[resource]\ntimeout_seconds = 90\n"
+	project := "version = 1\n[format]\nmode = \"transform\"\nscope = \"declared\"\n[format.transform]\ncommand = [\"tool\", \"--write\"]\ndeclared_writes = [\"*.go\"]\n[resource]\ntimeout_seconds = 90\nmax_parallel = 4\n"
 	if err := os.WriteFile(filepath.Join(root, ".huyang.toml"), []byte(project), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +71,14 @@ func TestPipelinePolicyRequiresUserTrustAndTightensResources(t *testing.T) {
 		t.Fatal("repository command trusted without user declaration")
 	}
 	user := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(user, []byte("[trust]\nroots = [\""+root+"\"]\n[resource]\ntimeout_seconds = 3\nmax_output_bytes = 1024\n"), 0o600); err != nil {
+	if err := os.WriteFile(user, []byte("[trust]\nroots = [\""+root+"\"]\n[resource]\ntimeout_seconds = 3\nmax_output_bytes = 1024\nmax_parallel = 2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	trusted, err := LoadPipelinePolicy(root, user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !trusted.Trusted || trusted.Resource.TimeoutSeconds != 3 || trusted.Resource.MaxOutputBytes != 1024 {
+	if !trusted.Trusted || trusted.Resource.TimeoutSeconds != 3 || trusted.Resource.MaxOutputBytes != 1024 || trusted.Resource.MaxParallel != 2 {
 		t.Fatalf("layered policy = %+v", trusted)
 	}
 }
@@ -315,5 +318,127 @@ func TestCommandStageFailureIncludesCapturedOutput(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("failure %q omitted %q", err, want)
 		}
+	}
+}
+
+func TestParallelTestsAreBoundedAndDeterministicallyOrdered(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"input.txt": "stable\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.MaxParallel = 2
+	policy.Tests = []CommandPolicy{
+		{Name: "first", Parallel: true, Command: []string{"sh", "-c", "sleep 1; printf first"}},
+		{Name: "second", Parallel: true, Command: []string{"sh", "-c", "sleep 1; printf second"}},
+		{Name: "third", Parallel: true, Command: []string{"sh", "-c", "sleep 1; printf third"}},
+		{Name: "fourth", Parallel: true, Command: []string{"sh", "-c", "sleep 1; printf fourth"}},
+	}
+	started := time.Now()
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_parallel", Stages: []string{"tests"},
+	}, prepared)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first", "second", "third", "fourth"}
+	if len(result.Stages) != len(want) {
+		t.Fatalf("stages = %+v", result.Stages)
+	}
+	var totalDuration, longestDuration time.Duration
+	for index, expected := range want {
+		duration := time.Duration(result.Stages[index].DurationMS) * time.Millisecond
+		totalDuration += duration
+		if duration > longestDuration {
+			longestDuration = duration
+		}
+		if strings.TrimSpace(result.Stages[index].Output) != expected {
+			t.Fatalf("stage %d output = %q, want %q", index, result.Stages[index].Output, expected)
+		}
+		if len(result.Stages[index].ExecutedTests) != 1 || result.Stages[index].ExecutedTests[0] != expected {
+			t.Fatalf("stage %d test metadata = %+v, want %q", index, result.Stages[index].ExecutedTests, expected)
+		}
+	}
+	if elapsed >= totalDuration*3/4 {
+		t.Fatalf("parallel tests took %s versus %s summed stage time", elapsed, totalDuration)
+	}
+	if elapsed < longestDuration*3/2 {
+		t.Fatalf("max_parallel=2 was not enforced: elapsed %s, longest stage %s", elapsed, longestDuration)
+	}
+}
+
+func TestParallelChecksUseIsolatedSandboxesAndPreserveFailureOrder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"input.txt": "stable\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.MaxParallel = 2
+	policy.Check = []CommandPolicy{
+		{Name: "rogue", Parallel: true, Command: []string{"sh", "-c", "printf changed > input.txt"}},
+		{Name: "reader", Parallel: true, Command: []string{"sh", "-c", "sleep 0.1; grep -qx stable input.txt; printf original"}},
+	}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_isolated", Stages: []string{"check"},
+	}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "undeclared_tool_write") {
+		t.Fatalf("parallel isolation result = %+v, err = %v", result, err)
+	}
+	if len(result.Stages) != 2 || strings.TrimSpace(result.Stages[1].Output) != "original" {
+		t.Fatalf("parallel result order/content = %+v", result.Stages)
+	}
+	content, readErr := os.ReadFile(filepath.Join(sandbox.Tree, "input.txt"))
+	if readErr != nil || string(content) != "stable\n" {
+		t.Fatalf("shared sandbox changed to %q: %v", content, readErr)
+	}
+}
+
+func TestParallelExecutionRequiresCommandOptIn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"input.txt": "stable\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.MaxParallel = 2
+	policy.Check = []CommandPolicy{
+		{Command: []string{"sh", "-c", "sleep 0.3"}},
+		{Command: []string{"sh", "-c", "sleep 0.3"}},
+	}
+	started := time.Now()
+	_, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_sequential", Stages: []string{"check"},
+	}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 550*time.Millisecond {
+		t.Fatalf("commands without parallel opt-in overlapped: %s", elapsed)
+	}
+}
+
+func TestParallelCommandWithDeclaredWritesIsRejectedBeforeExecution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"input.txt": "stable\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Resource.MaxParallel = 2
+	marker := filepath.Join(t.TempDir(), "ran")
+	policy.Check = []CommandPolicy{{
+		Name: "writer", Parallel: true, DeclaredWrites: []string{"input.txt"},
+		Command: []string{"sh", "-c", "printf ran > " + marker},
+	}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_reject_writes", Stages: []string{"check"},
+	}, prepared)
+	if err == nil || !strings.Contains(err.Error(), "cannot declare writes") {
+		t.Fatalf("declared-write parallel result = %+v, err = %v", result, err)
+	}
+	if len(result.Stages) != 0 {
+		t.Fatalf("rejected command produced stages: %+v", result.Stages)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected command ran: %v", statErr)
 	}
 }

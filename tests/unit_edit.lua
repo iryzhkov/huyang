@@ -329,6 +329,90 @@ local gone = edit.stopped_servers()
 check("a server that published and is not running is reported as stopped",
     vim.tbl_contains(gone, "fakels") and vim.tbl_contains(gone, "otherls"), gone)
 
+-- Diagnostic evidence has one attach budget per request, not per file.
+-- Files with no enabled/startable server report why immediately.
+local latency_dir = vim.fn.tempname()
+vim.fn.mkdir(latency_dir, "p")
+local no_config = {}
+for i = 1, 3 do
+    local path = latency_dir .. "/plain" .. i .. ".huyang-no-lsp"
+    vim.fn.writefile({ "plain text" }, path)
+    no_config[#no_config + 1] = path
+end
+
+local started = vim.uv.hrtime()
+local evidence = edit.diagnostic_evidence({ files = no_config, wait_ms = 1000 })
+local elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+local unavailable = #evidence.batches == #no_config
+for _, batch in ipairs(evidence.batches) do
+    unavailable = unavailable and batch.kind == "unavailable"
+        and batch.reason == "lsp_not_configured"
+end
+check("diagnostic evidence reports an explicit unavailable reason with no LSP",
+    unavailable, evidence)
+check("diagnostic evidence does not wait when no LSP is configured",
+    elapsed_ms < 750, elapsed_ms)
+
+-- An enabled config whose command cannot launch is unavailable immediately too.
+vim.filetype.add({ extension = { huyangnostart = "huyang_no_start_test" } })
+local no_start_path = latency_dir .. "/nostart.huyangnostart"
+vim.fn.writefile({ "plain text" }, no_start_path)
+vim.fn.bufload(vim.fn.bufadd(no_start_path))
+vim.lsp.config("huyang_no_start_ls", {
+    cmd = { latency_dir .. "/missing-language-server" },
+    filetypes = { "huyang_no_start_test" },
+})
+local enabled_configs = vim.lsp._enabled_configs
+local no_start_was_enabled = enabled_configs.huyang_no_start_ls
+enabled_configs.huyang_no_start_ls = vim.lsp.config.huyang_no_start_ls
+started = vim.uv.hrtime()
+evidence = edit.diagnostic_evidence({ files = { no_start_path }, wait_ms = 1000 })
+elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+enabled_configs.huyang_no_start_ls = no_start_was_enabled
+check("diagnostic evidence reports an unstartable LSP explicitly",
+    #evidence.batches == 1 and evidence.batches[1].kind == "unavailable"
+        and evidence.batches[1].reason == "lsp_not_startable", evidence)
+check("diagnostic evidence does not wait for an unstartable LSP",
+    elapsed_ms < 250, elapsed_ms)
+
+-- A viable enabled configuration may still be attaching. Even then, all files
+-- share one deadline: three files cannot turn a 180 ms budget into 540 ms.
+vim.filetype.add({ extension = { huyanglatency = "huyang_latency_test" } })
+vim.lsp.config("huyang_latency_ls", {
+    cmd = { "/bin/true" },
+    filetypes = { "huyang_latency_test" },
+})
+local enabled = vim.lsp._enabled_configs
+local was_enabled = enabled.huyang_latency_ls
+enabled.huyang_latency_ls = vim.lsp.config.huyang_latency_ls
+local waiting = {}
+for i = 1, 3 do
+    local path = latency_dir .. "/waiting" .. i .. ".huyanglatency"
+    vim.fn.writefile({ "plain text" }, path)
+    waiting[#waiting + 1] = path
+end
+started = vim.uv.hrtime()
+local diagnostic_co = coroutine.create(function()
+    evidence = edit.diagnostic_evidence({ files = waiting, wait_ms = 180 })
+end)
+local resumed, resume_error = coroutine.resume(diagnostic_co)
+local completed = resumed and vim.wait(1000, function()
+    return coroutine.status(diagnostic_co) == "dead"
+end)
+elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+enabled.huyang_latency_ls = was_enabled
+check("diagnostic evidence coroutine completes", completed, resume_error)
+check("diagnostic evidence spends one shared attach deadline",
+    elapsed_ms >= 120 and elapsed_ms < 450, elapsed_ms)
+local timed_out_once = #evidence.batches == #waiting
+for _, batch in ipairs(evidence.batches) do
+    timed_out_once = timed_out_once and batch.kind == "unavailable"
+        and batch.reason == "lsp_attach_deadline_exceeded"
+end
+check("the shared deadline still returns explicit unavailable batches",
+    timed_out_once, evidence)
+vim.fn.delete(latency_dir, "rf")
+
 if failures > 0 then
     io.stdout:write(("unit_edit: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

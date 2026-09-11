@@ -20,7 +20,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const modernAPIVersion = "huyang.workspace/v1alpha1"
+const (
+	modernAPIVersion       = "huyang.workspace/v1alpha1"
+	defaultToolCallTimeout = 2 * time.Minute
+)
+
+var errGlobalToolCallTimeout = errors.New("global tool-call timeout exceeded")
 
 type mcpProfile string
 
@@ -572,6 +577,12 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 	if plan.Preparation != nil {
 		preparation := *plan.Preparation
 		preparation.ToolDelta = append([]workspacecore.ToolDelta(nil), plan.Preparation.ToolDelta...)
+		preparation.CommittedDiffs = append([]workspacecore.ExactDiff(nil), plan.Preparation.CommittedDiffs...)
+		for index := range preparation.CommittedDiffs {
+			preparation.CommittedDiffs[index].Before = nil
+			preparation.CommittedDiffs[index].After = nil
+			preparation.CommittedDiffs[index].Patch = ""
+		}
 		for index := range preparation.ToolDelta {
 			preparation.ToolDelta[index].Before = nil
 			preparation.ToolDelta[index].After = nil
@@ -711,11 +722,12 @@ func legacySDKResult(result map[string]any) *mcp.CallToolResult {
 }
 
 type directWorkspaces struct {
-	mu       sync.RWMutex
-	items    map[workspacecore.ID]*workspacecore.Workspace
-	records  map[workspacecore.ID]persistedWorkspace
-	stateDir string
-	requests atomic.Uint64
+	mu          sync.RWMutex
+	items       map[workspacecore.ID]*workspacecore.Workspace
+	records     map[workspacecore.ID]persistedWorkspace
+	stateDir    string
+	toolTimeout time.Duration
+	requests    atomic.Uint64
 
 	replayMu sync.Mutex
 	replays  map[string]*directReplay
@@ -755,6 +767,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		items:             make(map[workspacecore.ID]*workspacecore.Workspace),
 		records:           make(map[workspacecore.ID]persistedWorkspace),
 		stateDir:          stateDir,
+		toolTimeout:       defaultToolCallTimeout,
 		replays:           make(map[string]*directReplay),
 		registryPath:      filepath.Join(stateDir, "registry.json"),
 		scheduler:         newWorkspaceScheduler(providerQuota, externalJobQuota),
@@ -771,12 +784,16 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 }
 
 func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[string]any) map[string]any {
+	ctx, cancel := context.WithTimeoutCause(ctx, d.toolTimeout, errGlobalToolCallTimeout)
+	defer cancel()
 	requestID := fmt.Sprintf("req_%d", d.requests.Add(1))
 	if d.loadErr != nil {
 		return modernEnvelope(requestID, nil, "failed", "service_state_unavailable", d.loadErr.Error(), map[string]any{})
 	}
 	if !isStatefulModernTool(name) {
-		return d.executeScheduled(ctx, requestID, name, arguments)
+		result := d.executeScheduled(ctx, requestID, name, arguments)
+		normalizeToolTimeout(ctx, d.toolTimeout, name, result)
+		return result
 	}
 	idempotencyKey, _ := arguments["idempotency_key"].(string)
 	if idempotencyKey == "" {
@@ -824,7 +841,9 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 			}
 			return replayed
 		case <-ctx.Done():
-			return modernEnvelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
+			result := modernEnvelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
+			normalizeToolTimeout(ctx, d.toolTimeout, name, result)
+			return result
 		}
 	}
 	pending := &directReplay{argumentsHash: argumentsHash, done: make(chan struct{})}
@@ -832,8 +851,18 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 	d.replayMu.Unlock()
 
 	result := d.executeScheduled(ctx, requestID, name, arguments)
+	timedOut := normalizeToolTimeout(ctx, d.toolTimeout, name, result)
 	result["idempotency"] = "created"
-	result["idempotency_persisted"] = true
+	result["idempotency_persisted"] = !timedOut
+	if timedOut {
+		d.replayMu.Lock()
+		pending.result = cloneEnvelope(result)
+		pending.complete = true
+		delete(d.replays, replayKey)
+		close(pending.done)
+		d.replayMu.Unlock()
+		return result
+	}
 	d.replayMu.Lock()
 	pending.result = cloneEnvelope(result)
 	pending.complete = true
@@ -866,6 +895,31 @@ func cloneEnvelope(source map[string]any) map[string]any {
 		clone[key] = value
 	}
 	return clone
+}
+
+func normalizeToolTimeout(ctx context.Context, timeout time.Duration, name string, result map[string]any) bool {
+	if !errors.Is(context.Cause(ctx), errGlobalToolCallTimeout) {
+		return false
+	}
+	stateful := isStatefulModernTool(name)
+	result["outcome"] = "failed"
+	result["code"] = "request_timeout"
+	result["summary"] = fmt.Sprintf("%s exceeded the global %s tool-call timeout; the operation was cancelled", name, timeout)
+	result["data"] = map[string]any{
+		"tool": name, "timeout_ms": timeout.Milliseconds(), "retry_safe": true,
+	}
+	if stateful {
+		result["warnings"] = []string{"The timed-out operation completed cancellation and cleanup; retry with the same idempotency key."}
+		result["next"] = []any{map[string]any{
+			"tool": name, "action": "retry_after_timeout", "reuse_idempotency_key": true,
+		}}
+	} else {
+		result["warnings"] = []string{"The timed-out read was cancelled; retry the request when the workspace is less busy."}
+		result["next"] = []any{map[string]any{
+			"tool": name, "action": "retry_after_timeout",
+		}}
+	}
+	return true
 }
 
 func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name string, arguments map[string]any) map[string]any {
@@ -950,7 +1004,8 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		}
 		base := map[string]any{
 			"view": view, "revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
-			"inspection": inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
+			"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
+			"inspection":     inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
 			"pipeline_state": map[string]any{
 				"state": pipelineState, "configured": policy.ProjectConfig != "", "trusted": policy.Trusted,
 				"reason": pipelineReason, "project_config": policy.ProjectConfig, "user_config": policy.UserConfig,
@@ -1102,6 +1157,7 @@ func (d *directWorkspaces) open(requestID string, arguments map[string]any) map[
 	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
 		"revision":       fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities":   opened.Inspect(),
+		"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
 		"overview":       orientation,
 		"recent_commits": recent,
 		"registry":       map[string]any{"persistent": true, "reused": !created},
@@ -1528,47 +1584,29 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 	if toSeq > workspace.Identity().StateSeq {
 		return modernEnvelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
 	}
-	type recordedDiff struct {
-		from, to                  uint64
-		path, beforeSHA, afterSHA string
-		diff                      any
-	}
-	d.replayMu.Lock()
-	var recorded []recordedDiff
-	for key, replay := range d.replays {
-		if !replay.complete || !strings.HasPrefix(key, string(workspace.Identity().ID)+"\x00edit_apply\x00") {
-			continue
-		}
-		data, _ := replay.result["data"].(map[string]any)
-		if changed, _ := data["canonical_changed"].(bool); !changed {
-			continue
-		}
-		editFrom, editTo := fmt.Sprint(data["from_revision"]), fmt.Sprint(data["revision"])
-		left, leftErr := workspaceRevisionSequence(editFrom)
-		right, rightErr := workspaceRevisionSequence(editTo)
-		if leftErr == nil && rightErr == nil && left >= fromSeq && right <= toSeq {
-			change, _ := data["change"].(map[string]any)
-			if diff, ok := change["diff"].(map[string]any); ok {
-				recorded = append(recorded, recordedDiff{
-					from: left, to: right, diff: diff, path: fmt.Sprint(diff["path"]),
-					beforeSHA: fmt.Sprint(diff["before_sha256"]), afterSHA: fmt.Sprint(diff["after_sha256"]),
-				})
-			}
-		}
-	}
-	d.replayMu.Unlock()
+	recorded := d.recordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
 	sort.Slice(recorded, func(i, j int) bool {
 		if recorded[i].from != recorded[j].from {
 			return recorded[i].from < recorded[j].from
 		}
-		return recorded[i].to < recorded[j].to
+		if recorded[i].to != recorded[j].to {
+			return recorded[i].to < recorded[j].to
+		}
+		return recorded[i].path < recorded[j].path
 	})
-	known := make([]recordedDiff, 0, len(recorded))
+	known := make([]recordedRevisionDiff, 0, len(recorded))
 	segments := make([]any, 0, len(recorded))
 	gaps := make([]any, 0)
 	cursor := fromSeq
 	for _, item := range recorded {
-		if item.to <= cursor || item.from < cursor {
+		sameRevision := len(known) > 0 &&
+			known[len(known)-1].from == item.from &&
+			known[len(known)-1].to == item.to
+		if item.to <= cursor {
+			if !sameRevision {
+				continue
+			}
+		} else if item.from < cursor {
 			continue
 		}
 		if item.from > cursor {
@@ -1583,7 +1621,9 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 			"to_revision":   fmt.Sprintf("wsrev_%d", item.to),
 			"path":          item.path,
 		})
-		cursor = item.to
+		if item.to > cursor {
+			cursor = item.to
+		}
 	}
 	if cursor < toSeq {
 		gaps = append(gaps, map[string]any{
@@ -1842,7 +1882,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	planResult := func(summary string, plan workspacecore.PlanRecord) map[string]any {
 		data := map[string]any{"plan": plan}
 		if plan.State == workspacecore.PlanCommitted && plan.Preparation != nil {
-			data["from_revision"] = plan.Preparation.BaseRevision
+			fromRevision := plan.Preparation.CanonicalFromRevision
+			if fromRevision == "" {
+				fromRevision = plan.Preparation.BaseRevision
+			}
+			data["from_revision"] = fromRevision
 			data["revision"] = plan.Preparation.CanonicalRevision
 			data["changed_paths"] = append([]string(nil), plan.Preparation.AffectedFiles...)
 			data["canonical_changed"] = plan.Preparation.CanonicalChanged
@@ -1939,7 +1983,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		if current.State == workspacecore.PlanReady || current.State == workspacecore.PlanProvisional || current.State == workspacecore.PlanFailed {
 			stager, stagerErr := d.planStager(workspace, planID, revision, false)
 			if stagerErr != nil {
-				err = stagerErr
+				if current.State == workspacecore.PlanFailed && strings.Contains(stagerErr.Error(), "prepared sandbox is not available") {
+					plan, err = workspace.DiscardPlan(planID, revision)
+				} else {
+					err = stagerErr
+				}
 			} else {
 				plan, err = workspace.RollbackPlan(ctx, planID, revision, stager)
 			}

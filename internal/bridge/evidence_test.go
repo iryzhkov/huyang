@@ -2,12 +2,57 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
+
+func TestUnavailableDiagnosticReasonSurvivesJSONAndReachesStageCoverage(t *testing.T) {
+	var payload providerDiagnosticPayload
+	raw := []byte(`{"batches":[{"kind":"unavailable","provider_id":"nvim_lsp","producer":"nvim_lsp","document":"main.go","selected":true,"dimension":"edited_documents","reason":"lsp_not_configured"}]}`)
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Batches) != 1 || payload.Batches[0].Reason != "lsp_not_configured" {
+		t.Fatalf("decoded payload=%#v", payload)
+	}
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: root, ProviderEpoch: 1, StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := workspace.RecordDiagnosticEvidence(payload.Batches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Confidence != workspacecore.ConfidenceUnavailable {
+		t.Fatalf("confidence=%s", report.Confidence)
+	}
+	coverage := report.Coverage["edited_documents"]
+	if len(coverage.Reasons) != 1 || coverage.Reasons[0] != "lsp_not_configured" {
+		t.Fatalf("report coverage=%#v", coverage)
+	}
+	if len(report.ProvisionalReasons) != 1 || report.ProvisionalReasons[0] != "lsp_not_configured" {
+		t.Fatalf("report reasons=%v", report.ProvisionalReasons)
+	}
+
+	stage := diagnosticVerificationStage("wsrev_1", report)
+	if stage.Status != workspacecore.VerificationSkipped {
+		t.Fatalf("stage status=%s", stage.Status)
+	}
+	if len(stage.Coverage.Skipped) != 1 || stage.Coverage.Skipped[0] != "lsp_not_configured" {
+		t.Fatalf("stage coverage=%#v", stage.Coverage)
+	}
+}
 
 func TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence(t *testing.T) {
 	home, err := os.UserHomeDir()

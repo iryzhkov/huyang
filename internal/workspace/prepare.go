@@ -50,20 +50,22 @@ type PreparedRevisionStager interface {
 
 // PlanPreparation records the provider-backed result and eventual canonical apply receipt.
 type PlanPreparation struct {
-	PreparedRevision    string              `json:"prepared_revision"`
-	ProviderEpoch       uint64              `json:"provider_epoch"`
-	AffectedFiles       []string            `json:"affected_files"`
-	CanonicalChanged    bool                `json:"canonical_changed"`
-	CanonicalRevision   string              `json:"canonical_revision,omitempty"`
-	JournalID           string              `json:"journal_id,omitempty"`
-	Diagnostics         string              `json:"diagnostics"`
-	DiskChecks          string              `json:"disk_checks"`
-	IntermediateReports bool                `json:"intermediate_reports"`
-	SandboxBackend      string              `json:"sandbox_backend,omitempty"`
-	BaseRevision        string              `json:"base_revision,omitempty"`
-	EvidencePaths       string              `json:"evidence_paths,omitempty"`
-	Verification        []VerificationStage `json:"verification,omitempty"`
-	ToolDelta           []ToolDelta         `json:"tool_delta,omitempty"`
+	PreparedRevision      string              `json:"prepared_revision"`
+	ProviderEpoch         uint64              `json:"provider_epoch"`
+	AffectedFiles         []string            `json:"affected_files"`
+	CanonicalChanged      bool                `json:"canonical_changed"`
+	CanonicalRevision     string              `json:"canonical_revision,omitempty"`
+	JournalID             string              `json:"journal_id,omitempty"`
+	Diagnostics           string              `json:"diagnostics"`
+	DiskChecks            string              `json:"disk_checks"`
+	IntermediateReports   bool                `json:"intermediate_reports"`
+	SandboxBackend        string              `json:"sandbox_backend,omitempty"`
+	BaseRevision          string              `json:"base_revision,omitempty"`
+	CanonicalFromRevision string              `json:"canonical_from_revision,omitempty"`
+	EvidencePaths         string              `json:"evidence_paths,omitempty"`
+	Verification          []VerificationStage `json:"verification,omitempty"`
+	ToolDelta             []ToolDelta         `json:"tool_delta,omitempty"`
+	CommittedDiffs        []ExactDiff         `json:"committed_diffs,omitempty"`
 }
 
 // CheckProviderAccess prevents a provider-backed call from observing an unlabeled staged view.

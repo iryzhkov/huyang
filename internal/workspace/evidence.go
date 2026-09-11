@@ -32,6 +32,7 @@ const (
 	EvidencePull         DiagnosticEvidenceKind = "lsp_pull"
 	EvidenceWorkspace    DiagnosticEvidenceKind = "workspace_diagnostic"
 	EvidenceProjectCheck DiagnosticEvidenceKind = "project_check"
+	EvidenceUnavailable  DiagnosticEvidenceKind = "unavailable"
 )
 
 type DiagnosticRange struct {
@@ -78,6 +79,7 @@ type DiagnosticBatch struct {
 	StateSeq         uint64                 `json:"state_seq"`
 	Complete         bool                   `json:"complete"`
 	TimedOut         bool                   `json:"timed_out,omitempty"`
+	Reason           string                 `json:"reason,omitempty"`
 	ProgressPending  bool                   `json:"progress_pending,omitempty"`
 	Selected         bool                   `json:"selected"`
 	Dimension        string                 `json:"dimension,omitempty"`
@@ -265,7 +267,11 @@ func confidenceFor(batch DiagnosticBatch) (DiagnosticConfidence, []string) {
 		}
 		return ConfidenceUnavailable, []string{"project_check_unavailable"}
 	default:
-		return ConfidenceUnavailable, []string{"unsupported_diagnostic_evidence"}
+		reason := strings.TrimSpace(batch.Reason)
+		if reason == "" {
+			reason = "unsupported_diagnostic_evidence"
+		}
+		return ConfidenceUnavailable, []string{reason}
 	}
 }
 

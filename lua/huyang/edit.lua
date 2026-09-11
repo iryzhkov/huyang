@@ -971,6 +971,41 @@ function M.diagnostic_evidence(args)
     local transaction_id = args.transaction_id
     local revision = args.revision
     local batches = {}
+    local wait_ms = math.max(0, tonumber(args.wait_ms) or 1500)
+    -- One budget covers the whole file set. A transaction touching many files
+    -- must not pay the attach timeout once per file.
+    local attach_deadline = vim.uv.now() + wait_ms
+
+    local function config_startable(name)
+        local ok, cfg = pcall(function() return vim.lsp.config[name] end)
+        if not ok or type(cfg) ~= "table" then
+            return false
+        end
+        local cmd = cfg.cmd
+        if type(cmd) == "function" then
+            return true
+        end
+        local executable = type(cmd) == "table" and cmd[1] or cmd
+        return type(executable) == "string" and executable ~= ""
+            and vim.fn.executable(executable) == 1
+    end
+
+    local function unavailable_batch(bufnr, reason, configured)
+        batches[#batches + 1] = {
+            kind = "unavailable",
+            provider_id = "nvim_lsp",
+            producer = "nvim_lsp",
+            producer_version = table.concat(configured, ","),
+            document = vim.api.nvim_buf_get_name(bufnr),
+            document_revision = revision,
+            transaction_id = transaction_id,
+            complete = false,
+            selected = true,
+            dimension = "edited_documents",
+            findings = {},
+            reason = reason,
+        }
+    end
 
     local function finding(d)
         local range = d.range or {}
@@ -1002,10 +1037,24 @@ function M.diagnostic_evidence(args)
         if path and path ~= "" then
             local bufnr = load_buf(path)
             local clients = vim.lsp.get_clients({ bufnr = bufnr })
-            local attach_deadline = vim.uv.now() + math.max(500, args.wait_ms or 1500)
-            while #clients == 0 and vim.uv.now() < attach_deadline do
-                sleep(50)
+            local configured = enabled_lsp_configs_for(vim.bo[bufnr].filetype)
+            local startable = {}
+            if #clients == 0 then
+                for _, name in ipairs(configured) do
+                    if config_startable(name) then
+                        startable[#startable + 1] = name
+                    end
+                end
+            end
+            while #clients == 0 and #startable > 0 and vim.uv.now() < attach_deadline do
+                local remaining = attach_deadline - vim.uv.now()
+                sleep(math.min(50, math.max(1, remaining)))
                 clients = vim.lsp.get_clients({ bufnr = bufnr })
+            end
+            if #clients == 0 then
+                local reason = #configured == 0 and "lsp_not_configured"
+                    or (#startable == 0 and "lsp_not_startable" or "lsp_attach_deadline_exceeded")
+                unavailable_batch(bufnr, reason, configured)
             end
             local expected = vim.api.nvim_buf_get_changedtick(bufnr)
             for _, client in ipairs(clients) do

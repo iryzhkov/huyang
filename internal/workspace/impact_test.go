@@ -54,6 +54,37 @@ func TestImpactGraphUsesLanguageEdgesAndDisclosesUncertaintyAndVariants(t *testi
 	}
 }
 
+func TestImpactGraphFollowsTypeScriptBarrelWithJavaScriptSpecifiers(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"src/tokenBucket.ts":       "export class TokenBucket {}\n",
+		"src/index.ts":             "export { TokenBucket } from './tokenBucket.js'\n",
+		"test/tokenBucket.test.ts": "import { TokenBucket } from '../src/index.js'\nnew TokenBucket()\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, content)
+	}
+
+	graph, err := BuildImpactGraph(root, "prep_barrel", []string{"src/tokenBucket.ts"}, ImpactPolicy{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"src/tokenBucket.ts", "src/index.ts", "test/tokenBucket.test.ts"} {
+		if !containsString(graph.Affected, path) {
+			t.Fatalf("affected %v does not include %s", graph.Affected, path)
+		}
+	}
+
+	selected := SelectAffectedTests(graph, []CommandPolicy{{Name: "unit", Command: []string{"npm", "test"}}}, nil)
+	if len(selected) != 1 || !containsString(selected[0].Reasons, "colocated_test") {
+		t.Fatalf("selected = %+v", selected)
+	}
+}
+
 func TestImpactGraphCapsAreExplicit(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "a.ts"), "export const a = 1\n")

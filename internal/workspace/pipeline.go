@@ -39,6 +39,7 @@ type CommandPolicy struct {
 	Covers         []string `toml:"covers" json:"covers,omitempty"`
 	Variants       []string `toml:"variants" json:"variants,omitempty"`
 	Required       bool     `toml:"required" json:"required,omitempty"`
+	Parallel       bool     `toml:"parallel" json:"parallel,omitempty"`
 }
 
 type FormatPolicy struct {
@@ -60,6 +61,7 @@ type PipelinePolicy struct {
 		MaxOutputBytes   int   `toml:"max_output_bytes" json:"max_output_bytes"`
 		MaxSnapshotBytes int64 `toml:"max_snapshot_bytes" json:"max_snapshot_bytes"`
 		MaxChangedFiles  int   `toml:"max_changed_files" json:"max_changed_files"`
+		MaxParallel      int   `toml:"max_parallel" json:"max_parallel"`
 	} `toml:"resource" json:"resource"`
 	Trusted       bool   `toml:"-" json:"trusted"`
 	ProjectConfig string `toml:"-" json:"project_config,omitempty"`
@@ -75,6 +77,7 @@ type userPipelinePolicy struct {
 		MaxOutputBytes   int   `toml:"max_output_bytes"`
 		MaxSnapshotBytes int64 `toml:"max_snapshot_bytes"`
 		MaxChangedFiles  int   `toml:"max_changed_files"`
+		MaxParallel      int   `toml:"max_parallel"`
 	} `toml:"resource"`
 }
 
@@ -141,6 +144,7 @@ func DefaultPipelinePolicy() PipelinePolicy {
 	policy.Resource.MaxOutputBytes = 256 << 10
 	policy.Resource.MaxSnapshotBytes = 64 << 20
 	policy.Resource.MaxChangedFiles = 256
+	policy.Resource.MaxParallel = 1
 	return policy
 }
 
@@ -201,8 +205,17 @@ func LoadPipelinePolicy(projectRoot, userConfig string) (PipelinePolicy, error) 
 	if user.Resource.MaxChangedFiles > 0 && user.Resource.MaxChangedFiles < policy.Resource.MaxChangedFiles {
 		policy.Resource.MaxChangedFiles = user.Resource.MaxChangedFiles
 	}
+	if user.Resource.MaxParallel > 0 && user.Resource.MaxParallel < policy.Resource.MaxParallel {
+		policy.Resource.MaxParallel = user.Resource.MaxParallel
+	}
 	if policy.Version != 1 {
 		return PipelinePolicy{}, fmt.Errorf("unsupported huyang policy version %d", policy.Version)
+	}
+	if policy.Resource.MaxParallel < 1 || policy.Resource.MaxParallel > 8 {
+		return PipelinePolicy{}, errors.New("resource max_parallel must be between 1 and 8")
+	}
+	if err := validateParallelCommands(policy.Check, policy.Tests); err != nil {
+		return PipelinePolicy{}, err
 	}
 	if policy.Format.Mode == "" {
 		policy.Format.Mode = "check"
@@ -678,6 +691,130 @@ func parserStage(root, revision string, files []string) VerificationStage {
 	return stage
 }
 
+type commandStageRun struct {
+	stage VerificationStage
+	delta []ToolDelta
+	err   error
+}
+
+func commandStageFailure(revision, name, mode string, command CommandPolicy, err error) commandStageRun {
+	status := VerificationFailed
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		status = VerificationCancelled
+	}
+	return commandStageRun{
+		stage: VerificationStage{
+			Stage: name, Implementation: append([]string(nil), command.Command...), Mode: mode,
+			StartedRevision: revision, Exit: -1, Status: status,
+			Coverage: Coverage{Complete: false, Skipped: []string{"command_isolation_failed"}},
+		},
+		err: err,
+	}
+}
+
+func runIsolatedCommandBatch(ctx context.Context, root, revision, name, mode string, commands []CommandPolicy, policy PipelinePolicy) ([]commandStageRun, error) {
+	snapshot, err := captureTree(ctx, root, policy.Resource.MaxSnapshotBytes)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]commandStageRun, len(commands))
+	workers := policy.Resource.MaxParallel
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(commands) {
+		workers = len(commands)
+	}
+	jobs := make(chan int)
+	var wait sync.WaitGroup
+	run := func(index int) {
+		if err := ctx.Err(); err != nil {
+			results[index] = commandStageFailure(revision, name, mode, commands[index], err)
+			return
+		}
+		cloneRoot, cloneErr := os.MkdirTemp("", "huyang-verification-command-*")
+		if cloneErr != nil {
+			results[index] = commandStageFailure(revision, name, mode, commands[index], cloneErr)
+			return
+		}
+		defer os.RemoveAll(cloneRoot)
+		tree := filepath.Join(cloneRoot, "tree")
+		if cloneErr = os.Mkdir(tree, 0o700); cloneErr == nil {
+			cloneErr = restoreTree(tree, snapshot)
+		}
+		if cloneErr != nil {
+			results[index] = commandStageFailure(revision, name, mode, commands[index], cloneErr)
+			return
+		}
+		stage, delta, runErr := commandStage(ctx, tree, revision, name, mode, commands[index], policy, false)
+		results[index] = commandStageRun{stage: stage, delta: delta, err: runErr}
+	}
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := range jobs {
+				run(index)
+			}
+		}()
+	}
+	for index := range commands {
+		jobs <- index
+	}
+	close(jobs)
+	wait.Wait()
+	return results, nil
+}
+
+func validateParallelCommands(groups ...[]CommandPolicy) error {
+	for _, commands := range groups {
+		for index, command := range commands {
+			if command.Parallel && len(command.DeclaredWrites) > 0 {
+				name := command.Name
+				if name == "" {
+					name = fmt.Sprintf("command_%d", index+1)
+				}
+				return fmt.Errorf("parallel command %q cannot declare writes", name)
+			}
+		}
+	}
+	return nil
+}
+
+func runCommandPolicies(ctx context.Context, root, revision, name, mode string, commands []CommandPolicy, policy PipelinePolicy) ([]commandStageRun, error) {
+	if err := validateParallelCommands(commands); err != nil {
+		return nil, err
+	}
+	var results []commandStageRun
+	for index := 0; index < len(commands); {
+		if policy.Resource.MaxParallel <= 1 || !commands[index].Parallel {
+			stage, delta, err := commandStage(ctx, root, revision, name, mode, commands[index], policy, false)
+			results = append(results, commandStageRun{stage: stage, delta: delta, err: err})
+			if err != nil {
+				return results, err
+			}
+			index++
+			continue
+		}
+		end := index + 1
+		for end < len(commands) && commands[end].Parallel {
+			end++
+		}
+		batch, err := runIsolatedCommandBatch(ctx, root, revision, name, mode, commands[index:end], policy)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, batch...)
+		for _, run := range batch {
+			if run.err != nil {
+				return results, run.err
+			}
+		}
+		index = end
+	}
+	return results, nil
+}
+
 func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, prepared []PlanStageFile) (VerificationResult, error) {
 	if sandbox == nil {
 		return VerificationResult{}, errors.New("prepared sandbox is required")
@@ -748,13 +885,13 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 			if len(policy.Check) == 0 {
 				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})
 			}
-			for _, command := range policy.Check {
-				stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, name, "check", command, policy, false)
-				result.Stages = append(result.Stages, stage)
-				result.ToolDelta = append(result.ToolDelta, delta...)
-				if err != nil {
-					return result, err
-				}
+			runs, err := runCommandPolicies(ctx, sandbox.Tree, request.Revision, name, "check", policy.Check, policy)
+			for _, run := range runs {
+				result.Stages = append(result.Stages, run.stage)
+				result.ToolDelta = append(result.ToolDelta, run.delta...)
+			}
+			if err != nil {
+				return result, err
 			}
 		case "tests":
 			if request.TestScope == "affected" {
@@ -776,24 +913,32 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 			}
 			var history []TestHistoryEntry
 			result.FullTestGate = "full_tests_passed"
-			for index, command := range policy.Tests {
-				stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, name, "check", command, policy, false)
+			stageStart := len(result.Stages)
+			runs, runErr := runCommandPolicies(ctx, sandbox.Tree, request.Revision, name, "check", policy.Tests, policy)
+			failedIndex := -1
+			for index, run := range runs {
+				command := policy.Tests[index]
 				testName := command.Name
 				if testName == "" {
 					testName = fmt.Sprintf("test_%d", index+1)
 				}
-				stage.TestScope = "full"
-				stage.TestVerdict = "full_tests_passed"
-				stage.ExecutedTests = []string{testName}
-				result.Stages = append(result.Stages, stage)
-				result.ToolDelta = append(result.ToolDelta, delta...)
-				history = append(history, historyEntry(request.Revision, "full", testName, command.Variants, stage))
-				if err != nil {
-					result.FullTestGate = "full_tests_failed"
-					result.Stages[len(result.Stages)-1].TestVerdict = result.FullTestGate
-					_ = recordTestHistory(request.TestHistoryPath, history)
-					return result, err
+				run.stage.TestScope = "full"
+				run.stage.TestVerdict = "full_tests_passed"
+				run.stage.ExecutedTests = []string{testName}
+				result.Stages = append(result.Stages, run.stage)
+				result.ToolDelta = append(result.ToolDelta, run.delta...)
+				history = append(history, historyEntry(request.Revision, "full", testName, command.Variants, run.stage))
+				if failedIndex < 0 && run.err != nil {
+					failedIndex = index
 				}
+			}
+			if runErr != nil {
+				result.FullTestGate = "full_tests_failed"
+				if failedIndex >= 0 {
+					result.Stages[stageStart+failedIndex].TestVerdict = result.FullTestGate
+				}
+				_ = recordTestHistory(request.TestHistoryPath, history)
+				return result, runErr
 			}
 			if err := recordTestHistory(request.TestHistoryPath, history); err != nil {
 				return result, err

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,8 +106,27 @@ func TestJournaledCommitCreatesReplacesMovesDeletesModesAndSymlinks(t *testing.T
 	if committed.State != PlanCommitted || committed.Preparation == nil || !committed.Preparation.CanonicalChanged {
 		t.Fatalf("commit = %#v", committed)
 	}
-	if committed.Preparation.CanonicalRevision == "" || committed.Preparation.JournalID != committed.PlanID {
+	if committed.Preparation.CanonicalRevision == "" ||
+		committed.Preparation.CanonicalFromRevision != fmt.Sprintf("wsrev_%d", startSeq) ||
+		committed.Preparation.JournalID != committed.PlanID {
 		t.Fatalf("commit metadata = %#v", committed.Preparation)
+	}
+	if len(committed.Preparation.CommittedDiffs) != 7 {
+		t.Fatalf("committed diffs = %d, want 7: %#v", len(committed.Preparation.CommittedDiffs), committed.Preparation.CommittedDiffs)
+	}
+	foundScript := false
+	for _, diff := range committed.Preparation.CommittedDiffs {
+		if diff.Path != "script.sh" {
+			continue
+		}
+		foundScript = true
+		if !bytes.Equal(diff.Before, []byte("#!/bin/sh\necho old\n")) ||
+			!bytes.Equal(diff.After, []byte("#!/bin/sh\necho new\n")) || diff.Patch == "" {
+			t.Fatalf("script committed diff = %#v", diff)
+		}
+	}
+	if !foundScript {
+		t.Fatal("script committed diff was not recorded")
 	}
 	if ws.Identity().StateSeq != startSeq+1 || stager.commits != 1 {
 		t.Fatalf("state/provider resync = seq %d commits %d", ws.Identity().StateSeq, stager.commits)

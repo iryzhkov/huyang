@@ -431,6 +431,20 @@ func resolveImpactTarget(from, imported string, sources map[string]impactSource)
 	if strings.HasPrefix(imported, ".") {
 		clean := filepath.ToSlash(filepath.Clean(filepath.Join(base, imported)))
 		candidates = append(candidates, clean, clean+".ts", clean+".tsx", clean+".js", clean+".py", clean+".lua", clean+"/index.ts", clean+"/index.js")
+		switch strings.ToLower(filepath.Ext(clean)) {
+		case ".js":
+			stem := strings.TrimSuffix(clean, filepath.Ext(clean))
+			candidates = append(candidates, stem+".ts", stem+".tsx")
+		case ".jsx":
+			stem := strings.TrimSuffix(clean, filepath.Ext(clean))
+			candidates = append(candidates, stem+".tsx", stem+".ts")
+		case ".mjs":
+			stem := strings.TrimSuffix(clean, filepath.Ext(clean))
+			candidates = append(candidates, stem+".mts")
+		case ".cjs":
+			stem := strings.TrimSuffix(clean, filepath.Ext(clean))
+			candidates = append(candidates, stem+".cts")
+		}
 	} else {
 		module := strings.ReplaceAll(imported, ".", "/")
 		candidates = append(candidates, module+".py", module+".lua", module+"/__init__.py", imported+".go")

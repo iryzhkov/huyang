@@ -486,11 +486,24 @@ func (w *Workspace) CommitPlan(ctx context.Context, planID string, expected uint
 	if err := stager.Commit(ctx, planID); err != nil {
 		return w.markCommitRecovery(plan, journalPath, &journal, fmt.Errorf("provider resync: %w", err))
 	}
+	canonicalFromRevision := fmt.Sprintf("wsrev_%d", w.Identity().StateSeq)
 	identity := w.recordCanonicalCommit()
 	preparation := *plan.Preparation
+	preparation.CanonicalFromRevision = canonicalFromRevision
 	preparation.CanonicalChanged = true
 	preparation.CanonicalRevision = fmt.Sprintf("wsrev_%d", identity.StateSeq)
 	preparation.JournalID = planID
+	preparation.CommittedDiffs = make([]ExactDiff, 0, len(request.Files))
+	for _, file := range request.Files {
+		before, after := file.Before, file.After
+		if !file.BeforeExists {
+			before = nil
+		}
+		if !file.AfterExists {
+			after = nil
+		}
+		preparation.CommittedDiffs = append(preparation.CommittedDiffs, exactDiff(file.Path, before, after, 0, len(before), after))
+	}
 	result, err := w.transitionPlan(planID, expected, PlanCommitted, "commit", "ok", &preparation)
 	if err != nil {
 		return w.markCommitRecovery(plan, journalPath, &journal, err)

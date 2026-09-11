@@ -1,7 +1,9 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -452,5 +454,102 @@ func TestCanonicalChangedPathsUsesLatestPlanReceipt(t *testing.T) {
 	want := []string{"pkg/a.py", "tests/test_a.py"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("changed paths = %#v, want %#v", got, want)
+	}
+}
+
+type probeFailedPrepareStager struct {
+	rollbacks int
+}
+
+func (s *probeFailedPrepareStager) Epoch() uint64 { return 1 }
+
+func (s *probeFailedPrepareStager) Stage(context.Context, workspacecore.PlanStageRequest) error {
+	return errors.New("python probe prepare failed")
+}
+
+func (s *probeFailedPrepareStager) Commit(context.Context, string) error { return nil }
+
+func (s *probeFailedPrepareStager) Rollback(context.Context, string) error {
+	s.rollbacks++
+	return nil
+}
+
+func TestRevisionDiffIncludesCommittedPlanReceipt(t *testing.T) {
+	direct, workspaceID, _ := openProbeProject(t, map[string]string{"sample.py": "value = 1\n"})
+	applied := applyLiteralProbeEdit(t, direct, workspaceID, "1", "2", "plan-receipt-source")
+	if applied["outcome"] != "ok" && applied["outcome"] != "provisional" {
+		t.Fatalf("seed edit failed: %#v", applied)
+	}
+
+	direct.replayMu.Lock()
+	for key := range direct.replays {
+		if strings.HasPrefix(key, workspaceID+"\x00edit_apply\x00") {
+			delete(direct.replays, key)
+		}
+	}
+	direct.replays[workspaceID+"\x00change_plan\x00python-plan-apply"] = &directReplay{
+		complete: true,
+		result: map[string]any{"data": map[string]any{
+			"canonical_changed": true,
+			"from_revision":     "wsrev_1",
+			"revision":          "wsrev_2",
+			"plan": workspacecore.PlanRecord{Preparation: &workspacecore.PlanPreparation{
+				CommittedDiffs: []workspacecore.ExactDiff{
+					{Path: "sample.py", BeforeSHA256: "before-sample", AfterSHA256: "after-sample"},
+					{Path: "other.py", BeforeSHA256: "before-other", AfterSHA256: "after-other"},
+				},
+			}},
+		}},
+	}
+	direct.replayMu.Unlock()
+
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	result := direct.revisionDiff("req_plan_receipt", workspace, map[string]any{
+		"from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
+	})
+	if result["outcome"] != "ok" {
+		t.Fatalf("revision diff outcome = %#v", result)
+	}
+	diffs := result["data"].(map[string]any)["diffs"].([]any)
+	if len(diffs) != 2 {
+		t.Fatalf("revision diff returned %d plan diffs: %#v", len(diffs), result)
+	}
+}
+
+func TestDiscardFailedPrepareWithoutRemainingSandbox(t *testing.T) {
+	direct, workspaceID, _ := openProbeProject(t, map[string]string{"sample.py": "value = 1\n"})
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	target, err := workspace.NewRange("sample.py", 8, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := workspace.CreatePlan([]workspacecore.PlanOperation{{
+		OpID: "replace-value", Kind: workspacecore.OperationReplaceRange,
+		Target: &workspacecore.PlanTarget{FileRange: &target}, Content: "2",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stager := &probeFailedPrepareStager{}
+	if _, err := workspace.PreparePlan(context.Background(), plan.PlanID, plan.PlanRevision, stager); err == nil {
+		t.Fatal("prepare unexpectedly succeeded")
+	}
+	if stager.rollbacks != 1 {
+		t.Fatalf("prepare rollback count = %d, want 1", stager.rollbacks)
+	}
+
+	failed, err := workspace.InspectPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := direct.changePlan(context.Background(), "req_discard_failed_prepare", workspace, map[string]any{
+		"action": "discard", "plan_id": plan.PlanID, "plan_revision": float64(failed.PlanRevision),
+	})
+	if result["outcome"] != "ok" {
+		t.Fatalf("discard failed after prepare cleanup: %#v", result)
+	}
+	transaction := result["transaction"].(map[string]any)
+	if transaction["state"] != workspacecore.PlanDiscarded {
+		t.Fatalf("discard state = %#v, want %s", transaction["state"], workspacecore.PlanDiscarded)
 	}
 }

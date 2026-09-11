@@ -166,6 +166,63 @@ func callModern(t *testing.T, session *mcp.ClientSession, name string, arguments
 	return structuredMap(t, result)
 }
 
+func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	direct := newDirectWorkspaces(t.TempDir())
+	direct.toolTimeout = 20 * time.Millisecond
+	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
+	identity, ok := opened["workspace"].(workspacecore.Identity)
+	if !ok {
+		t.Fatalf("workspace identity = %#v", opened["workspace"])
+	}
+	limits := opened["data"].(map[string]any)["service_limits"].(map[string]any)
+	if got := limits["tool_call_timeout_ms"]; got != int64(20) {
+		t.Fatalf("advertised timeout = %#v, want 20", got)
+	}
+
+	release, err := direct.scheduler.acquire(context.Background(), string(identity.ID), scheduleCanonicalWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := map[string]any{
+		"workspace_id": string(identity.ID), "idempotency_key": "timeout-retry",
+		"operation": map[string]any{"kind": "replace_range"},
+	}
+	started := time.Now()
+	result := direct.call(context.Background(), "edit_apply", arguments)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("timed call returned after %s", elapsed)
+	}
+	if got := result["code"]; got != "request_timeout" {
+		t.Fatalf("timeout code = %#v, want request_timeout: %#v", got, result)
+	}
+	if got := result["idempotency_persisted"]; got != false {
+		t.Fatalf("timeout receipt persisted = %#v, want false", got)
+	}
+	release()
+
+	retry := direct.call(context.Background(), "edit_apply", arguments)
+	if retry["idempotency"] == "replayed" || retry["code"] == "request_timeout" {
+		t.Fatalf("same-key retry replayed timeout: %#v", retry)
+	}
+
+	release, err = direct.scheduler.acquire(context.Background(), string(identity.ID), scheduleCanonicalWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments["idempotency_key"] = "caller-deadline"
+	callerCtx, callerCancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	callerDeadline := direct.call(callerCtx, "edit_apply", arguments)
+	callerCancel()
+	release()
+	if got := callerDeadline["code"]; got == "request_timeout" {
+		t.Fatalf("caller deadline reported as global timeout: %#v", callerDeadline)
+	}
+}
+
 func assertModernOutputValid(t *testing.T, value map[string]any) {
 	t.Helper()
 	encoded, err := json.Marshal(value)

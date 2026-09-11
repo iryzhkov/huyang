@@ -103,6 +103,22 @@ func TestDiagnosticBarrierPermutationsNeverCallIncompleteEvidenceClean(t *testin
 	}
 }
 
+func TestUnavailableEvidenceUsesExplicitReasonForKnownAndUnknownKinds(t *testing.T) {
+	for _, kind := range []DiagnosticEvidenceKind{EvidenceUnavailable, DiagnosticEvidenceKind("future_evidence")} {
+		confidence, reasons := confidenceFor(DiagnosticBatch{Kind: kind, Selected: true, Reason: "lsp_not_configured"})
+		if confidence != ConfidenceUnavailable {
+			t.Fatalf("kind %q confidence=%s", kind, confidence)
+		}
+		if len(reasons) != 1 || reasons[0] != "lsp_not_configured" {
+			t.Fatalf("kind %q reasons=%v", kind, reasons)
+		}
+	}
+	_, reasons := confidenceFor(DiagnosticBatch{Kind: EvidenceUnavailable, Selected: true})
+	if len(reasons) != 1 || reasons[0] != "unsupported_diagnostic_evidence" {
+		t.Fatalf("empty reason fallback=%v", reasons)
+	}
+}
+
 func TestDiagnosticInboxPersistsAcknowledgementAndEvidence(t *testing.T) {
 	workspace, state := evidenceWorkspace(t)
 	id := workspace.Identity().ID
