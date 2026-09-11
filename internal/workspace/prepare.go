@@ -283,11 +283,14 @@ func (w *Workspace) transitionPlanWithConflict(planID string, expected uint64, s
 	if !canTransition(previous.State, state) {
 		return PlanRecord{}, illegalTransition(planID, previous.State, state)
 	}
+	if previous.Compacted && !planTerminal(state) {
+		return PlanRecord{}, Codedf(CodePlanStateInvalid, "plan %s was compacted by retention; create a new plan", planID)
+	}
 	plan := clonePlan(previous)
 	plan.State, plan.Preparation, plan.Conflict = state, preparation, conflict
 	recordPlanEvent(&plan, action, outcome)
 	w.plans[planID] = plan
-	if err := w.persistPlansLocked(); err != nil {
+	if err := w.finishPlanLocked(planID); err != nil {
 		w.plans[planID] = previous
 		return PlanRecord{}, err
 	}

@@ -150,35 +150,10 @@ func (w *Workspace) writeCommitJournal(path string, journal *CommitJournal) erro
 		return fmt.Errorf("encode commit journal: %w", err)
 	}
 	content = append(content, '\n')
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(directory, ".journal-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	defer os.Remove(name)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDirectory(directory)
+	return atomicWriteFile(path, content, 0o600)
 }
 
 func (w *Workspace) loadCommitJournal(planID string) (CommitJournal, error) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,7 +15,10 @@ import (
 	"time"
 )
 
-const planStateVersion = 1
+const (
+	planStateVersion  = 1
+	planRecordVersion = 2
+)
 
 type OperationKind string
 
@@ -169,9 +173,11 @@ type PlanRecord struct {
 	Conflict     *PlanConflictReason `json:"conflict,omitempty"`
 	Events       []PlanEvent         `json:"events"`
 	// DroppedEvents counts events removed from the middle of Events by retention.
-	DroppedEvents int       `json:"dropped_events,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	DroppedEvents int `json:"dropped_events,omitempty"`
+	// Compacted marks a terminal plan whose bulky payloads retention has stripped.
+	Compacted bool      `json:"compacted,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type PlanEvent struct {
@@ -196,116 +202,301 @@ func recordPlanEvent(plan *PlanRecord, action string, outcome string) {
 	}
 }
 
+// Plan records are stored one file per plan under <stateDir>/plans/<workspace id>/<plan id>.json
+// (planRecordVersion 2) so a mutation rewrites and syncs only the record that changed. The
+// previous layout, one monolithic <stateDir>/plans/<workspace id>.json holding every record
+// (planStateVersion 1), is still read on open: its records are pruned, written out as
+// per-plan files and the legacy file is then removed.
 type persistedPlans struct {
 	Version int          `json:"version"`
 	Plans   []PlanRecord `json:"plans"`
 }
 
-func (w *Workspace) planStatePath() string {
+type persistedPlan struct {
+	Version int        `json:"version"`
+	Plan    PlanRecord `json:"plan"`
+}
+
+// Terminal plan retention. A plan in a terminal state is kept for planRetainAge, and only
+// the newest planRetainCount terminal plans are kept at all; the rest are dropped on open
+// and after every terminal transition. A plan whose commit journal is still prepared,
+// applying or recovery-required is never dropped, because that journal is what recovery
+// reconciles against. Terminal plans older than planCompactAge lose their bulky payloads
+// (operation contents and targets, preview, verification evidence, committed diffs) but keep
+// their identity, state, revisions, canonical receipt and conflict reason.
+const (
+	planRetainCount = 200
+	planRetainAge   = 30 * 24 * time.Hour
+	planCompactAge  = time.Hour
+)
+
+func planTerminal(state PlanState) bool {
+	switch state {
+	case PlanCommitted, PlanRolledBack, PlanDiscarded, PlanExpired, PlanFailed, PlanConflicted:
+		return true
+	}
+	return false
+}
+
+// legacyPlanStatePath is the monolithic version 1 file read for migration only.
+func (w *Workspace) legacyPlanStatePath() string {
 	if w.stateDir == "" {
 		return ""
 	}
 	return filepath.Join(w.stateDir, "plans", string(w.Identity().ID)+".json")
 }
 
+func (w *Workspace) planStateDir() string {
+	if w.stateDir == "" {
+		return ""
+	}
+	return filepath.Join(w.stateDir, "plans", string(w.Identity().ID))
+}
+
+func (w *Workspace) planRecordPath(planID string) string {
+	directory := w.planStateDir()
+	if directory == "" {
+		return ""
+	}
+	return filepath.Join(directory, planID+".json")
+}
+
 func (w *Workspace) loadPlans() error {
-	path := w.planStatePath()
-	if path == "" {
+	if w.stateDir == "" {
 		return nil
-	}
-	content, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read plans: %w", err)
-	}
-	var state persistedPlans
-	if err := json.Unmarshal(content, &state); err != nil {
-		return fmt.Errorf("decode plans: %w", err)
-	}
-	if state.Version != planStateVersion {
-		return fmt.Errorf("unsupported plan state version %d", state.Version)
 	}
 	w.plansMu.Lock()
 	defer w.plansMu.Unlock()
-	recovered := false
-	for i := range state.Plans {
-		plan := clonePlan(state.Plans[i])
-		if plan.WorkspaceID != w.Identity().ID {
-			return fmt.Errorf("plan %s belongs to workspace %s", plan.PlanID, plan.WorkspaceID)
-		}
+	legacy, err := w.loadLegacyPlans()
+	if err != nil {
+		return err
+	}
+	changed := make(map[string]bool, len(legacy))
+	for _, plan := range legacy {
+		w.plans[plan.PlanID] = plan
+		changed[plan.PlanID] = true
+	}
+	if err := w.loadPlanRecords(); err != nil {
+		return err
+	}
+	for id, plan := range w.plans {
+		plan = clonePlan(plan)
 		switch plan.State {
 		case PlanReady, PlanProvisional:
 			plan.State = PlanFailed
 			recordPlanEvent(&plan, "provider_restart_restore", "provider_buffers_discarded_reprepare_available")
-			recovered = true
 		case PlanPreparing, PlanRollingBack:
 			plan.State = PlanFailed
 			plan.Preparation = nil
 			recordPlanEvent(&plan, "provider_restart_restore", "incomplete_provider_operation_discarded")
-			recovered = true
 		case PlanCommitting:
 			plan.State = PlanRecoveryRequired
 			recordPlanEvent(&plan, "commit_restart_detected", "recovery_required")
-			recovered = true
+		default:
+			continue
 		}
-		w.plans[plan.PlanID] = plan
+		w.plans[id] = plan
+		changed[id] = true
 	}
-	if recovered {
-		return w.persistPlansLocked()
+	dropped, compacted, err := w.pruneTerminalPlansLocked(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if len(legacy) > 0 || dropped > 0 || compacted > 0 {
+		log.Printf("huyang: workspace %s plan store: migrated %d legacy records, dropped %d terminal plans, compacted %d",
+			w.Identity().ID, len(legacy), dropped, compacted)
+	}
+	ids := make([]string, 0, len(changed))
+	for id := range changed {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := w.persistPlanLocked(id); err != nil {
+			return err
+		}
+	}
+	if len(legacy) > 0 {
+		if err := os.Remove(w.legacyPlanStatePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove migrated plan file: %w", err)
+		}
 	}
 	return nil
 }
 
-func (w *Workspace) persistPlansLocked() error {
-	path := w.planStatePath()
+func (w *Workspace) loadLegacyPlans() ([]PlanRecord, error) {
+	content, err := os.ReadFile(w.legacyPlanStatePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read plans: %w", err)
+	}
+	var state persistedPlans
+	if err := json.Unmarshal(content, &state); err != nil {
+		return nil, fmt.Errorf("decode plans: %w", err)
+	}
+	if state.Version != planStateVersion {
+		return nil, fmt.Errorf("unsupported plan state version %d", state.Version)
+	}
+	for _, plan := range state.Plans {
+		if plan.WorkspaceID != w.Identity().ID {
+			return nil, fmt.Errorf("plan %s belongs to workspace %s", plan.PlanID, plan.WorkspaceID)
+		}
+	}
+	return state.Plans, nil
+}
+
+func (w *Workspace) loadPlanRecords() error {
+	entries, err := os.ReadDir(w.planStateDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read plan records: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(w.planStateDir(), entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read plan record %s: %w", entry.Name(), err)
+		}
+		var record persistedPlan
+		if err := json.Unmarshal(content, &record); err != nil {
+			return fmt.Errorf("decode plan record %s: %w", entry.Name(), err)
+		}
+		if record.Version != planRecordVersion {
+			return fmt.Errorf("unsupported plan record version %d in %s", record.Version, entry.Name())
+		}
+		if record.Plan.WorkspaceID != w.Identity().ID {
+			return fmt.Errorf("plan %s belongs to workspace %s", record.Plan.PlanID, record.Plan.WorkspaceID)
+		}
+		if record.Plan.PlanID+".json" != entry.Name() {
+			return fmt.Errorf("plan record %s holds plan %s", entry.Name(), record.Plan.PlanID)
+		}
+		w.plans[record.Plan.PlanID] = record.Plan
+	}
+	return nil
+}
+
+// persistPlanLocked writes the durable record of one plan, or removes the record when the
+// plan no longer exists in memory. The caller holds plansMu.
+func (w *Workspace) persistPlanLocked(planID string) error {
+	path := w.planRecordPath(planID)
 	if path == "" {
 		return nil
 	}
-	plans := make([]PlanRecord, 0, len(w.plans))
-	for _, plan := range w.plans {
-		plans = append(plans, clonePlan(plan))
+	plan, ok := w.plans[planID]
+	if !ok {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
 	}
-	sort.Slice(plans, func(i, j int) bool { return plans[i].PlanID < plans[j].PlanID })
-	content, err := json.MarshalIndent(persistedPlans{Version: planStateVersion, Plans: plans}, "", "  ")
+	content, err := json.MarshalIndent(persistedPlan{Version: planRecordVersion, Plan: plan}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode plans: %w", err)
+		return fmt.Errorf("encode plan %s: %w", planID, err)
 	}
 	content = append(content, '\n')
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".plans-*.tmp")
+	return atomicWriteFile(path, content, 0o600)
+}
+
+// journalRetainsPlan reports whether the plan's commit journal is still incomplete, in
+// which case the plan record must outlive retention so startup recovery can reconcile it.
+func (w *Workspace) journalRetainsPlan(planID string) bool {
+	journal, err := w.loadCommitJournal(planID)
 	if err != nil {
+		return false
+	}
+	return journal.State != CommitJournalCommitted && journal.State != CommitJournalRolledBack
+}
+
+// pruneTerminalPlansLocked applies terminal plan retention and compaction. It returns the
+// number of plans dropped and compacted; every change is persisted immediately. The caller
+// holds plansMu.
+func (w *Workspace) pruneTerminalPlansLocked(now time.Time) (dropped, compacted int, err error) {
+	if w.stateDir == "" {
+		return 0, 0, nil
+	}
+	terminal := make([]PlanRecord, 0, len(w.plans))
+	for _, plan := range w.plans {
+		if planTerminal(plan.State) {
+			terminal = append(terminal, plan)
+		}
+	}
+	sort.Slice(terminal, func(i, j int) bool {
+		if !terminal[i].UpdatedAt.Equal(terminal[j].UpdatedAt) {
+			return terminal[i].UpdatedAt.After(terminal[j].UpdatedAt)
+		}
+		return terminal[i].PlanID < terminal[j].PlanID
+	})
+	kept := 0
+	for _, plan := range terminal {
+		expired := now.Sub(plan.UpdatedAt) > planRetainAge
+		if (kept >= planRetainCount || expired) && !w.journalRetainsPlan(plan.PlanID) {
+			delete(w.plans, plan.PlanID)
+			if err := w.persistPlanLocked(plan.PlanID); err != nil {
+				return dropped, compacted, err
+			}
+			dropped++
+			continue
+		}
+		kept++
+		if !plan.Compacted && now.Sub(plan.UpdatedAt) > planCompactAge {
+			plan = compactPlan(plan)
+			w.plans[plan.PlanID] = plan
+			if err := w.persistPlanLocked(plan.PlanID); err != nil {
+				return dropped, compacted, err
+			}
+			compacted++
+		}
+	}
+	return dropped, compacted, nil
+}
+
+// compactPlan strips the payloads a terminal plan no longer needs. What remains identifies
+// the plan, its state and revisions, its canonical receipt and its conflict reason.
+func compactPlan(plan PlanRecord) PlanRecord {
+	plan = clonePlan(plan)
+	for i := range plan.Operations {
+		operation := &plan.Operations[i]
+		operation.Content = ""
+		operation.Target = nil
+		operation.DependsOn = nil
+	}
+	plan.Preview = nil
+	if plan.Preparation != nil {
+		slim := PlanPreparation{
+			PreparedRevision: plan.Preparation.PreparedRevision, ProviderEpoch: plan.Preparation.ProviderEpoch,
+			AffectedFiles: plan.Preparation.AffectedFiles, CanonicalChanged: plan.Preparation.CanonicalChanged,
+			CanonicalRevision: plan.Preparation.CanonicalRevision, JournalID: plan.Preparation.JournalID,
+			Diagnostics: plan.Preparation.Diagnostics, DiskChecks: plan.Preparation.DiskChecks,
+			BaseRevision: plan.Preparation.BaseRevision, CanonicalFromRevision: plan.Preparation.CanonicalFromRevision,
+			ProvisionalAccepted: plan.Preparation.ProvisionalAccepted,
+		}
+		plan.Preparation = &slim
+	}
+	plan.Compacted = true
+	return plan
+}
+
+// finishPlanLocked persists a plan after a state change and, when the plan reached a
+// terminal state, applies retention across the store. The caller holds plansMu.
+func (w *Workspace) finishPlanLocked(planID string) error {
+	if err := w.persistPlanLocked(planID); err != nil {
 		return err
 	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return err
+	if plan, ok := w.plans[planID]; ok && planTerminal(plan.State) {
+		if _, _, err := w.pruneTerminalPlansLocked(time.Now().UTC()); err != nil {
+			return err
+		}
 	}
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempName, path); err != nil {
-		return err
-	}
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return nil
 }
 
 func newPlanID() (string, error) {
@@ -334,7 +525,7 @@ func (w *Workspace) CreatePlan(operations []PlanOperation) (PlanRecord, error) {
 	w.plansMu.Lock()
 	defer w.plansMu.Unlock()
 	w.plans[id] = plan
-	if err := w.persistPlansLocked(); err != nil {
+	if err := w.persistPlanLocked(id); err != nil {
 		delete(w.plans, id)
 		return PlanRecord{}, err
 	}
@@ -372,6 +563,9 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	// conflict reason.
 	if !canTransition(plan.State, PlanOpen) {
 		return PlanRecord{}, illegalTransition(planID, plan.State, PlanOpen)
+	}
+	if plan.Compacted {
+		return PlanRecord{}, Codedf(CodePlanStateInvalid, "plan %s was compacted by retention; create a new plan", planID)
 	}
 	if expected == 0 || plan.PlanRevision != expected {
 		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
@@ -441,7 +635,7 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	plan.Conflict = nil
 	recordPlanEvent(&plan, "edit", "ok")
 	w.plans[planID] = plan
-	if err := w.persistPlansLocked(); err != nil {
+	if err := w.persistPlanLocked(planID); err != nil {
 		return PlanRecord{}, err
 	}
 	return clonePlan(plan), nil
@@ -467,7 +661,7 @@ func (w *Workspace) DiscardPlan(planID string, expected uint64) (PlanRecord, err
 	plan.State = PlanDiscarded
 	recordPlanEvent(&plan, "discard", "ok")
 	w.plans[planID] = plan
-	if err := w.persistPlansLocked(); err != nil {
+	if err := w.finishPlanLocked(planID); err != nil {
 		return PlanRecord{}, err
 	}
 	return clonePlan(plan), nil
@@ -498,7 +692,7 @@ func (w *Workspace) PreviewPlan(planID string, expected uint64) (PlanRecord, err
 	current.State = PlanPreviewed
 	recordPlanEvent(&current, "preview", preview.Outcome)
 	w.plans[planID] = current
-	if err := w.persistPlansLocked(); err != nil {
+	if err := w.persistPlanLocked(planID); err != nil {
 		return PlanRecord{}, err
 	}
 	return clonePlan(current), nil

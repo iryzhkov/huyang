@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -209,8 +210,185 @@ func TestMutationDetectsDeleteAndRecreate(t *testing.T) {
 	if got := conflictCode(t, err); got != ConflictDocumentChanged {
 		t.Fatalf("recreate: got %s", got)
 	}
-	if recreated.Revision == initial.Revision {
-		t.Fatal("delete/recreate rebound the original revision")
+	// The revision derives from content: recreating identical bytes yields
+	// the original token again even though the inode changed.
+	if recreated.Revision != initial.Revision {
+		t.Fatalf("delete/recreate of identical content changed the revision: %s vs %s", recreated.Revision, initial.Revision)
+	}
+	if recreated.Disk.Inode == initial.Disk.Inode && recreated.Disk.Device == initial.Disk.Device {
+		t.Fatal("recreated file was expected to carry a new disk identity")
+	}
+	if _, err := ws.ValidateMutation(ws.Identity().ID, path, initial.Revision, ProviderLayer{}); err != nil {
+		t.Fatalf("original revision no longer validates against identical content: %v", err)
+	}
+}
+
+func TestMetadataOnlyChangesKeepRevisionAndHandles(t *testing.T) {
+	ws, root := testWorkspace(t)
+	path := filepath.Join(root, "stable.txt")
+	writeFile(t, path, "stable content\n")
+	initial, err := ws.Snapshot(path, ProviderLayer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := ws.NewRange(path, 0, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := ws.RegisterRangeHandle(handle, HandleRange, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A touch moves the mtime without changing bytes.
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	touched, err := ws.ValidateMutation(ws.Identity().ID, path, initial.Revision, ProviderLayer{})
+	if err != nil {
+		t.Fatalf("touch invalidated the revision: %v", err)
+	}
+	if touched.Revision != initial.Revision || touched.Disk.MTimeNS == initial.Disk.MTimeNS {
+		t.Fatalf("touch: revision=%s initial=%s mtime=%d", touched.Revision, initial.Revision, touched.Disk.MTimeNS)
+	}
+	if touched.Workspace.StateSeq != initial.Workspace.StateSeq {
+		t.Fatalf("touch advanced the state sequence from %d to %d", initial.Workspace.StateSeq, touched.Workspace.StateSeq)
+	}
+
+	// An editor atomic save replaces the inode with identical bytes.
+	replacement := filepath.Join(root, ".stable.txt.swp")
+	writeFile(t, replacement, "stable content\n")
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := ws.ValidateMutation(ws.Identity().ID, path, initial.Revision, ProviderLayer{})
+	if err != nil {
+		t.Fatalf("atomic save of identical bytes invalidated the revision: %v", err)
+	}
+	if saved.Revision != initial.Revision {
+		t.Fatalf("atomic save changed the revision: %s vs %s", saved.Revision, initial.Revision)
+	}
+	resolution, err := ws.ResolveHandle(record.Handle)
+	if err != nil || resolution.Status != ResolutionExact {
+		t.Fatalf("range handle after metadata-only change = %+v, %v", resolution, err)
+	}
+
+	// A permission change is a real change of the object and must conflict.
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ws.ValidateMutation(ws.Identity().ID, path, initial.Revision, ProviderLayer{})
+	if got := conflictCode(t, err); got != ConflictDocumentChanged {
+		t.Fatalf("mode change: got %s", got)
+	}
+}
+
+func TestConfinementRefusesSymlinkedParentsThatLeaveTheRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs additional privileges on Windows")
+	}
+	ws, root := testWorkspace(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "real", "kept.go"), "package real\n")
+
+	escaped := filepath.Join(root, "linkdir", "x.go")
+	if _, err := ws.Snapshot(escaped, ProviderLayer{}); err == nil {
+		t.Fatal("snapshot through an escaping symlinked directory was accepted")
+	}
+	if _, err := ws.Read("linkdir/x.go"); err == nil {
+		t.Fatal("read through an escaping symlinked directory was accepted")
+	}
+	writeFile(t, filepath.Join(outside, "x.go"), "package outside\n")
+	_, _, err := ws.ApplyFile(ws.Identity().ID, "linkdir/x.go", RevisionID("docrev_any"), FileReplace, []byte("package hacked\n"))
+	if err == nil {
+		t.Fatal("write through an escaping symlinked directory was accepted")
+	}
+	content, readErr := os.ReadFile(filepath.Join(outside, "x.go"))
+	if readErr != nil || string(content) != "package outside\n" {
+		t.Fatalf("file outside the root was modified: %q, %v", content, readErr)
+	}
+
+	// A symlinked directory that stays inside the root is fine, and the
+	// final element may itself be a symlink because it is observed, not
+	// followed.
+	if _, err := ws.Read("alias/kept.go"); err != nil {
+		t.Fatalf("in-root symlinked directory refused: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "x.go"), filepath.Join(root, "leaf")); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := ws.Snapshot("leaf", ProviderLayer{})
+	if err != nil || leaf.Disk.Kind != ObjectSymlink {
+		t.Fatalf("leaf symlink snapshot = %+v, %v", leaf, err)
+	}
+	if _, _, err := ws.ApplyFile(ws.Identity().ID, "leaf", leaf.Revision, FileReplace, []byte("x")); err == nil {
+		t.Fatal("replace through a leaf symlink was accepted")
+	}
+}
+
+func TestUnknownRevisionIsReportedAsEpochConflictNotContentChange(t *testing.T) {
+	ws, root := testWorkspace(t)
+	path := filepath.Join(root, "known.txt")
+	writeFile(t, path, "one")
+	if _, err := ws.Snapshot(path, ProviderLayer{}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := RevisionID("docrev_0000000000000000000000000000000000000000000000000000000000000000")
+	_, err := ws.ValidateMutation(ws.Identity().ID, path, foreign, ProviderLayer{})
+	if got := conflictCode(t, err); got != ConflictWorkspaceEpoch {
+		t.Fatalf("unknown revision: got %s", got)
+	}
+	var conflict *Conflict
+	if !errors.As(err, &conflict) || conflict.Detail == "" {
+		t.Fatalf("unknown revision conflict lacks detail: %v", err)
+	}
+
+	// A revision this instance issued and still retains is a content change.
+	writeFile(t, path, "two")
+	second, err := ws.Refresh(path, ProviderLayer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "three")
+	_, err = ws.ValidateMutation(ws.Identity().ID, path, second.Revision, ProviderLayer{})
+	if got := conflictCode(t, err); got != ConflictDocumentChanged {
+		t.Fatalf("retained revision: got %s", got)
+	}
+}
+
+func TestRevisionHistoryIsBoundedPerDocument(t *testing.T) {
+	ws, root := testWorkspace(t)
+	path := filepath.Join(root, "churn.txt")
+	var first DocumentSnapshot
+	for index := 0; index < maxRevisionsPerDocument*2; index++ {
+		writeFile(t, path, fmt.Sprintf("content %d\n", index))
+		snapshot, err := ws.Refresh(path, ProviderLayer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if index == 0 {
+			first = snapshot
+		}
+	}
+	if got := ws.RevisionHistoryLength(path); got != maxRevisionsPerDocument {
+		t.Fatalf("retained revisions = %d, want %d", got, maxRevisionsPerDocument)
+	}
+	ws.mu.Lock()
+	total := len(ws.revisions)
+	_, retained := ws.revisions[first.Revision]
+	ws.mu.Unlock()
+	if total != maxRevisionsPerDocument || retained {
+		t.Fatalf("revision map holds %d entries, first retained=%v", total, retained)
 	}
 }
 

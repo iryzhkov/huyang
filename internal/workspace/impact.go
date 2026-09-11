@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -263,7 +264,7 @@ func SelectAffectedTests(graph ImpactGraph, tests []CommandPolicy, history []Tes
 		}
 		name := test.Name
 		if name == "" {
-			name = "test_" + strconvItoa(index+1)
+			name = "test_" + strconv.Itoa(index+1)
 		}
 		selected = append(selected, SelectedTest{Name: name, Command: append([]string(nil), test.Command...), Reasons: uniqueSorted(reasons), Variants: append([]string(nil), test.Variants...)})
 	}
@@ -365,11 +366,7 @@ func recordTestHistory(path string, entries []TestHistoryEntry) error {
 	if err != nil {
 		return err
 	}
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, append(content, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temporary, path)
+	return atomicWriteFile(path, append(content, '\n'), 0o600)
 }
 
 func historyEntry(revision, scope, name string, variants []string, stage VerificationStage) TestHistoryEntry {
@@ -576,12 +573,4 @@ func containsString(values []string, value string) bool {
 		}
 	}
 	return false
-}
-
-func strconvItoa(value int) string {
-	const digits = "0123456789"
-	if value < 10 {
-		return string(digits[value])
-	}
-	return "test"
 }
