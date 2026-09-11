@@ -162,13 +162,21 @@ func (w *Workspace) loadPlans() error {
 			return fmt.Errorf("plan %s belongs to workspace %s", plan.PlanID, plan.WorkspaceID)
 		}
 		switch plan.State {
-		case PlanPreparing, PlanReady, PlanProvisional, PlanRollingBack:
+		case PlanReady, PlanProvisional:
+			plan.State = PlanFailed
+			plan.UpdatedAt = time.Now().UTC()
+			plan.Events = append(plan.Events, PlanEvent{
+				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
+				Outcome: "provider_buffers_discarded_reprepare_available", At: plan.UpdatedAt,
+			})
+			recovered = true
+		case PlanPreparing, PlanRollingBack:
 			plan.State = PlanFailed
 			plan.Preparation = nil
 			plan.UpdatedAt = time.Now().UTC()
 			plan.Events = append(plan.Events, PlanEvent{
 				Action: "provider_restart_restore", PlanRevision: plan.PlanRevision,
-				Outcome: "provider_buffers_discarded", At: plan.UpdatedAt,
+				Outcome: "incomplete_provider_operation_discarded", At: plan.UpdatedAt,
 			})
 			recovered = true
 		case PlanCommitting:

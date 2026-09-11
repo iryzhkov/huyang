@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -177,5 +179,44 @@ func TestProjectCheckDoesNotHideMissingLSPReason(t *testing.T) {
 	}
 	if report.Confidence == workspacecore.ConfidenceCorroborated || diagnosticVerificationStage("prep_1", report).Status == workspacecore.VerificationPassed {
 		t.Fatalf("missing LSP was hidden by project check: %#v", report)
+	}
+}
+
+func TestVerifyRefreshesExternalBytesBeforeRevisionCheck(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{"main.go": "package sample\nvar Value = 1\n"})
+	defer direct.closeProviders()
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	revision := "wsrev_1"
+	if got := workspace.Identity().StateSeq; got != 1 {
+		revision = fmt.Sprintf("wsrev_%d", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package sample\nvar Value = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := direct.verify(context.Background(), "r8-external-verify", workspace, map[string]any{
+		"revision_or_transaction": revision, "stages": []any{"parser"},
+	})
+	if result["outcome"] != "conflict" || result["code"] != "revision_changed" {
+		t.Fatalf("verification observed external bytes under an old revision: %#v", result)
+	}
+}
+
+func TestRevisionDiffRefreshesExternalGapWithoutPriorInspect(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{"main.go": "package sample\n"})
+	defer direct.closeProviders()
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	from := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := direct.revisionDiff("r8-external-diff", workspace, map[string]any{
+		"from_revision": from, "to_revision_or_current": "current",
+	})
+	if result["outcome"] != "partial" || result["code"] != "diff_evidence_incomplete" {
+		t.Fatalf("revision diff did not report the external gap precisely: %#v", result)
+	}
+	gaps := anySlice(result["data"].(map[string]any)["gaps"])
+	if len(gaps) != 1 {
+		t.Fatalf("external change was not exposed as an exact gap: %#v", result)
 	}
 }

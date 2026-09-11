@@ -719,14 +719,40 @@ end
 
 local function get_client(bufnr, method, timeout_ms)
     local deadline = vim.uv.now() + (timeout_ms or ATTACH_TIMEOUT_MS)
+    local availability_checked = false
     while true do
         for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
             if c:supports_method(method, bufnr) then
                 return c
             end
         end
+        if not availability_checked then
+            availability_checked = true
+            local ft = vim.bo[bufnr].filetype
+            local configs = enabled_lsp_configs_for(ft)
+            if #configs == 0 then
+                err("lsp_not_configured: no LSP config is enabled for filetype %s; call language_server_setup install with language=%s",
+                    ft, ft)
+            end
+            local startable = {}
+            local missing = {}
+            for _, name in ipairs(configs) do
+                local cfg = vim.lsp.config[name]
+                local cmd = type(cfg) == "table" and cfg.cmd or nil
+                local executable = type(cmd) == "table" and type(cmd[1]) == "string" and cmd[1] or nil
+                if executable == nil or vim.fn.executable(executable) == 1 then
+                    startable[#startable + 1] = name
+                else
+                    missing[#missing + 1] = name .. " (" .. executable .. ")"
+                end
+            end
+            if #startable == 0 then
+                err("lsp_not_startable: enabled LSP config(s) for filetype %s have unavailable commands: %s; call language_server_setup install with language=%s",
+                    ft, table.concat(missing, ", "), ft)
+            end
+        end
         if vim.uv.now() >= deadline then
-            err("no LSP client supporting %s is attached to %s (filetype: %s)",
+            err("lsp_attach_deadline_exceeded: no LSP client supporting %s attached to %s (filetype: %s); call language_server_setup restart",
                 method, vim.api.nvim_buf_get_name(bufnr), vim.bo[bufnr].filetype)
         end
         sleep(100)

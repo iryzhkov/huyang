@@ -237,9 +237,10 @@ func TestPrepareFinalTransitionFailureRollsProviderBack(t *testing.T) {
 	}
 }
 
-func TestRestartInvalidatesPreparedProviderView(t *testing.T) {
+func TestRestartRetainsPreparedEvidenceWithoutProviderLease(t *testing.T) {
 	ws, _, plan, stager := prepareFixture(t)
-	if _, err := ws.PreparePlan(context.Background(), plan.PlanID, plan.PlanRevision, stager); err != nil {
+	prepared, err := ws.PreparePlan(context.Background(), plan.PlanID, plan.PlanRevision, stager)
+	if err != nil {
 		t.Fatal(err)
 	}
 	identity := ws.Identity()
@@ -254,14 +255,21 @@ func TestRestartInvalidatesPreparedProviderView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.State != PlanFailed || restored.Preparation != nil {
-		t.Fatalf("restart retained vanished provider preparation: %+v", restored)
+	if restored.State != PlanFailed || restored.Preparation == nil {
+		t.Fatalf("restart did not retain exact preparation evidence: %+v", restored)
+	}
+	if restored.Preparation.PreparedRevision != prepared.Preparation.PreparedRevision {
+		t.Fatalf("prepared revision changed on restart: got %s want %s",
+			restored.Preparation.PreparedRevision, prepared.Preparation.PreparedRevision)
+	}
+	recoverable, ok := restarted.RecoverablePreparedPlan(prepared.Preparation.PreparedRevision)
+	if !ok || recoverable.PlanID != plan.PlanID {
+		t.Fatalf("prepared plan is not discoverable for recovery: %+v, %v", recoverable, ok)
 	}
 	if err := restarted.CheckProviderAccess("other"); err != nil {
 		t.Fatalf("restart restored a stale lease: %v", err)
 	}
 }
-
 func TestPrepareStateTransitionFailureDoesNotStageOrRetainLease(t *testing.T) {
 	ws, _, plan, stager := prepareFixture(t)
 	plansDir := filepath.Join(ws.stateDir, "plans")

@@ -1749,6 +1749,15 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 }
 
 func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if err := workspace.PrimeDocuments(); err != nil {
+		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+	}
+	if _, err := workspace.RefreshKnownDocuments(); err != nil {
+		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+	}
+	if err := d.persistWorkspaceIdentity(workspace.Identity().ID); err != nil {
+		return modernFailure(requestID, workspace, "service_state_persist_failed", err)
+	}
 	from := fmt.Sprint(arguments["from_revision"])
 	to := fmt.Sprint(arguments["to_revision_or_current"])
 	current := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
@@ -2235,6 +2244,16 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		var stager workspacecore.PlanStager
 		stager, err = d.planStager(workspace, planID, revision, false)
+		if err != nil {
+			recoveredStager, recoveredPlan, recoverable, recoveryErr := d.recoverPreparedStager(ctx, workspace, preparedRevision)
+			switch {
+			case recoveryErr != nil:
+				err = recoveryErr
+			case recoverable:
+				stager, plan, err = recoveredStager, recoveredPlan, nil
+				wasProvisional = recoveredPlan.State == workspacecore.PlanProvisional
+			}
+		}
 		if err == nil {
 			plan, err = workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager)
 		}
@@ -2245,6 +2264,15 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				result["summary"] = "Prepared plan applied with explicitly accepted incomplete diagnostic evidence; canonical provider resynced"
 				result["warnings"] = append(result["warnings"].([]string), "The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted.")
 				result["data"].(map[string]any)["applied_from_provisional"] = true
+			}
+			if _, resyncErr := d.restartCanonicalProvider(ctx, workspace); resyncErr != nil {
+				result["outcome"] = "provisional"
+				result["code"] = "provider_resync_failed"
+				result["summary"] = "Prepared plan applied, but canonical provider resynchronization failed"
+				result["warnings"] = append(result["warnings"].([]string), resyncErr.Error())
+				result["next"] = []any{map[string]any{
+					"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true,
+				}}
 			}
 			return result
 		}
@@ -2300,6 +2328,15 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 }
 
 func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if err := workspace.PrimeDocuments(); err != nil {
+		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+	}
+	if _, err := workspace.RefreshKnownDocuments(); err != nil {
+		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
+	}
+	if err := d.persistWorkspaceIdentity(workspace.Identity().ID); err != nil {
+		return modernFailure(requestID, workspace, "service_state_persist_failed", err)
+	}
 	revision := fmt.Sprint(arguments["revision_or_transaction"])
 	var stages []string
 	for _, value := range anySlice(arguments["stages"]) {
@@ -2337,6 +2374,22 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 	}
 	d.providerMu.Unlock()
+	if stager == nil {
+		recoveredStager, recoveredPlan, recoverable, recoveryErr := d.recoverPreparedStager(ctx, workspace, revision)
+		if recoveryErr != nil {
+			result := modernFailure(requestID, workspace, "prepared_revision_recovery_failed", recoveryErr)
+			if recoveredPlan.PlanID != "" {
+				result["next"] = []any{map[string]any{
+					"tool": "change_plan", "action": "prepare", "plan_id": recoveredPlan.PlanID,
+					"plan_revision": recoveredPlan.PlanRevision, "use_new_idempotency_key": true,
+				}}
+			}
+			return result
+		}
+		if recoverable {
+			stager = recoveredStager
+		}
+	}
 
 	var result workspacecore.VerificationResult
 	var err error

@@ -8,6 +8,7 @@
 -- Run with: nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_edit.lua
 
 local edit = require("huyang.edit")
+local core = require("huyang.core")
 
 local failures = 0
 
@@ -411,6 +412,22 @@ for _, batch in ipairs(evidence.batches) do
 end
 check("the shared deadline still returns explicit unavailable batches",
     timed_out_once, evidence)
+-- Navigation uses the same actionable availability check instead of spending
+-- the full attach timeout when no language server can possibly attach.
+vim.filetype.add({ extension = { huyangnav = "huyang_navigation_no_lsp" } })
+local nav_path = latency_dir .. "/navigation.huyangnav"
+vim.fn.writefile({ "plain text" }, nav_path)
+local nav_buf = vim.fn.bufadd(nav_path)
+vim.fn.bufload(nav_buf)
+started = vim.uv.hrtime()
+local nav_ok, nav_error = pcall(core.get_client, nav_buf, "textDocument/hover", 1000)
+elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+check("navigation reports actionable missing LSP configuration",
+    not nav_ok and tostring(nav_error):find("lsp_not_configured", 1, true)
+        and tostring(nav_error):find("language_server_setup", 1, true), nav_error)
+check("navigation does not wait when no LSP is configured",
+    elapsed_ms < 250, elapsed_ms)
+
 vim.fn.delete(latency_dir, "rf")
 
 if failures > 0 then

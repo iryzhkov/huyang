@@ -221,16 +221,28 @@ func (w *Workspace) PrimeDocuments() error {
 		current[path] = struct{}{}
 	}
 	w.mu.Lock()
+	inventoryChanged := false
 	if w.pathsPrimed {
 		for path := range current {
 			if _, known := w.knownPaths[path]; !known {
-				// The file appeared outside a Huyang mutation. There is no exact
-				// native diff for the uncovered transition, so advance once and
-				// let revision_diff expose the resulting external gap.
-				w.identity.StateSeq++
+				inventoryChanged = true
 				break
 			}
 		}
+		if !inventoryChanged {
+			for path := range w.knownPaths {
+				if _, exists := current[path]; !exists {
+					inventoryChanged = true
+					break
+				}
+			}
+		}
+	}
+	if inventoryChanged {
+		// The inventory changed outside a Huyang mutation. There is no exact
+		// native diff for the uncovered transition, so advance once and let
+		// revision_diff expose the resulting external gap.
+		w.identity.StateSeq++
 	}
 	w.knownPaths = current
 	w.pathsPrimed = true
