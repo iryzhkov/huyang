@@ -210,50 +210,14 @@ func LoadPipelinePolicy(projectRoot, userConfig string) (PipelinePolicy, error) 
 	return LoadPipelinePolicyForTrustedRoot(projectRoot, projectRoot, userConfig)
 }
 
-// LoadPipelinePolicyForTrustedRoot reads project policy from projectRoot while
-// evaluating command trust against the stable canonical workspace root.
 func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig string) (PipelinePolicy, error) {
 	policy := DefaultPipelinePolicy()
-	projectPath := filepath.Join(projectRoot, ".huyang.toml")
-	if content, err := os.ReadFile(projectPath); err == nil {
-		metadata, err := toml.Decode(string(content), &policy)
-		if err != nil {
-			return PipelinePolicy{}, fmt.Errorf("invalid project policy: %w", err)
-		}
-		if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
-			key := undecoded[0].String()
-			hint := ""
-			if strings.HasSuffix(key, ".affected") {
-				hint = "; use covers = [\"path/**\"] on the command instead"
-			}
-			return PipelinePolicy{}, fmt.Errorf("unknown project policy key %q%s", key, hint)
-		}
-		policy.ProjectConfig = projectPath
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := loadProjectPolicy(projectRoot, &policy); err != nil {
 		return PipelinePolicy{}, err
 	}
-	if userConfig == "" {
-		base := os.Getenv("XDG_CONFIG_HOME")
-		if base == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				base = filepath.Join(home, ".config")
-			}
-		}
-		if base != "" {
-			userConfig = filepath.Join(base, "huyang", "config.toml")
-		}
-	}
-	var user userPipelinePolicy
-	if userConfig != "" {
-		policy.UserConfig = userConfig
-		if content, err := os.ReadFile(userConfig); err == nil {
-			if _, err := toml.Decode(string(content), &user); err != nil {
-				return PipelinePolicy{}, fmt.Errorf("invalid user policy: %w", err)
-			}
-			policy.UserConfig = userConfig
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return PipelinePolicy{}, err
-		}
+	user, err := loadUserPolicy(defaultUserConfigPath(userConfig), &policy)
+	if err != nil {
+		return PipelinePolicy{}, err
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(trustedRoot)
 	if err != nil {
@@ -266,6 +230,82 @@ func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig strin
 			break
 		}
 	}
+	applyUserResourceCaps(&policy, user)
+	if err := validatePipelinePolicy(&policy); err != nil {
+		return PipelinePolicy{}, err
+	}
+	return policy, nil
+}
+
+// loadProjectPolicy decodes .huyang.toml under projectRoot into policy when it exists,
+// refusing unknown keys.
+func loadProjectPolicy(projectRoot string, policy *PipelinePolicy) error {
+	projectPath := filepath.Join(projectRoot, ".huyang.toml")
+	content, err := os.ReadFile(projectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	metadata, err := toml.Decode(string(content), policy)
+	if err != nil {
+		return fmt.Errorf("invalid project policy: %w", err)
+	}
+	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
+		key := undecoded[0].String()
+		hint := ""
+		if strings.HasSuffix(key, ".affected") {
+			hint = "; use covers = [\"path/**\"] on the command instead"
+		}
+		return fmt.Errorf("unknown project policy key %q%s", key, hint)
+	}
+	policy.ProjectConfig = projectPath
+	return nil
+}
+
+// defaultUserConfigPath returns the explicit user config path, or the XDG default.
+func defaultUserConfigPath(userConfig string) string {
+	if userConfig != "" {
+		return userConfig
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, ".config")
+		}
+	}
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "huyang", "config.toml")
+}
+
+// loadUserPolicy decodes the user policy at userConfig when the path is set and the file
+// exists, and records the path on the pipeline policy.
+func loadUserPolicy(userConfig string, policy *PipelinePolicy) (userPipelinePolicy, error) {
+	var user userPipelinePolicy
+	if userConfig == "" {
+		return user, nil
+	}
+	policy.UserConfig = userConfig
+	content, err := os.ReadFile(userConfig)
+	if errors.Is(err, os.ErrNotExist) {
+		return user, nil
+	}
+	if err != nil {
+		return user, err
+	}
+	if _, err := toml.Decode(string(content), &user); err != nil {
+		return user, fmt.Errorf("invalid user policy: %w", err)
+	}
+	policy.UserConfig = userConfig
+	return user, nil
+}
+
+// applyUserResourceCaps lowers each resource limit to the user's cap when the user set a
+// smaller positive value.
+func applyUserResourceCaps(policy *PipelinePolicy, user userPipelinePolicy) {
 	if user.Resource.TimeoutSeconds > 0 && user.Resource.TimeoutSeconds < policy.Resource.TimeoutSeconds {
 		policy.Resource.TimeoutSeconds = user.Resource.TimeoutSeconds
 	}
@@ -281,28 +321,32 @@ func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig strin
 	if user.Resource.MaxParallel > 0 && user.Resource.MaxParallel < policy.Resource.MaxParallel {
 		policy.Resource.MaxParallel = user.Resource.MaxParallel
 	}
+}
+
+// validatePipelinePolicy checks the merged policy and fills the format defaults.
+func validatePipelinePolicy(policy *PipelinePolicy) error {
 	if policy.Version != 1 {
-		return PipelinePolicy{}, fmt.Errorf("unsupported huyang policy version %d", policy.Version)
+		return fmt.Errorf("unsupported huyang policy version %d", policy.Version)
 	}
 	if policy.Resource.MaxParallel < 1 || policy.Resource.MaxParallel > 8 {
-		return PipelinePolicy{}, errors.New("resource max_parallel must be between 1 and 8")
+		return errors.New("resource max_parallel must be between 1 and 8")
 	}
 	if err := validateParallelCommands(policy.Check, policy.Tests); err != nil {
-		return PipelinePolicy{}, err
+		return err
 	}
 	if policy.Format.Mode == "" {
 		policy.Format.Mode = "check"
 	}
 	if policy.Format.Mode != "off" && policy.Format.Mode != "check" && policy.Format.Mode != "transform" {
-		return PipelinePolicy{}, fmt.Errorf("invalid format mode %q", policy.Format.Mode)
+		return fmt.Errorf("invalid format mode %q", policy.Format.Mode)
 	}
 	if policy.Format.Scope == "" {
 		policy.Format.Scope = "declared"
 	}
 	if policy.Format.Scope != "declared" && policy.Format.Scope != "whole_repository" {
-		return PipelinePolicy{}, fmt.Errorf("invalid format scope %q", policy.Format.Scope)
+		return fmt.Errorf("invalid format scope %q", policy.Format.Scope)
 	}
-	return policy, nil
+	return nil
 }
 
 type treeObject struct {
@@ -624,7 +668,37 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 		return stage, nil, envErr
 	}
 	defer cleanupEnvironment()
-	process := exec.CommandContext(timed, command.Command[0], command.Command[1:]...)
+	runErr := runSandboxCommand(timed, root, environment, command, policy, started, &stage)
+	after, snapshotErr := captureTree(context.Background(), root, policy.Resource.MaxSnapshotBytes)
+	if snapshotErr != nil {
+		_ = restoreTree(root, before)
+		stage.Status = VerificationFailed
+		return stage, nil, snapshotErr
+	}
+	delta := diffTrees(before, after)
+	for _, change := range delta {
+		stage.Writes = append(stage.Writes, change.Path)
+	}
+	if err := auditToolDelta(delta, command, policy, mutating); err != nil {
+		_ = restoreTree(root, before)
+		stage.Status = VerificationFailed
+		return stage, delta, err
+	}
+	if runErr != nil {
+		stage.Status = commandRunStatus(ctx, timed)
+		if mutating {
+			_ = restoreTree(root, before)
+		}
+		return stage, delta, commandRunError(name, stage, runErr)
+	}
+	stage.Status = VerificationPassed
+	return stage, delta, nil
+}
+
+// runSandboxCommand executes the command inside root with the isolated environment and
+// records its duration, capped output and exit code on the stage.
+func runSandboxCommand(ctx context.Context, root string, environment []string, command CommandPolicy, policy PipelinePolicy, started time.Time, stage *VerificationStage) error {
+	process := exec.CommandContext(ctx, command.Command[0], command.Command[1:]...)
 	configureCommandCancellation(process)
 	process.Dir = root
 	process.Env = append(environment, "HUYANG_SANDBOX=1")
@@ -637,62 +711,49 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 	if process.ProcessState != nil {
 		stage.Exit = process.ProcessState.ExitCode()
 	}
-	after, snapshotErr := captureTree(context.Background(), root, policy.Resource.MaxSnapshotBytes)
-	if snapshotErr != nil {
-		_ = restoreTree(root, before)
-		stage.Status = VerificationFailed
-		return stage, nil, snapshotErr
-	}
-	delta := diffTrees(before, after)
-	for _, change := range delta {
-		stage.Writes = append(stage.Writes, change.Path)
-	}
+	return runErr
+}
+
+// auditToolDelta refuses tool writes that exceed the changed-file quota, touch
+// non-text objects or protected literals under a mutating stage, fall outside the
+// command's declared writes, or happen at all under a non-mutating stage.
+func auditToolDelta(delta []ToolDelta, command CommandPolicy, policy PipelinePolicy, mutating bool) error {
 	if len(delta) > policy.Resource.MaxChangedFiles {
-		_ = restoreTree(root, before)
-		stage.Status = VerificationFailed
-		return stage, delta, errors.New("verification_changed_file_quota_exceeded")
+		return errors.New("verification_changed_file_quota_exceeded")
 	}
 	for _, change := range delta {
 		if mutating && ((change.BeforeExists && change.BeforeKind != ObjectRegularText) || (change.AfterExists && change.AfterKind != ObjectRegularText)) {
-			_ = restoreTree(root, before)
-			stage.Status = VerificationFailed
-			return stage, delta, fmt.Errorf("formatter_unsupported_object: %s", change.Path)
+			return fmt.Errorf("formatter_unsupported_object: %s", change.Path)
 		}
 		if !matchDeclared(change.Path, command.DeclaredWrites) {
-			_ = restoreTree(root, before)
-			stage.Status = VerificationFailed
-			return stage, delta, fmt.Errorf("undeclared_tool_write: %s", change.Path)
+			return fmt.Errorf("undeclared_tool_write: %s", change.Path)
 		}
 		if mutating && protectedBytesChanged(change.Path, change.Before, change.After) {
-			_ = restoreTree(root, before)
-			stage.Status = VerificationFailed
-			return stage, delta, fmt.Errorf("protected_literal_changed: %s", change.Path)
+			return fmt.Errorf("protected_literal_changed: %s", change.Path)
 		}
 	}
 	if !mutating && len(delta) > 0 {
-		_ = restoreTree(root, before)
-		stage.Status = VerificationFailed
-		return stage, delta, errors.New("non_mutating_stage_wrote_files")
+		return errors.New("non_mutating_stage_wrote_files")
 	}
-	if runErr != nil {
-		if timed.Err() == context.DeadlineExceeded {
-			stage.Status = VerificationTimedOut
-		} else if ctx.Err() != nil {
-			stage.Status = VerificationCancelled
-		} else {
-			stage.Status = VerificationFailed
-		}
-		if mutating {
-			_ = restoreTree(root, before)
-		}
-		detail := strings.TrimSpace(stage.Output)
-		if detail == "" {
-			detail = runErr.Error()
-		}
-		return stage, delta, fmt.Errorf("verification stage %s failed (exit %d): %s", name, stage.Exit, detail)
+	return nil
+}
+
+func commandRunStatus(ctx, timed context.Context) VerificationStatus {
+	if timed.Err() == context.DeadlineExceeded {
+		return VerificationTimedOut
 	}
-	stage.Status = VerificationPassed
-	return stage, delta, nil
+	if ctx.Err() != nil {
+		return VerificationCancelled
+	}
+	return VerificationFailed
+}
+
+func commandRunError(name string, stage VerificationStage, runErr error) error {
+	detail := strings.TrimSpace(stage.Output)
+	if detail == "" {
+		detail = runErr.Error()
+	}
+	return fmt.Errorf("verification stage %s failed (exit %d): %s", name, stage.Exit, detail)
 }
 
 func parserStage(root, revision string, files []string) VerificationStage {
@@ -703,10 +764,14 @@ func parserStage(root, revision string, files []string) VerificationStage {
 	}
 	supported := 0
 	skipped := map[string]bool{}
+	fail := func(output string) {
+		stage.Status = VerificationFailed
+		stage.Exit = 1
+		stage.Output += output
+	}
 	for _, relative := range files {
 		extension := strings.ToLower(filepath.Ext(relative))
-		supportedFormat := extension == ".go" || extension == ".json" || extension == ".jsonl" || extension == ".toml" || extension == ".yaml" || extension == ".yml" || extension == ".md" || extension == ".markdown"
-		if !supportedFormat {
+		if !parserSupports(extension) {
 			reason := "parser_unavailable:" + extension
 			if extension == "" {
 				reason = "parser_unavailable:no_extension"
@@ -720,61 +785,17 @@ func parserStage(root, revision string, files []string) VerificationStage {
 		supported++
 		content, err := os.ReadFile(filepath.Join(root, relative))
 		if err != nil {
-			stage.Status = VerificationFailed
-			stage.Exit = 1
-			stage.Output += err.Error() + "\n"
+			fail(err.Error() + "\n")
 			continue
 		}
 		stage.Coverage.FilesRead++
 		stage.Coverage.BytesRead += int64(len(content))
 		if !utf8.Valid(content) {
-			stage.Status = VerificationFailed
-			stage.Exit = 1
-			stage.Output += relative + ": invalid UTF-8\n"
+			fail(relative + ": invalid UTF-8\n")
 			continue
 		}
-		switch extension {
-		case ".go":
-			if _, err := parser.ParseFile(token.NewFileSet(), relative, content, parser.AllErrors); err != nil {
-				stage.Status = VerificationFailed
-				stage.Exit = 1
-				stage.Output += err.Error() + "\n"
-			}
-		case ".json":
-			var value any
-			if err := json.Unmarshal(content, &value); err != nil {
-				stage.Status = VerificationFailed
-				stage.Exit = 1
-				stage.Output += relative + ": " + err.Error() + "\n"
-			}
-		case ".jsonl":
-			for lineNumber, line := range bytes.Split(content, []byte("\n")) {
-				if len(bytes.TrimSpace(line)) == 0 {
-					continue
-				}
-				var value any
-				if err := json.Unmarshal(line, &value); err != nil {
-					stage.Status = VerificationFailed
-					stage.Exit = 1
-					stage.Output += fmt.Sprintf("%s:%d: %v\n", relative, lineNumber+1, err)
-				}
-			}
-		case ".toml":
-			var value map[string]any
-			if _, err := toml.Decode(string(content), &value); err != nil {
-				stage.Status = VerificationFailed
-				stage.Exit = 1
-				stage.Output += relative + ": " + err.Error() + "\n"
-			}
-		case ".yaml", ".yml":
-			var value any
-			if err := yaml.Unmarshal(content, &value); err != nil {
-				stage.Status = VerificationFailed
-				stage.Exit = 1
-				stage.Output += relative + ": " + err.Error() + "\n"
-			}
-		case ".md", ".markdown":
-			goldmark.DefaultParser().Parse(text.NewReader(content))
+		if output := parseDocument(extension, relative, content); output != "" {
+			fail(output)
 		}
 	}
 	if supported == 0 {
@@ -792,6 +813,55 @@ func parserStage(root, revision string, files []string) VerificationStage {
 		}
 	}
 	return stage
+}
+
+func parserSupports(extension string) bool {
+	switch extension {
+	case ".go", ".json", ".jsonl", ".toml", ".yaml", ".yml", ".md", ".markdown":
+		return true
+	}
+	return false
+}
+
+// parseDocument parses content with the native parser for its extension and returns the
+// failure text, or "" when the document parses.
+func parseDocument(extension, relative string, content []byte) string {
+	switch extension {
+	case ".go":
+		if _, err := parser.ParseFile(token.NewFileSet(), relative, content, parser.AllErrors); err != nil {
+			return err.Error() + "\n"
+		}
+	case ".json":
+		var value any
+		if err := json.Unmarshal(content, &value); err != nil {
+			return relative + ": " + err.Error() + "\n"
+		}
+	case ".jsonl":
+		var output string
+		for lineNumber, line := range bytes.Split(content, []byte("\n")) {
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
+			}
+			var value any
+			if err := json.Unmarshal(line, &value); err != nil {
+				output += fmt.Sprintf("%s:%d: %v\n", relative, lineNumber+1, err)
+			}
+		}
+		return output
+	case ".toml":
+		var value map[string]any
+		if _, err := toml.Decode(string(content), &value); err != nil {
+			return relative + ": " + err.Error() + "\n"
+		}
+	case ".yaml", ".yml":
+		var value any
+		if err := yaml.Unmarshal(content, &value); err != nil {
+			return relative + ": " + err.Error() + "\n"
+		}
+	case ".md", ".markdown":
+		goldmark.DefaultParser().Parse(text.NewReader(content))
+	}
+	return ""
 }
 
 type commandStageRun struct {
@@ -1075,147 +1145,219 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 }
 
 func runVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, prepared []PlanStageFile) (VerificationResult, error) {
-	result := VerificationResult{Revision: request.Revision, PreparedFiles: append([]PlanStageFile(nil), prepared...)}
-	affected := make([]string, 0, len(prepared))
+	run := &pipelineRun{
+		ctx: ctx, sandbox: sandbox, policy: policy, request: request,
+		result:   VerificationResult{Revision: request.Revision, PreparedFiles: append([]PlanStageFile(nil), prepared...)},
+		affected: make([]string, 0, len(prepared)),
+	}
 	for _, file := range prepared {
-		affected = append(affected, file.Path)
+		run.affected = append(run.affected, file.Path)
 	}
 	if request.Transform || (request.ApplyConfiguredTransform && policy.Format.Mode == "transform") {
-		transform := policy.Format.Transform
-		if policy.Format.Scope == "declared" {
-			transform.DeclaredWrites = append([]string(nil), affected...)
-		}
-		original, snapshotErr := captureTree(ctx, sandbox.Tree, policy.Resource.MaxSnapshotBytes)
-		if snapshotErr != nil {
-			return result, snapshotErr
-		}
-		stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, "format", "transform", transform, policy, true)
-		if policy.Format.Scope == "declared" {
-			stage.Scope = append([]string(nil), affected...)
-		} else {
-			stage.Scope = []string{"**"}
-		}
-		result.Stages = append(result.Stages, stage)
-		result.ToolDelta = append(result.ToolDelta, delta...)
-		if err != nil {
-			return result, err
-		}
-		if request.Transform && stage.Status != VerificationPassed {
-			return result, errors.New("explicit formatter transform is unavailable")
-		}
-		if stage.Status == VerificationPassed {
-			_, secondDelta, secondErr := commandStage(ctx, sandbox.Tree, request.Revision, "format_idempotency", "check", transform, policy, true)
-			if secondErr != nil || len(secondDelta) > 0 {
-				_ = restoreTree(sandbox.Tree, original)
-				result.Stages[len(result.Stages)-1].Status = VerificationFailed
-				return result, errors.New("formatter_nondeterministic: second pass changed prepared bytes")
-			}
+		if err := run.transform(); err != nil {
+			return run.result, err
 		}
 	}
+	// request.Stages is the CanonicalStages output: validated names in pipeline order.
 	for _, name := range request.Stages {
-		switch name {
-		case "format_gate":
-			stage, delta, err := commandStage(ctx, sandbox.Tree, request.Revision, name, "check", policy.Format.Gate, policy, false)
-			result.Stages = append(result.Stages, stage)
-			result.ToolDelta = append(result.ToolDelta, delta...)
-			if err != nil {
-				return result, err
-			}
-		case "parser":
-			stage := parserStage(sandbox.Tree, request.Revision, affected)
-			result.Stages = append(result.Stages, stage)
-			if stage.Status == VerificationFailed {
-				return result, errors.New("parser verification failed")
-			}
-		case "diagnostics":
-			if request.DiagnosticVerifier == nil {
-				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "provider", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"diagnostic_provider_unavailable"}, Semantic: string(ConfidenceUnavailable)}})
-				continue
-			}
-			stage, err := request.DiagnosticVerifier(ctx, request.Revision, result.PreparedFiles)
-			result.Stages = append(result.Stages, stage)
-			if err != nil {
-				return result, err
-			}
-		case "check":
-			if len(policy.Check) == 0 {
-				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})
-			}
-			runs, err := runCommandPolicies(ctx, sandbox.Tree, request.Revision, name, "check", policy.Check, policy)
-			for _, run := range runs {
-				result.Stages = append(result.Stages, run.stage)
-				result.ToolDelta = append(result.ToolDelta, run.delta...)
-			}
-			if err != nil {
-				return result, err
-			}
-		case "tests":
-			if request.TestScope == "affected" {
-				stages, targeted, err := runAffectedTests(ctx, sandbox, policy, request, affected)
-				result.Stages = append(result.Stages, stages...)
-				result.Targeted = targeted
-				if targeted != nil {
-					result.Impact = &targeted.Graph
-				}
-				if err != nil {
-					return result, err
-				}
-				continue
-			}
-			result.FullTestGate = "not_configured"
-			if len(policy.Tests) == 0 {
-				result.Stages = append(result.Stages, VerificationStage{Stage: name, Mode: "check", StartedRevision: request.Revision, Exit: -1, Status: VerificationSkipped, TestScope: "full", TestVerdict: "full_tests_unavailable", Coverage: Coverage{Complete: false, Skipped: []string{"not_configured"}}})
-				continue
-			}
-			var history []TestHistoryEntry
-			result.FullTestGate = "full_tests_passed"
-			stageStart := len(result.Stages)
-			runs, runErr := runCommandPolicies(ctx, sandbox.Tree, request.Revision, name, "check", policy.Tests, policy)
-			failedIndex := -1
-			for index, run := range runs {
-				command := policy.Tests[index]
-				testName := command.Name
-				if testName == "" {
-					testName = fmt.Sprintf("test_%d", index+1)
-				}
-				run.stage.TestScope = "full"
-				if run.stage.Status == VerificationPassed {
-					run.stage.TestVerdict = "full_tests_passed"
-				} else {
-					run.stage.TestVerdict = "full_tests_unavailable"
-					result.FullTestGate = "full_tests_unavailable"
-				}
-				run.stage.ExecutedTests = []string{testName}
-				result.Stages = append(result.Stages, run.stage)
-				result.ToolDelta = append(result.ToolDelta, run.delta...)
-				history = append(history, historyEntry(request.Revision, "full", testName, command.Variants, run.stage))
-				if failedIndex < 0 && run.err != nil {
-					failedIndex = index
-				}
-			}
-			if runErr != nil {
-				result.FullTestGate = "full_tests_failed"
-				if failedIndex >= 0 {
-					result.Stages[stageStart+failedIndex].TestVerdict = result.FullTestGate
-				}
-				_ = recordTestHistory(request.TestHistoryPath, history)
-				return result, runErr
-			}
-			if err := recordTestHistory(request.TestHistoryPath, history); err != nil {
-				return result, err
-			}
-		default:
-			// CanonicalStages already rejected unknown names.
-			return result, fmt.Errorf("unknown verification stage %q", name)
+		stage, known := pipelineStages[name]
+		if !known {
+			return run.result, fmt.Errorf("unknown verification stage %q", name)
+		}
+		if err := stage(run); err != nil {
+			return run.result, err
 		}
 	}
-	corroborateParserWithProjectCheck(&result)
-	final, err := captureTree(ctx, sandbox.Tree, policy.Resource.MaxSnapshotBytes)
-	if err != nil {
-		return result, err
+	corroborateParserWithProjectCheck(&run.result)
+	err := run.collectPreparedFiles()
+	return run.result, err
+}
+
+// pipelineStages maps each canonical stage name to the method that runs it. Every stage
+// appends its own VerificationStage records to the result and returns the error that
+// stops the pipeline, if any.
+var pipelineStages = map[string]func(*pipelineRun) error{
+	"format_gate": (*pipelineRun).formatGate,
+	"parser":      (*pipelineRun).parser,
+	"diagnostics": (*pipelineRun).diagnostics,
+	"check":       (*pipelineRun).check,
+	"tests":       (*pipelineRun).tests,
+}
+
+// pipelineRun carries one verification pass over a prepared sandbox. affected lists the
+// prepared paths; result accumulates stages and tool deltas in execution order.
+type pipelineRun struct {
+	ctx      context.Context
+	sandbox  *Sandbox
+	policy   PipelinePolicy
+	request  VerificationRequest
+	affected []string
+	result   VerificationResult
+}
+
+func (run *pipelineRun) record(stage VerificationStage, delta []ToolDelta) {
+	run.result.Stages = append(run.result.Stages, stage)
+	run.result.ToolDelta = append(run.result.ToolDelta, delta...)
+}
+
+func (run *pipelineRun) skipped(name, mode string, coverage Coverage) VerificationStage {
+	return VerificationStage{Stage: name, Mode: mode, StartedRevision: run.request.Revision, Exit: -1, Status: VerificationSkipped, Coverage: coverage}
+}
+
+// transform runs the configured formatter over the sandbox and requires a second pass to
+// change nothing; a non-deterministic formatter restores the tree and fails the stage.
+func (run *pipelineRun) transform() error {
+	policy, tree, revision := run.policy, run.sandbox.Tree, run.request.Revision
+	transform := policy.Format.Transform
+	if policy.Format.Scope == "declared" {
+		transform.DeclaredWrites = append([]string(nil), run.affected...)
 	}
-	for i := range result.PreparedFiles {
-		file := &result.PreparedFiles[i]
+	original, snapshotErr := captureTree(run.ctx, tree, policy.Resource.MaxSnapshotBytes)
+	if snapshotErr != nil {
+		return snapshotErr
+	}
+	stage, delta, err := commandStage(run.ctx, tree, revision, "format", "transform", transform, policy, true)
+	if policy.Format.Scope == "declared" {
+		stage.Scope = append([]string(nil), run.affected...)
+	} else {
+		stage.Scope = []string{"**"}
+	}
+	run.record(stage, delta)
+	if err != nil {
+		return err
+	}
+	if run.request.Transform && stage.Status != VerificationPassed {
+		return errors.New("explicit formatter transform is unavailable")
+	}
+	if stage.Status != VerificationPassed {
+		return nil
+	}
+	_, secondDelta, secondErr := commandStage(run.ctx, tree, revision, "format_idempotency", "check", transform, policy, true)
+	if secondErr != nil || len(secondDelta) > 0 {
+		_ = restoreTree(tree, original)
+		run.result.Stages[len(run.result.Stages)-1].Status = VerificationFailed
+		return errors.New("formatter_nondeterministic: second pass changed prepared bytes")
+	}
+	return nil
+}
+
+func (run *pipelineRun) formatGate() error {
+	stage, delta, err := commandStage(run.ctx, run.sandbox.Tree, run.request.Revision, "format_gate", "check", run.policy.Format.Gate, run.policy, false)
+	run.record(stage, delta)
+	return err
+}
+
+func (run *pipelineRun) parser() error {
+	stage := parserStage(run.sandbox.Tree, run.request.Revision, run.affected)
+	run.result.Stages = append(run.result.Stages, stage)
+	if stage.Status == VerificationFailed {
+		return errors.New("parser verification failed")
+	}
+	return nil
+}
+
+func (run *pipelineRun) diagnostics() error {
+	if run.request.DiagnosticVerifier == nil {
+		coverage := Coverage{Complete: false, Skipped: []string{"diagnostic_provider_unavailable"}, Semantic: string(ConfidenceUnavailable)}
+		run.result.Stages = append(run.result.Stages, run.skipped("diagnostics", "provider", coverage))
+		return nil
+	}
+	stage, err := run.request.DiagnosticVerifier(run.ctx, run.request.Revision, run.result.PreparedFiles)
+	run.result.Stages = append(run.result.Stages, stage)
+	return err
+}
+
+func (run *pipelineRun) check() error {
+	if len(run.policy.Check) == 0 {
+		run.result.Stages = append(run.result.Stages, run.skipped("check", "check", Coverage{Complete: false, Skipped: []string{"not_configured"}}))
+	}
+	runs, err := runCommandPolicies(run.ctx, run.sandbox.Tree, run.request.Revision, "check", "check", run.policy.Check, run.policy)
+	for _, item := range runs {
+		run.record(item.stage, item.delta)
+	}
+	return err
+}
+
+func (run *pipelineRun) tests() error {
+	if run.request.TestScope == "affected" {
+		return run.affectedTests()
+	}
+	return run.fullTests()
+}
+
+func (run *pipelineRun) affectedTests() error {
+	stages, targeted, err := runAffectedTests(run.ctx, run.sandbox, run.policy, run.request, run.affected)
+	run.result.Stages = append(run.result.Stages, stages...)
+	run.result.Targeted = targeted
+	if targeted != nil {
+		run.result.Impact = &targeted.Graph
+	}
+	return err
+}
+
+// fullTests runs every configured test command and records the full-suite gate and the
+// test history; a failing command fails the gate after every command has been recorded.
+func (run *pipelineRun) fullTests() error {
+	result, policy, revision := &run.result, run.policy, run.request.Revision
+	result.FullTestGate = "not_configured"
+	if len(policy.Tests) == 0 {
+		stage := run.skipped("tests", "check", Coverage{Complete: false, Skipped: []string{"not_configured"}})
+		stage.TestScope, stage.TestVerdict = "full", "full_tests_unavailable"
+		result.Stages = append(result.Stages, stage)
+		return nil
+	}
+	var history []TestHistoryEntry
+	result.FullTestGate = "full_tests_passed"
+	stageStart := len(result.Stages)
+	runs, runErr := runCommandPolicies(run.ctx, run.sandbox.Tree, revision, "tests", "check", policy.Tests, policy)
+	failedIndex := -1
+	for index, item := range runs {
+		command := policy.Tests[index]
+		stage, testName := labelFullTest(index, command, item.stage)
+		if stage.Status != VerificationPassed {
+			result.FullTestGate = "full_tests_unavailable"
+		}
+		run.record(stage, item.delta)
+		history = append(history, historyEntry(revision, "full", testName, command.Variants, stage))
+		if failedIndex < 0 && item.err != nil {
+			failedIndex = index
+		}
+	}
+	if runErr != nil {
+		result.FullTestGate = "full_tests_failed"
+		if failedIndex >= 0 {
+			result.Stages[stageStart+failedIndex].TestVerdict = result.FullTestGate
+		}
+		_ = recordTestHistory(run.request.TestHistoryPath, history)
+		return runErr
+	}
+	return recordTestHistory(run.request.TestHistoryPath, history)
+}
+
+// labelFullTest marks one full-suite command run with its scope, verdict and test name.
+func labelFullTest(index int, command CommandPolicy, stage VerificationStage) (VerificationStage, string) {
+	testName := command.Name
+	if testName == "" {
+		testName = fmt.Sprintf("test_%d", index+1)
+	}
+	stage.TestScope = "full"
+	stage.TestVerdict = "full_tests_passed"
+	if stage.Status != VerificationPassed {
+		stage.TestVerdict = "full_tests_unavailable"
+	}
+	stage.ExecutedTests = []string{testName}
+	return stage, testName
+}
+
+// collectPreparedFiles reads the final sandbox bytes back into the prepared files so the
+// commit stages exactly what verification saw, including formatter output.
+func (run *pipelineRun) collectPreparedFiles() error {
+	final, err := captureTree(run.ctx, run.sandbox.Tree, run.policy.Resource.MaxSnapshotBytes)
+	if err != nil {
+		return err
+	}
+	for i := range run.result.PreparedFiles {
+		file := &run.result.PreparedFiles[i]
 		object, exists := final[file.Path]
 		file.AfterExists = exists
 		if exists {
@@ -1227,5 +1369,5 @@ func runVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 			file.AfterDisk = DiskSnapshot{Kind: ObjectMissing}
 		}
 	}
-	return result, nil
+	return nil
 }
