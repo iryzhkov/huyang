@@ -487,7 +487,7 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 		}
 		depth := len(strings.Split(rel, string(filepath.Separator)))
 		if entry.IsDir() {
-			if entry.Name() == ".git" || depth > w.limits.MaxDepth {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" || depth > w.limits.MaxDepth {
 				if depth > w.limits.MaxDepth {
 					coverage.Complete = false
 					coverage.Capped = true

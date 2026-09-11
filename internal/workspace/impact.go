@@ -125,7 +125,7 @@ func BuildImpactGraph(root, revision string, changed []string, policy ImpactPoli
 			return nil
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil

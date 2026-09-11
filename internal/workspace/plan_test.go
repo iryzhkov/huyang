@@ -242,3 +242,44 @@ func TestSyntaxAnchorIndentationIsBoundedAndRejectsMixedWhitespace(t *testing.T)
 		t.Fatal("mixed indentation was accepted")
 	}
 }
+
+func TestCreateFileInfersMissingRevisionAndPreservesAbsencePrecondition(t *testing.T) {
+	root := t.TempDir()
+	opened, err := Open(OpenOptions{Kind: KindProject, Root: root, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := opened.CreatePlan([]PlanOperation{{
+		OpID: "create", Kind: OperationCreateFile, Path: "new.txt", Content: "created\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Operations[0].Revision == "" {
+		t.Fatal("create_file did not bind the missing target revision")
+	}
+	previewed, err := opened.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewed.Preview == nil || previewed.Preview.Outcome != "ok" || len(previewed.Preview.Diffs) != 1 {
+		t.Fatalf("create preview = %#v", previewed)
+	}
+
+	conflicted, err := opened.CreatePlan([]PlanOperation{{
+		OpID: "create", Kind: OperationCreateFile, Path: "raced.txt", Content: "planned\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "raced.txt"), []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conflicted, err = opened.PreviewPlan(conflicted.PlanID, conflicted.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflicted.Preview == nil || conflicted.Preview.Outcome != "conflict" {
+		t.Fatalf("create absence race was not rejected: %#v", conflicted)
+	}
+}

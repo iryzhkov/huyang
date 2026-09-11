@@ -271,3 +271,47 @@ func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
 		t.Fatalf("timeout rollback = %q", got)
 	}
 }
+
+func TestCommandStageProvidesIsolatedCacheEnvironment(t *testing.T) {
+	environment, cleanup, err := isolatedCommandEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	values := map[string]string{}
+	for _, entry := range environment {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			values[parts[0]] = parts[1]
+		}
+	}
+	for _, name := range []string{"HOME", "USERPROFILE", "XDG_CACHE_HOME", "LOCALAPPDATA", "GOCACHE"} {
+		path := values[name]
+		if path == "" {
+			t.Fatalf("%s was not configured: %v", name, environment)
+		}
+		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+			t.Fatalf("%s path %q is not a directory: %v", name, path, statErr)
+		}
+	}
+}
+
+func TestCommandStageFailureIncludesCapturedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	root := t.TempDir()
+	policy := DefaultPipelinePolicy()
+	policy.Trusted = true
+	stage, _, err := commandStage(context.Background(), root, "wsrev_2", "check", "check", CommandPolicy{
+		Command: []string{"sh", "-c", "printf 'actionable stderr' >&2; exit 7"},
+	}, policy, false)
+	if err == nil || stage.Status != VerificationFailed || stage.Exit != 7 {
+		t.Fatalf("failed command stage = %+v, err=%v", stage, err)
+	}
+	for _, want := range []string{"check", "exit 7", "actionable stderr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("failure %q omitted %q", err, want)
+		}
+	}
+}

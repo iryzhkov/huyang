@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -396,5 +397,60 @@ func TestDebuggerUnavailableNamesHuyangAndGivesRepairStep(t *testing.T) {
 	if strings.Contains(string(encoded), "agent99") || len(result["next"].([]any)) != 2 ||
 		result["data"].(map[string]any)["repair"].(map[string]any)["action"] != "install_or_configure_dap_adapter" {
 		t.Fatalf("debugger recovery is obsolete or not actionable: %#v", result)
+	}
+}
+
+func TestCompactTextEnvelopeBoundsTypedPlanPayload(t *testing.T) {
+	large := strings.Repeat("large-marker-", 10000)
+	envelope := map[string]any{
+		"api_version": "huyang.workspace/v1alpha1",
+		"request_id":  "req_test",
+		"outcome":     "ok",
+		"summary":     "Plan created",
+		"data": map[string]any{
+			"plan": workspacecore.PlanRecord{
+				PlanID: "plan_test",
+				Operations: []workspacecore.PlanOperation{{
+					OpID:    "large-create",
+					Kind:    workspacecore.OperationCreateFile,
+					Path:    "large.txt",
+					Content: large,
+				}},
+			},
+		},
+		"evidence": map[string]any{"ids": []string{}, "truncated": false},
+		"warnings": []string{},
+		"next":     []any{},
+	}
+	encoded, err := json.Marshal(compactTextEnvelope(envelope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16<<10 || strings.Contains(string(encoded), large[:1024]) {
+		t.Fatalf("compact text envelope retained large plan bytes: %d", len(encoded))
+	}
+}
+
+func TestCanonicalChangedPathsUsesLatestPlanReceipt(t *testing.T) {
+	direct := newDirectWorkspaces(t.TempDir())
+	workspaceID := workspacecore.ID("ws_receipt_test")
+	direct.replays[string(workspaceID)+"\x00change_plan\x00receipt"] = &directReplay{
+		complete: true,
+		result: map[string]any{
+			"data": map[string]any{
+				"canonical_changed": true,
+				"from_revision":     "wsrev_19",
+				"revision":          "wsrev_20",
+				"changed_paths":     []any{"pkg/a.py", "tests/test_a.py"},
+			},
+		},
+	}
+	got, err := direct.canonicalChangedPaths(workspaceID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pkg/a.py", "tests/test_a.py"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changed paths = %#v, want %#v", got, want)
 	}
 }

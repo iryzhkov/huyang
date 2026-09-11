@@ -452,7 +452,7 @@ func (w *cappedCommandOutput) String() string {
 	}
 	return value
 }
-func sanitizedCommandEnv() []string {
+func isolatedCommandEnv() ([]string, func(), error) {
 	allowed := []string{"PATH", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "PATHEXT"}
 	var result []string
 	for _, key := range allowed {
@@ -460,7 +460,28 @@ func sanitizedCommandEnv() []string {
 			result = append(result, key+"="+value)
 		}
 	}
-	return result
+	runtimeRoot, err := os.MkdirTemp("", "huyang-command-env-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create isolated command environment: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(runtimeRoot) }
+	home := filepath.Join(runtimeRoot, "home")
+	cache := filepath.Join(runtimeRoot, "cache")
+	goCache := filepath.Join(runtimeRoot, "go-build")
+	for _, dir := range []string{home, cache, goCache} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("create isolated command environment: %w", err)
+		}
+	}
+	result = append(result,
+		"HOME="+home,
+		"USERPROFILE="+home,
+		"XDG_CACHE_HOME="+cache,
+		"LOCALAPPDATA="+cache,
+		"GOCACHE="+goCache,
+	)
+	return result, cleanup, nil
 }
 
 func commandStage(ctx context.Context, root, revision, name, mode string, command CommandPolicy, policy PipelinePolicy, mutating bool) (VerificationStage, []ToolDelta, error) {
@@ -485,9 +506,15 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 	started := time.Now()
 	timed, cancel := context.WithTimeout(ctx, time.Duration(policy.Resource.TimeoutSeconds)*time.Second)
 	defer cancel()
+	environment, cleanupEnvironment, envErr := isolatedCommandEnv()
+	if envErr != nil {
+		stage.Status = VerificationFailed
+		return stage, nil, envErr
+	}
+	defer cleanupEnvironment()
 	process := exec.CommandContext(timed, command.Command[0], command.Command[1:]...)
 	process.Dir = root
-	process.Env = append(sanitizedCommandEnv(), "HUYANG_SANDBOX=1")
+	process.Env = append(environment, "HUYANG_SANDBOX=1")
 	var output cappedCommandOutput
 	output.limit = policy.Resource.MaxOutputBytes
 	process.Stdout, process.Stderr = &output, &output
@@ -545,7 +572,11 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 		if mutating {
 			_ = restoreTree(root, before)
 		}
-		return stage, delta, runErr
+		detail := strings.TrimSpace(stage.Output)
+		if detail == "" {
+			detail = runErr.Error()
+		}
+		return stage, delta, fmt.Errorf("verification stage %s failed (exit %d): %s", name, stage.Exit, detail)
 	}
 	stage.Status = VerificationPassed
 	return stage, delta, nil

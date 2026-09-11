@@ -508,7 +508,21 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 			if operation.Kind == OperationDeleteSymbol {
 				operation.Content = ""
 			}
-		case OperationCreateFile, OperationDeleteFile:
+		case OperationCreateFile:
+			if operation.Path == "" {
+				return nil, fmt.Errorf("%s requires path", operation.OpID)
+			}
+			if operation.Revision == "" {
+				snapshot, err := w.Snapshot(operation.Path, ProviderLayer{})
+				if err != nil {
+					return nil, fmt.Errorf("%s: snapshot create target: %w", operation.OpID, err)
+				}
+				if snapshot.Disk.Kind != ObjectMissing {
+					return nil, fmt.Errorf("%s: create target already exists", operation.OpID)
+				}
+				operation.Revision = snapshot.Revision
+			}
+		case OperationDeleteFile:
 			if operation.Path == "" || operation.Revision == "" {
 				return nil, fmt.Errorf("%s requires path and revision_id", operation.OpID)
 			}

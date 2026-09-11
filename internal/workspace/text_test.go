@@ -409,6 +409,41 @@ func TestRecoveryRestoresPostimageAndPreservesThirdPartyWrite(t *testing.T) {
 	}
 }
 
+func TestProjectDiscoveryAndImpactSkipNodeModules(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{filepath.Join(root, "src"), filepath.Join(root, "node_modules", "pkg")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(root, "src", "app.ts"), "export const app = 1\n")
+	for _, name := range []string{"dep-a.js", "dep-b.js", "dep-c.js"} {
+		writeFile(t, filepath.Join(root, "node_modules", "pkg", name), "needle\n")
+	}
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{MaxFiles: 2})
+	orientation, err := ws.Orient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !orientation.Coverage.Complete || len(orientation.Entries) != 1 || orientation.Entries[0].Path != "src/app.ts" {
+		t.Fatalf("node_modules consumed workspace limits: %+v", orientation)
+	}
+	search, err := ws.Search(SearchRequest{Query: "needle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !search.Coverage.Complete || len(search.Hits) != 0 {
+		t.Fatalf("node_modules leaked into search: %+v", search)
+	}
+	graph, err := BuildImpactGraph(root, "rev_node_modules", []string{"src/app.ts"}, ImpactPolicy{MaxFiles: 2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Coverage.Complete || len(graph.Nodes) != 1 || graph.Nodes[0].Path != "src/app.ts" {
+		t.Fatalf("node_modules consumed impact limits: %+v", graph)
+	}
+}
+
 func writeJournalFixture(t *testing.T, stateDir, name string, record journalRecord) {
 	t.Helper()
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {

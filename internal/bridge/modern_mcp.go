@@ -150,7 +150,7 @@ func planOperationSchema(operationKinds []string) map[string]any {
 		"path":                    stringSchema("Workspace path for create_file or delete_file."),
 		"from":                    stringSchema("Source path for move_file."),
 		"to":                      stringSchema("Destination path for move_file."),
-		"revision_id":             stringSchema("Expected source or path document revision."),
+		"revision_id":             stringSchema("Expected source/path document revision. Optional for create_file; Huyang binds the current missing-target revision.."),
 		"destination_revision_id": stringSchema("Expected destination document revision for move_file."),
 		"depends_on":              map[string]any{"type": "array", "items": stringSchema("Predecessor op_id.")},
 		"indentation":             enumSchema("exact", "syntax_anchor", "formatter"),
@@ -466,25 +466,19 @@ func compactTextEnvelope(envelope map[string]any) map[string]any {
 }
 
 func compactTextData(value any) any {
-	data, ok := value.(map[string]any)
+	compacted := compactStructuredData(value)
+	data, ok := compacted.(map[string]any)
 	if !ok {
-		return value
-	}
-	compact := make(map[string]any, len(data))
-	for key, item := range data {
-		compact[key] = item
+		return compacted
 	}
 	for _, key := range []string{"overview", "map"} {
-		orientation, ok := compact[key].(workspacecore.Orientation)
+		orientation, ok := data[key].(map[string]any)
 		if !ok {
 			continue
 		}
-		compact[key] = map[string]any{
-			"workspace": orientation.Workspace, "coverage": orientation.Coverage,
-			"entry_count": len(orientation.Entries),
-		}
+		delete(orientation, "entries")
 	}
-	return compact
+	return data
 }
 
 const maxStructuredEntries = 100
@@ -1136,7 +1130,11 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 		if err != nil {
 			return modernFailure(requestID, workspace, "git_history_search_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical matches", len(result.Hits)), result)
+		noun := "matches"
+		if len(result.Hits) == 1 {
+			noun = "match"
+		}
+		return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
 	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
 		refine, _ := arguments["refine"].(map[string]any)
@@ -1492,7 +1490,8 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 	data := map[string]any{
 		"change": compactTextChange(change), "resolution": resolution, "tool_delta": []any{},
 		"diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
-		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq), "canonical_changed": !preview,
+		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq),
+		"changed_paths":    []string{change.Diff.Path}, "canonical_changed": !preview,
 	}
 	evidenceIDs := make([]string, 0)
 	if !preview {
@@ -1697,7 +1696,14 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		return json.Unmarshal(encoded, target)
 	}
 	planResult := func(summary string, plan workspacecore.PlanRecord) map[string]any {
-		result := modernEnvelope(requestID, workspace, "ok", "", summary, map[string]any{"plan": plan})
+		data := map[string]any{"plan": plan}
+		if plan.State == workspacecore.PlanCommitted && plan.Preparation != nil {
+			data["from_revision"] = plan.Preparation.BaseRevision
+			data["revision"] = plan.Preparation.CanonicalRevision
+			data["changed_paths"] = append([]string(nil), plan.Preparation.AffectedFiles...)
+			data["canonical_changed"] = plan.Preparation.CanonicalChanged
+		}
+		result := modernEnvelope(requestID, workspace, "ok", "", summary, data)
 		result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
 		if plan.Preparation != nil {
 			evidenceIDs := make([]string, 0)
@@ -1770,6 +1776,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		if err == nil {
 			plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
 		}
+		if err != nil && planID != "" {
+			if failed, inspectErr := workspace.InspectPlan(planID, revision); inspectErr == nil {
+				plan = failed
+			}
+		}
 		if err == nil {
 			return planResult("Plan prepared in an isolated sandbox; canonical workspace unchanged", plan)
 		}
@@ -1833,7 +1844,14 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				data["canonical_changed"] = plan.Preparation.CanonicalChanged
 			}
 		}
-		return modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
+		result := modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
+		if action == "prepare" && plan.PlanID != "" {
+			result["next"] = []any{
+				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+			}
+		}
+		return result
 	}
 	panic("unreachable")
 }
@@ -1966,7 +1984,7 @@ func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, t
 	d.replayMu.Lock()
 	var receipts []receipt
 	for key, replay := range d.replays {
-		if !replay.complete || !strings.HasPrefix(key, string(workspaceID)+"\x00edit_apply\x00") {
+		if !replay.complete || !strings.HasPrefix(key, string(workspaceID)+"\x00") {
 			continue
 		}
 		data, _ := replay.result["data"].(map[string]any)
@@ -1975,29 +1993,41 @@ func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, t
 		}
 		from, fromErr := workspaceRevisionSequence(fmt.Sprint(data["from_revision"]))
 		to, toErr := workspaceRevisionSequence(fmt.Sprint(data["revision"]))
-		change, _ := data["change"].(map[string]any)
-		diff, _ := change["diff"].(map[string]any)
-		path, _ := diff["path"].(string)
-		if fromErr == nil && toErr == nil && path != "" && to <= target {
-			receipts = append(receipts, receipt{from: from, to: to, path: path})
+		if fromErr != nil || toErr != nil || from+1 != to || to != target {
+			continue
+		}
+		var changedPaths []string
+		switch values := data["changed_paths"].(type) {
+		case []string:
+			changedPaths = append(changedPaths, values...)
+		case []any:
+			for _, value := range values {
+				if path, ok := value.(string); ok {
+					changedPaths = append(changedPaths, path)
+				}
+			}
+		}
+		if len(changedPaths) == 0 {
+			change, _ := data["change"].(map[string]any)
+			diff, _ := change["diff"].(map[string]any)
+			if path, _ := diff["path"].(string); path != "" {
+				changedPaths = append(changedPaths, path)
+			}
+		}
+		for _, path := range changedPaths {
+			if path != "" {
+				receipts = append(receipts, receipt{from: from, to: to, path: path})
+			}
 		}
 	}
 	d.replayMu.Unlock()
 	sort.Slice(receipts, func(i, j int) bool { return receipts[i].from < receipts[j].from })
-	cursor := uint64(1)
 	paths := map[string]bool{}
 	for _, item := range receipts {
-		if item.from != cursor {
-			continue
-		}
 		paths[item.path] = true
-		cursor = item.to
-		if cursor == target {
-			break
-		}
 	}
-	if cursor != target {
-		return nil, fmt.Errorf("changed_file_evidence_incomplete: native receipts cover wsrev_%d through wsrev_%d", 1, cursor)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("changed_file_evidence_incomplete: no native receipt covers wsrev_%d through wsrev_%d; run full verification or make a new native change", target-1, target)
 	}
 	result := make([]string, 0, len(paths))
 	for path := range paths {
