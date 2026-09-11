@@ -6,16 +6,9 @@ local here = debug.getinfo(1, "S").source:sub(2)
 local repo = vim.fn.fnamemodify(here, ":h:h")
 vim.opt.rtp:prepend(repo)
 
--- nvim-dap for the debugger tests: a checkout tests/smoke.sh made under
--- tests/.deps, or the one $AGENT99_TEST_NVIM_DAP points at (a dev
--- machine's lazy.nvim copy). Without either the debug tests skip.
-local dap_dir = os.getenv("AGENT99_TEST_NVIM_DAP")
-if dap_dir == nil or dap_dir == "" then
-    dap_dir = repo .. "/tests/.deps/nvim-dap"
-end
-if vim.fn.isdirectory(dap_dir) == 1 then
-    vim.opt.rtp:prepend(dap_dir)
-end
+-- nvim-dap is shipped on the same runtimepath as Huyang. Debugger tests
+-- intentionally use the production asset rather than a developer checkout.
+assert(pcall(require, "dap"), "shipped nvim-dap runtime is unavailable")
 
 -- --clean drops the data site directory, where nvim-treesitter installs its
 -- parsers; put it back so the data-file tests see the machine's yaml and

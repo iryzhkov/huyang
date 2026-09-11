@@ -8,8 +8,9 @@
 -- live in one module-level table, mirroring check_baseline: one instance,
 -- one session, dying with the instance.
 --
--- nvim-dap is an optional dependency. Without it every tool here explains
--- how to add it and returns; nothing else in agent99 changes.
+-- Huyang ships nvim-dap on its production runtimepath. Keep the explicit
+-- availability error below so corrupted or incomplete installations fail with
+-- actionable recovery instead of a Lua module traceback.
 
 local M = {}
 
