@@ -2305,8 +2305,9 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		Stages: stages, Revision: revision, TestScope: testScope,
 		TestHistoryPath: filepath.Join(d.stateDir, "test-history", string(workspace.Identity().ID)+".json"),
 	}
+	identity := workspace.Identity()
 	cacheKey := strings.Join([]string{
-		string(workspace.Identity().ID), revision, strings.Join(stages, "\x1f"), testScope,
+		string(identity.ID), revision, strings.Join(stages, "\x1f"), testScope, verificationPolicyFingerprint(identity.Root),
 	}, "\x00")
 	d.verificationMu.Lock()
 	cached, cacheHit := d.verificationCache[cacheKey]
@@ -2333,7 +2334,6 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	if stager != nil {
 		result, err = stager.Verify(ctx, request)
 	} else {
-		identity := workspace.Identity()
 		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
 		if revision != current {
 			return modernEnvelope(requestID, workspace, "conflict", "revision_changed",
@@ -2450,6 +2450,19 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	d.verificationCache[cacheKey] = cachedVerification{Result: result, Outcome: outcome}
 	d.verificationMu.Unlock()
 	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
+}
+
+func verificationPolicyFingerprint(root string) string {
+	policy, err := workspacecore.LoadPipelinePolicy(root, "")
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest[:])
 }
 
 func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {

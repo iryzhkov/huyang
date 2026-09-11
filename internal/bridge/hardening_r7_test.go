@@ -1,9 +1,34 @@
 package bridge
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestVerificationPolicyFingerprintTracksTrustChanges(t *testing.T) {
+	root := t.TempDir()
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	configDir := filepath.Join(configRoot, "huyang")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[trust]\nroots = []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	untrusted := verificationPolicyFingerprint(root)
+	trustedConfig := []byte("[trust]\nroots = [\"" + root + "\"]\n")
+	if err := os.WriteFile(configPath, trustedConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trusted := verificationPolicyFingerprint(root)
+	if untrusted == trusted {
+		t.Fatalf("verification cache fingerprint ignored trust change: %s", trusted)
+	}
+}
 
 func TestChangePlanInspectAcceptsOmittedOptionalRevision(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "before\n"})
