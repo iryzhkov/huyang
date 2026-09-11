@@ -17,7 +17,7 @@ local has_parser, expand_glob, decl_line = core.has_parser, core.expand_glob, co
 local project_files, is_test_path, better_sample = core.project_files, core.is_test_path, core.better_sample
 local fresh_buf, DATA_FILETYPES, FRESH_RETRY_MS = core.fresh_buf, core.DATA_FILETYPES, core.FRESH_RETRY_MS
 local enabled_lsp_configs_for = core.enabled_lsp_configs_for
-local MAX_LOCATIONS, ATTACH_TIMEOUT_MS = core.MAX_LOCATIONS, core.ATTACH_TIMEOUT_MS
+local MAX_LOCATIONS = core.MAX_LOCATIONS
 
 
 local function symbol_kind(kind)

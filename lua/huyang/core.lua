@@ -8,8 +8,6 @@
 
 local M = {}
 
-
-
 local ATTACH_TIMEOUT_MS = 5000
 
 local REQUEST_TIMEOUT_MS = 10000
@@ -18,6 +16,10 @@ local MAX_LOCATIONS = 100
 
 local function err(fmt, ...)
     error(fmt:format(...), 0)
+end
+
+local function pack(...)
+    return { n = select("#", ...), ... }
 end
 
 -- Run `start(resume)` and yield until `resume(...)` is called. Guarded so a
@@ -30,10 +32,6 @@ end
 -- module keeps the resume function while the coroutine is parked, so a
 -- cancel wakes it at once instead of after the LSP reply or timer it was
 -- waiting for; the guard below makes that late reply a no-op.
-local function pack(...)
-    return { n = select("#", ...), ... }
-end
-
 local function await(start)
     local co = assert(coroutine.running(), "huyang: await called outside a coroutine")
     local rpc = require("huyang.rpc")
@@ -622,8 +620,8 @@ local function dialect_note(bufnr)
         return "this is QML JavaScript (a .pragma/.import header), which no JavaScript "
             .. "or TypeScript server can parse; the one that attached was detached and "
             .. "its errors on this file discarded. Nothing checked this edit - qmllint "
-            .. "over the .qml files that import this one is the gate (check_project "
-            .. "runs it)."
+            .. "over the .qml files that import this one is the gate (verify_run "
+            .. "runs it as the project's check stage)."
     end
     return nil
 end

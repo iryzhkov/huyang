@@ -8,9 +8,8 @@ local M = {}
 
 local core = require("huyang.core")
 local index = require("huyang.index")
-local err, await, sleep, load_buf, rel_path = core.err, core.await, core.sleep, core.load_buf, core.rel_path
-local assert_writable = core.assert_writable
-local get_client, request, client_for, write_buf = core.get_client, core.request, core.client_for, core.write_buf
+local err, sleep, load_buf, rel_path = core.err, core.sleep, core.load_buf, core.rel_path
+local get_client, request, client_for = core.get_client, core.request, core.client_for
 local make_position, resync_open_buffers = core.make_position, core.resync_open_buffers
 local dialect_note = core.dialect_note
 local position_params, fresh_buf, enabled_lsp_configs_for =
@@ -24,6 +23,14 @@ local cap = require("huyang.cap")
 -- name for it here keeps the rest of the file indifferent to the version.
 ---@diagnostic disable-next-line: deprecated
 local text_diff = (vim.text and vim.text.diff) or vim.diff
+
+-- An environment switch under its HUYANG_ name, falling back to the
+-- AGENT99_ name it had before the rename.
+local function env_setting(name, legacy)
+    local value = os.getenv(name)
+    if value == nil or value == "" then value = os.getenv(legacy) end
+    return value
+end
 
 -- A symbol edit whose target lines overlap the region a request in
 -- progress owns as its PRIMARY edit target (the one only the <replacement>
@@ -46,7 +53,7 @@ local function primary_region_conflict(bufnr, first, last)
         :format(first, last, pfirst, plast)
 end
 
--- The format switch as setup(), AGENT99_FORMAT or a tool call may spell it,
+-- The format switch as setup(), HUYANG_FORMAT or a tool call may spell it,
 -- reduced to false, "range" or "file". Anything unrecognized is off, so a
 -- typo cannot turn formatting on.
 local function normalize_format(value)
@@ -77,11 +84,11 @@ local function post_edit_options(args)
         nvim_lint = true,
         -- Off by default: a server's formatter rewrites whitespace the caller
         -- chose on purpose often enough that formatting is opt-in, through
-        -- setup(), AGENT99_FORMAT, or the tool call's own `format`.
+        -- setup(), HUYANG_FORMAT, or the tool call's own `format`.
         format = false,
         organize_imports = true,
     }, opts or {})
-    local env = os.getenv("AGENT99_FORMAT")
+    local env = env_setting("HUYANG_FORMAT", "AGENT99_FORMAT")
     if env and env ~= "" then
         merged.format = env
     end
@@ -91,7 +98,7 @@ local function post_edit_options(args)
     merged.format = normalize_format(merged.format)
     -- wait=false defers the verdict to the next reply; the environment
     -- switch serves the standalone server, the argument one call.
-    local wait_env = os.getenv("AGENT99_POST_EDIT_WAIT")
+    local wait_env = env_setting("HUYANG_POST_EDIT_WAIT", "AGENT99_POST_EDIT_WAIT")
     if wait_env == "0" or wait_env == "false" or wait_env == "off" then
         merged.wait = false
     elseif wait_env and wait_env ~= "" then
@@ -1607,17 +1614,33 @@ end
 -- Reports not yet delivered: verdicts deferred by wait=false, and
 -- diagnostics that arrived after a report went out. Both ride on the next
 -- reply, whatever tool produces it.
-local deferred = {}   -- [bufnr] = { since, acks, names, before, root, headless, opts, full, label, client }
-local watched = {}    -- [bufnr] = { reported_at, after, names, root, label, settle_ms, wait_ms, client }
+--
+-- All three stores are keyed by client first and buffer second. One
+-- headless Neovim serves every client that opened its root, and a store
+-- keyed by buffer alone let one client's watch on a file overwrite
+-- another's: the second client's late diagnostics were then measured from
+-- a report it had never seen.
+local deferred = {}   -- [client][bufnr] = { since, acks, names, before, root, headless, opts, full, label, client }
+local watched = {}    -- [client][bufnr] = { reported_at, after, names, root, label, settle_ms, wait_ms, client }
 -- What the next reply takes along, per client: a verdict deferred by one
 -- client's wait=false edit belongs to that client, and used to ride out on
 -- whichever client's reply left the editor first.
 local carries = {}    -- [client] = { late_diagnostics, deferred_verdicts, still_pending }
 
-local function carry_for(id)
+-- This client's own table inside a store keyed by client id, made on first
+-- use. `id` defaults to the client whose call is running.
+local function client_slot(store, id)
     id = id or require("huyang.client").current()
-    if not carries[id] then carries[id] = {} end
-    return carries[id]
+    local mine = store[id]
+    if not mine then
+        mine = {}
+        store[id] = mine
+    end
+    return mine
+end
+
+local function carry_for(id)
+    return client_slot(carries, id)
 end
 
 local WATCH_MS = 60 * 1000
@@ -1662,9 +1685,10 @@ local function watch_after_report(bufnr, root, names, opts, label, extra)
     -- and discharging its watches here is how it came to be told "none new
     -- to this list" about text it had never seen.
     local me = require("huyang.client").current()
+    local mine = client_slot(watched, me)
     local now = vim.uv.now()
-    for b, w in pairs(watched) do
-        if b ~= bufnr and w.client == me and vim.api.nvim_buf_is_valid(b) then
+    for b, w in pairs(mine) do
+        if b ~= bufnr and vim.api.nvim_buf_is_valid(b) then
             w.after, w.reported_at = buf_snapshot(b), now
             -- And the label with them. It names the reply the next late
             -- report is measured from, so leaving it behind while the
@@ -1676,7 +1700,7 @@ local function watch_after_report(bufnr, root, names, opts, label, extra)
         end
     end
     local function watch(b)
-        watched[b] = {
+        mine[b] = {
             reported_at = now, after = buf_snapshot(b),
             names = names or {}, root = root, label = label,
             settle_ms = opts.settle_ms, wait_ms = opts.wait_ms,
@@ -1697,10 +1721,11 @@ end
 -- that buffer against what the report showed, added to the carry.
 local function collect_late()
     local now = vim.uv.now()
-    for bufnr, w in pairs(watched) do
+    for _, mine in pairs(watched) do
+    for bufnr, w in pairs(mine) do
         local lp = last_publish[bufnr]
         if not vim.api.nvim_buf_is_valid(bufnr) or now - w.reported_at > WATCH_MS then
-            watched[bufnr] = nil
+            mine[bufnr] = nil
         elseif lp and lp.at > w.reported_at then
             local current = buf_snapshot(bufnr)
             local added, gone = {}, 0
@@ -1744,6 +1769,7 @@ local function collect_late()
             w.reported_at = now
         end
     end
+    end
 end
 
 -- Forward declaration: post_edit_report is defined below and resolves a
@@ -1754,15 +1780,16 @@ local post_edit_report
 -- `wait` is true (an edit or a diagnostics read is about to take a
 -- snapshot, and an unresolved verdict would be charged to it).
 function flush_deferred(wait)
-    for bufnr, d in pairs(deferred) do
+    for _, mine in pairs(deferred) do
+    for bufnr, d in pairs(mine) do
         if not vim.api.nvim_buf_is_valid(bufnr) then
-            deferred[bufnr] = nil
+            mine[bufnr] = nil
         else
             local settle = settle_for(d.root, d.names, d.opts.settle_ms, d.opts.wait_ms)
             local ripe = verdict_in(bufnr, d.since, d.acks, settle, d.names, d.version)
                 or vim.uv.now() >= d.since + d.opts.wait_ms
             if ripe or wait then
-                deferred[bufnr] = nil
+                mine[bufnr] = nil
                 local opts = vim.tbl_extend("force", d.opts, { wait = true })
                 -- As the client that made the edit: the report says what is
                 -- new to *its* list, and another client's call happening to
@@ -1783,6 +1810,7 @@ function flush_deferred(wait)
                 into.still_pending[#into.still_pending + 1] = d.label
             end
         end
+    end
     end
 end
 
@@ -1972,7 +2000,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         acks, names = send_barriers(bufnr, root)
     end
     if attached and not opts.wait and not ctx.since then
-        deferred[bufnr] = {
+        client_slot(deferred)[bufnr] = {
             since = since, acks = acks, names = names, before = before, root = root,
             headless = headless, opts = opts, full = full, label = label,
             -- Whose edit it was: the verdict is owed to that client, and
@@ -2005,11 +2033,11 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
     end
     local closure_how = wait_for_closure(closure_wait, root, bufnr, since, opts)
     local report = {}
-    -- AGENT99_DEBUG_VERDICT surfaces which signal the wait actually got, which
+    -- HUYANG_DEBUG_VERDICT surfaces which signal the wait actually got, which
     -- is otherwise only visible through the wording it produces. Worth keeping:
     -- "does this server stamp versions" is the question to ask first when an
     -- edit verdict turns out to have been early.
-    local debug_verdict = os.getenv("AGENT99_DEBUG_VERDICT") ~= nil
+    local debug_verdict = env_setting("HUYANG_DEBUG_VERDICT", "AGENT99_DEBUG_VERDICT") ~= nil
     -- Diff against the snapshot: consume matching signatures as
     -- pre-existing, the rest are new; leftovers in the snapshot were fixed.
     local remaining = vim.deepcopy(before or {})
@@ -2233,7 +2261,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
             .. "this file when the wait ended and none of them has been timed in this "
             .. "workspace yet, so this verdict is provisional: what arrives later comes with "
             .. "a later reply under late_diagnostics. A structural change is worth confirming "
-            .. "with check_project or diagnostics before it is treated as finished"):format(covers)
+            .. "with verify_run or diagnostics before it is treated as finished"):format(covers)
     elseif #new_here == 0 and silent then
         -- The servers on this file answered the barrier and then said nothing,
         -- and none of them has ever published anything about this file. That
@@ -2244,7 +2272,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- this one, which is what the old per-server gate treated it as.
         report.diagnostics_after = ("no new errors or warnings%s, but %s has published no "
             .. "diagnostics %s, so its silence is not yet evidence that "
-            .. "this file is clean; check_project runs the project's own build or check")
+            .. "this file is clean; verify_run runs the project's own build or check")
             :format(covers, silent, silent_scope)
     elseif #new_here == 0 and #hints > 0 and not strong_here then
         -- The server has hints for these files and has never had anything
@@ -2255,7 +2283,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         report.diagnostics_after = ("no new errors or warnings - but the server reports "
             .. "nothing above hint severity for %s, so that is an empty category here and "
             .. "this line checks nothing. The hints below are the whole of what it has to "
-            .. "say about these files; check_project runs the project's own build or check")
+            .. "say about these files; verify_run runs the project's own build or check")
             :format(scope)
     elseif #new_here == 0 and basis == "version" and structural then
         -- Worth one clause on a structural change, because the alternative
@@ -2271,7 +2299,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- A server analyzes one build configuration and can lag a change it
         -- has only just been told about, so a surprising error here is worth
         -- confirming rather than chasing.
-        report.if_unexpected = "these come from the language server; check_project "
+        report.if_unexpected = "these come from the language server; verify_run "
             .. "runs the project's own build or check for ground truth"
     end
     -- The closure, listed whatever the verdict says: a reply that does report
@@ -2460,9 +2488,26 @@ end
 -- Code actions come in two steps: list them (returns a token), then apply
 -- one by token + index. The raw actions are cached editor-side because
 -- applying needs the original LSP objects, which the model must not edit.
-local action_cache = {}
+-- The cache and its token counter are per client: a token is only ever
+-- valid for the client that listed the actions, so one client cannot apply
+-- an action another client was offered.
+local action_cache = {}   -- [client] = { next = n, [token] = entry }
 
-local action_token = 0
+local function cache_actions(entry)
+    local mine = client_slot(action_cache)
+    mine.next = (mine.next or 0) + 1
+    local token = tostring(mine.next)
+    mine[token] = entry
+    return token
+end
+
+local function cached_actions(token)
+    return client_slot(action_cache)[tostring(token)]
+end
+
+local function forget_actions(token)
+    client_slot(action_cache)[tostring(token)] = nil
+end
 
 local function code_actions(args)
     local bufnr = load_buf(args.file)
@@ -2497,9 +2542,7 @@ local function code_actions(args)
         range = range,
         context = { diagnostics = lsp_diags, triggerKind = 1 },
     }) or {}
-    action_token = action_token + 1
-    local token = tostring(action_token)
-    action_cache[token] = { client_id = client.id, bufnr = bufnr, actions = result }
+    local token = cache_actions({ client_id = client.id, bufnr = bufnr, actions = result })
     -- Servers repeat themselves: gopls offered "Remove variable trimmed"
     -- twice for one diagnostic, at indices 1 and 2, which reads as two
     -- different fixes. The first of each title keeps its index.
@@ -2524,7 +2567,7 @@ local function code_actions(args)
 end
 
 local function apply_code_action(args)
-    local entry = action_cache[tostring(args.token)]
+    local entry = cached_actions(args.token)
     if not entry then
         err("unknown or expired code-action token: %s", tostring(args.token))
     end
@@ -2535,7 +2578,7 @@ local function apply_code_action(args)
     -- A refused edit offers its own follow-ups (relocated, or forced) under
     -- a token too; those re-run the edit tool with adjusted arguments.
     if entry.edit then
-        action_cache[tostring(args.token)] = nil
+        forget_actions(args.token)
         local result = require("huyang.lsp").dispatch(entry.edit, action.args)
         if type(result) == "table" then
             result.applied = action.title
@@ -2588,7 +2631,7 @@ local function apply_code_action(args)
                     .. "if any, arrives later and is not in changed_files"):format(COMMAND_WAIT_MS)
         end
     end
-    action_cache[tostring(args.token)] = nil
+    forget_actions(args.token)
     return {
         applied = action.title,
         changed_files = changed,
@@ -3520,9 +3563,7 @@ local function replace_symbol_lines(args)
             title = "apply at the requested lines anyway (ignore expect)",
             args = vim.tbl_extend("force", args, { force = true })
         }
-        action_token = action_token + 1
-        local token = tostring(action_token)
-        action_cache[token] = { edit = "replace_symbol_lines", actions = actions }
+        local token = cache_actions({ edit = "replace_symbol_lines", actions = actions })
         -- A literal `index=N` is not a call anybody can make, and when the
         -- token is itself a short number the whole line reads as a template
         -- with nothing filled in. Each action is printed as the call that
@@ -4585,30 +4626,6 @@ local function replace_pattern(args)
             args.full_diagnostics, { own = own_bufs }))
 end
 
-local FILE_OP_CAPABILITY = {
-    ["workspace/willCreateFiles"] = "willCreate",
-    ["workspace/didCreateFiles"] = "didCreate",
-    ["workspace/willRenameFiles"] = "willRename",
-    ["workspace/didRenameFiles"] = "didRename",
-    ["workspace/willDeleteFiles"] = "willDelete",
-    ["workspace/didDeleteFiles"] = "didDelete",
-}
-
-local function file_op_clients(method)
-    local key = FILE_OP_CAPABILITY[method]
-    local out = {}
-    for _, client in ipairs(vim.lsp.get_clients()) do
-        local workspace = (client.server_capabilities or {}).workspace or {}
-        if (workspace.fileOperations or {})[key] then
-            out[#out + 1] = client
-        end
-    end
-    return out
-end
-
--- The same operation as watched-file changes, which is how a server learns
--- that its view of the project is out of date: a rename is the old path
--- gone and the new path arrived.
 M.post_edit_options = post_edit_options
 M.organize_imports = organize_imports
 -- Exported for tests/unit_edit.lua: the guard that keeps an import pass from
