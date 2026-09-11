@@ -610,7 +610,7 @@ func (s *Sandbox) writeMarker(state string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.Root, "owner.json"), append(content, '\n'), 0o600)
+	return atomicWriteFile(filepath.Join(s.Root, "owner.json"), append(content, '\n'), 0o600)
 }
 
 func (s *Sandbox) Cleanup() error {

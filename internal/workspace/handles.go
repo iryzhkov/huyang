@@ -542,9 +542,9 @@ func (w *Workspace) resolveSymbol(record HandleRecord) (HandleResolution, error)
 			current.DocumentRevision == original.DocumentRevision {
 			return HandleResolution{Status: ResolutionExact, Handle: record.Handle, Original: original, Current: &current}, nil
 		}
-		if current.Path == original.Path && (current.Device != original.Device || current.Inode != original.Inode) {
-			return HandleResolution{Status: ResolutionConflicted, Code: ConflictTargetDeleted, Handle: record.Handle, Original: original, Candidates: fingerprint}, nil
-		}
+		// A different device or inode with the same declaration bytes is an
+		// atomic save, a checkout or a delete/recreate of equal content. The
+		// content hash is the authoritative token, so the handle stays bound.
 		code := ConflictFormatOnlyRelocation
 		if current.Path != original.Path {
 			code = ConflictSymbolMoved

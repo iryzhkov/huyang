@@ -120,9 +120,20 @@ func TestSymbolHandleDeleteRecreateTTLAndEpochInvalidation(t *testing.T) {
 	if err := os.Rename(replacement, filepath.Join(root, "a.go")); err != nil {
 		t.Fatal(err)
 	}
+	// The replacement carries identical bytes under a new inode. Content is
+	// the authoritative token, so the handle stays bound exactly.
 	recreated, err := workspace.ResolveHandle(record.Handle)
-	if err != nil || recreated.Status != ResolutionConflicted || recreated.Code != ConflictTargetDeleted {
-		t.Fatalf("delete/recreate resolution = %+v, %v", recreated, err)
+	if err != nil || recreated.Status != ResolutionExact || recreated.Current == nil ||
+		recreated.Current.ContentSHA256 != record.Locator.ContentSHA256 {
+		t.Fatalf("delete/recreate of identical content resolution = %+v, %v", recreated, err)
+	}
+	writeFile(t, replacement, "func other()\nbody\n---\n")
+	if err := os.Rename(replacement, filepath.Join(root, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := workspace.ResolveHandle(record.Handle)
+	if err != nil || replaced.Status != ResolutionConflicted || replaced.Code != ConflictTargetDeleted {
+		t.Fatalf("delete/recreate with other content resolution = %+v, %v", replaced, err)
 	}
 
 	workspace, _ = newHandleWorkspace(t, map[string]string{"a.go": "func foo()\nbody\n---\n"})

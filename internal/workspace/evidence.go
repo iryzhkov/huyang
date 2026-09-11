@@ -212,10 +212,7 @@ func (s *diagnosticStore) save() error {
 	if err != nil {
 		return err
 	}
-	if err := atomicWrite(s.path, append(content, '\n'), 0o600); err != nil {
-		return err
-	}
-	return syncDirectory(filepath.Dir(s.path))
+	return atomicWriteFile(s.path, append(content, '\n'), 0o600)
 }
 
 func normalizeFinding(f DiagnosticFinding) DiagnosticFinding {

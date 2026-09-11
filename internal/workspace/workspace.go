@@ -95,6 +95,10 @@ type Conflict struct {
 	Path     string
 	Expected RevisionID
 	Current  RevisionID
+	// Detail carries an optional human-readable qualification of the code, for
+	// example why an expected revision could not be attributed to this
+	// service instance.
+	Detail string
 }
 
 func (c *Conflict) Error() string {
@@ -106,9 +110,23 @@ func (c *Conflict) Error() string {
 	case ConflictRevisionRequired:
 		return "modern mutation requires an explicit document revision"
 	default:
-		return fmt.Sprintf("%s: %s changed from %s to %s", c.Code, c.Path, c.Expected, c.Current)
+		message := fmt.Sprintf("%s: %s changed from %s to %s", c.Code, c.Path, c.Expected, c.Current)
+		if c.Detail != "" {
+			message += " (" + c.Detail + ")"
+		}
+		return message
 	}
 }
+
+// maxRevisionsPerDocument bounds how many historical snapshots the workspace
+// keeps for one document. Revision tokens derive from content, so a handle
+// issued at an older revision still validates whenever the bytes are back;
+// the history only has to be deep enough to classify a conflict as a content
+// change rather than an unknown revision for the handles a caller is likely
+// to still hold.
+const maxRevisionsPerDocument = 32
+
+const unknownRevisionDetail = "expected revision is not known to this service instance: it was issued before a restart, under an earlier provider epoch, or before the retained revision history"
 
 type cachedDocument struct {
 	disk        DiskSnapshot
@@ -119,17 +137,20 @@ type cachedDocument struct {
 }
 
 type Workspace struct {
-	mu          sync.Mutex
-	identity    Identity
-	documents   map[string]cachedDocument
-	revisions   map[RevisionID]DocumentSnapshot
-	knownPaths  map[string]struct{}
-	pathsPrimed bool
-	allowlist   map[string]struct{}
-	limits      Limits
-	stateDir    string
-	sectioner   Sectioner
-	failures    []EnvironmentFailure
+	mu        sync.Mutex
+	identity  Identity
+	documents map[string]cachedDocument
+	revisions map[RevisionID]DocumentSnapshot
+	// revisionHistory keeps the insertion order of revisions per absolute
+	// path so that revisions can be pruned oldest-first.
+	revisionHistory map[string][]RevisionID
+	knownPaths      map[string]struct{}
+	pathsPrimed     bool
+	allowlist       map[string]struct{}
+	limits          Limits
+	stateDir        string
+	sectioner       Sectioner
+	failures        []EnvironmentFailure
 
 	handlesMu   sync.Mutex
 	handles     *handleStore
@@ -260,14 +281,18 @@ func (w *Workspace) Refresh(path string, layer ProviderLayer) (DocumentSnapshot,
 }
 
 func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (DocumentSnapshot, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	// Path confinement, disk inspection and hashing happen outside the
+	// workspace lock so concurrent readers are not serialised behind disk
+	// I/O. The lock is retaken only to publish the observation, with a
+	// recheck against whatever was recorded meanwhile.
 	absolute, err := w.confinedPath(path)
 	if err != nil {
 		return DocumentSnapshot{}, err
 	}
+	w.mu.Lock()
 	previous, hadPrevious := w.documents[absolute]
+	w.mu.Unlock()
+
 	disk, content, err := inspectPath(absolute)
 	if err != nil {
 		return DocumentSnapshot{}, err
@@ -288,7 +313,14 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 		}
 	}
 	signature := documentSignature(disk, layer, contentHash)
-	if hadPrevious && signature != previous.signature {
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Compare against the latest record rather than the one read before the
+	// I/O: a concurrent snapshot may already have published this change, and
+	// one external change must advance the state sequence exactly once.
+	latest, hadLatest := w.documents[absolute]
+	if hadLatest && signature != latest.signature {
 		w.identity.StateSeq++
 	}
 
@@ -309,8 +341,43 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 		signature:   signature,
 		revision:    snapshot.Revision,
 	}
-	w.revisions[snapshot.Revision] = snapshot
+	w.rememberRevisionLocked(absolute, snapshot)
 	return snapshot, nil
+}
+
+// rememberRevisionLocked records a snapshot under its revision token and
+// prunes the oldest snapshots of the same document beyond
+// maxRevisionsPerDocument. The caller holds w.mu.
+func (w *Workspace) rememberRevisionLocked(absolute string, snapshot DocumentSnapshot) {
+	if w.revisionHistory == nil {
+		w.revisionHistory = make(map[string][]RevisionID)
+	}
+	history := w.revisionHistory[absolute]
+	for index, id := range history {
+		if id == snapshot.Revision {
+			history = append(history[:index], history[index+1:]...)
+			break
+		}
+	}
+	history = append(history, snapshot.Revision)
+	for len(history) > maxRevisionsPerDocument {
+		delete(w.revisions, history[0])
+		history = history[1:]
+	}
+	w.revisionHistory[absolute] = history
+	w.revisions[snapshot.Revision] = snapshot
+}
+
+// RevisionHistoryLength reports how many snapshots are retained for a
+// document. It exists for tests and inspection of retention behaviour.
+func (w *Workspace) RevisionHistoryLength(path string) int {
+	absolute, err := w.confinedPath(path)
+	if err != nil {
+		return 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.revisionHistory[absolute])
 }
 
 func (w *Workspace) ValidateMutation(workspaceID ID, path string, expected RevisionID, layer ProviderLayer) (DocumentSnapshot, error) {
@@ -339,8 +406,21 @@ func (w *Workspace) ValidateMutation(workspaceID ID, path string, expected Revis
 		}
 	}
 	if current.Revision != expected {
+		// The revision token derives from content, so an unchanged document
+		// matched above even if the service never saw the token before. A
+		// token that neither matches nor is retained cannot be attributed to
+		// a content change: it was issued by an earlier service instance,
+		// under another epoch, or before the retained history. Report that as
+		// an epoch conflict with a detail instead of claiming the content
+		// changed.
+		if !known {
+			return current, &Conflict{
+				Code: ConflictWorkspaceEpoch, Path: path, Expected: expected, Current: current.Revision,
+				Detail: unknownRevisionDetail,
+			}
+		}
 		code := ConflictDocumentChanged
-		if known && prior.Disk.Kind != ObjectMissing && current.Disk.Kind == ObjectMissing {
+		if prior.Disk.Kind != ObjectMissing && current.Disk.Kind == ObjectMissing {
 			code = ConflictDocumentDeleted
 		}
 		return current, &Conflict{Code: code, Path: path, Expected: expected, Current: current.Revision}
@@ -472,36 +552,66 @@ func hashBytes(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// contentIdentity is the part of a disk observation that describes what the
+// object is rather than where or when it was stored. Device, inode, size and
+// mtime are cheap change detectors used to skip re-hashing; they never enter
+// the revision token, so a touch, an atomic editor save or a checkout of
+// identical bytes keeps the revision and every handle issued against it.
+type contentIdentity struct {
+	Kind          ObjectKind `json:"kind"`
+	Mode          uint32     `json:"mode"`
+	SymlinkTarget string     `json:"symlink_target,omitempty"`
+}
+
+func contentIdentityOf(disk DiskSnapshot) contentIdentity {
+	return contentIdentity{Kind: disk.Kind, Mode: disk.Mode, SymlinkTarget: disk.SymlinkTarget}
+}
+
 func documentSignature(disk DiskSnapshot, layer ProviderLayer, contentHash string) string {
 	value := struct {
-		Disk          DiskSnapshot     `json:"disk"`
+		Object        contentIdentity  `json:"object"`
 		ContentSHA256 string           `json:"content_sha256"`
 		ChangedTick   uint64           `json:"changedtick"`
 		Dirty         bool             `json:"dirty"`
 		LSPVersions   map[string]int64 `json:"lsp_versions,omitempty"`
 	}{
-		Disk: disk, ContentSHA256: contentHash, ChangedTick: layer.ChangedTick,
+		Object: contentIdentityOf(disk), ContentSHA256: contentHash, ChangedTick: layer.ChangedTick,
 		Dirty: layer.Dirty, LSPVersions: layer.LSPVersions,
 	}
 	encoded, _ := json.Marshal(value)
 	return hashBytes(encoded)
 }
 
+// revisionFor derives the optimistic-concurrency token for a snapshot. The
+// token covers workspace identity, provider epoch, URI, object kind and mode,
+// the content hash and the provider layer. It deliberately excludes
+// filesystem metadata; see contentIdentity.
 func revisionFor(snapshot DocumentSnapshot) RevisionID {
 	value := struct {
 		WorkspaceID   ID               `json:"workspace_id"`
 		Epoch         uint64           `json:"epoch"`
 		URI           string           `json:"uri"`
+		Object        contentIdentity  `json:"object"`
 		ContentSHA256 string           `json:"content_sha256"`
-		Disk          DiskSnapshot     `json:"disk"`
 		ChangedTick   uint64           `json:"changedtick"`
 		Dirty         bool             `json:"dirty"`
 		LSPVersions   map[string]int64 `json:"lsp_versions,omitempty"`
 	}{
 		WorkspaceID: snapshot.Workspace.ID, Epoch: snapshot.Workspace.Epoch,
-		URI: snapshot.URI, ContentSHA256: snapshot.ContentSHA256, Disk: snapshot.Disk,
+		URI: snapshot.URI, Object: contentIdentityOf(snapshot.Disk), ContentSHA256: snapshot.ContentSHA256,
 		ChangedTick: snapshot.ChangedTick, Dirty: snapshot.Dirty, LSPVersions: snapshot.LSPVersions,
 	}
 	encoded, _ := json.Marshal(value)
 	return RevisionID("docrev_" + hashBytes(encoded))
+}
+
+// atomicWriteFile writes data to path through a same-directory temporary
+// file, fsyncs the file, renames it into place and fsyncs the parent
+// directory so the replacement is durable before the call returns. It is the
+// single implementation every state file in this package should use.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	if err := atomicWrite(path, data, mode); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }

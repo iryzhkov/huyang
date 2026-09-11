@@ -257,17 +257,18 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 	}
 	limits := normalizeLimits(options.Limits)
 	workspace := &Workspace{
-		identity:    Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
-		documents:   make(map[string]cachedDocument),
-		revisions:   make(map[RevisionID]DocumentSnapshot),
-		knownPaths:  make(map[string]struct{}),
-		allowlist:   make(map[string]struct{}),
-		limits:      limits,
-		stateDir:    options.StateDir,
-		sectioner:   options.Sectioner,
-		plans:       make(map[string]PlanRecord),
-		activePlans: make(map[string]struct{}),
-		commitFault: options.CommitFault,
+		identity:        Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
+		documents:       make(map[string]cachedDocument),
+		revisions:       make(map[RevisionID]DocumentSnapshot),
+		revisionHistory: make(map[string][]RevisionID),
+		knownPaths:      make(map[string]struct{}),
+		allowlist:       make(map[string]struct{}),
+		limits:          limits,
+		stateDir:        options.StateDir,
+		sectioner:       options.Sectioner,
+		plans:           make(map[string]PlanRecord),
+		activePlans:     make(map[string]struct{}),
+		commitFault:     options.CommitFault,
 	}
 	for _, name := range options.Files {
 		absolute := name

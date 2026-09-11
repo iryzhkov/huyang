@@ -176,6 +176,47 @@ func TestAffectedSelectionIncludesRevisionKeyedPriorFailure(t *testing.T) {
 	}
 }
 
+func TestUnnamedSuitesBeyondTenKeepDistinctGeneratedNames(t *testing.T) {
+	graph := ImpactGraph{Affected: []string{"src/value.go"}}
+	var tests []CommandPolicy
+	for index := 0; index < 12; index++ {
+		tests = append(tests, CommandPolicy{Command: []string{"true"}, Required: true})
+	}
+	selected := SelectAffectedTests(graph, tests, nil)
+	if len(selected) != 12 {
+		t.Fatalf("selected %d suites, want 12", len(selected))
+	}
+	names := map[string]bool{}
+	for _, test := range selected {
+		names[test.Name] = true
+	}
+	if len(names) != 12 || !names["test_10"] || !names["test_12"] {
+		t.Fatalf("generated suite names collide: %v", names)
+	}
+}
+
+func TestRecordTestHistoryReplacesFileWithoutLeavingTemporaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history", "tests.json")
+	entries := []TestHistoryEntry{{Revision: "rev_1", Scope: "full", Test: "unit", Status: string(VerificationPassed)}}
+	if err := recordTestHistory(path, entries); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordTestHistory(path, entries); err != nil {
+		t.Fatal(err)
+	}
+	history, err := readTestHistory(path)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history = %+v, %v", history, err)
+	}
+	listing, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing) != 1 || listing[0].Name() != "tests.json" {
+		t.Fatalf("history directory holds leftovers: %v", listing)
+	}
+}
+
 func preparedFile(t *testing.T, files []PlanStageFile, path string) PlanStageFile {
 	t.Helper()
 	for _, file := range files {
