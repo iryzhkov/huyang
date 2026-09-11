@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -94,7 +95,39 @@ func (h *Handlers) verify(ctx context.Context, requestID string, workspace *work
 	return h.VerifyRun(ctx, requestID, workspace, job)
 }
 
-// verifyPrepare resynchronises the canonical workspace, validates the request
+// verifyRequest is the decoded verify_run call. Stages already include the
+// trusted project check when parser verification was requested alone.
+type verifyRequest struct {
+	revision  string
+	stages    []string
+	testScope string
+}
+
+func decodeVerifyRequest(workspace *workspacecore.Workspace, arguments map[string]any) (verifyRequest, error) {
+	request := verifyRequest{
+		revision:  fmt.Sprint(arguments["revision_or_transaction"]),
+		testScope: fmt.Sprint(arguments["test_scope"]),
+	}
+	for _, value := range mcpapi.AnySlice(arguments["stages"]) {
+		stage, ok := value.(string)
+		if !ok {
+			return request, errors.New("verification stage must be a string")
+		}
+		request.stages = append(request.stages, stage)
+	}
+	// For languages without a built-in exact parser, the trusted project check
+	// is the declared parser corroborator. Include it when parser verification
+	// is requested alone so explicit verification agrees with plan preparation
+	// and with language_server_status recovery guidance.
+	if slices.Contains(request.stages, "parser") && !slices.Contains(request.stages, "check") {
+		if policy, err := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, ""); err == nil && policy.Trusted && len(policy.Check) > 0 {
+			request.stages = append(request.stages, "check")
+		}
+	}
+	return request, nil
+}
+
+// VerifyPrepare resynchronises the canonical workspace, validates the request
 // and locates or recovers the prepared stager. It runs in the workspace's
 // canonical lane because the document refresh is an external resync.
 func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) (*VerifyJob, map[string]any) {
@@ -107,176 +140,83 @@ func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspac
 	if err := h.registry.PersistIdentity(workspace.Identity().ID); err != nil {
 		return nil, mcpapi.Failure(requestID, workspace, "service_state_persist_failed", err)
 	}
-	revision := fmt.Sprint(arguments["revision_or_transaction"])
-	var stages []string
-	for _, value := range mcpapi.AnySlice(arguments["stages"]) {
-		stage, ok := value.(string)
-		if !ok {
-			return nil, mcpapi.Failure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
-		}
-		stages = append(stages, stage)
+	request, err := decodeVerifyRequest(workspace, arguments)
+	if err != nil {
+		return nil, mcpapi.Failure(requestID, workspace, "invalid_verification_stage", err)
 	}
-	// For languages without a built-in exact parser, the trusted project check
-	// is the declared parser corroborator. Include it when parser verification
-	// is requested alone so explicit verification agrees with plan preparation
-	// and with language_server_status recovery guidance.
-	hasParser, hasCheck := false, false
-	for _, stage := range stages {
-		hasParser = hasParser || stage == "parser"
-		hasCheck = hasCheck || stage == "check"
-	}
-	if hasParser && !hasCheck {
-		if policy, err := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, ""); err == nil && policy.Trusted && len(policy.Check) > 0 {
-			stages = append(stages, "check")
-		}
-	}
-	testScope := fmt.Sprint(arguments["test_scope"])
 	identity := workspace.Identity()
 	job := &VerifyJob{
 		request: workspacecore.VerificationRequest{
-			Stages: stages, Revision: revision, TestScope: testScope,
+			Stages: request.stages, Revision: request.revision, TestScope: request.testScope,
 			TestHistoryPath: filepath.Join(h.stateDir, "test-history", string(identity.ID)+".json"),
 		},
-		stages: stages, testScope: testScope, revision: revision, identity: identity,
+		stages: request.stages, testScope: request.testScope, revision: request.revision, identity: identity,
 		cacheKey: strings.Join([]string{
-			string(identity.ID), revision, strings.Join(stages, "\x1f"), testScope, verificationPolicyFingerprint(identity.Root),
+			string(identity.ID), request.revision, strings.Join(request.stages, "\x1f"), request.testScope, verificationPolicyFingerprint(identity.Root),
 		}, "\x00"),
 	}
-	cached, cacheHit := h.verification.lookup(job.cacheKey)
-	if cacheHit {
+	if cached, cacheHit := h.verification.lookup(job.cacheKey); cacheHit {
 		return nil, modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
 	}
-	job.stager = h.pool.PreparedStager(workspace, revision)
-	if job.stager == nil {
-		recoveredStager, recoveredPlan, recoverable, recoveryErr := h.recoverPreparedStager(ctx, workspace, revision)
-		if recoveryErr != nil {
-			result := mcpapi.Failure(requestID, workspace, "prepared_revision_recovery_failed", recoveryErr)
-			if recoveredPlan.PlanID != "" {
-				result["next"] = []any{map[string]any{
-					"tool": "change_plan", "action": "prepare", "plan_id": recoveredPlan.PlanID,
-					"plan_revision": recoveredPlan.PlanRevision, "use_new_idempotency_key": true,
-				}}
-			}
-			return nil, result
-		}
-		if recoverable {
-			job.stager = recoveredStager
-		}
+	stager, failure := h.locateVerifyStager(ctx, requestID, workspace, request.revision)
+	if failure != nil {
+		return nil, failure
 	}
-	if job.stager == nil {
-		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
-		if revision != current {
-			result := mcpapi.Envelope(requestID, workspace, "conflict", "revision_changed",
-				"Requested canonical revision is not current", map[string]any{
-					"revision_or_transaction": revision, "current_revision": current,
-				})
-			result["next"] = []any{
-				map[string]any{"tool": "revision_diff", "from_revision": revision, "to_revision_or_current": "current"},
-				map[string]any{"tool": "verify_run", "revision_or_transaction": current, "stages": stages, "test_scope": testScope, "use_new_idempotency_key": true},
-			}
-			return nil, result
+	job.stager = stager
+	if current := fmt.Sprintf("wsrev_%d", identity.StateSeq); stager == nil && request.revision != current {
+		result := mcpapi.Envelope(requestID, workspace, "conflict", "revision_changed",
+			"Requested canonical revision is not current", map[string]any{
+				"revision_or_transaction": request.revision, "current_revision": current,
+			})
+		result["next"] = []any{
+			map[string]any{"tool": "revision_diff", "from_revision": request.revision, "to_revision_or_current": "current"},
+			map[string]any{"tool": "verify_run", "revision_or_transaction": current, "stages": request.stages, "test_scope": request.testScope, "use_new_idempotency_key": true},
 		}
+		return nil, result
 	}
 	return job, nil
 }
 
-// verifyRun executes the pipeline for a prepared job as an external job.
+// locateVerifyStager finds the prepared sandbox the revision names, or
+// recovers it from the durable plan record after a restart. A nil stager
+// with no failure means the revision addresses the canonical tree.
+func (h *Handlers) locateVerifyStager(ctx context.Context, requestID string, workspace *workspacecore.Workspace, revision string) (*providerpool.SandboxStager, map[string]any) {
+	if stager := h.pool.PreparedStager(workspace, revision); stager != nil {
+		return stager, nil
+	}
+	recovered, plan, recoverable, err := h.recoverPreparedStager(ctx, workspace, revision)
+	if err != nil {
+		result := mcpapi.Failure(requestID, workspace, "prepared_revision_recovery_failed", err)
+		if plan.PlanID != "" {
+			result["next"] = []any{map[string]any{
+				"tool": "change_plan", "action": "prepare", "plan_id": plan.PlanID,
+				"plan_revision": plan.PlanRevision, "use_new_idempotency_key": true,
+			}}
+		}
+		return nil, result
+	}
+	if recoverable {
+		return recovered, nil
+	}
+	return nil, nil
+}
+
+// VerifyRun executes the pipeline for a prepared job as an external job.
 func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *workspacecore.Workspace, job *VerifyJob) map[string]any {
-	request, stages, testScope, revision, identity, stager := job.request, job.stages, job.testScope, job.revision, job.identity, job.stager
 	var result workspacecore.VerificationResult
 	var err error
-	if stager != nil {
-		result, err = stager.Verify(ctx, request)
+	if job.stager != nil {
+		result, err = job.stager.Verify(ctx, job.request)
 	} else {
-		current := fmt.Sprintf("wsrev_%d", identity.StateSeq)
-		sandbox, materializeErr := workspacecore.MaterializeSandbox(
-			ctx, identity.Root, h.pool.SandboxBaseDir(), identity.ID,
-			"verify_"+requestID, 1, current, workspacecore.DefaultSandboxLimits(),
-		)
-		if materializeErr != nil {
-			return mcpapi.Failure(requestID, workspace, "verification_sandbox_failed", materializeErr)
-		}
-		files, filesErr := sandbox.BaseStageFiles()
-		if filesErr == nil {
-			var changedPaths []string
-			changedPaths, provenanceErr := h.provenance.CanonicalChangedPaths(identity.ID, identity.StateSeq)
-			if provenanceErr != nil && testScope != "affected" {
-				for _, file := range files {
-					changedPaths = append(changedPaths, file.Path)
-				}
-			} else {
-				filesErr = provenanceErr
-			}
-			if filesErr == nil {
-				changed := make(map[string]bool, len(changedPaths))
-				for _, path := range changedPaths {
-					changed[path] = true
-				}
-				filtered := files[:0]
-				for _, file := range files {
-					if changed[file.Path] {
-						filtered = append(filtered, file)
-					}
-				}
-				files = filtered
-			}
-		}
-		if filesErr == nil {
-			var policy workspacecore.PipelinePolicy
-			policy, filesErr = workspacecore.LoadPipelinePolicy(identity.Root, "")
-			var diagnosticProvider provider.Provider
-			var diagnosticReport *workspacecore.DiagnosticReport
-			providerOpened := false
-			wantsDiagnostics := false
-			for _, stage := range stages {
-				if stage == "diagnostics" {
-					wantsDiagnostics = true
-					break
-				}
-			}
-
-			if filesErr == nil && wantsDiagnostics {
-				var providerErr error
-				diagnosticProvider, providerErr = h.pool.Open(sandbox.Tree, false)
-				providerOpened = providerErr == nil
-				if providerErr == nil {
-					_, providerErr = providerpool.CallCanonical(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,
-						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": providerpool.VerificationAttachWaitMS})
-				}
-				if providerErr == nil {
-
-					request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-						report, evidenceErr := providerpool.RecordDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
-						diagnosticReport = &report
-						return providerpool.DiagnosticVerificationStage(revision, report), evidenceErr
-					}
-				}
-			}
-			if filesErr == nil {
-				result, err = workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
-				if err == nil && diagnosticReport != nil {
-					if report, evidenceErr := providerpool.CorroborateWithProjectCheck(workspace, revision, "verify_"+requestID, result.Stages, *diagnosticReport); evidenceErr == nil {
-						providerpool.ReplaceDiagnosticVerificationStage(&result, revision, report)
-					}
-				}
-			}
-			if providerOpened {
-				if closeErr := diagnosticProvider.Close(context.Background()); err == nil && closeErr != nil {
-					err = closeErr
-				}
-			}
-		}
-		if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {
-			err = cleanupErr
-		}
-		if filesErr != nil {
-			err = filesErr
+		var failure map[string]any
+		result, failure, err = h.verifyCanonical(ctx, requestID, workspace, job)
+		if failure != nil {
+			return failure
 		}
 	}
 	if err != nil {
-		code, summary := "verification_failed", err.Error()
-		resultEnvelope := modernVerificationEnvelope(requestID, workspace, "failed", code, summary, "", result)
-		if timeoutCode, timeoutSummary, recovery, ok := verificationTimeoutRecovery(revision, stages, testScope, result); ok {
+		resultEnvelope := modernVerificationEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), "", result)
+		if timeoutCode, timeoutSummary, recovery, ok := verificationTimeoutRecovery(job.revision, job.stages, job.testScope, result); ok {
 			resultEnvelope["code"] = timeoutCode
 			resultEnvelope["summary"] = timeoutSummary
 			next, _ := resultEnvelope["next"].([]any)
@@ -293,6 +233,122 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 	}
 	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
 	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
+}
+
+// verifyCanonical materialises a throwaway sandbox of the canonical tree,
+// narrows the staged files to the paths the receipts say changed, and runs
+// the pipeline there. A sandbox that cannot be materialised is answered
+// directly; every other failure is returned as the pipeline error.
+func (h *Handlers) verifyCanonical(ctx context.Context, requestID string, workspace *workspacecore.Workspace, job *VerifyJob) (workspacecore.VerificationResult, map[string]any, error) {
+	identity := job.identity
+	sandbox, materializeErr := workspacecore.MaterializeSandbox(
+		ctx, identity.Root, h.pool.SandboxBaseDir(), identity.ID,
+		"verify_"+requestID, 1, fmt.Sprintf("wsrev_%d", identity.StateSeq), workspacecore.DefaultSandboxLimits(),
+	)
+	if materializeErr != nil {
+		return workspacecore.VerificationResult{}, mcpapi.Failure(requestID, workspace, "verification_sandbox_failed", materializeErr), nil
+	}
+	var result workspacecore.VerificationResult
+	var err error
+	files, filesErr := sandbox.BaseStageFiles()
+	if filesErr == nil {
+		files, filesErr = h.selectChangedFiles(files, identity, job.testScope)
+	}
+	if filesErr == nil {
+		result, filesErr, err = h.runCanonicalPipeline(ctx, requestID, workspace, sandbox, job, files)
+	}
+	if cleanupErr := sandbox.Cleanup(); err == nil && filesErr == nil && cleanupErr != nil {
+		err = cleanupErr
+	}
+	if filesErr != nil {
+		err = filesErr
+	}
+	return result, nil, err
+}
+
+// selectChangedFiles keeps the staged files the receipts record as changed
+// at the current revision. Without receipt coverage a full verification
+// keeps every file, while an affected-scope verification refuses.
+func (h *Handlers) selectChangedFiles(files []workspacecore.PlanStageFile, identity workspacecore.Identity, testScope string) ([]workspacecore.PlanStageFile, error) {
+	changedPaths, err := h.provenance.CanonicalChangedPaths(identity.ID, identity.StateSeq)
+	if err != nil {
+		if testScope == "affected" {
+			return nil, err
+		}
+		return files, nil
+	}
+	changed := make(map[string]bool, len(changedPaths))
+	for _, path := range changedPaths {
+		changed[path] = true
+	}
+	filtered := files[:0]
+	for _, file := range files {
+		if changed[file.Path] {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered, nil
+}
+
+// runCanonicalPipeline loads the policy, attaches a sandbox provider for the
+// diagnostics stage when it was requested, and runs the pipeline. The
+// second result is a policy load failure, which the caller reports instead
+// of the pipeline error.
+func (h *Handlers) runCanonicalPipeline(ctx context.Context, requestID string, workspace *workspacecore.Workspace, sandbox *workspacecore.Sandbox, job *VerifyJob, files []workspacecore.PlanStageFile) (workspacecore.VerificationResult, error, error) {
+	policy, policyErr := workspacecore.LoadPipelinePolicy(job.identity.Root, "")
+	if policyErr != nil {
+		return workspacecore.VerificationResult{}, policyErr, nil
+	}
+	request := job.request
+	probe := h.openDiagnosticProbe(ctx, requestID, workspace, sandbox.Tree, slices.Contains(job.stages, "diagnostics"))
+	if probe.ready {
+		request.DiagnosticVerifier = probe.verifier(workspace, requestID)
+	}
+	result, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, files)
+	if err == nil && probe.report != nil {
+		if report, evidenceErr := providerpool.CorroborateWithProjectCheck(workspace, job.revision, "verify_"+requestID, result.Stages, *probe.report); evidenceErr == nil {
+			providerpool.ReplaceDiagnosticVerificationStage(&result, job.revision, report)
+		}
+	}
+	if probe.backend != nil {
+		if closeErr := probe.backend.Close(context.Background()); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}
+	return result, nil, err
+}
+
+// diagnosticProbe is the sandbox provider that records diagnostics during
+// a canonical verification. backend is set when a provider was opened and
+// must be closed; ready is set when it also attached language servers.
+type diagnosticProbe struct {
+	backend provider.Provider
+	ready   bool
+	report  *workspacecore.DiagnosticReport
+}
+
+func (h *Handlers) openDiagnosticProbe(ctx context.Context, requestID string, workspace *workspacecore.Workspace, tree string, wanted bool) *diagnosticProbe {
+	probe := &diagnosticProbe{}
+	if !wanted {
+		return probe
+	}
+	backend, err := h.pool.Open(tree, false)
+	if err != nil {
+		return probe
+	}
+	probe.backend = backend
+	_, err = providerpool.CallCanonical(ctx, "workspace_support_"+requestID, workspace, backend,
+		"workspace_support", map[string]any{"root": tree, "attach_wait_ms": providerpool.VerificationAttachWaitMS})
+	probe.ready = err == nil
+	return probe
+}
+
+func (p *diagnosticProbe) verifier(workspace *workspacecore.Workspace, requestID string) func(context.Context, string, []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
+	return func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
+		report, evidenceErr := providerpool.RecordDiagnostics(verifyCtx, workspace, p.backend, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
+		p.report = &report
+		return providerpool.DiagnosticVerificationStage(revision, report), evidenceErr
+	}
 }
 
 // maxVerificationCacheEntries bounds the exact-revision verification cache;
