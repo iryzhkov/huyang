@@ -79,7 +79,7 @@ func providerBackedReplay(result map[string]any) bool {
 	transaction, _ := result["transaction"].(map[string]any)
 	state, _ := transaction["state"].(string)
 	switch workspacecore.PlanState(state) {
-	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack:
+	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack, workspacecore.PlanConflicted:
 		return true
 	default:
 		return false

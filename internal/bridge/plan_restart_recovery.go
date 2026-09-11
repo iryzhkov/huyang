@@ -27,11 +27,11 @@ func (d *directWorkspaces) recoverPreparedStager(
 	}
 	stager, ok := raw.(*sandboxPlanStager)
 	if !ok {
-		return nil, recovered, true, errors.New("provider_unavailable: recovered plan stager has an unexpected type")
+		return nil, recovered, true, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("recovered plan stager has an unexpected type"))
 	}
 	if recovered.Preparation == nil || recovered.Preparation.PreparedRevision != originalRevision {
 		_ = stager.Rollback(context.Background(), plan.PlanID)
-		return nil, recovered, true, errors.New("prepared_revision_changed: restart recovery produced different exact bytes")
+		return nil, recovered, true, workspacecore.Coded(workspacecore.CodePreparedRevisionChanged, errors.New("restart recovery produced different exact bytes"))
 	}
 	return stager, recovered, true, nil
 }

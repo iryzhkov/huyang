@@ -127,6 +127,7 @@ required = true
 	applied := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-apply", "action": "apply",
 		"plan_id": planID, "plan_revision": planRevision, "prepared_revision": preparedRevision,
+		"accept_provisional": true,
 	})
 	if applied["outcome"] != "provisional" {
 		t.Fatalf("apply = %#v", applied)

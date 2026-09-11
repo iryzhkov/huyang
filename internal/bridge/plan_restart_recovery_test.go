@@ -81,7 +81,7 @@ func TestPreparedPlanRecoversAcrossServiceRestart(t *testing.T) {
 	applied := callModern(t, restartedSession, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "restart-apply", "action": "apply",
 		"plan_id": createdPlan["plan_id"], "plan_revision": createdPlan["plan_revision"],
-		"prepared_revision": preparedRevision,
+		"prepared_revision": preparedRevision, "accept_provisional": true,
 	})
 	if applied["outcome"] != "ok" && applied["outcome"] != "provisional" {
 		t.Fatalf("prepared apply was not recovered: %#v", applied)

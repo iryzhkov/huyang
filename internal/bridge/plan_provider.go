@@ -15,10 +15,10 @@ import (
 )
 
 type providerPlanStager struct {
-	workspaceID workspacecore.ID
-	provider    provider.Provider
-	epoch       uint64
-	requests    atomic.Uint64
+	workspace *workspacecore.Workspace
+	provider  provider.Provider
+	epoch     uint64
+	requests  atomic.Uint64
 }
 
 func (s *providerPlanStager) Epoch() uint64 {
@@ -54,19 +54,20 @@ func (s *providerPlanStager) Rollback(ctx context.Context, planID string) error 
 }
 
 func (s *providerPlanStager) call(ctx context.Context, operation, planID string, arguments map[string]any) (provider.Result, error) {
-	deadline, _ := ctx.Deadline()
-	return s.provider.Call(ctx, provider.Request{
-		Context: provider.RequestContext{
-			RequestID: fmt.Sprintf("huyang-plan-%d", s.requests.Add(1)), WorkspaceID: string(s.workspaceID),
-			Epoch: s.provider.Descriptor().Epoch, TransactionID: planID, Deadline: deadline,
-			Cancellation: s.provider.Descriptor().Cancellation,
-		},
-		Operation: operation, Arguments: arguments,
-	})
+	return callProvider(ctx, s.workspace, s.provider, providerCall{
+		RequestID: fmt.Sprintf("huyang-plan-%d", s.requests.Add(1)), TransactionID: planID, Timeout: defaultToolCallTimeout,
+	}, operation, arguments)
 }
 
+// sandboxPlanStager prepares one plan in an isolated sandbox. Two locks keep
+// bookkeeping separate from the long-running work: opMu serialises Stage,
+// Verify, Commit and Rollback, each of which may materialise a sandbox, spawn
+// a provider and run the pipeline; stateMu guards the small state below and
+// is only ever held briefly, so lookups such as PreparedRequest or Epoch never
+// wait behind a running operation.
 type sandboxPlanStager struct {
-	mu               sync.Mutex
+	opMu             sync.Mutex
+	stateMu          sync.Mutex
 	workspace        *workspacecore.Workspace
 	sandboxBase      string
 	planID           string
@@ -82,8 +83,8 @@ type sandboxPlanStager struct {
 }
 
 func (s *sandboxPlanStager) Epoch() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	if s.stager != nil {
 		return s.stager.Epoch()
 	}
@@ -94,8 +95,8 @@ func (s *sandboxPlanStager) Epoch() uint64 {
 }
 
 func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	if s.sandbox == nil {
 		return "", s.baseRevision, "canonical"
 	}
@@ -103,8 +104,8 @@ func (s *sandboxPlanStager) PreparationMetadata() (string, string, string) {
 }
 
 func (s *sandboxPlanStager) PreparedRequest() (workspacecore.PlanStageRequest, workspacecore.VerificationResult, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	if s.sandbox == nil || len(s.prepared.Files) == 0 {
 		return workspacecore.PlanStageRequest{}, workspacecore.VerificationResult{}, false
 	}
@@ -128,19 +129,20 @@ func (s *sandboxPlanStager) PreparedRequest() (workspacecore.PlanStageRequest, w
 }
 
 func (s *sandboxPlanStager) SetPreparedRevision(revision string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
 	s.preparedRevision = revision
 	s.verification.Revision = revision
 }
 
 func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.sandbox == nil || s.done {
-		return workspacecore.VerificationResult{}, errors.New("prepared sandbox is not available")
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	sandbox, prepared, done := s.snapshot()
+	if sandbox == nil || done {
+		return workspacecore.VerificationResult{}, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
 	}
-	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(s.sandbox.Tree, s.workspace.Identity().Root, "")
+	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
 		return workspacecore.VerificationResult{}, err
 	}
@@ -150,26 +152,27 @@ func (s *sandboxPlanStager) Verify(ctx context.Context, request workspacecore.Ve
 		diagnosticReport = &report
 		return diagnosticVerificationStage(revision, report), evidenceErr
 	}
-	result, err := workspacecore.RunVerificationPipeline(ctx, s.sandbox, policy, request, s.prepared.Files)
+	result, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, prepared.Files)
 	if err == nil && diagnosticReport != nil {
 		if report, evidenceErr := corroborateDiagnosticsWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
 			replaceDiagnosticVerificationStage(&result, request.Revision, report)
 		}
 	}
 	if len(result.Stages) > 0 {
+		s.stateMu.Lock()
 		s.verification.Stages = append(s.verification.Stages, result.Stages...)
+		s.stateMu.Unlock()
 	}
 	return result, err
 }
 
 func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.PlanStageRequest) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done {
-		return errors.New("sandbox preparation is already closed")
-	}
-	if s.sandbox != nil {
-		return errors.New("sandbox preparation is already staged")
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if current, _, done := s.snapshot(); done {
+		return workspacecore.Coded(workspacecore.CodePlanStateInvalid, errors.New("sandbox preparation is already closed"))
+	} else if current != nil {
+		return workspacecore.Coded(workspacecore.CodePlanStateInvalid, errors.New("sandbox preparation is already staged"))
 	}
 	sandbox, err := workspacecore.MaterializeSandbox(
 		ctx, s.workspace.Identity().Root, s.sandboxBase, s.workspace.Identity().ID,
@@ -178,51 +181,48 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	if err != nil {
 		return err
 	}
-	s.sandbox = sandbox
-	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: false,
-	})
+	s.setResources(sandbox, nil, nil)
+	backend, err := openReferenceProvider(sandbox.Tree, false)
 	if err != nil {
 		_ = sandbox.Cleanup()
-		s.sandbox = nil
+		s.setResources(nil, nil, nil)
 		return err
 	}
-	s.provider = backend
-	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, backend, "workspace_support", map[string]any{"root": sandbox.Tree})
-	s.stager = &providerPlanStager{
-		workspaceID: s.workspace.Identity().ID, provider: backend, epoch: backend.Descriptor().Epoch,
-	}
-	if err := s.stager.Stage(ctx, request); err != nil {
+	stager := &providerPlanStager{workspace: s.workspace, provider: backend, epoch: backend.Descriptor().Epoch}
+	s.setResources(sandbox, backend, stager)
+	_, _ = callProvider(ctx, s.workspace, backend, providerCall{
+		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: defaultToolCallTimeout,
+	}, "workspace_support", map[string]any{"root": sandbox.Tree})
+	if err := stager.Stage(ctx, request); err != nil {
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
-		s.provider, s.stager, s.sandbox = nil, nil, nil
+		s.setResources(nil, nil, nil)
 		return err
 	}
 	if err := sandbox.ApplyPrepared(request); err != nil {
-		_ = s.stager.Rollback(context.Background(), request.PlanID)
+		_ = stager.Rollback(context.Background(), request.PlanID)
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
-		s.provider, s.stager, s.sandbox = nil, nil, nil
+		s.setResources(nil, nil, nil)
 		return err
 	}
 	// The provider staged identical bytes in modified buffers while the
 	// coordinator wrote the durable sandbox copy. Commit only the disposable
 	// provider transaction now so its buffers are marked synchronized before
 	// diagnostics; the sandbox remains the rollback boundary for the plan.
-	if err := s.stager.Commit(ctx, request.PlanID); err != nil {
+	if err := stager.Commit(ctx, request.PlanID); err != nil {
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
-		s.provider, s.stager, s.sandbox = nil, nil, nil
+		s.setResources(nil, nil, nil)
 		return err
 	}
-	s.stager = nil
+	s.setResources(sandbox, backend, nil)
 	if err := backend.Close(context.Background()); err != nil {
 		_ = sandbox.Cleanup()
-		s.provider, s.sandbox = nil, nil
+		s.setResources(nil, nil, nil)
 		return err
 	}
-	s.provider = nil
+	s.setResources(sandbox, nil, nil)
 	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
 	if err != nil {
 		return err
@@ -252,16 +252,15 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			known[delta.Path] = true
 		}
 	}
-	replacement, err := referenceProviders.Open(providerOpenConfig{
-		Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: false,
-	})
+	replacement, err := openReferenceProvider(sandbox.Tree, false)
 	if err != nil {
 		return err
 	}
-	s.provider = replacement
-	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
-	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, s.provider, request.Files, s.baseRevision, s.planID)
+	s.setResources(sandbox, replacement, nil)
+	_, _ = callProvider(ctx, s.workspace, replacement, providerCall{
+		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: defaultToolCallTimeout,
+	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
+	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, replacement, request.Files, s.baseRevision, s.planID)
 	if err != nil {
 		return err
 	}
@@ -271,8 +270,63 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 	}
 
 	verification.Stages = append(verification.Stages, diagnosticVerificationStage(s.baseRevision, diagnosticReport))
+	s.stateMu.Lock()
 	s.prepared, s.verification = request, verification
+	s.stateMu.Unlock()
 	return nil
+}
+
+// snapshot reads the bookkeeping state without waiting on a running operation.
+func (s *sandboxPlanStager) snapshot() (*workspacecore.Sandbox, workspacecore.PlanStageRequest, bool) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.sandbox, s.prepared, s.done
+}
+
+func (s *sandboxPlanStager) setResources(sandbox *workspacecore.Sandbox, backend provider.Provider, stager *providerPlanStager) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.sandbox, s.provider, s.stager = sandbox, backend, stager
+}
+
+// reusable reports whether the stager still serves the given plan revision.
+func (s *sandboxPlanStager) reusable(planRevision uint64) bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return !s.done && s.planRevision == planRevision
+}
+
+// release finishes the provider transaction, closes the provider and removes
+// the sandbox. It runs under opMu so it cannot interleave with Stage or Verify.
+func (s *sandboxPlanStager) release(ctx context.Context, planID string, commit bool) error {
+	s.stateMu.Lock()
+	done, stager, backend, sandbox := s.done, s.stager, s.provider, s.sandbox
+	s.stateMu.Unlock()
+	if done {
+		return nil
+	}
+	var result error
+	if stager != nil {
+		if commit {
+			result = stager.Commit(ctx, planID)
+		} else {
+			result = stager.Rollback(ctx, planID)
+		}
+	}
+	if backend != nil {
+		if err := backend.Close(context.Background()); result == nil {
+			result = err
+		}
+	}
+	if sandbox != nil {
+		if err := sandbox.Cleanup(); result == nil {
+			result = err
+		}
+	}
+	s.stateMu.Lock()
+	s.done = result == nil
+	s.stateMu.Unlock()
+	return result
 }
 
 func replaceDiagnosticVerificationStage(result *workspacecore.VerificationResult, revision string, report workspacecore.DiagnosticReport) {
@@ -287,90 +341,94 @@ func replaceDiagnosticVerificationStage(result *workspacecore.VerificationResult
 }
 
 func (s *sandboxPlanStager) Commit(ctx context.Context, planID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done {
-		return nil
-	}
-	var result error
-	if s.stager != nil {
-		result = s.stager.Commit(ctx, planID)
-	}
-	if s.provider != nil {
-		if err := s.provider.Close(context.Background()); result == nil {
-			result = err
-		}
-	}
-	if s.sandbox != nil {
-		if err := s.sandbox.Cleanup(); result == nil {
-			result = err
-		}
-	}
-	s.done = result == nil
-	return result
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.release(ctx, planID, true)
 }
 
 func (s *sandboxPlanStager) Rollback(ctx context.Context, planID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done {
-		return nil
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.release(ctx, planID, false)
+}
+
+// stagerKey identifies a sandbox stager by workspace and plan so a plan ID
+// from one workspace can never select another workspace's sandbox.
+type stagerKey struct {
+	workspace workspacecore.ID
+	planID    string
+}
+
+// preparedStager returns the stager of one workspace whose plan ID or prepared
+// revision matches reference. The map is snapshotted under d.providerMu and
+// inspected after it is released; PreparedRequest only takes the stager's
+// short state lock, so a stager inside a long Stage never blocks the lookup.
+func (d *directWorkspaces) preparedStager(workspace *workspacecore.Workspace, reference string) *sandboxPlanStager {
+	workspaceID := workspace.Identity().ID
+	d.providerMu.Lock()
+	candidates := make([]*sandboxPlanStager, 0, len(d.sandboxStagers))
+	if exact := d.sandboxStagers[stagerKey{workspace: workspaceID, planID: reference}]; exact != nil {
+		candidates = append(candidates, exact)
 	}
-	var result error
-	if s.stager != nil {
-		result = s.stager.Rollback(ctx, planID)
-	}
-	if s.provider != nil {
-		if err := s.provider.Close(context.Background()); result == nil {
-			result = err
+	for key, candidate := range d.sandboxStagers {
+		if key.workspace == workspaceID && key.planID != reference {
+			candidates = append(candidates, candidate)
 		}
 	}
-	if s.sandbox != nil {
-		if err := s.sandbox.Cleanup(); result == nil {
-			result = err
+	d.providerMu.Unlock()
+	for _, candidate := range candidates {
+		if candidate.workspace.Identity().ID != workspaceID {
+			continue
+		}
+		if candidate.planID == reference {
+			return candidate
+		}
+		if _, result, available := candidate.PreparedRequest(); available && result.Revision == reference {
+			return candidate
 		}
 	}
-	s.done = result == nil
-	return result
+	return nil
 }
 
 func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
+	identity := workspace.Identity()
+	key := stagerKey{workspace: identity.ID, planID: planID}
 	d.providerMu.Lock()
-	defer d.providerMu.Unlock()
-	if existing := d.sandboxStagers[planID]; existing != nil {
-		existing.mu.Lock()
-		reusable := !existing.done && existing.planRevision == planRevision
-		existing.mu.Unlock()
-		if reusable {
+	existing := d.sandboxStagers[key]
+	d.providerMu.Unlock()
+	if existing != nil {
+		if existing.reusable(planRevision) {
 			return existing, nil
 		}
+		if !create {
+			// A lookup with the wrong plan revision must not destroy the
+			// sandbox another caller prepared; report the mismatch instead.
+			return nil, workspacecore.Codedf(workspacecore.CodePlanRevisionChanged, "prepared sandbox belongs to plan revision %d, not %d", existing.planRevision, planRevision)
+		}
+		// The stale stager is rolled back outside d.providerMu because the
+		// rollback closes a provider and removes a sandbox tree.
 		_ = existing.Rollback(context.Background(), planID)
-		delete(d.sandboxStagers, planID)
+		d.providerMu.Lock()
+		if d.sandboxStagers[key] == existing {
+			delete(d.sandboxStagers, key)
+		}
+		d.providerMu.Unlock()
 	}
 	if !create {
-		return nil, errors.New("provider_unavailable: prepared sandbox is not available")
+		return nil, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
 	}
-	identity := workspace.Identity()
 	stager := &sandboxPlanStager{
 		workspace: workspace, sandboxBase: filepath.Join(d.stateDir, "sandboxes"),
 		planID: planID, planRevision: planRevision, baseRevision: fmt.Sprintf("wsrev_%d", identity.StateSeq),
 	}
-	d.sandboxStagers[planID] = stager
-	return stager, nil
-}
-
-func (d *directWorkspaces) closeProviders() {
 	d.providerMu.Lock()
-	defer d.providerMu.Unlock()
-	for id, backend := range d.providers {
-		_ = backend.Close(context.Background())
-		delete(d.providers, id)
-		delete(d.stagers, id)
+	if current := d.sandboxStagers[key]; current != nil && current.reusable(planRevision) {
+		d.providerMu.Unlock()
+		return current, nil
 	}
-	for planID, stager := range d.sandboxStagers {
-		_ = stager.Rollback(context.Background(), planID)
-		delete(d.sandboxStagers, planID)
-	}
+	d.sandboxStagers[key] = stager
+	d.providerMu.Unlock()
+	return stager, nil
 }
 
 type recordedRevisionDiff struct {

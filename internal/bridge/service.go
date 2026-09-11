@@ -247,8 +247,10 @@ func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdo
 		Method string          `json:"method"`
 	}
 
+	done := make(chan struct{})
+	defer close(done)
 	clientEvents := make(chan proxyLineEvent, 32)
-	go readProxyLines(stdin, 0, clientEvents)
+	go readProxyLines(stdin, 0, clientEvents, done)
 	backendEvents := make(chan proxyLineEvent, 32)
 
 	var connection *net.UnixConn
@@ -315,7 +317,7 @@ func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdo
 					}
 				}
 				generation++
-				go readProxyLines(reader, generation, backendEvents)
+				go readProxyLines(reader, generation, backendEvents, done)
 				return nil
 			}()
 			if err == nil {
@@ -390,15 +392,28 @@ func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdo
 	}
 }
 
-func readProxyLines(reader io.Reader, generation uint64, events chan<- proxyLineEvent) {
+// readProxyLines forwards newline-delimited frames to events until the reader
+// fails or done closes. Selecting on done lets the goroutine exit once the
+// proxy loop has returned instead of blocking forever on a full channel.
+func readProxyLines(reader io.Reader, generation uint64, events chan<- proxyLineEvent, done <-chan struct{}) {
 	buffered := bufio.NewReader(reader)
+	send := func(event proxyLineEvent) bool {
+		select {
+		case events <- event:
+			return true
+		case <-done:
+			return false
+		}
+	}
 	for {
 		line, err := buffered.ReadBytes('\n')
 		if len(line) > 0 {
-			events <- proxyLineEvent{line: line, generation: generation}
+			if !send(proxyLineEvent{line: line, generation: generation}) {
+				return
+			}
 		}
 		if err != nil {
-			events <- proxyLineEvent{err: err, generation: generation}
+			send(proxyLineEvent{err: err, generation: generation})
 			return
 		}
 	}

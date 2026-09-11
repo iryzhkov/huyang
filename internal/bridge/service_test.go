@@ -201,10 +201,10 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 		},
 	}
 	checkpointed, release := make(chan struct{}), make(chan struct{})
-	direct.replayCheckpointTestHook = func() {
+	direct.setObserver(checkpointObserver(func() {
 		close(checkpointed)
 		<-release
-	}
+	}))
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()
 	done := make(chan map[string]any, 1)
@@ -399,3 +399,8 @@ func TestServiceRejectsNonLoopbackHTTPAndProtectsSocketPath(t *testing.T) {
 		t.Fatalf("protected socket path content = %q, err = %v", content, err)
 	}
 }
+
+// checkpointObserver adapts a function to the directObserver interface.
+type checkpointObserver func()
+
+func (o checkpointObserver) replayCheckpointed() { o() }

@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -181,11 +180,12 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	}
 	return schemaObject(map[string]any{
 		"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
-		"action":            enumSchema("create", "edit", "preview", "inspect", "prepare", "apply", "discard"),
-		"operations":        operations,
-		"plan_id":           stringSchema("Required after creation unless prepare supplies operations inline."),
-		"plan_revision":     map[string]any{"type": "integer", "minimum": 1, "description": "Required with plan_id."},
-		"prepared_revision": stringSchema("Required when action=apply."),
+		"action":             enumSchema("create", "edit", "preview", "inspect", "prepare", "apply", "discard"),
+		"operations":         operations,
+		"plan_id":            stringSchema("Required after creation unless prepare supplies operations inline."),
+		"plan_revision":      map[string]any{"type": "integer", "minimum": 1, "description": "Required with plan_id."},
+		"prepared_revision":  stringSchema("Required when action=apply."),
+		"accept_provisional": map[string]any{"type": "boolean", "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence."},
 		"edit": schemaObject(map[string]any{
 			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": operations,
 			"op_ids": map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
@@ -695,19 +695,22 @@ type directWorkspaces struct {
 	toolTimeout time.Duration
 	requests    atomic.Uint64
 
-	replayMu                 sync.Mutex
-	replays                  map[string]*directReplay
-	replayCheckpointTestHook func()
+	replayMu sync.Mutex
+	replays  map[string]*directReplay
+	// observer receives lifecycle notifications; production leaves it nil.
+	// It is read under replayMu.
+	observer directObserver
 
 	persistMu    sync.Mutex
 	registryPath string
 	loadErr      error
 	scheduler    *workspaceScheduler
 
+	// providerMu guards only the two maps below; provider and stager
+	// operations run outside it (see providerSlot and sandboxPlanStager).
 	providerMu     sync.Mutex
-	stagers        map[workspacecore.ID]workspacecore.PlanStager
-	providers      map[workspacecore.ID]provider.Provider
-	sandboxStagers map[string]*sandboxPlanStager
+	providers      map[workspacecore.ID]*providerSlot
+	sandboxStagers map[stagerKey]*sandboxPlanStager
 
 	verificationMu    sync.Mutex
 	verificationCache map[string]cachedVerification
@@ -719,6 +722,19 @@ type directReplay struct {
 	done          chan struct{}
 	complete      bool
 	checkpointed  bool
+}
+
+// directObserver is notified at points where a test needs to interleave
+// another actor, for example a service restart between the durable receipt
+// checkpoint and the end of a stateful call.
+type directObserver interface {
+	replayCheckpointed()
+}
+
+func (d *directWorkspaces) setObserver(observer directObserver) {
+	d.replayMu.Lock()
+	defer d.replayMu.Unlock()
+	d.observer = observer
 }
 
 type replayCheckpoint func(map[string]any) error
@@ -750,9 +766,8 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		replays:           make(map[string]*directReplay),
 		registryPath:      filepath.Join(stateDir, "registry.json"),
 		scheduler:         newWorkspaceScheduler(providerQuota, externalJobQuota),
-		stagers:           make(map[workspacecore.ID]workspacecore.PlanStager),
-		providers:         make(map[workspacecore.ID]provider.Provider),
-		sandboxStagers:    make(map[string]*sandboxPlanStager),
+		providers:         make(map[workspacecore.ID]*providerSlot),
+		sandboxStagers:    make(map[stagerKey]*sandboxPlanStager),
 		verificationCache: make(map[string]cachedVerification),
 	}
 	direct.loadErr = direct.loadRegistry()
@@ -845,8 +860,11 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 			d.replayMu.Unlock()
 			return err
 		}
-		if d.replayCheckpointTestHook != nil {
-			d.replayCheckpointTestHook()
+		d.replayMu.Lock()
+		observer := d.observer
+		d.replayMu.Unlock()
+		if observer != nil {
+			observer.replayCheckpointed()
 		}
 		return nil
 	}))
@@ -1004,14 +1022,13 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 	if workspace == nil {
 		return modernEnvelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
-	if modernSchedulerClass(name) == scheduleProviderRead {
-		transactionID, _ := arguments["transaction_id"].(string)
-		if err := workspace.CheckProviderAccess(transactionID); err != nil {
-			return modernEnvelope(requestID, workspace, "conflict", "workspace_busy", err.Error(), map[string]any{
-				"transaction_id": transactionID,
-			})
-		}
-	}
+	// Provider-touching calls are serialised by the scheduler lanes in
+	// executeScheduled, and plans stage in isolated sandboxes with their own
+	// providers, so the canonical provider never shows a staged view. The
+	// workspace-level CheckProviderAccess lease is a no-op today and the bridge
+	// deliberately advertises no workspace_busy guard for provider reads; the
+	// only workspace_busy result comes from PreparePlan when the same plan is
+	// already preparing.
 	switch name {
 	case "language_server_status":
 		return d.languageServerStatus(ctx, requestID, workspace)
@@ -1030,7 +1047,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		if backend, providerErr := d.canonicalProvider(ctx, workspace); providerErr == nil {
 			inspection.Optional["provider"] = "available"
 			inspection.Optional["lsp"] = "probe_with_language_server_status"
-			semanticProvider = canonicalProviderStatus(backend)
+			semanticProvider = canonicalProviderStatus(ctx, backend)
 		}
 		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
 		if policyErr != nil {
@@ -1216,7 +1233,7 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 	if canonicalBackend != nil {
 		capabilities.Optional["provider"] = "available"
 		capabilities.Optional["lsp"] = "probe_with_language_server_status"
-		semanticProvider = canonicalProviderStatus(canonicalBackend)
+		semanticProvider = canonicalProviderStatus(ctx, canonicalBackend)
 	}
 	if policy, policyErr := workspacecore.LoadPipelinePolicy(opened.Identity().Root, ""); policyErr == nil {
 		reconcilePipelineCapabilities(&capabilities, policy)
@@ -1371,39 +1388,6 @@ func compactSearchHits(hits []workspacecore.SearchHit, limit int) ([]map[string]
 		compact = append(compact, item)
 	}
 	return compact, len(hits) > len(returned)
-}
-
-func providerLineByteRange(content []byte, lines string) (int, int, error) {
-	parts := strings.SplitN(lines, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid provider line range %q", lines)
-	}
-	first, err := strconv.Atoi(parts[0])
-	if err != nil || first < 1 {
-		return 0, 0, fmt.Errorf("invalid provider start line %q", lines)
-	}
-	last, err := strconv.Atoi(parts[1])
-	if err != nil || last < first {
-		return 0, 0, fmt.Errorf("invalid provider end line %q", lines)
-	}
-	start, end, line := 0, len(content), 1
-	for index, value := range content {
-		if value != '\n' {
-			continue
-		}
-		if line < first {
-			start = index + 1
-		}
-		if line == last {
-			end = index + 1
-			break
-		}
-		line++
-	}
-	if line < first || start >= len(content) {
-		return 0, 0, fmt.Errorf("provider line range %q exceeds document", lines)
-	}
-	return start, end, nil
 }
 
 func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -1610,32 +1594,6 @@ func (d *directWorkspaces) read(requestID string, workspace *workspacecore.Works
 		data["start_line"], data["end_line"] = actualStart, actualEnd
 	}
 	return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
-}
-
-func boundedLines(content []byte, startLine, endLine int) ([]byte, int, int, error) {
-	if startLine == 0 && endLine == 0 {
-		return content, 0, 0, nil
-	}
-	if startLine == 0 {
-		startLine = 1
-	}
-	if endLine == 0 {
-		endLine = startLine
-	}
-	if endLine < startLine {
-		return nil, 0, 0, errors.New("end_line must be greater than or equal to start_line")
-	}
-	lines := bytes.SplitAfter(content, []byte("\n"))
-	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-		lines = lines[:len(lines)-1]
-	}
-	if startLine > len(lines) {
-		return nil, 0, 0, fmt.Errorf("start_line %d exceeds document line count %d", startLine, len(lines))
-	}
-	if endLine > len(lines) {
-		endLine = len(lines)
-	}
-	return bytes.Join(lines[startLine-1:endLine], nil), startLine, endLine, nil
 }
 
 func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, resolution workspacecore.HandleResolution) map[string]any {
@@ -2207,6 +2165,12 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			result["code"] = "plan_validation_conflicts"
 			result["summary"] = fmt.Sprintf("Plan preview found %d conflicts; canonical workspace unchanged", len(plan.Preview.Conflicts))
 		}
+		if plan.State == workspacecore.PlanConflicted && plan.Conflict != nil {
+			result["outcome"] = "conflict"
+			result["code"] = plan.Conflict.Code
+			result["summary"] = "Plan is CONFLICTED: " + plan.Conflict.Message
+			result["next"] = planStateNext(plan)
+		}
 		return result
 	}
 	var plan workspacecore.PlanRecord
@@ -2288,10 +2252,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			err = inspectErr
 			break
 		}
-		if current.State == workspacecore.PlanReady || current.State == workspacecore.PlanProvisional || current.State == workspacecore.PlanFailed {
+		switch current.State {
+		case workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanFailed, workspacecore.PlanConflicted:
 			stager, stagerErr := d.planStager(workspace, planID, revision, false)
 			if stagerErr != nil {
-				if current.State == workspacecore.PlanFailed && strings.Contains(stagerErr.Error(), "prepared sandbox is not available") {
+				if (current.State == workspacecore.PlanFailed || current.State == workspacecore.PlanConflicted) && workspacecore.ErrorCode(stagerErr) == workspacecore.CodeProviderUnavailable {
 					plan, err = workspace.DiscardPlan(planID, revision)
 				} else {
 					err = stagerErr
@@ -2299,7 +2264,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			} else {
 				plan, err = workspace.RollbackPlan(ctx, planID, revision, stager)
 			}
-		} else {
+		default:
 			plan, err = workspace.DiscardPlan(planID, revision)
 		}
 		if err == nil {
@@ -2326,8 +2291,17 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				wasProvisional = recoveredPlan.State == workspacecore.PlanProvisional
 			}
 		}
+		acceptProvisional, _ := arguments["accept_provisional"].(bool)
 		if err == nil {
-			plan, err = workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager)
+			var options []workspacecore.CommitOption
+			if acceptProvisional {
+				options = append(options, workspacecore.AcceptProvisional("diagnostics"))
+			}
+			committed, commitErr := workspace.CommitPlan(ctx, planID, revision, preparedRevision, stager, options...)
+			if commitErr == nil || committed.PlanID != "" {
+				plan = committed
+			}
+			err = commitErr
 		}
 		if err == nil {
 			result := planResult("Prepared plan applied through the durable commit journal; canonical provider resynced", plan)
@@ -2335,7 +2309,12 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				result["outcome"] = "provisional"
 				result["summary"] = "Prepared plan applied with explicitly accepted incomplete diagnostic evidence; canonical provider resynced"
 				result["warnings"] = append(result["warnings"].([]string), "The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted.")
-				result["data"].(map[string]any)["applied_from_provisional"] = true
+				data := result["data"].(map[string]any)
+				data["applied_from_provisional"] = true
+				if plan.Preparation != nil {
+					data["provisional_accepted"] = nonNilStrings(plan.Preparation.ProvisionalAccepted)
+					data["missing_coverage"] = plan.Preparation.MissingCoverage
+				}
 			}
 			if _, resyncErr := d.resyncCanonicalProvider(ctx, workspace); resyncErr != nil {
 				result["outcome"] = "provisional"
@@ -2352,26 +2331,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		err = fmt.Errorf("unknown change_plan action %q", action)
 	}
 	if err != nil {
-		code := "plan_action_failed"
-		outcome := "failed"
-		switch {
-		case strings.Contains(err.Error(), "plan_revision_changed"):
-			code, outcome = "plan_revision_changed", "conflict"
-		case strings.Contains(err.Error(), "workspace_busy"):
-			code, outcome = "workspace_busy", "conflict"
-		case strings.Contains(err.Error(), "plan_validation_conflicts"):
-			code, outcome = "plan_validation_conflicts", "conflict"
-		case strings.Contains(err.Error(), "commit_precondition_changed"), strings.Contains(err.Error(), "prepared_revision_changed"):
-			code, outcome = "commit_precondition_changed", "conflict"
-		case strings.Contains(err.Error(), "workspace_epoch_changed"):
-			code, outcome = "workspace_epoch_changed", "conflict"
-		case strings.Contains(err.Error(), "recovery"), plan.State == workspacecore.PlanRecoveryRequired:
-			code = "commit_recovery_required"
-		case strings.Contains(err.Error(), "undeclared_tool_write"):
-			code = "undeclared_tool_write"
-		case strings.Contains(err.Error(), "provider"):
-			code = "provider_prepare_failed"
-		}
+		code, outcome := classifyPlanError(err, plan)
 		data := map[string]any{"action": action, "canonical_changed": false}
 		if plan.PlanID != "" {
 			data["plan"] = plan
@@ -2380,7 +2340,24 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			}
 		}
 		result := modernEnvelope(requestID, workspace, outcome, code, err.Error(), data)
-		if action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed" {
+		if code == workspacecore.CodeProvisionalNotAccepted && plan.PlanID != "" {
+			gaps := []workspacecore.VerificationGap{}
+			if plan.Preparation != nil {
+				gaps = plan.Preparation.MissingCoverage
+			}
+			data["missing_coverage"] = gaps
+			result["next"] = []any{
+				map[string]any{
+					"tool": "change_plan", "action": "apply", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision,
+					"prepared_revision": preparedRevisionOf(plan), "accept_provisional": true, "use_new_idempotency_key": true,
+					"note": "Apply only if you explicitly accept the incomplete verification evidence for this exact prepared revision.",
+				},
+				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
+			}
+		} else if code == workspacecore.CodePlanStateInvalid && plan.PlanID != "" {
+			data["state"] = plan.State
+			result["next"] = planStateNext(plan)
+		} else if action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed" {
 			result["next"] = []any{
 				map[string]any{"tool": "change_plan", "action": "prepare", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision, "use_new_idempotency_key": true},
 				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
@@ -2404,6 +2381,64 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		return result
 	}
 	panic("unreachable")
+}
+
+// classifyPlanError maps a workspace lifecycle error onto the tool outcome and
+// stable code using the typed error code rather than the message text.
+func classifyPlanError(err error, plan workspacecore.PlanRecord) (string, string) {
+	switch code := workspacecore.ErrorCode(err); code {
+	case workspacecore.CodePlanRevisionChanged, workspacecore.CodeWorkspaceBusy, workspacecore.CodePlanValidationConflicts,
+		workspacecore.CodeWorkspaceEpochChanged, workspacecore.CodeProvisionalNotAccepted, workspacecore.CodePlanStateInvalid:
+		return code, "conflict"
+	case workspacecore.CodeCommitPreconditionChanged, workspacecore.CodePreparedRevisionChanged:
+		return workspacecore.CodeCommitPreconditionChanged, "conflict"
+	case workspacecore.CodeCommitRecoveryRequired:
+		return code, "failed"
+	case workspacecore.CodeProviderUnavailable:
+		return "provider_prepare_failed", "failed"
+	}
+	switch {
+	case plan.State == workspacecore.PlanRecoveryRequired:
+		return workspacecore.CodeCommitRecoveryRequired, "failed"
+	case strings.Contains(err.Error(), "undeclared_tool_write"):
+		return "undeclared_tool_write", "failed"
+	}
+	return "plan_action_failed", "failed"
+}
+
+func preparedRevisionOf(plan workspacecore.PlanRecord) string {
+	if plan.Preparation == nil {
+		return ""
+	}
+	return plan.Preparation.PreparedRevision
+}
+
+// planStateNext lists the valid follow-up actions for a plan in its current
+// state so an invalid transition answers with what is possible next.
+func planStateNext(plan workspacecore.PlanRecord) []any {
+	base := map[string]any{"tool": "change_plan", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision}
+	with := func(action string, extra map[string]any) map[string]any {
+		item := cloneEnvelope(base)
+		item["action"] = action
+		for key, value := range extra {
+			item[key] = value
+		}
+		return item
+	}
+	switch plan.State {
+	case workspacecore.PlanReady:
+		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "use_new_idempotency_key": true}), with("discard", nil)}
+	case workspacecore.PlanProvisional:
+		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "accept_provisional": true, "use_new_idempotency_key": true}), with("discard", nil)}
+	case workspacecore.PlanConflicted, workspacecore.PlanFailed:
+		return []any{with("inspect", nil), with("discard", nil)}
+	case workspacecore.PlanOpen, workspacecore.PlanPreviewed:
+		return []any{with("prepare", map[string]any{"use_new_idempotency_key": true}), with("discard", nil)}
+	case workspacecore.PlanRecoveryRequired:
+		return []any{with("inspect", nil)}
+	default:
+		return []any{with("inspect", nil)}
+	}
 }
 
 func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -2454,19 +2489,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 	if cacheHit {
 		return modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
 	}
-	d.providerMu.Lock()
-	var stager *sandboxPlanStager
-	for planID, candidate := range d.sandboxStagers {
-		if planID == revision {
-			stager = candidate
-			break
-		}
-		if _, result, available := candidate.PreparedRequest(); available && result.Revision == revision {
-			stager = candidate
-			break
-		}
-	}
-	d.providerMu.Unlock()
+	stager := d.preparedStager(workspace, revision)
 	if stager == nil {
 		recoveredStager, recoveredPlan, recoverable, recoveryErr := d.recoverPreparedStager(ctx, workspace, revision)
 		if recoveryErr != nil {
@@ -2549,10 +2572,7 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 
 			if filesErr == nil && wantsDiagnostics {
 				var providerErr error
-				diagnosticProvider, providerErr = referenceProviders.Open(providerOpenConfig{
-					Root: sandbox.Tree, InitFile: huyangHeadlessInit(),
-					RuntimePath: shippedRuntimePath(), Debug: false,
-				})
+				diagnosticProvider, providerErr = openReferenceProvider(sandbox.Tree, false)
 				providerOpened = providerErr == nil
 				if providerErr == nil {
 					_, providerErr = callCanonicalProvider(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,

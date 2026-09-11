@@ -259,7 +259,7 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 			return result
 		}
 	}
-	backend, err := d.debugProvider(workspace)
+	backend, err := d.debugProvider(ctx, workspace)
 	if err != nil {
 		result := debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
 		result["next"] = debugFailureNext(name, action)
@@ -309,45 +309,17 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 	return result
 }
 
-func (d *directWorkspaces) debugProvider(workspace *workspacecore.Workspace) (provider.Provider, error) {
-	identity := workspace.Identity()
-	d.providerMu.Lock()
-	defer d.providerMu.Unlock()
-	if existing := d.providers[identity.ID]; existing != nil {
-		return existing, nil
-	}
-	backend, err := referenceProviders.Open(providerOpenConfig{
-		Root: identity.Root, InitFile: huyangHeadlessInit(),
-		RuntimePath: shippedRuntimePath(), Debug: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	d.providers[identity.ID] = backend
-	workspace.SyncProviderEpoch(backend.Descriptor().Epoch)
-	return backend, nil
+// debugProvider returns the workspace provider, starting it in debug mode
+// when no provider is running yet. A healthy canonical provider is reused.
+func (d *directWorkspaces) debugProvider(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
+	return d.workspaceProvider(ctx, workspace, true)
 }
 
 func callModernDebugProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, backend provider.Provider, operation string, arguments map[string]any) (any, error) {
-	callContext := ctx
-	if callContext == nil {
-		callContext = context.Background()
-	}
-	var cancel context.CancelFunc
-	if _, ok := callContext.Deadline(); !ok {
-		callContext, cancel = context.WithTimeout(callContext, modernDebugTimeout)
-		defer cancel()
-	}
-	deadline, _ := callContext.Deadline()
-	descriptor := backend.Descriptor()
-	result, err := backend.Call(callContext, provider.Request{
-		Context: provider.RequestContext{
-			RequestID: requestID, WorkspaceID: string(workspace.Identity().ID), Epoch: descriptor.Epoch,
-			Deadline: deadline, Cancellation: descriptor.Cancellation,
-		},
-		Operation: operation, Arguments: arguments,
-	})
-	workspace.SyncProviderEpoch(backend.Descriptor().Epoch)
+	transactionID, _ := arguments["transaction_id"].(string)
+	result, err := callProvider(ctx, workspace, backend, providerCall{
+		RequestID: requestID, TransactionID: transactionID, Timeout: modernDebugTimeout,
+	}, operation, arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -616,27 +588,6 @@ func debugSourceTarget(workspace *workspacecore.Workspace, location map[string]a
 		"handle": record.Handle, "display": record.Display,
 		"locator": map[string]any{"file_range": handle},
 	}, nil
-}
-
-func lineByteRange(content []byte, line int) (int, int, error) {
-	if line < 1 {
-		return 0, 0, errors.New("line must be at least one")
-	}
-	start := 0
-	for current := 1; current < line; current++ {
-		index := bytes.IndexByte(content[start:], '\n')
-		if index < 0 {
-			return 0, 0, fmt.Errorf("line %d is outside the document", line)
-		}
-		start += index + 1
-	}
-	end := start
-	if index := bytes.IndexByte(content[start:], '\n'); index >= 0 {
-		end += index
-	} else {
-		end = len(content)
-	}
-	return start, end, nil
 }
 
 func debugCoverage(complete bool) map[string]any {

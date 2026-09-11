@@ -49,7 +49,10 @@ func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) 
 	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := workspacecore.New(workspacecore.KindProject, root, 1)
+	// The workspace starts at the scripted provider's epoch: reusing a live
+	// provider synchronises the workspace epoch, so handles registered here
+	// must already belong to epoch 7.
+	workspace, err := workspacecore.New(workspacecore.KindProject, root, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ func modernDebugFixture(t *testing.T, call func(provider.Request) (any, error)) 
 		done: make(chan struct{}),
 	}
 	direct := newDirectWorkspaces(t.TempDir())
-	direct.providers[workspace.Identity().ID] = backend
+	direct.providers[workspace.Identity().ID] = &providerSlot{backend: backend}
 	t.Cleanup(direct.closeProviders)
 	return direct, workspace, backend, record
 }
