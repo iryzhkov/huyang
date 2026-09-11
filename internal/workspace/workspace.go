@@ -315,7 +315,6 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 	signature := documentSignature(disk, layer, contentHash)
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	// Compare against the latest record rather than the one read before the
 	// I/O: a concurrent snapshot may already have published this change, and
 	// one external change must advance the state sequence exactly once.
@@ -323,6 +322,7 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 	if hadLatest && signature != latest.signature {
 		w.identity.StateSeq++
 	}
+	contentChanged := hadLatest && latest.contentHash != contentHash
 
 	snapshot := DocumentSnapshot{
 		Workspace:     w.identity,
@@ -342,6 +342,15 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 		revision:    snapshot.Revision,
 	}
 	w.rememberRevisionLocked(absolute, snapshot)
+	w.mu.Unlock()
+	if contentChanged {
+		// Findings recorded for the previous content can no longer be
+		// reported as current. This touches the ledger's own lock and disk,
+		// so it runs after the workspace lock is released.
+		if err := w.noteDocumentContentChanged(absolute, snapshot.Revision); err != nil {
+			return snapshot, fmt.Errorf("update diagnostic ledger for %s: %w", absolute, err)
+		}
+	}
 	return snapshot, nil
 }
 

@@ -99,6 +99,10 @@ type SearchHit struct {
 	Match       string        `json:"match"`
 	Range       RangeHandle   `json:"range"`
 	MatchHandle *HandleRecord `json:"match_handle,omitempty"`
+	// MatchTruncated marks a hit stored inside a frozen result set whose
+	// matched text exceeded maxRetainedMatchBytes and was dropped; the
+	// locator is intact and hydrateHits restores the text on demand.
+	MatchTruncated bool `json:"match_truncated,omitempty"`
 }
 
 type SearchResult struct {

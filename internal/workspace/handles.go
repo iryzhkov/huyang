@@ -121,17 +121,134 @@ type ResultRefinement struct {
 	MatchRegex   string
 }
 
+// Retention bounds for the in-memory handle and result-set store. Expired
+// entries used to be removed only when they were touched, so a workspace
+// that kept issuing handles grew without limit.
+const (
+	// handleSweepInterval is the longest an expired handle or result set
+	// stays in memory before an insert sweeps it out.
+	handleSweepInterval = time.Minute
+	// handleSweepThreshold forces a sweep after this many inserts since the
+	// previous sweep, regardless of elapsed time.
+	handleSweepThreshold = 1024
+	// maxLiveHandles caps the handles kept per workspace; when exceeded the
+	// entries closest to expiry are evicted first.
+	maxLiveHandles = 20000
+	// maxLiveResultSets caps the frozen result sets kept per workspace.
+	maxLiveResultSets = 64
+	// maxRetainedMatchBytes caps the matched text retained per hit in a
+	// frozen result set. Longer matches keep only the locator and are read
+	// back from the (revision-validated) document when needed.
+	maxRetainedMatchBytes = 256
+)
+
 type handleStore struct {
 	mu      sync.RWMutex
 	ttl     time.Duration
 	handles map[HandleID]HandleRecord
 	sets    map[ResultSetID]ResultSet
+
+	maxHandles        int
+	maxSets           int
+	lastSweep         time.Time
+	insertsSinceSweep int
 }
 
 func newHandleStore() *handleStore {
 	return &handleStore{
 		ttl: defaultHandleTTL, handles: make(map[HandleID]HandleRecord), sets: make(map[ResultSetID]ResultSet),
+		maxHandles: maxLiveHandles, maxSets: maxLiveResultSets, lastSweep: time.Now(),
 	}
+}
+
+// putHandleLocked stores a record and applies retention. The caller holds
+// store.mu for writing.
+func (s *handleStore) putHandleLocked(record HandleRecord) {
+	s.handles[record.Handle] = record
+	s.noteInsertLocked()
+}
+
+// putSetLocked stores a result set and applies retention. The caller holds
+// store.mu for writing.
+func (s *handleStore) putSetLocked(set ResultSet) {
+	s.sets[set.Handle] = set
+	s.noteInsertLocked()
+}
+
+func (s *handleStore) noteInsertLocked() {
+	s.insertsSinceSweep++
+	now := time.Now()
+	if s.insertsSinceSweep >= handleSweepThreshold || now.Sub(s.lastSweep) >= handleSweepInterval ||
+		len(s.handles) > s.maxHandles || len(s.sets) > s.maxSets {
+		s.sweepLocked(now)
+	}
+}
+
+// sweepLocked drops expired handles and result sets, then evicts the entries
+// closest to expiry until the store is within its caps.
+func (s *handleStore) sweepLocked(now time.Time) {
+	s.lastSweep = now
+	s.insertsSinceSweep = 0
+	for id, record := range s.handles {
+		if !record.ExpiresAt.After(now) {
+			delete(s.handles, id)
+		}
+	}
+	for id, set := range s.sets {
+		if !set.ExpiresAt.After(now) {
+			delete(s.sets, id)
+		}
+	}
+	if excess := len(s.handles) - s.maxHandles; excess > 0 {
+		ids := make([]HandleID, 0, len(s.handles))
+		for id := range s.handles {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			left, right := s.handles[ids[i]].ExpiresAt, s.handles[ids[j]].ExpiresAt
+			if left.Equal(right) {
+				return ids[i] < ids[j]
+			}
+			return left.Before(right)
+		})
+		for _, id := range ids[:excess] {
+			delete(s.handles, id)
+		}
+	}
+	if excess := len(s.sets) - s.maxSets; excess > 0 {
+		ids := make([]ResultSetID, 0, len(s.sets))
+		for id := range s.sets {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			left, right := s.sets[ids[i]].ExpiresAt, s.sets[ids[j]].ExpiresAt
+			if left.Equal(right) {
+				return ids[i] < ids[j]
+			}
+			return left.Before(right)
+		})
+		for _, id := range ids[:excess] {
+			delete(s.sets, id)
+		}
+	}
+}
+
+// HandleStoreSize reports the live handle and result-set counts. It exists
+// for tests and inspection of retention behaviour.
+func (w *Workspace) HandleStoreSize() (handles, sets int) {
+	store := w.handleRegistry()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return len(store.handles), len(store.sets)
+}
+
+// setHandleCaps lowers the retention caps; tests use it to exercise
+// eviction without registering tens of thousands of handles.
+func (w *Workspace) setHandleCaps(handles, sets int) {
+	store := w.handleRegistry()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.maxHandles, store.maxSets = handles, sets
 }
 
 func (w *Workspace) handleRegistry() *handleStore {
@@ -188,7 +305,7 @@ func (w *Workspace) RegisterRangeHandle(handle RangeHandle, kind HandleKind, dis
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	record.ExpiresAt = time.Now().Add(store.ttl)
-	store.handles[record.Handle] = record
+	store.putHandleLocked(record)
 	return record, nil
 }
 
@@ -234,7 +351,7 @@ func (w *Workspace) registerSymbol(read TextRead, section Section) (HandleRecord
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	record.ExpiresAt = time.Now().Add(store.ttl)
-	store.handles[record.Handle] = record
+	store.putHandleLocked(record)
 	return record, nil
 }
 
@@ -592,7 +709,7 @@ func (w *Workspace) FreezeSearch(result SearchResult) (ResultSet, error) {
 	}
 	set := ResultSet{
 		Handle: ResultSetID(id), Kind: ResultSetCurrentSource, WorkspaceID: identity.ID, Epoch: identity.Epoch,
-		StateSeq: identity.StateSeq, Matches: append([]SearchHit(nil), result.Hits...), MatchCount: len(result.Hits),
+		StateSeq: identity.StateSeq, Matches: retainedHits(result.Hits), MatchCount: len(result.Hits),
 		FileCount: len(files), Complete: result.Coverage.Complete, NonOverlapping: nonOverlapping(result.Hits),
 		Retained: len(result.Hits), Coverage: result.Coverage, Query: result.Query, Mode: result.Mode,
 		DocumentRevisions: revisions, SourceFiles: append([]string(nil), result.SourceFiles...),
@@ -602,8 +719,52 @@ func (w *Workspace) FreezeSearch(result SearchResult) (ResultSet, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	set.ExpiresAt = time.Now().Add(store.ttl)
-	store.sets[set.Handle] = set
+	store.putSetLocked(set)
 	return set, nil
+}
+
+// retainedHits copies hits for storage inside a frozen result set, keeping
+// at most maxRetainedMatchBytes of matched text per hit. The locator is
+// always kept, so hydrateHits can read the exact bytes back later.
+func retainedHits(hits []SearchHit) []SearchHit {
+	retained := make([]SearchHit, len(hits))
+	for index, hit := range hits {
+		if len(hit.Match) > maxRetainedMatchBytes {
+			hit.Match = ""
+			hit.MatchTruncated = true
+		}
+		retained[index] = hit
+	}
+	return retained
+}
+
+// hydrateHits restores the matched text for hits whose content was not
+// retained. It is only valid after InspectResultSet confirmed that every
+// source document still carries the frozen revision.
+func (w *Workspace) hydrateHits(hits []SearchHit) ([]SearchHit, error) {
+	result := append([]SearchHit(nil), hits...)
+	contents := map[string][]byte{}
+	for index := range result {
+		hit := &result[index]
+		if !hit.MatchTruncated {
+			continue
+		}
+		content, cached := contents[hit.Path]
+		if !cached {
+			read, err := w.Read(hit.Path)
+			if err != nil {
+				return nil, err
+			}
+			content = read.Content
+			contents[hit.Path] = content
+		}
+		if hit.ByteStart < 0 || hit.ByteEnd > len(content) || hit.ByteEnd < hit.ByteStart {
+			return nil, &Conflict{Code: ConflictDocumentChanged, Path: hit.Path}
+		}
+		hit.Match = string(content[hit.ByteStart:hit.ByteEnd])
+		hit.MatchTruncated = false
+	}
+	return result, nil
 }
 
 func (w *Workspace) FreezeHistoricalResultSet(matchCount, fileCount int, coverage Coverage) (ResultSet, error) {
@@ -691,7 +852,7 @@ func (w *Workspace) ResolveAllMatches(id ResultSetID) ([]SearchHit, error) {
 			return nil, &Conflict{Code: ConflictDocumentChanged, Path: hit.Path}
 		}
 	}
-	return append([]SearchHit(nil), set.Matches...), nil
+	return w.hydrateHits(set.Matches)
 }
 
 func (w *Workspace) RefineResultSet(parentID ResultSetID, refinement ResultRefinement) (ResultSet, error) {
@@ -709,8 +870,12 @@ func (w *Workspace) RefineResultSet(parentID ResultSetID, refinement ResultRefin
 			return ResultSet{}, fmt.Errorf("invalid refinement regular expression: %w", err)
 		}
 	}
-	hits := make([]SearchHit, 0, len(parent.Matches))
-	for _, hit := range parent.Matches {
+	parentHits, err := w.hydrateHits(parent.Matches)
+	if err != nil {
+		return ResultSet{}, err
+	}
+	hits := make([]SearchHit, 0, len(parentHits))
+	for _, hit := range parentHits {
 		if refinement.Path != "" && !strings.Contains(hit.Path, refinement.Path) {
 			continue
 		}
@@ -746,8 +911,11 @@ func (w *Workspace) RefineResultSet(parentID ResultSetID, refinement ResultRefin
 	child.Eliminated = len(parent.Matches) - len(hits)
 	store := w.handleRegistry()
 	store.mu.Lock()
-	store.sets[child.Handle] = child
+	store.putSetLocked(child)
 	store.mu.Unlock()
+	// The stored copy keeps only bounded match text; the returned set carries
+	// the exact hits the caller filtered on.
+	child.Matches = hits
 	return child, nil
 }
 
