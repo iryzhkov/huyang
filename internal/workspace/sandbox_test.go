@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -71,6 +72,73 @@ func TestSandboxMaterializesExactTreeAndPreparedBytesWithoutAliases(t *testing.T
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("sandbox retained: %v", err)
+	}
+}
+
+func TestSandboxRefusesSymlinksThatReachIntoTheCanonicalTree(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs additional privileges on Windows")
+	}
+	workspaceID := ID("ws_0123456789abcdef0123456789abcdef")
+	cases := map[string]func(source, base string) string{
+		"absolute link into the canonical root": func(source, _ string) string {
+			return filepath.Join(source, "dirty.txt")
+		},
+		"relative link that lands in the canonical root from the sandbox location": func(source, base string) string {
+			relative, err := filepath.Rel(filepath.Join(base, "sandbox-fixture", "tree"), filepath.Join(source, "dirty.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return relative
+		},
+	}
+	for name, target := range cases {
+		t.Run(name, func(t *testing.T) {
+			source, base := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "dirty.txt"), []byte("before\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target(source, base), filepath.Join(source, "escape")); err != nil {
+				t.Fatal(err)
+			}
+			sandbox, err := MaterializeSandbox(context.Background(), source, base, workspaceID, "plan_fixture", 1, "wsrev_1", DefaultSandboxLimits())
+			if err == nil {
+				t.Cleanup(func() { _ = sandbox.Cleanup() })
+				// Demonstrate the escape: a sandbox-only write through the
+				// link lands in the canonical tree.
+				_ = os.WriteFile(filepath.Join(sandbox.Tree, "escape"), []byte("leaked\n"), 0o600)
+				canonical, _ := os.ReadFile(filepath.Join(source, "dirty.txt"))
+				t.Fatalf("sandbox materialized a symlink into the canonical tree; canonical now reads %q", canonical)
+			}
+			if !strings.Contains(err.Error(), "sandbox_symlink_escape") {
+				t.Fatalf("unexpected refusal: %v", err)
+			}
+			entries, _ := os.ReadDir(base)
+			if len(entries) != 0 {
+				t.Fatalf("refused sandbox left directories behind: %v", entries)
+			}
+		})
+	}
+
+	// Links that stay inside the tree or point away from the canonical root
+	// are reproduced verbatim.
+	source, base := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "dirty.txt"), []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("dirty.txt", filepath.Join(source, "inside")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), filepath.Join(source, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	sandbox, err := MaterializeSandbox(context.Background(), source, base, workspaceID, "plan_fixture", 1, "wsrev_1", DefaultSandboxLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sandbox.Cleanup() })
+	if target, err := os.Readlink(filepath.Join(sandbox.Tree, "inside")); err != nil || target != "dirty.txt" {
+		t.Fatalf("in-tree symlink = %q, %v", target, err)
 	}
 }
 

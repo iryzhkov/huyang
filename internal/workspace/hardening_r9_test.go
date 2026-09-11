@@ -43,7 +43,8 @@ func TestParserStageParsesCommonStructuredConfig(t *testing.T) {
 	}
 }
 
-func TestProjectInventoryHonorsGitIgnore(t *testing.T) {
+func gitIgnoreFixture(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	for name, content := range map[string]string{
 		".gitignore": ".ruby-lsp/\n", "tracked.txt": "tracked\n", "untracked.txt": "untracked\n",
@@ -62,6 +63,11 @@ func TestProjectInventoryHonorsGitIgnore(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, output)
 		}
 	}
+	return root
+}
+
+func TestProjectInventoryHonorsGitIgnore(t *testing.T) {
+	root := gitIgnoreFixture(t)
 	workspace, err := Open(OpenOptions{Kind: KindProject, Root: root})
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +79,30 @@ func TestProjectInventoryHonorsGitIgnore(t *testing.T) {
 	joined := strings.Join(files, "\n")
 	if strings.Contains(joined, ".ruby-lsp") || !strings.Contains(joined, "tracked.txt") || !strings.Contains(joined, "untracked.txt") {
 		t.Fatalf("git-aware inventory = %v", files)
+	}
+}
+
+func TestProjectInventoryIgnoresAmbientGitEnvironment(t *testing.T) {
+	root := gitIgnoreFixture(t)
+	// With the ambient environment these settings would redirect Git to a
+	// foreign repository and make it execute an fsmonitor hook; the native
+	// inventory must run Git only through the sanitized runner.
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "elsewhere.git"))
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+	t.Setenv("GIT_CONFIG_VALUE_0", filepath.Join(t.TempDir(), "missing-hook"))
+	workspace, err := Open(OpenOptions{Kind: KindProject, Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, coverage, err := workspace.collectFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(files, "\n")
+	if strings.Contains(joined, ".ruby-lsp") || !strings.Contains(joined, "tracked.txt") || !strings.Contains(joined, "untracked.txt") {
+		t.Fatalf("inventory under hostile git environment = %v (coverage %+v)", files, coverage)
 	}
 }
 

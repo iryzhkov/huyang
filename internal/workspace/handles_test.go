@@ -120,9 +120,20 @@ func TestSymbolHandleDeleteRecreateTTLAndEpochInvalidation(t *testing.T) {
 	if err := os.Rename(replacement, filepath.Join(root, "a.go")); err != nil {
 		t.Fatal(err)
 	}
+	// The replacement carries identical bytes under a new inode. Content is
+	// the authoritative token, so the handle stays bound exactly.
 	recreated, err := workspace.ResolveHandle(record.Handle)
-	if err != nil || recreated.Status != ResolutionConflicted || recreated.Code != ConflictTargetDeleted {
-		t.Fatalf("delete/recreate resolution = %+v, %v", recreated, err)
+	if err != nil || recreated.Status != ResolutionExact || recreated.Current == nil ||
+		recreated.Current.ContentSHA256 != record.Locator.ContentSHA256 {
+		t.Fatalf("delete/recreate of identical content resolution = %+v, %v", recreated, err)
+	}
+	writeFile(t, replacement, "func other()\nbody\n---\n")
+	if err := os.Rename(replacement, filepath.Join(root, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := workspace.ResolveHandle(record.Handle)
+	if err != nil || replaced.Status != ResolutionConflicted || replaced.Code != ConflictTargetDeleted {
+		t.Fatalf("delete/recreate with other content resolution = %+v, %v", replaced, err)
 	}
 
 	workspace, _ = newHandleWorkspace(t, map[string]string{"a.go": "func foo()\nbody\n---\n"})
@@ -294,5 +305,86 @@ func TestResultSetRejectsCapsNewFilesAndEpochChanges(t *testing.T) {
 	var conflict *Conflict
 	if !errors.As(err, &conflict) || conflict.Code != ConflictWorkspaceEpoch {
 		t.Fatalf("result-set epoch error = %v", err)
+	}
+}
+
+func TestHandleStoreSweepsExpiredEntriesAndEnforcesCaps(t *testing.T) {
+	workspace, root := newHandleWorkspace(t, map[string]string{"a.txt": "alpha beta gamma\n"})
+	workspace.setHandleCaps(8, 3)
+	handle, err := workspace.NewRange(filepath.Join(root, "a.txt"), 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expired handles are swept by a later insert, not only when touched.
+	workspace.SetHandleTTL(-time.Second)
+	for index := 0; index < 5; index++ {
+		if _, err := workspace.RegisterRangeHandle(handle, HandleRange, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace.SetHandleTTL(time.Hour)
+	store := workspace.handleRegistry()
+	store.mu.Lock()
+	store.lastSweep = time.Now().Add(-2 * handleSweepInterval)
+	store.mu.Unlock()
+	if _, err := workspace.RegisterRangeHandle(handle, HandleRange, ""); err != nil {
+		t.Fatal(err)
+	}
+	if handles, _ := workspace.HandleStoreSize(); handles != 1 {
+		t.Fatalf("expired handles survived the sweep: %d live", handles)
+	}
+
+	// Live handles beyond the cap evict the ones closest to expiry.
+	var records []HandleRecord
+	for index := 0; index < 12; index++ {
+		record, err := workspace.RegisterRangeHandle(handle, HandleRange, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	if handles, _ := workspace.HandleStoreSize(); handles != 8 {
+		t.Fatalf("handle cap not enforced: %d live", handles)
+	}
+	if _, err := workspace.InspectHandle(records[len(records)-1].Handle); err != nil {
+		t.Fatalf("newest handle was evicted: %v", err)
+	}
+
+	// Result sets obey their own cap.
+	for index := 0; index < 6; index++ {
+		if _, err := workspace.Search(SearchRequest{Query: "alpha"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, sets := workspace.HandleStoreSize(); sets != 3 {
+		t.Fatalf("result set cap not enforced: %d live", sets)
+	}
+}
+
+func TestResultSetRetainsBoundedMatchTextAndHydratesOnUse(t *testing.T) {
+	long := strings.Repeat("x", maxRetainedMatchBytes+10)
+	workspace, _ := newHandleWorkspace(t, map[string]string{"a.txt": "start " + long + " end\n"})
+	result, err := workspace.Search(SearchRequest{Query: "x+", Mode: SearchRegex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].Match != long {
+		t.Fatalf("search hit = %+v", result.Hits)
+	}
+	stored, err := workspace.InspectResultSet(result.ResultSet.Handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Matches) != 1 || !stored.Matches[0].MatchTruncated || stored.Matches[0].Match != "" {
+		t.Fatalf("stored match was not bounded: %+v", stored.Matches)
+	}
+	resolved, err := workspace.ResolveAllMatches(result.ResultSet.Handle)
+	if err != nil || len(resolved) != 1 || resolved[0].Match != long || resolved[0].MatchTruncated {
+		t.Fatalf("hydrated matches = %+v, %v", resolved, err)
+	}
+	refined, err := workspace.RefineResultSet(result.ResultSet.Handle, ResultRefinement{MatchLiteral: strings.Repeat("x", maxRetainedMatchBytes+5)})
+	if err != nil || refined.Retained != 1 || len(refined.Matches) != 1 || refined.Matches[0].Match != long {
+		t.Fatalf("refinement over hydrated text = %+v, %v", refined, err)
 	}
 }

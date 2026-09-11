@@ -194,6 +194,34 @@ func TestVerificationRejectsNondeterministicFormatterAndRestoresOriginal(t *test
 	}
 }
 
+func TestVerificationRunsStagesInCanonicalOrderAndRejectsUnknownStagesUpFront(t *testing.T) {
+	sandbox, prepared := pipelineSandbox(t, map[string]string{"a.go": "package p\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Check = []CommandPolicy{{Name: "noop", Command: []string{"true"}}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_order", Stages: []string{"check", "parser", "format_gate", "parser"},
+	}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, stage := range result.Stages {
+		names = append(names, stage.Stage)
+	}
+	if strings.Join(names, ",") != "format_gate,parser,check" {
+		t.Fatalf("stage order = %v", names)
+	}
+	if !result.Formatting.NotConfigured || result.Formatting.FormatGatePassed {
+		t.Fatalf("formatting claims = %+v", result.Formatting)
+	}
+	rejected, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_order", Stages: []string{"check", "lint"},
+	}, prepared)
+	if err == nil || len(rejected.Stages) != 0 {
+		t.Fatalf("unknown stage ran other stages first: %+v, %v", rejected, err)
+	}
+}
+
 func TestVerificationFormatGateCannotMutateAndParserSeesPreparedBytes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-specific")

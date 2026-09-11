@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -99,6 +98,10 @@ type SearchHit struct {
 	Match       string        `json:"match"`
 	Range       RangeHandle   `json:"range"`
 	MatchHandle *HandleRecord `json:"match_handle,omitempty"`
+	// MatchTruncated marks a hit stored inside a frozen result set whose
+	// matched text exceeded maxRetainedMatchBytes and was dropped; the
+	// locator is intact and hydrateHits restores the text on demand.
+	MatchTruncated bool `json:"match_truncated,omitempty"`
 }
 
 type SearchResult struct {
@@ -257,17 +260,18 @@ func newWorkspace(options OpenOptions) (*Workspace, error) {
 	}
 	limits := normalizeLimits(options.Limits)
 	workspace := &Workspace{
-		identity:    Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
-		documents:   make(map[string]cachedDocument),
-		revisions:   make(map[RevisionID]DocumentSnapshot),
-		knownPaths:  make(map[string]struct{}),
-		allowlist:   make(map[string]struct{}),
-		limits:      limits,
-		stateDir:    options.StateDir,
-		sectioner:   options.Sectioner,
-		plans:       make(map[string]PlanRecord),
-		activePlans: make(map[string]struct{}),
-		commitFault: options.CommitFault,
+		identity:        Identity{ID: id, Kind: options.Kind, Root: canonical, Epoch: options.ProviderEpoch, StateSeq: stateSeq},
+		documents:       make(map[string]cachedDocument),
+		revisions:       make(map[RevisionID]DocumentSnapshot),
+		revisionHistory: make(map[string][]RevisionID),
+		knownPaths:      make(map[string]struct{}),
+		allowlist:       make(map[string]struct{}),
+		limits:          limits,
+		stateDir:        options.StateDir,
+		sectioner:       options.Sectioner,
+		plans:           make(map[string]PlanRecord),
+		activePlans:     make(map[string]struct{}),
+		commitFault:     options.CommitFault,
 	}
 	for _, name := range options.Files {
 		absolute := name
@@ -473,10 +477,13 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 		}
 		return files, coverage, nil
 	}
-	if output, err := exec.Command("git", "-C", w.identity.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output(); err == nil {
+	// The inventory honours .gitignore through the sanitized Git runner so
+	// ambient GIT_DIR, GIT_CONFIG_* injection and core.fsmonitor hooks never
+	// reach the native text path. A truncated listing is not trusted; the
+	// bounded walk below takes over instead.
+	if output, truncated, err := runGitAt(w.identity.Root, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err == nil && !truncated {
 		var files []string
-		for _, raw := range bytes.Split(output, []byte{0}) {
-			relative := string(raw)
+		for _, relative := range strings.Split(output, "\x00") {
 			if relative == "" {
 				continue
 			}

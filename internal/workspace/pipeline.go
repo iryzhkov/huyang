@@ -112,6 +112,59 @@ type VerificationStage struct {
 	TestVerdict     string             `json:"test_verdict,omitempty"`
 	SelectedTests   []SelectedTest     `json:"selected_tests,omitempty"`
 	ExecutedTests   []string           `json:"executed_tests,omitempty"`
+	// Confidence qualifies an unavailable stage whose dimension another
+	// stage corroborated, for example a parser stage without a native parser
+	// for a language whose configured project check passed. Status and Exit
+	// always describe what this stage itself did.
+	Confidence DiagnosticConfidence `json:"confidence,omitempty"`
+}
+
+// FormattingClaims separates the formatting statements a verification result
+// can make so consumers do not infer them from stage names.
+type FormattingClaims struct {
+	// EditorFormatted: an LSP or editor formatter changed the buffer. The
+	// pipeline never runs an editor; the bridge sets this when it applied
+	// one before staging.
+	EditorFormatted bool `json:"editor_formatted"`
+	// RepositoryFormatted: the configured repository formatter transform
+	// produced the staged bytes.
+	RepositoryFormatted bool `json:"repository_formatted"`
+	// FormatGatePassed: the configured non-mutating repository check
+	// accepted the staged bytes.
+	FormatGatePassed bool `json:"format_gate_passed"`
+	// NotConfigured: no repository formatter or gate is configured, so no
+	// stronger claim can exist.
+	NotConfigured bool `json:"not_configured"`
+	// Provisional: a gate is configured but did not deliver a verdict (not
+	// requested, untrusted workspace, timed out, cancelled).
+	Provisional bool     `json:"provisional"`
+	Reasons     []string `json:"reasons,omitempty"`
+}
+
+// canonicalStageOrder is the server-side pipeline order. Requested stages
+// are sorted into it; the caller's order never changes execution order.
+var canonicalStageOrder = []string{"format_gate", "parser", "diagnostics", "check", "tests"}
+
+// CanonicalStages validates and orders requested stage names. Unknown names
+// are rejected before anything runs and duplicates collapse.
+func CanonicalStages(requested []string) ([]string, error) {
+	rank := make(map[string]int, len(canonicalStageOrder))
+	for index, name := range canonicalStageOrder {
+		rank[name] = index
+	}
+	seen := map[string]bool{}
+	var ordered []string
+	for _, name := range requested {
+		if _, known := rank[name]; !known {
+			return nil, fmt.Errorf("unknown verification stage %q", name)
+		}
+		if !seen[name] {
+			seen[name] = true
+			ordered = append(ordered, name)
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool { return rank[ordered[i]] < rank[ordered[j]] })
+	return ordered, nil
 }
 
 type ToolDelta struct {
@@ -137,6 +190,7 @@ type VerificationResult struct {
 	Impact        *ImpactGraph        `json:"impact,omitempty"`
 	Targeted      *TargetedTestResult `json:"targeted_tests,omitempty"`
 	FullTestGate  string              `json:"full_test_gate,omitempty"`
+	Formatting    FormattingClaims    `json:"formatting"`
 }
 
 func DefaultPipelinePolicy() PipelinePolicy {
@@ -900,21 +954,69 @@ func corroborateParserWithProjectCheck(result *VerificationResult) {
 				remaining = append(remaining, reason)
 			}
 		}
-		stage.Coverage.Skipped = remaining
 		if coveredCount == 0 {
+			stage.Coverage.Skipped = remaining
 			continue
 		}
+		// The parser stage itself still did nothing for these files: its
+		// status stays unavailable and its exit stays -1. The corroboration
+		// is expressed only through coverage and confidence.
 		if len(remaining) == 0 {
-			stage.Status = VerificationPassed
-			stage.Exit = 0
-			stage.Coverage.Complete = true
-			stage.Coverage.FilesRead = stage.Coverage.FilesConsidered
 			stage.Coverage.Semantic = "configured_project_check"
 		} else {
 			stage.Coverage.Semantic = "native_parser_and_configured_project_check"
 		}
+		stage.Confidence = ConfidenceCorroborated
+		stage.Coverage.Skipped = append(remaining, fmt.Sprintf("parser_unavailable_corroborated_by_project_check:%d", coveredCount))
 		stage.Implementation = append(stage.Implementation, "configured_project_check")
 	}
+}
+
+// formattingClaims derives the separate formatting statements from the
+// stages that ran. Stage names stay descriptive; consumers read these.
+func formattingClaims(result VerificationResult, policy PipelinePolicy, requested []string) FormattingClaims {
+	var claims FormattingClaims
+	gateRequested := false
+	for _, name := range requested {
+		if name == "format_gate" {
+			gateRequested = true
+		}
+	}
+	var gate *VerificationStage
+	for index := range result.Stages {
+		stage := &result.Stages[index]
+		switch {
+		case stage.Stage == "format" && stage.Mode == "transform" && stage.Status == VerificationPassed:
+			claims.RepositoryFormatted = true
+		case stage.Stage == "format_gate":
+			gate = stage
+		}
+	}
+	gateConfigured := len(policy.Format.Gate.Command) > 0
+	switch {
+	case gate != nil && gate.Status == VerificationPassed:
+		claims.FormatGatePassed = true
+	case gate != nil && gate.Status == VerificationFailed:
+		claims.Reasons = append(claims.Reasons, "format_gate_failed")
+	case gate != nil:
+		// The gate ran into a skip reason, a timeout or a cancellation.
+		claims.Provisional = true
+		claims.Reasons = append(claims.Reasons, "format_gate_"+string(gate.Status))
+		claims.Reasons = append(claims.Reasons, gate.Coverage.Skipped...)
+	case gateConfigured && !gateRequested:
+		claims.Provisional = true
+		claims.Reasons = append(claims.Reasons, "format_gate_not_requested")
+	}
+	if !gateConfigured && len(policy.Format.Transform.Command) == 0 {
+		claims.NotConfigured = true
+		claims.Provisional = false
+		claims.Reasons = uniqueSorted(append(claims.Reasons, "not_configured"))
+	}
+	if claims.NotConfigured && gate != nil && gate.Status == VerificationSkipped {
+		// The gate stage only records not_configured; that is already the claim.
+		claims.Reasons = []string{"not_configured"}
+	}
+	return claims
 }
 
 func projectCheckCoversParserExtension(extension string, implementation []string) bool {
@@ -955,10 +1057,24 @@ func projectCheckCoversParserExtension(extension string, implementation []string
 	return false
 }
 
+// RunVerificationPipeline runs the requested stages in the canonical
+// pipeline order (see canonicalStageOrder) against the prepared sandbox and
+// reports each stage as data plus the separate formatting claims.
 func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, prepared []PlanStageFile) (VerificationResult, error) {
 	if sandbox == nil {
 		return VerificationResult{}, errors.New("prepared sandbox is required")
 	}
+	stages, err := CanonicalStages(request.Stages)
+	if err != nil {
+		return VerificationResult{Revision: request.Revision}, err
+	}
+	request.Stages = stages
+	result, err := runVerificationPipeline(ctx, sandbox, policy, request, prepared)
+	result.Formatting = formattingClaims(result, policy, stages)
+	return result, err
+}
+
+func runVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, prepared []PlanStageFile) (VerificationResult, error) {
 	result := VerificationResult{Revision: request.Revision, PreparedFiles: append([]PlanStageFile(nil), prepared...)}
 	affected := make([]string, 0, len(prepared))
 	for _, file := range prepared {
@@ -1089,6 +1205,7 @@ func RunVerificationPipeline(ctx context.Context, sandbox *Sandbox, policy Pipel
 				return result, err
 			}
 		default:
+			// CanonicalStages already rejected unknown names.
 			return result, fmt.Errorf("unknown verification stage %q", name)
 		}
 	}

@@ -105,7 +105,43 @@ type DiagnosticItem struct {
 	FirstSeen        time.Time                `json:"first_seen"`
 	LastSeen         time.Time                `json:"last_seen"`
 	Attribution      CulpritAttribution       `json:"attribution"`
+	// Status is one of DiagnosticStatusCurrent, DiagnosticStatusStale or
+	// DiagnosticStatusResolved. A stale item was recorded against document
+	// content that has since changed and the producer has not re-published
+	// for the new content; it is neither current nor verified resolved.
+	Status        string    `json:"status,omitempty"`
+	StaleReason   string    `json:"stale_reason,omitempty"`
+	StaleRevision string    `json:"stale_revision,omitempty"`
+	ResolvedAt    time.Time `json:"resolved_at,omitempty"`
 }
+
+const (
+	DiagnosticStatusCurrent  = "current"
+	DiagnosticStatusStale    = "stale"
+	DiagnosticStatusResolved = "resolved"
+
+	staleReasonDocumentChanged = "document_changed"
+)
+
+// Retention bounds for the diagnostic ledger. Items that are neither current
+// nor stale, evidence nobody references and consumed notices are pruned so a
+// long-lived workspace does not accumulate every observation it ever made.
+const (
+	// diagnosticRetentionWindow is how long resolved items and unreferenced
+	// evidence stay in the ledger after they were last seen.
+	diagnosticRetentionWindow = 24 * time.Hour
+	// maxInactiveDiagnosticItems caps resolved items kept regardless of age;
+	// the least recently seen are dropped first.
+	maxInactiveDiagnosticItems = 1000
+	// maxUnreferencedDiagnosticEvidence caps evidence payloads that no
+	// retained item and no coverage dimension references.
+	maxUnreferencedDiagnosticEvidence = 500
+	// maxDiagnosticNotices caps retained notices. Acknowledged notices are
+	// dropped as soon as they are acknowledged; beyond the cap the oldest
+	// unacknowledged notices are dropped and the notice floor records the
+	// gap so cursors older than the floor are reported as truncated.
+	maxDiagnosticNotices = 1000
+)
 
 type DiagnosticDimension struct {
 	State       string               `json:"state"`
@@ -129,11 +165,25 @@ type DiagnosticReport struct {
 	New                []DiagnosticItem               `json:"new"`
 	Current            []DiagnosticItem               `json:"current,omitempty"`
 	Resolved           []DiagnosticItem               `json:"resolved"`
+	Stale              []DiagnosticItem               `json:"stale,omitempty"`
 	PreexistingCount   int                            `json:"preexisting_count"`
+	CurrentCount       int                            `json:"current_count"`
+	StaleCount         int                            `json:"stale_count"`
 	ProvisionalReasons []string                       `json:"provisional_reasons,omitempty"`
 	EvidenceIDs        []string                       `json:"evidence_ids"`
 	Cursor             string                         `json:"cursor"`
 	Notices            []DiagnosticNotice             `json:"notices,omitempty"`
+	// NoticesTruncated reports that notices between the caller's cursor and
+	// the retained notice floor were pruned, so the delta is incomplete.
+	NoticesTruncated bool `json:"notices_truncated,omitempty"`
+}
+
+// DiagnosticNoticePage is a bounded delta of notices strictly after a cursor.
+type DiagnosticNoticePage struct {
+	Notices   []DiagnosticNotice `json:"notices"`
+	Cursor    string             `json:"cursor"`
+	Truncated bool               `json:"truncated,omitempty"`
+	More      bool               `json:"more,omitempty"`
 }
 
 type DiagnosticEvidence struct {
@@ -149,6 +199,8 @@ type diagnosticState struct {
 	Ack                uint64                         `json:"ack"`
 	Items              map[string]DiagnosticItem      `json:"items"`
 	Active             map[string][]string            `json:"active"`
+	Stale              map[string][]string            `json:"stale,omitempty"`
+	NoticeFloor        uint64                         `json:"notice_floor,omitempty"`
 	Evidence           map[string]DiagnosticEvidence  `json:"evidence"`
 	Notices            []DiagnosticNotice             `json:"notices"`
 	Dimensions         map[string]DiagnosticDimension `json:"dimensions"`
@@ -159,11 +211,16 @@ type diagnosticStore struct {
 	mu    sync.Mutex
 	path  string
 	state diagnosticState
+	// delivered is the highest notice sequence handed out by pendingNotices
+	// during this process lifetime. It is deliberately not persisted: after a
+	// restart unacknowledged notices are delivered again, which is the
+	// conservative direction.
+	delivered uint64
 }
 
 func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, error) {
 	store := &diagnosticStore{state: diagnosticState{
-		Version: diagnosticStateVersion, Items: map[string]DiagnosticItem{}, Active: map[string][]string{},
+		Version: diagnosticStateVersion, Items: map[string]DiagnosticItem{}, Active: map[string][]string{}, Stale: map[string][]string{},
 		Evidence: map[string]DiagnosticEvidence{}, Dimensions: map[string]DiagnosticDimension{}, ProviderDimensions: map[string]DiagnosticDimension{},
 	}}
 	if stateDir == "" {
@@ -189,6 +246,9 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 	if store.state.Active == nil {
 		store.state.Active = map[string][]string{}
 	}
+	if store.state.Stale == nil {
+		store.state.Stale = map[string][]string{}
+	}
 	if store.state.Evidence == nil {
 		store.state.Evidence = map[string]DiagnosticEvidence{}
 	}
@@ -212,10 +272,7 @@ func (s *diagnosticStore) save() error {
 	if err != nil {
 		return err
 	}
-	if err := atomicWrite(s.path, append(content, '\n'), 0o600); err != nil {
-		return err
-	}
-	return syncDirectory(filepath.Dir(s.path))
+	return atomicWriteFile(s.path, append(content, '\n'), 0o600)
 }
 
 func normalizeFinding(f DiagnosticFinding) DiagnosticFinding {
@@ -375,6 +432,7 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 
 	key := batch.ProviderID + "\x00" + batch.Document
 	previous := append([]string(nil), s.state.Active[key]...)
+	previousStale := append([]string(nil), s.state.Stale[key]...)
 	seen := map[string]bool{}
 	var current, added, resolved []DiagnosticItem
 	for _, finding := range batch.Findings {
@@ -387,31 +445,55 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		item, existed := s.state.Items[id]
 		if !existed {
 			item = DiagnosticItem{ID: id, ProviderID: batch.ProviderID, Producer: batch.Producer,
-				ProducerVersion: batch.ProducerVersion, Document: batch.Document, DocumentRevision: batch.DocumentRevision,
-				DocumentVersion: batch.DocumentVersion, TransactionID: batch.TransactionID, StateSeq: batch.StateSeq,
+				ProducerVersion: batch.ProducerVersion, Document: batch.Document,
 				Finding: finding, FirstSeen: batch.ObservedAt, Attribution: rankCulprit(batch.Candidates)}
-			added = append(added, item)
-			s.addNotice("new", item)
 		}
+		// An item that was stale or resolved and is reported again is a new
+		// current finding for this content; announce it again.
+		announce := !existed || item.Status != DiagnosticStatusCurrent
+		item.Status = DiagnosticStatusCurrent
+		item.StaleReason, item.StaleRevision, item.ResolvedAt = "", "", time.Time{}
+		// The provenance follows the latest observation so a re-published
+		// finding is attributed to the content it was verified against.
+		item.DocumentRevision = batch.DocumentRevision
+		item.DocumentVersion = batch.DocumentVersion
+		item.TransactionID = batch.TransactionID
+		item.StateSeq = batch.StateSeq
 		item.LastSeen = batch.ObservedAt
 		item.EvidenceIDs = appendUnique(item.EvidenceIDs, evID)
 		item.EvidenceKinds = appendUniqueKind(item.EvidenceKinds, batch.Kind)
 		s.state.Items[id] = item
+		if announce {
+			added = append(added, item)
+			s.addNotice("new", item)
+		}
 		current = append(current, item)
 	}
 	if batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
-		for _, id := range previous {
+		// A complete observation of this document verifies the absence of
+		// everything it did not report: previously current items and items
+		// left stale by a content change are both resolved.
+		for _, id := range append(previous, previousStale...) {
 			if seen[id] {
 				continue
 			}
-			item := s.state.Items[id]
+			item, ok := s.state.Items[id]
+			if !ok {
+				continue
+			}
+			item.Status = DiagnosticStatusResolved
+			item.ResolvedAt = batch.ObservedAt
+			s.state.Items[id] = item
 			resolved = append(resolved, item)
 			s.addNotice("resolved", item)
 		}
 		s.state.Active[key] = idsOf(current)
+		delete(s.state.Stale, key)
 	} else {
 		s.state.Active[key] = appendUnique(previous, idsOf(current)...)
+		s.state.Stale[key] = withoutIDs(previousStale, seen)
 	}
+	s.pruneLocked(batch.ObservedAt)
 	if err := s.save(); err != nil {
 		return DiagnosticReport{}, err
 	}
@@ -424,6 +506,61 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	return report, nil
 }
 
+// documentChanged marks every current finding recorded for document as stale
+// unless it was already recorded against revision. It reports whether the
+// ledger changed. Stale findings leave the active set, are announced with a
+// "stale" notice and stay visible as stale until the producer re-publishes
+// for the new content (current again) or a complete observation omits them
+// (resolved). They are never silently promoted to resolved.
+func (s *diagnosticStore) documentChanged(documents []string, revision string, observedAt time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	names := map[string]bool{}
+	for _, document := range documents {
+		names[filepath.ToSlash(filepath.Clean(document))] = true
+	}
+	changed := false
+	keys := make([]string, 0, len(s.state.Active))
+	for key := range s.state.Active {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		_, document, found := strings.Cut(key, "\x00")
+		if !found || !names[document] {
+			continue
+		}
+		var remaining []string
+		for _, id := range s.state.Active[key] {
+			item, ok := s.state.Items[id]
+			if !ok {
+				continue
+			}
+			if revision != "" && item.DocumentRevision == revision {
+				remaining = append(remaining, id)
+				continue
+			}
+			item.Status = DiagnosticStatusStale
+			item.StaleReason = staleReasonDocumentChanged
+			item.StaleRevision = revision
+			s.state.Items[id] = item
+			s.state.Stale[key] = appendUnique(s.state.Stale[key], id)
+			s.addNotice("stale", item)
+			changed = true
+		}
+		if len(remaining) == 0 {
+			delete(s.state.Active, key)
+		} else {
+			s.state.Active[key] = remaining
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	s.pruneLocked(observedAt)
+	return true, s.save()
+}
+
 func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
 	s.state.Sequence++
 	s.state.Notices = append(s.state.Notices, DiagnosticNotice{
@@ -432,9 +569,144 @@ func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
 	})
 }
 
+// pruneLocked applies the retention bounds. Evidence referenced by a current
+// or stale item, or by a coverage dimension, is never dropped. The caller
+// holds s.mu.
+func (s *diagnosticStore) pruneLocked(now time.Time) {
+	// Acknowledged notices have been consumed through diagnostics(since).
+	// NoticeFloor remembers the highest dropped notice sequence so a cursor
+	// older than it is told that its delta is incomplete.
+	var retained []DiagnosticNotice
+	dropUpTo := func(notice DiagnosticNotice) {
+		seq, _ := parseDiagnosticCursor(notice.Cursor)
+		if seq > s.state.NoticeFloor {
+			s.state.NoticeFloor = seq
+		}
+	}
+	for _, notice := range s.state.Notices {
+		seq, _ := parseDiagnosticCursor(notice.Cursor)
+		if seq > s.state.Ack {
+			retained = append(retained, notice)
+		} else {
+			dropUpTo(notice)
+		}
+	}
+	if excess := len(retained) - maxDiagnosticNotices; excess > 0 {
+		dropUpTo(retained[excess-1])
+		retained = retained[excess:]
+	}
+	s.state.Notices = retained
+	noticed := map[string]bool{}
+	for _, notice := range s.state.Notices {
+		noticed[notice.ID] = true
+	}
+
+	// Resolved items stay while a retained notice names them, then for the
+	// window, then up to the cap.
+	live := map[string]bool{}
+	for _, ids := range s.state.Active {
+		for _, id := range ids {
+			live[id] = true
+		}
+	}
+	for _, ids := range s.state.Stale {
+		for _, id := range ids {
+			live[id] = true
+		}
+	}
+	var inactive []string
+	for id, item := range s.state.Items {
+		if live[id] || noticed[id] {
+			continue
+		}
+		if now.Sub(item.LastSeen) > diagnosticRetentionWindow {
+			delete(s.state.Items, id)
+			continue
+		}
+		inactive = append(inactive, id)
+	}
+	if excess := len(inactive) - maxInactiveDiagnosticItems; excess > 0 {
+		sort.Slice(inactive, func(i, j int) bool {
+			left, right := s.state.Items[inactive[i]].LastSeen, s.state.Items[inactive[j]].LastSeen
+			if left.Equal(right) {
+				return inactive[i] < inactive[j]
+			}
+			return left.Before(right)
+		})
+		for _, id := range inactive[:excess] {
+			delete(s.state.Items, id)
+		}
+	}
+
+	referenced := map[string]bool{}
+	for _, item := range s.state.Items {
+		for _, id := range item.EvidenceIDs {
+			referenced[id] = true
+		}
+	}
+	for _, dimension := range s.state.Dimensions {
+		for _, id := range dimension.EvidenceIDs {
+			referenced[id] = true
+		}
+	}
+	for _, dimension := range s.state.ProviderDimensions {
+		for _, id := range dimension.EvidenceIDs {
+			referenced[id] = true
+		}
+	}
+	var unreferenced []string
+	for id, evidence := range s.state.Evidence {
+		if referenced[id] {
+			continue
+		}
+		if now.Sub(evidence.RecordedAt) > diagnosticRetentionWindow {
+			delete(s.state.Evidence, id)
+			continue
+		}
+		unreferenced = append(unreferenced, id)
+	}
+	if excess := len(unreferenced) - maxUnreferencedDiagnosticEvidence; excess > 0 {
+		sort.Slice(unreferenced, func(i, j int) bool {
+			left, right := s.state.Evidence[unreferenced[i]].RecordedAt, s.state.Evidence[unreferenced[j]].RecordedAt
+			if left.Equal(right) {
+				return unreferenced[i] < unreferenced[j]
+			}
+			return left.Before(right)
+		})
+		for _, id := range unreferenced[:excess] {
+			delete(s.state.Evidence, id)
+		}
+	}
+}
+
+func (s *diagnosticStore) countsLocked() (current, stale int) {
+	for _, ids := range s.state.Active {
+		current += len(ids)
+	}
+	for _, ids := range s.state.Stale {
+		stale += len(ids)
+	}
+	return current, stale
+}
+
+func (s *diagnosticStore) staleItemsLocked() []DiagnosticItem {
+	var items []DiagnosticItem
+	for _, ids := range s.state.Stale {
+		for _, id := range ids {
+			if item, ok := s.state.Items[id]; ok {
+				items = append(items, item)
+			}
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items
+}
+
 func (s *diagnosticStore) reportLocked(added, resolved []DiagnosticItem, evID string, reasons []string) DiagnosticReport {
+	current, stale := s.countsLocked()
 	return DiagnosticReport{Confidence: weakestConfidence(s.state.Dimensions), Coverage: cloneDimensions(s.state.Dimensions),
-		New: added, Resolved: resolved, PreexistingCount: len(s.state.Items) - len(added), ProvisionalReasons: reasons,
+		New: added, Resolved: resolved, Stale: s.staleItemsLocked(), PreexistingCount: current - len(added),
+		CurrentCount: current, StaleCount: stale, ProvisionalReasons: reasons,
 		EvidenceIDs: []string{evID}, Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence)}
 }
 
@@ -448,25 +720,38 @@ func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
 	if since != "" && seq > s.state.Ack {
 		s.state.Ack = seq
 	}
+	truncated := seq < s.state.NoticeFloor
 	var notices []DiagnosticNotice
-	var added, resolved []DiagnosticItem
+	var added, resolved, stale []DiagnosticItem
 	for _, notice := range s.state.Notices {
 		n, _ := parseDiagnosticCursor(notice.Cursor)
 		if n <= seq {
 			continue
 		}
 		notices = append(notices, notice)
-		if notice.Kind == "new" {
-			added = append(added, s.state.Items[notice.ID])
-		} else {
-			resolved = append(resolved, s.state.Items[notice.ID])
+		item := s.state.Items[notice.ID]
+		switch notice.Kind {
+		case "new":
+			added = append(added, item)
+		case "stale":
+			stale = append(stale, item)
+		default:
+			resolved = append(resolved, item)
 		}
 	}
+	s.pruneLocked(time.Now().UTC())
 	if err := s.save(); err != nil {
 		return DiagnosticReport{}, err
 	}
+	current, staleCount := s.countsLocked()
+	preexisting := current - len(added)
+	if preexisting < 0 {
+		preexisting = 0
+	}
 	report := DiagnosticReport{Confidence: weakestConfidence(s.state.Dimensions), Coverage: cloneDimensions(s.state.Dimensions),
-		New: added, Resolved: resolved, PreexistingCount: len(s.state.Items) - len(added), EvidenceIDs: evidenceIDsFromDimensions(s.state.Dimensions), Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Notices: notices}
+		New: added, Resolved: resolved, Stale: stale, PreexistingCount: preexisting, CurrentCount: current, StaleCount: staleCount,
+		EvidenceIDs: evidenceIDsFromDimensions(s.state.Dimensions), Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Notices: notices,
+		NoticesTruncated: truncated}
 	if len(s.state.Dimensions) == 0 {
 		report.Confidence = ConfidenceUnavailable
 		report.Coverage = map[string]DiagnosticDimension{"edited_documents": {State: "unavailable", Confidence: ConfidenceUnavailable, Reasons: []string{"no_diagnostic_evidence"}}}
@@ -475,23 +760,75 @@ func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
 	return report, nil
 }
 
+// pendingNotices returns unacknowledged notices that this process has not
+// handed out before. Each notice is therefore attached to exactly one reply;
+// a client that needs the full unacknowledged backlog uses query or
+// noticesSince with its own cursor.
 func (s *diagnosticStore) pendingNotices(limit int) []DiagnosticNotice {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if limit <= 0 {
 		limit = 20
 	}
+	floor := s.state.Ack
+	if s.delivered > floor {
+		floor = s.delivered
+	}
 	var out []DiagnosticNotice
 	for _, notice := range s.state.Notices {
 		seq, _ := parseDiagnosticCursor(notice.Cursor)
-		if seq > s.state.Ack {
-			out = append(out, notice)
+		if seq <= floor {
+			continue
 		}
+		out = append(out, notice)
+		s.delivered = seq
 		if len(out) == limit {
 			break
 		}
 	}
 	return out
+}
+
+// noticesSince returns up to limit notices strictly after cursor without
+// acknowledging anything. The returned cursor names the last notice in the
+// page (or the caller's cursor when the page is empty) so the caller can
+// continue from it; Truncated reports that notices between cursor and the
+// retained floor were pruned.
+func (s *diagnosticStore) noticesSince(cursor string, limit int) (DiagnosticNoticePage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seq, err := parseDiagnosticCursor(cursor)
+	if err != nil {
+		return DiagnosticNoticePage{}, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	page := DiagnosticNoticePage{Notices: []DiagnosticNotice{}, Cursor: fmt.Sprintf("diagcur_%d", seq),
+		Truncated: seq < s.state.NoticeFloor}
+	for _, notice := range s.state.Notices {
+		n, _ := parseDiagnosticCursor(notice.Cursor)
+		if n <= seq {
+			continue
+		}
+		if len(page.Notices) == limit {
+			page.More = true
+			break
+		}
+		page.Notices = append(page.Notices, notice)
+		page.Cursor = notice.Cursor
+	}
+	return page, nil
+}
+
+func withoutIDs(ids []string, drop map[string]bool) []string {
+	var kept []string
+	for _, id := range ids {
+		if !drop[id] {
+			kept = append(kept, id)
+		}
+	}
+	return kept
 }
 
 func (s *diagnosticStore) evidenceByID(id string) (DiagnosticEvidence, error) {
@@ -593,6 +930,27 @@ func (w *Workspace) Diagnostics(since string) (DiagnosticReport, error) {
 }
 func (w *Workspace) DiagnosticNotices(limit int) []DiagnosticNotice {
 	return w.diagnostics.pendingNotices(limit)
+}
+
+// DiagnosticNoticesSince returns a bounded page of notices strictly after
+// cursor without acknowledging them. A bridge that tracks one cursor per
+// client should call this instead of DiagnosticNotices so every reply
+// carries only the delta that client has not seen.
+func (w *Workspace) DiagnosticNoticesSince(cursor string, limit int) (DiagnosticNoticePage, error) {
+	return w.diagnostics.noticesSince(cursor, limit)
+}
+
+// noteDocumentContentChanged tells the ledger that the content of absolute
+// changed and now carries revision, so findings recorded for the older
+// content become stale. Documents are matched by absolute path and by the
+// workspace-relative display path, which are the forms producers record.
+func (w *Workspace) noteDocumentContentChanged(absolute string, revision RevisionID) error {
+	if w.diagnostics == nil {
+		return nil
+	}
+	documents := []string{absolute, displayPath(w.identity.Root, absolute)}
+	_, err := w.diagnostics.documentChanged(documents, string(revision), time.Now().UTC())
+	return err
 }
 func (w *Workspace) Evidence(id string) (DiagnosticEvidence, error) {
 	return w.diagnostics.evidenceByID(id)
