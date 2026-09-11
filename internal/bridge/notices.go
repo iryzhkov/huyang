@@ -86,10 +86,10 @@ func diagnosticCursorSequence(cursor string) uint64 {
 // workspace's notices-after-cursor query against the last cursor delivered to
 // this client; acknowledgement through the diagnostics cursor prunes notices
 // for every client.
-func (d *directWorkspaces) attachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
+func (h *toolHandlers) attachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
 	workspaceID := workspace.Identity().ID
 	client := clientIdentity(ctx)
-	last := d.notices.last(workspaceID, client)
+	last := h.notices.last(workspaceID, client)
 	page, err := workspace.DiagnosticNoticesSince(fmt.Sprintf("diagcur_%d", last), maxDiagnosticUpdates)
 	if err != nil || len(page.Notices) == 0 {
 		return
@@ -98,5 +98,5 @@ func (d *directWorkspaces) attachDiagnosticUpdates(ctx context.Context, workspac
 	if page.More || page.Truncated {
 		result["diagnostic_updates_truncated"] = true
 	}
-	d.notices.record(workspaceID, client, diagnosticCursorSequence(page.Cursor))
+	h.notices.record(workspaceID, client, diagnosticCursorSequence(page.Cursor))
 }

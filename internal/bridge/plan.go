@@ -9,7 +9,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) changePlan(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	decode := func(value any, target any) error {
 		encoded, err := json.Marshal(value)
@@ -69,7 +69,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	case "create":
 		var operations []workspacecore.PlanOperation
 		if err = decode(arguments["operations"], &operations); err == nil {
-			err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
+			err = h.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
 		}
 		if err == nil {
 			plan, err = workspace.CreatePlan(operations)
@@ -80,7 +80,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 	case "edit":
 		var edit workspacecore.PlanEdit
 		if err = decode(arguments["edit"], &edit); err == nil {
-			err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, edit.Operations)
+			err = h.resolvePlanSymbolLocators(ctx, requestID, workspace, edit.Operations)
 		}
 		if err == nil {
 			plan, err = workspace.EditPlan(
@@ -110,7 +110,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		if raw, inline := arguments["operations"]; inline {
 			var operations []workspacecore.PlanOperation
 			if err = decode(raw, &operations); err == nil {
-				err = d.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
+				err = h.resolvePlanSymbolLocators(ctx, requestID, workspace, operations)
 			}
 			if err == nil {
 				plan, err = workspace.CreatePlan(operations)
@@ -121,7 +121,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		var stager workspacecore.PlanStager
 		if err == nil {
-			stager, err = d.planStager(workspace, planID, revision, true)
+			stager, err = h.pool.planStager(workspace, planID, revision, true)
 		}
 		if err == nil {
 			plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
@@ -144,7 +144,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		switch current.State {
 		case workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanFailed, workspacecore.PlanConflicted:
-			stager, stagerErr := d.planStager(workspace, planID, revision, false)
+			stager, stagerErr := h.pool.planStager(workspace, planID, revision, false)
 			if stagerErr != nil {
 				if (current.State == workspacecore.PlanFailed || current.State == workspacecore.PlanConflicted) && workspacecore.ErrorCode(stagerErr) == workspacecore.CodeProviderUnavailable {
 					plan, err = workspace.DiscardPlan(planID, revision)
@@ -170,9 +170,9 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			wasProvisional = current.State == workspacecore.PlanProvisional
 		}
 		var stager workspacecore.PlanStager
-		stager, err = d.planStager(workspace, planID, revision, false)
+		stager, err = h.pool.planStager(workspace, planID, revision, false)
 		if err != nil {
-			recoveredStager, recoveredPlan, recoverable, recoveryErr := d.recoverPreparedStager(ctx, workspace, preparedRevision)
+			recoveredStager, recoveredPlan, recoverable, recoveryErr := h.recoverPreparedStager(ctx, workspace, preparedRevision)
 			switch {
 			case recoveryErr != nil:
 				err = recoveryErr
@@ -206,7 +206,7 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 					data["missing_coverage"] = plan.Preparation.MissingCoverage
 				}
 			}
-			if _, resyncErr := d.resyncCanonicalProvider(ctx, workspace); resyncErr != nil {
+			if _, resyncErr := h.pool.resync(ctx, workspace); resyncErr != nil {
 				result["outcome"] = "provisional"
 				result["code"] = "provider_resync_failed"
 				result["summary"] = "Prepared plan applied, but canonical provider resynchronization failed"

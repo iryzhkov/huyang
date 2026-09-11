@@ -185,7 +185,7 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	// 300ms leaves margin for workspace_open (tree walk, Git, provider probe) under
 	// suite load while keeping the blocked call below well under the one-second bound.
-	direct.toolTimeout = 300 * time.Millisecond
+	direct.setToolTimeout(300 * time.Millisecond)
 	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	identity, ok := opened["workspace"].(workspacecore.Identity)
 	if !ok {

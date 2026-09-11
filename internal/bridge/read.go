@@ -8,7 +8,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, ok := arguments["target"].(map[string]any)
 	if !ok {
 		return modernEnvelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
@@ -78,7 +78,7 @@ func (d *directWorkspaces) read(ctx context.Context, requestID string, workspace
 				// FindSymbols never has parser coverage. Resolve through the
 				// same provider-backed path symbol_find uses, which registers
 				// durable handles the locator can then select.
-				if record, ok := d.resolveSymbolLocatorViaProvider(ctx, requestID, workspace, path, name); ok {
+				if record, ok := h.resolveSymbolLocatorViaProvider(ctx, requestID, workspace, path, name); ok {
 					exact = []workspacecore.HandleRecord{record}
 					coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
 				}
@@ -145,14 +145,14 @@ func (d *directWorkspaces) read(ctx context.Context, requestID string, workspace
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the
 // declaration when the native text core cannot section the document.
-func (d *directWorkspaces) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
+func (h *toolHandlers) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
 	if record, err := workspace.ResolveSymbolLocator(path, name); err == nil {
 		return record, true
 	}
 	if workspace.Identity().Kind != workspacecore.KindProject {
 		return workspacecore.HandleRecord{}, false
 	}
-	d.symbolFind(ctx, requestID+"_resolve", workspace, map[string]any{"query": name})
+	h.symbolFind(ctx, requestID+"_resolve", workspace, map[string]any{"query": name})
 	record, err := workspace.ResolveSymbolLocator(path, name)
 	return record, err == nil
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -67,6 +66,7 @@ func (s *providerPlanStager) call(ctx context.Context, operation, planID string,
 type sandboxPlanStager struct {
 	opMu             sync.Mutex
 	stateMu          sync.Mutex
+	pool             *providerPool
 	workspace        *workspacecore.Workspace
 	sandboxBase      string
 	planID           string
@@ -181,7 +181,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		return err
 	}
 	s.setResources(sandbox, nil, nil)
-	backend, err := openReferenceProvider(sandbox.Tree, false)
+	backend, err := s.pool.open(sandbox.Tree, false)
 	if err != nil {
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
@@ -251,7 +251,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 			known[delta.Path] = true
 		}
 	}
-	replacement, err := openReferenceProvider(sandbox.Tree, false)
+	replacement, err := s.pool.open(sandbox.Tree, false)
 	if err != nil {
 		return err
 	}
@@ -359,22 +359,22 @@ type stagerKey struct {
 }
 
 // preparedStager returns the stager of one workspace whose plan ID or prepared
-// revision matches reference. The map is snapshotted under d.providerMu and
+// revision matches reference. The map is snapshotted under p.mu and
 // inspected after it is released; PreparedRequest only takes the stager's
 // short state lock, so a stager inside a long Stage never blocks the lookup.
-func (d *directWorkspaces) preparedStager(workspace *workspacecore.Workspace, reference string) *sandboxPlanStager {
+func (p *providerPool) preparedStager(workspace *workspacecore.Workspace, reference string) *sandboxPlanStager {
 	workspaceID := workspace.Identity().ID
-	d.providerMu.Lock()
-	candidates := make([]*sandboxPlanStager, 0, len(d.sandboxStagers))
-	if exact := d.sandboxStagers[stagerKey{workspace: workspaceID, planID: reference}]; exact != nil {
+	p.mu.Lock()
+	candidates := make([]*sandboxPlanStager, 0, len(p.stagers))
+	if exact := p.stagers[stagerKey{workspace: workspaceID, planID: reference}]; exact != nil {
 		candidates = append(candidates, exact)
 	}
-	for key, candidate := range d.sandboxStagers {
+	for key, candidate := range p.stagers {
 		if key.workspace == workspaceID && key.planID != reference {
 			candidates = append(candidates, candidate)
 		}
 	}
-	d.providerMu.Unlock()
+	p.mu.Unlock()
 	for _, candidate := range candidates {
 		if candidate.workspace.Identity().ID != workspaceID {
 			continue
@@ -389,12 +389,12 @@ func (d *directWorkspaces) preparedStager(workspace *workspacecore.Workspace, re
 	return nil
 }
 
-func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
+func (p *providerPool) planStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {
 	identity := workspace.Identity()
 	key := stagerKey{workspace: identity.ID, planID: planID}
-	d.providerMu.Lock()
-	existing := d.sandboxStagers[key]
-	d.providerMu.Unlock()
+	p.mu.Lock()
+	existing := p.stagers[key]
+	p.mu.Unlock()
 	if existing != nil {
 		if existing.reusable(planRevision) {
 			return existing, nil
@@ -404,28 +404,28 @@ func (d *directWorkspaces) planStager(workspace *workspacecore.Workspace, planID
 			// sandbox another caller prepared; report the mismatch instead.
 			return nil, workspacecore.Codedf(workspacecore.CodePlanRevisionChanged, "prepared sandbox belongs to plan revision %d, not %d", existing.planRevision, planRevision)
 		}
-		// The stale stager is rolled back outside d.providerMu because the
+		// The stale stager is rolled back outside p.mu because the
 		// rollback closes a provider and removes a sandbox tree.
 		_ = existing.Rollback(context.Background(), planID)
-		d.providerMu.Lock()
-		if d.sandboxStagers[key] == existing {
-			delete(d.sandboxStagers, key)
+		p.mu.Lock()
+		if p.stagers[key] == existing {
+			delete(p.stagers, key)
 		}
-		d.providerMu.Unlock()
+		p.mu.Unlock()
 	}
 	if !create {
 		return nil, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
 	}
 	stager := &sandboxPlanStager{
-		workspace: workspace, sandboxBase: filepath.Join(d.stateDir, "sandboxes"),
+		pool: p, workspace: workspace, sandboxBase: p.sandboxBase,
 		planID: planID, planRevision: planRevision, baseRevision: fmt.Sprintf("wsrev_%d", identity.StateSeq),
 	}
-	d.providerMu.Lock()
-	if current := d.sandboxStagers[key]; current != nil && current.reusable(planRevision) {
-		d.providerMu.Unlock()
+	p.mu.Lock()
+	if current := p.stagers[key]; current != nil && current.reusable(planRevision) {
+		p.mu.Unlock()
 		return current, nil
 	}
-	d.sandboxStagers[key] = stager
-	d.providerMu.Unlock()
+	p.stagers[key] = stager
+	p.mu.Unlock()
 	return stager, nil
 }

@@ -115,7 +115,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		t.Fatalf("reconnected read = %#v", read)
 	}
 	closeReconnected()
-	if err := firstService.direct.syncProviderEpoch(workspaceIDFromString(workspaceID), 3); err != nil {
+	if err := firstService.direct.registry.syncProviderEpoch(workspaceIDFromString(workspaceID), 3); err != nil {
 		t.Fatal(err)
 	}
 	stopFirst()
@@ -183,7 +183,13 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 	if err := os.WriteFile(path, []byte("alpha beta\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The canonical resync is the first provider call after the receipt
+	// checkpoint; blocking it holds the edit between the durable receipt and
+	// its post-mutation diagnostics while a second service instance starts.
+	backend := &resyncBlockingProvider{reached: make(chan struct{}), release: make(chan struct{})}
+	useFixedProvider(t, backend)
 	direct := newDirectWorkspaces(stateDir)
+	defer direct.closeProviders()
 	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
 	searched := direct.call(context.Background(), "search", map[string]any{
@@ -205,12 +211,6 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 			"kind": "replace_range", "target": map[string]any{"file_range": fileRange}, "content": "gamma",
 		},
 	}
-	// The canonical resync is the first provider call after the receipt
-	// checkpoint; blocking it holds the edit between the durable receipt and
-	// its post-mutation diagnostics while a second service instance starts.
-	backend := &resyncBlockingProvider{reached: make(chan struct{}), release: make(chan struct{})}
-	useFixedProvider(t, backend)
-	defer direct.closeProviders()
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()
 	done := make(chan map[string]any, 1)

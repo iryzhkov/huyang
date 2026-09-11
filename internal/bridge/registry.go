@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"sync"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -35,115 +37,160 @@ type persistedWorkspace struct {
 	StateSeq      uint64
 }
 
-func (d *directWorkspaces) loadRegistry() error {
-	content, err := os.ReadFile(d.registryPath)
+// workspaceRegistry owns the canonical workspace definitions: the open
+// workspace objects, their durable records and the registry.json file that
+// makes the same workspace ID survive a service restart.
+type workspaceRegistry struct {
+	mu       sync.RWMutex
+	items    map[workspacecore.ID]*workspacecore.Workspace
+	records  map[workspacecore.ID]persistedWorkspace
+	stateDir string
+	path     string
+
+	// persistMu serialises writers of registry.json.
+	persistMu sync.Mutex
+}
+
+func newWorkspaceRegistry(stateDir string) *workspaceRegistry {
+	return &workspaceRegistry{
+		items:    make(map[workspacecore.ID]*workspacecore.Workspace),
+		records:  make(map[workspacecore.ID]persistedWorkspace),
+		stateDir: stateDir,
+		path:     filepath.Join(stateDir, "registry.json"),
+	}
+}
+
+// load restores every recorded workspace. It returns the receipts a version
+// 1 registry embedded, with migrate set, so the caller can move them into
+// the receipt store and rewrite the registry at version 2.
+func (r *workspaceRegistry) load() (legacy []persistedReplay, migrate bool, err error) {
+	content, err := os.ReadFile(r.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return d.loadReceipts()
+		return nil, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read registry: %w", err)
+		return nil, false, fmt.Errorf("read registry: %w", err)
 	}
 	var state persistedRegistry
 	if err := json.Unmarshal(content, &state); err != nil {
-		return fmt.Errorf("decode registry: %w", err)
+		return nil, false, fmt.Errorf("decode registry: %w", err)
 	}
 	if state.Version != registryStateVersion && state.Version != legacyRegistryStateVersion {
-		return fmt.Errorf("unsupported registry version %d", state.Version)
+		return nil, false, fmt.Errorf("unsupported registry version %d", state.Version)
 	}
 	for _, record := range state.Workspaces {
 		opened, err := workspacecore.Open(workspacecore.OpenOptions{
 			Kind: record.Kind, Root: record.Root, Files: record.Files,
 			ProviderEpoch: record.ProviderEpoch, StateSeq: record.StateSeq,
-			StateDir: d.stateDir, Identity: record.ID,
+			StateDir: r.stateDir, Identity: record.ID,
 		})
 		if err != nil {
-			return fmt.Errorf("restore workspace %s: %w", record.ID, err)
+			return nil, false, fmt.Errorf("restore workspace %s: %w", record.ID, err)
 		}
-		d.items[record.ID] = opened
-		d.records[record.ID] = record
+		r.items[record.ID] = opened
+		r.records[record.ID] = record
 	}
-	if err := d.loadReceipts(); err != nil {
-		return err
-	}
-	if state.Version == legacyRegistryStateVersion {
-		if err := d.migrateLegacyReceipts(state.Replays); err != nil {
-			return fmt.Errorf("migrate legacy receipts: %w", err)
-		}
-		if err := d.persistRegistry(); err != nil {
-			return fmt.Errorf("rewrite legacy registry: %w", err)
-		}
-	}
-	return nil
+	return state.Replays, state.Version == legacyRegistryStateVersion, nil
 }
 
-func providerBackedReplay(result map[string]any) bool {
-	transaction, _ := result["transaction"].(map[string]any)
-	state, _ := transaction["state"].(string)
-	switch workspacecore.PlanState(state) {
-	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack, workspacecore.PlanConflicted:
-		return true
-	default:
-		return false
-	}
+// lookup returns the open workspace with the given ID, or nil.
+func (r *workspaceRegistry) lookup(id workspacecore.ID) *workspacecore.Workspace {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.items[id]
 }
 
-// persistRegistry writes the workspace definitions. Receipts are persisted
-// separately per workspace by persistReceipts.
-func (d *directWorkspaces) persistRegistry() error {
-	d.mu.Lock()
-	records := make([]persistedWorkspace, 0, len(d.records))
-	for id, record := range d.records {
+// adopt records a freshly opened workspace unless an equivalent definition
+// (same kind, root and file allowlist) is already registered, in which case
+// the registered workspace is returned and created is false. A new record
+// is persisted before it is reported; a persist failure leaves the registry
+// unchanged.
+func (r *workspaceRegistry) adopt(opened *workspacecore.Workspace, files []string) (*workspacecore.Workspace, bool, error) {
+	identity := opened.Identity()
+	record := persistedWorkspace{
+		ID: identity.ID, Kind: identity.Kind, Root: identity.Root, Files: append([]string(nil), files...),
+		ProviderEpoch: identity.Epoch, StateSeq: identity.StateSeq,
+	}
+	r.mu.Lock()
+	for id, existing := range r.records {
+		if samePersistedWorkspace(existing, record) {
+			reused := r.items[id]
+			r.mu.Unlock()
+			return reused, false, nil
+		}
+	}
+	r.items[identity.ID] = opened
+	r.records[identity.ID] = record
+	r.mu.Unlock()
+	if err := r.persist(); err != nil {
+		r.mu.Lock()
+		delete(r.items, identity.ID)
+		delete(r.records, identity.ID)
+		r.mu.Unlock()
+		return nil, false, err
+	}
+	return opened, true, nil
+}
+
+// persist writes the workspace definitions. Receipts are persisted
+// separately per workspace by the receipt store.
+func (r *workspaceRegistry) persist() error {
+	r.mu.Lock()
+	records := make([]persistedWorkspace, 0, len(r.records))
+	for id, record := range r.records {
 		record.Files = append([]string(nil), record.Files...)
-		if opened := d.items[record.ID]; opened != nil {
+		if opened := r.items[record.ID]; opened != nil {
 			identity := opened.Identity()
 			record.ProviderEpoch = identity.Epoch
 			record.StateSeq = identity.StateSeq
 		}
-		d.records[id] = record
+		r.records[id] = record
 		records = append(records, record)
 	}
-	d.mu.Unlock()
+	r.mu.Unlock()
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 
 	content, err := json.MarshalIndent(persistedRegistry{Version: registryStateVersion, Workspaces: records}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode registry: %w", err)
 	}
-	d.persistMu.Lock()
-	defer d.persistMu.Unlock()
-	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
+	r.persistMu.Lock()
+	defer r.persistMu.Unlock()
+	if err := os.MkdirAll(r.stateDir, 0o700); err != nil {
 		return err
 	}
-	return writeDurableFile(d.registryPath, append(content, '\n'))
+	return writeDurableFile(r.path, append(content, '\n'))
 }
 
-func (d *directWorkspaces) persistWorkspaceIdentity(id workspacecore.ID) error {
-	d.mu.Lock()
-	record, ok := d.records[id]
-	opened := d.items[id]
+// persistIdentity rewrites the registry when the workspace's epoch or state
+// sequence moved since the last write; an unchanged identity is a no-op.
+func (r *workspaceRegistry) persistIdentity(id workspacecore.ID) error {
+	r.mu.Lock()
+	record, ok := r.records[id]
+	opened := r.items[id]
 	if !ok || opened == nil {
-		d.mu.Unlock()
+		r.mu.Unlock()
 		return nil
 	}
 	identity := opened.Identity()
 	if record.ProviderEpoch == identity.Epoch && record.StateSeq == identity.StateSeq {
-		d.mu.Unlock()
+		r.mu.Unlock()
 		return nil
 	}
 	record.ProviderEpoch = identity.Epoch
 	record.StateSeq = identity.StateSeq
-	d.records[id] = record
-	d.mu.Unlock()
-	return d.persistRegistry()
+	r.records[id] = record
+	r.mu.Unlock()
+	return r.persist()
 }
 
-func (d *directWorkspaces) syncProviderEpoch(id workspacecore.ID, epoch uint64) error {
-	opened := d.get(id)
+func (r *workspaceRegistry) syncProviderEpoch(id workspacecore.ID, epoch uint64) error {
+	opened := r.lookup(id)
 	if opened == nil {
 		return fmt.Errorf("workspace %s not found", id)
 	}
 	opened.SyncProviderEpoch(epoch)
-	return d.persistWorkspaceIdentity(id)
+	return r.persistIdentity(id)
 }
 
 func samePersistedWorkspace(left, right persistedWorkspace) bool {

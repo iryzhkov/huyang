@@ -7,7 +7,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) recoverPreparedStager(
+func (h *toolHandlers) recoverPreparedStager(
 	ctx context.Context,
 	workspace *workspacecore.Workspace,
 	reference string,
@@ -17,7 +17,7 @@ func (d *directWorkspaces) recoverPreparedStager(
 		return nil, workspacecore.PlanRecord{}, false, nil
 	}
 	originalRevision := plan.Preparation.PreparedRevision
-	raw, err := d.planStager(workspace, plan.PlanID, plan.PlanRevision, true)
+	raw, err := h.pool.planStager(workspace, plan.PlanID, plan.PlanRevision, true)
 	if err != nil {
 		return nil, plan, true, err
 	}

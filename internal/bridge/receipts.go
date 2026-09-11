@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -44,6 +45,108 @@ type receiptLimits struct {
 
 func defaultReceiptLimits() receiptLimits {
 	return receiptLimits{PerWorkspace: 256, TotalBytes: 32 << 20, Tombstones: 4096, PayloadWindow: 15 * time.Minute}
+}
+
+// receiptStore owns the idempotency receipts of every workspace: the
+// in-memory replay table, the retention caps and the per-workspace receipt
+// files. It is also the source of the revision provenance queries, because
+// the receipts are the only durable record of which native mutation
+// produced which workspace revision.
+type receiptStore struct {
+	mu       sync.Mutex
+	replays  map[string]*directReplay
+	limits   receiptLimits
+	stateDir string
+
+	// persistMu serialises writers of the receipt files.
+	persistMu sync.Mutex
+}
+
+func newReceiptStore(stateDir string, limits receiptLimits) *receiptStore {
+	return &receiptStore{replays: make(map[string]*directReplay), limits: limits, stateDir: stateDir}
+}
+
+// lookupOrBegin returns the receipt already recorded or in flight for key,
+// or registers a pending receipt for this call when there is none. Exactly
+// one of the results is non-nil.
+func (s *receiptStore) lookupOrBegin(key, argumentsHash string) (existing, pending *directReplay) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous, ok := s.replays[key]; ok {
+		return previous, nil
+	}
+	pending = &directReplay{argumentsHash: argumentsHash, done: make(chan struct{})}
+	s.replays[key] = pending
+	return nil, pending
+}
+
+// replaySnapshot reads what a replay of a completed receipt needs.
+func (s *receiptStore) replaySnapshot(replay *directReplay) (evicted, trimmed bool, result map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return replay.evicted, replay.trimmed, replay.result
+}
+
+// checkpoint persists an early receipt for a mutation whose post-mutation
+// work is still running, so a lost response can be replayed even if the
+// service stops before the call returns.
+func (s *receiptStore) checkpoint(key string, replay *directReplay, receipt map[string]any) error {
+	s.mu.Lock()
+	replay.checkpointed = true
+	s.mu.Unlock()
+	if err := s.storeReceipt(key, replay, receipt); err != nil {
+		s.mu.Lock()
+		replay.complete = false
+		replay.checkpointed = false
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// checkpointedResult returns the receipt persisted by checkpoint, if any.
+func (s *receiptStore) checkpointedResult(replay *directReplay) (map[string]any, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !replay.checkpointed {
+		return nil, false
+	}
+	return replay.result, true
+}
+
+// abandon drops a pending receipt whose call did not complete, releasing
+// any waiter for the same key.
+func (s *receiptStore) abandon(key string, replay *directReplay) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.replays, key)
+	close(replay.done)
+}
+
+// finish releases the waiters of a completed receipt; result, when set,
+// replaces the stored payload first (used when persistence failed and the
+// returned envelope carries the warning).
+func (s *receiptStore) finish(replay *directReplay, result map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if result != nil {
+		replay.result = result
+	}
+	close(replay.done)
+}
+
+// providerBackedReplay reports whether a receipt describes a plan whose
+// sandbox and provider would be needed to continue; such receipts are not
+// replayed after a restart because that state is gone.
+func providerBackedReplay(result map[string]any) bool {
+	transaction, _ := result["transaction"].(map[string]any)
+	state, _ := transaction["state"].(string)
+	switch workspacecore.PlanState(state) {
+	case workspacecore.PlanPreparing, workspacecore.PlanReady, workspacecore.PlanProvisional, workspacecore.PlanRollingBack, workspacecore.PlanConflicted:
+		return true
+	default:
+		return false
+	}
 }
 
 type persistedReceiptFile struct {
@@ -89,8 +192,8 @@ func replayWorkspace(key string) workspacecore.ID {
 	return workspacecore.ID(workspace)
 }
 
-func (d *directWorkspaces) receiptPath(workspaceID workspacecore.ID) string {
-	return filepath.Join(d.stateDir, receiptDirectoryName, string(workspaceID)+".json")
+func (s *receiptStore) receiptPath(workspaceID workspacecore.ID) string {
+	return filepath.Join(s.stateDir, receiptDirectoryName, string(workspaceID)+".json")
 }
 
 func receiptSize(result map[string]any) int {
@@ -171,34 +274,34 @@ func receiptIsTrimmed(result map[string]any) bool {
 
 // storeReceipt records a completed receipt, applies the retention caps and
 // persists the workspace's receipt file. It is the only writer of receipts.
-func (d *directWorkspaces) storeReceipt(key string, replay *directReplay, result map[string]any) error {
-	d.replayMu.Lock()
+func (s *receiptStore) storeReceipt(key string, replay *directReplay, result map[string]any) error {
+	s.mu.Lock()
 	replay.result = result
 	replay.complete = true
 	replay.completedAt = time.Now()
 	replay.bytes = receiptSize(result)
-	d.replays[key] = replay
-	d.applyReceiptCapsLocked(time.Now())
-	d.replayMu.Unlock()
-	return d.persistReceipts(replayWorkspace(key))
+	s.replays[key] = replay
+	s.applyReceiptCapsLocked(time.Now())
+	s.mu.Unlock()
+	return s.persistReceipts(replayWorkspace(key))
 }
 
 // applyReceiptCapsLocked trims payloads outside the window, evicts the
 // oldest completed receipts beyond the per-workspace count and the total
 // byte budget, and bounds the tombstones. In-flight receipts are never
-// touched. Caller holds d.replayMu.
-func (d *directWorkspaces) applyReceiptCapsLocked(now time.Time) {
+// touched. Caller holds s.mu.
+func (s *receiptStore) applyReceiptCapsLocked(now time.Time) {
 	type entry struct {
 		key    string
 		replay *directReplay
 	}
 	byWorkspace := map[workspacecore.ID][]entry{}
 	totalBytes := 0
-	for key, replay := range d.replays {
+	for key, replay := range s.replays {
 		if !replay.complete || replay.evicted || replay.inFlight() {
 			continue
 		}
-		if !replay.trimmed && now.Sub(replay.completedAt) > d.receiptLimits.PayloadWindow {
+		if !replay.trimmed && now.Sub(replay.completedAt) > s.limits.PayloadWindow {
 			replay.result = trimReceipt(replay.result)
 			replay.trimmed = true
 			replay.bytes = receiptSize(replay.result)
@@ -216,18 +319,18 @@ func (d *directWorkspaces) applyReceiptCapsLocked(now time.Time) {
 	var all []entry
 	for _, entries := range byWorkspace {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].replay.completedAt.Before(entries[j].replay.completedAt) })
-		for len(entries) > d.receiptLimits.PerWorkspace {
+		for len(entries) > s.limits.PerWorkspace {
 			evict(entries[0])
 			entries = entries[1:]
 		}
 		all = append(all, entries...)
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].replay.completedAt.Before(all[j].replay.completedAt) })
-	for index := 0; totalBytes > d.receiptLimits.TotalBytes && index < len(all); index++ {
+	for index := 0; totalBytes > s.limits.TotalBytes && index < len(all); index++ {
 		evict(all[index])
 	}
 	tombstones := map[workspacecore.ID][]entry{}
-	for key, replay := range d.replays {
+	for key, replay := range s.replays {
 		if replay.evicted {
 			workspace := replayWorkspace(key)
 			tombstones[workspace] = append(tombstones[workspace], entry{key: key, replay: replay})
@@ -235,8 +338,8 @@ func (d *directWorkspaces) applyReceiptCapsLocked(now time.Time) {
 	}
 	for _, entries := range tombstones {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].replay.completedAt.Before(entries[j].replay.completedAt) })
-		for len(entries) > d.receiptLimits.Tombstones {
-			delete(d.replays, entries[0].key)
+		for len(entries) > s.limits.Tombstones {
+			delete(s.replays, entries[0].key)
 			entries = entries[1:]
 		}
 	}
@@ -244,10 +347,10 @@ func (d *directWorkspaces) applyReceiptCapsLocked(now time.Time) {
 
 // persistReceipts rewrites the bounded receipt file of one workspace. Only
 // that file changes; the registry of workspaces is untouched.
-func (d *directWorkspaces) persistReceipts(workspaceID workspacecore.ID) error {
-	d.replayMu.Lock()
+func (s *receiptStore) persistReceipts(workspaceID workspacecore.ID) error {
+	s.mu.Lock()
 	receipts := make([]persistedReplay, 0)
-	for key, replay := range d.replays {
+	for key, replay := range s.replays {
 		if !replay.complete || replayWorkspace(key) != workspaceID {
 			continue
 		}
@@ -257,22 +360,22 @@ func (d *directWorkspaces) persistReceipts(workspaceID workspacecore.ID) error {
 		}
 		receipts = append(receipts, record)
 	}
-	d.replayMu.Unlock()
+	s.mu.Unlock()
 	sort.Slice(receipts, func(i, j int) bool { return receipts[i].Key < receipts[j].Key })
 	content, err := json.Marshal(persistedReceiptFile{Version: receiptFileVersion, Receipts: receipts})
 	if err != nil {
 		return fmt.Errorf("encode receipts: %w", err)
 	}
-	d.persistMu.Lock()
-	defer d.persistMu.Unlock()
-	return writeDurableFile(d.receiptPath(workspaceID), append(content, '\n'))
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	return writeDurableFile(s.receiptPath(workspaceID), append(content, '\n'))
 }
 
 // loadReceipts restores every workspace receipt file. Receipts whose payload
 // exceeds the legacy trim size are trimmed on load and the caps are applied
 // afterwards; nothing here refuses to start.
-func (d *directWorkspaces) loadReceipts() error {
-	entries, err := os.ReadDir(filepath.Join(d.stateDir, receiptDirectoryName))
+func (s *receiptStore) loadReceipts() error {
+	entries, err := os.ReadDir(filepath.Join(s.stateDir, receiptDirectoryName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -284,7 +387,7 @@ func (d *directWorkspaces) loadReceipts() error {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		content, err := os.ReadFile(filepath.Join(d.stateDir, receiptDirectoryName, entry.Name()))
+		content, err := os.ReadFile(filepath.Join(s.stateDir, receiptDirectoryName, entry.Name()))
 		if err != nil {
 			return fmt.Errorf("read receipts: %w", err)
 		}
@@ -294,7 +397,7 @@ func (d *directWorkspaces) loadReceipts() error {
 			log.Printf("huyang: dropping unreadable receipt file %s", entry.Name())
 			continue
 		}
-		loadedHere, droppedHere := d.adoptReceipts(file.Receipts)
+		loadedHere, droppedHere := s.adoptReceipts(file.Receipts)
 		loaded += loadedHere
 		dropped += droppedHere
 	}
@@ -307,10 +410,10 @@ func (d *directWorkspaces) loadReceipts() error {
 // adoptReceipts installs persisted receipts in memory, trimming oversized
 // payloads and skipping provider-backed receipts whose sandbox no longer
 // exists. It returns the counts of adopted and dropped receipts.
-func (d *directWorkspaces) adoptReceipts(receipts []persistedReplay) (int, int) {
+func (s *receiptStore) adoptReceipts(receipts []persistedReplay) (int, int) {
 	loaded, dropped := 0, 0
-	d.replayMu.Lock()
-	defer d.replayMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, receipt := range receipts {
 		if receipt.Key == "" || (!receipt.Evicted && providerBackedReplay(receipt.Result)) {
 			dropped++
@@ -330,21 +433,21 @@ func (d *directWorkspaces) adoptReceipts(receipts []persistedReplay) (int, int) 
 				replay.bytes = receiptSize(replay.result)
 			}
 		}
-		d.replays[receipt.Key] = replay
+		s.replays[receipt.Key] = replay
 		loaded++
 	}
-	d.applyReceiptCapsLocked(time.Now())
+	s.applyReceiptCapsLocked(time.Now())
 	return loaded, dropped
 }
 
 // migrateLegacyReceipts moves the receipts a version 1 registry embedded
 // into per-workspace files, trimming every payload because version 1 kept no
 // completion time, and reports how many were kept and dropped.
-func (d *directWorkspaces) migrateLegacyReceipts(replays []persistedReplay) error {
+func (s *receiptStore) migrateLegacyReceipts(replays []persistedReplay) error {
 	if len(replays) == 0 {
 		return nil
 	}
-	loaded, dropped := d.adoptReceipts(replays)
+	loaded, dropped := s.adoptReceipts(replays)
 	log.Printf("huyang: migrated %d legacy idempotency receipts out of registry.json, dropped %d", loaded, dropped)
 	workspaces := map[workspacecore.ID]bool{}
 	for _, replay := range replays {
@@ -354,7 +457,7 @@ func (d *directWorkspaces) migrateLegacyReceipts(replays []persistedReplay) erro
 		if workspaceID == "" {
 			continue
 		}
-		if err := d.persistReceipts(workspaceID); err != nil {
+		if err := s.persistReceipts(workspaceID); err != nil {
 			return err
 		}
 	}
@@ -400,7 +503,7 @@ func writeDurableFile(path string, content []byte) error {
 	return directory.Sync()
 }
 
-func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {
+func (s *receiptStore) canonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error) {
 	if target == 1 {
 		return []string{}, nil
 	}
@@ -408,9 +511,9 @@ func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, t
 		from, to uint64
 		path     string
 	}
-	d.replayMu.Lock()
+	s.mu.Lock()
 	var receipts []receipt
-	for key, replay := range d.replays {
+	for key, replay := range s.replays {
 		if !replay.complete || !strings.HasPrefix(key, string(workspaceID)+"\x00") {
 			continue
 		}
@@ -447,7 +550,7 @@ func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, t
 			}
 		}
 	}
-	d.replayMu.Unlock()
+	s.mu.Unlock()
 	sort.Slice(receipts, func(i, j int) bool { return receipts[i].from < receipts[j].from })
 	paths := map[string]bool{}
 	for _, item := range receipts {
@@ -464,12 +567,6 @@ func (d *directWorkspaces) canonicalChangedPaths(workspaceID workspacecore.ID, t
 	return result, nil
 }
 
-type recordedRevisionDiff struct {
-	from, to                  uint64
-	path, beforeSHA, afterSHA string
-	diff                      any
-}
-
 func exactDiffReceiptMap(diff workspacecore.ExactDiff) map[string]any {
 	return map[string]any{
 		"path": diff.Path, "before_sha256": diff.BeforeSHA256, "after_sha256": diff.AfterSHA256,
@@ -477,14 +574,14 @@ func exactDiffReceiptMap(diff workspacecore.ExactDiff) map[string]any {
 	}
 }
 
-func (d *directWorkspaces) recordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
-	d.replayMu.Lock()
-	defer d.replayMu.Unlock()
+func (s *receiptStore) recordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []recordedRevisionDiff {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	var recorded []recordedRevisionDiff
 	seen := map[string]bool{}
 	prefix := workspaceID + "\x00"
-	for key, replay := range d.replays {
+	for key, replay := range s.replays {
 		if !replay.complete || !strings.HasPrefix(key, prefix) {
 			continue
 		}

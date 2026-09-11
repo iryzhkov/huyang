@@ -40,8 +40,8 @@ func languageServerAttachmentConfirmed(value any) bool {
 	}
 }
 
-func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
-	backend, err := d.canonicalProvider(ctx, workspace)
+func (h *toolHandlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
+	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
 		result := modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
@@ -144,10 +144,10 @@ func failedLanguageServerInstallNext(status, language, requestedServer string) [
 	return []any{retry, statusAction}
 }
 
-func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if action == "restart" {
-		before := d.languageServerStatus(ctx, requestID, workspace)
+		before := h.languageServerStatus(ctx, requestID, workspace)
 		previouslyAttached := []string{}
 		if beforeData, _ := before["data"].(map[string]any); beforeData != nil {
 			for _, server := range anySlice(beforeData["attached_servers"]) {
@@ -156,11 +156,11 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 				}
 			}
 		}
-		backend, err := d.restartCanonicalProvider(ctx, workspace)
+		backend, err := h.pool.restart(ctx, workspace)
 		if err != nil {
 			return modernFailure(requestID, workspace, "semantic_provider_restart_failed", err)
 		}
-		verified := d.languageServerStatus(ctx, requestID, workspace)
+		verified := h.languageServerStatus(ctx, requestID, workspace)
 		data, _ := verified["data"].(map[string]any)
 		if data == nil {
 			data = map[string]any{}
@@ -194,7 +194,7 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	if strings.TrimSpace(language) == "" {
 		return modernEnvelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
 	}
-	backend, err := d.canonicalProvider(ctx, workspace)
+	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
 		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
@@ -264,14 +264,14 @@ func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID st
 	return result
 }
 
-func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	relation, _ := arguments["relation"].(string)
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {
 		return modernFailure(requestID, workspace, "semantic_target_invalid", err)
 	}
-	backend, err := d.canonicalProvider(ctx, workspace)
+	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
 		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
@@ -300,13 +300,13 @@ func (d *directWorkspaces) navigateProvider(ctx context.Context, requestID strin
 	})
 }
 
-func (d *directWorkspaces) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	target, _ := arguments["target"].(map[string]any)
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {
 		return modernFailure(requestID, workspace, "semantic_target_invalid", err)
 	}
-	backend, err := d.canonicalProvider(ctx, workspace)
+	backend, err := h.pool.canonical(ctx, workspace)
 	if err != nil {
 		return modernFailure(requestID, workspace, "semantic_provider_start_failed", err)
 	}

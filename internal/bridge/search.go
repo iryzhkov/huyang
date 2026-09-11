@@ -8,7 +8,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if source, ok := arguments["git_history"].(map[string]any); ok {
 		fields := make([]string, 0)
 		for _, value := range anySlice(source["fields"]) {
@@ -100,7 +100,7 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 	return envelope
 }
 
-func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) symbolFind(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
 	records, coverage, err := workspace.FindSymbols(query)
 	if err != nil {
@@ -109,7 +109,7 @@ func (d *directWorkspaces) symbolFind(ctx context.Context, requestID string, wor
 	providerEvidence := any(nil)
 	providerWarning := ""
 	if !coverage.Complete {
-		backend, providerErr := d.canonicalProvider(ctx, workspace)
+		backend, providerErr := h.pool.canonical(ctx, workspace)
 		if providerErr == nil {
 			providerEvidence, providerErr = callCanonicalProvider(ctx, requestID, workspace, backend, "find_symbol", map[string]any{
 				"root": workspace.Identity().Root, "name": query, "include_body": false,

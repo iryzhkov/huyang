@@ -10,9 +10,9 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+func (h *toolHandlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
 	kind, _ := arguments["kind"].(string)
-	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: d.stateDir, ProviderEpoch: 1}
+	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1}
 	switch kind {
 	case "project":
 		options.Root, _ = arguments["root"].(string)
@@ -34,41 +34,16 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 	if err != nil {
 		return modernEnvelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 	}
-	identity := opened.Identity()
-	record := persistedWorkspace{
-		ID: identity.ID, Kind: identity.Kind, Root: identity.Root, Files: append([]string(nil), options.Files...),
-		ProviderEpoch: identity.Epoch, StateSeq: identity.StateSeq,
-	}
-
-	created := true
-	d.mu.Lock()
-	for id, existing := range d.records {
-		if samePersistedWorkspace(existing, record) {
-			opened = d.items[id]
-			created = false
-			break
-		}
-	}
-	if created {
-		d.items[identity.ID] = opened
-		d.records[identity.ID] = record
-	}
-	d.mu.Unlock()
-	if created {
-		if err := d.persistRegistry(); err != nil {
-			d.mu.Lock()
-			delete(d.items, identity.ID)
-			delete(d.records, identity.ID)
-			d.mu.Unlock()
-			return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
-		}
+	opened, created, err := h.registry.adopt(opened, options.Files)
+	if err != nil {
+		return modernEnvelope(requestID, nil, "failed", "service_state_persist_failed", err.Error(), map[string]any{})
 	}
 	if err := opened.PrimeDocuments(); err != nil {
 		return modernFailure(requestID, opened, "workspace_baseline_failed", err)
 	}
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && shippedRuntimePath() != "" {
-		canonicalBackend, _ = d.canonicalProvider(ctx, opened)
+		canonicalBackend, _ = h.pool.canonical(ctx, opened)
 	}
 	orientation, err := opened.Orient()
 	if err != nil {
@@ -99,7 +74,7 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 	return modernEnvelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
 		"revision":     fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities": capabilities, "semantic_provider": semanticProvider,
-		"service_limits": map[string]any{"tool_call_timeout_ms": d.toolTimeout.Milliseconds()},
+		"service_limits": map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
 		"overview":       overview,
 		"recent_commits": compactRecentCommits(recent, 3),
 		"registry":       map[string]any{"persistent": true, "reused": !created},

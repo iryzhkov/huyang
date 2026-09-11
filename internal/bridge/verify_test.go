@@ -51,7 +51,7 @@ func TestVerifyRunObservesExternalBytesBeforeRevisionCheck(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package sample\nvar Value = 2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := direct.verify(context.Background(), "external-verify", workspace, map[string]any{
+	result := direct.handlers.verify(context.Background(), "external-verify", workspace, map[string]any{
 		"revision_or_transaction": revision, "stages": []any{"parser"},
 	})
 	if result["outcome"] != "conflict" || result["code"] != "revision_changed" {
@@ -102,7 +102,7 @@ func TestVerifyRunAffectedScopeCoversOnlyEditedFileAndReturnsQuickly(t *testing.
 func TestCanonicalChangedPathsComeFromTheReceiptOfTheTargetRevision(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID := workspacecore.ID("ws_receipt_test")
-	direct.replays[string(workspaceID)+"\x00change_plan\x00receipt"] = &directReplay{
+	direct.receipts.replays[string(workspaceID)+"\x00change_plan\x00receipt"] = &directReplay{
 		complete: true,
 		result: map[string]any{
 			"data": map[string]any{
@@ -113,7 +113,7 @@ func TestCanonicalChangedPathsComeFromTheReceiptOfTheTargetRevision(t *testing.T
 			},
 		},
 	}
-	got, err := direct.canonicalChangedPaths(workspaceID, 20)
+	got, err := direct.receipts.canonicalChangedPaths(workspaceID, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

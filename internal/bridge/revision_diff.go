@@ -8,14 +8,14 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if err := workspace.PrimeDocuments(); err != nil {
 		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
 	}
 	if _, err := workspace.RefreshKnownDocuments(); err != nil {
 		return modernFailure(requestID, workspace, "workspace_refresh_failed", err)
 	}
-	if err := d.persistWorkspaceIdentity(workspace.Identity().ID); err != nil {
+	if err := h.registry.persistIdentity(workspace.Identity().ID); err != nil {
 		return modernFailure(requestID, workspace, "service_state_persist_failed", err)
 	}
 	from := fmt.Sprint(arguments["from_revision"])
@@ -32,7 +32,7 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 	if toSeq > workspace.Identity().StateSeq {
 		return modernEnvelope(requestID, workspace, "conflict", "revision_changed", "Requested target revision is newer than the workspace", map[string]any{"current_revision": current})
 	}
-	recorded := d.recordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
+	recorded := h.provenance.recordedRevisionDiffs(string(workspace.Identity().ID), fromSeq, toSeq)
 	sort.Slice(recorded, func(i, j int) bool {
 		if recorded[i].from != recorded[j].from {
 			return recorded[i].from < recorded[j].from

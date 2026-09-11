@@ -22,7 +22,7 @@ func TestRevisionDiffObservesExternalChangeWithoutPriorInspect(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package changed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := direct.revisionDiff("external-diff", workspace, map[string]any{
+	result := direct.handlers.revisionDiff("external-diff", workspace, map[string]any{
 		"from_revision": from, "to_revision_or_current": "current",
 	})
 	if result["outcome"] != "partial" || result["code"] != "diff_evidence_incomplete" {
@@ -99,13 +99,13 @@ func TestRevisionDiffIncludesEveryCommittedPlanDiff(t *testing.T) {
 		t.Fatalf("seed edit failed: %#v", applied)
 	}
 
-	direct.replayMu.Lock()
-	for key := range direct.replays {
+	direct.receipts.mu.Lock()
+	for key := range direct.receipts.replays {
 		if strings.HasPrefix(key, workspaceID+"\x00edit_apply\x00") {
-			delete(direct.replays, key)
+			delete(direct.receipts.replays, key)
 		}
 	}
-	direct.replays[workspaceID+"\x00change_plan\x00python-plan-apply"] = &directReplay{
+	direct.receipts.replays[workspaceID+"\x00change_plan\x00python-plan-apply"] = &directReplay{
 		complete: true,
 		result: map[string]any{"data": map[string]any{
 			"canonical_changed": true,
@@ -119,10 +119,10 @@ func TestRevisionDiffIncludesEveryCommittedPlanDiff(t *testing.T) {
 			}},
 		}},
 	}
-	direct.replayMu.Unlock()
+	direct.receipts.mu.Unlock()
 
 	workspace := direct.get(workspacecore.ID(workspaceID))
-	result := direct.revisionDiff("req_plan_receipt", workspace, map[string]any{
+	result := direct.handlers.revisionDiff("req_plan_receipt", workspace, map[string]any{
 		"from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
 	})
 	if result["outcome"] != "ok" {
@@ -152,10 +152,10 @@ func TestRecordedRevisionDiffsDeduplicateRepeatedPlanReceipts(t *testing.T) {
 		}}
 	}
 	prefix := "workspace\x00change_plan\x00"
-	direct.replays[prefix+"apply"] = &directReplay{complete: true, result: result()}
-	direct.replays[prefix+"inspect"] = &directReplay{complete: true, result: result()}
+	direct.receipts.replays[prefix+"apply"] = &directReplay{complete: true, result: result()}
+	direct.receipts.replays[prefix+"inspect"] = &directReplay{complete: true, result: result()}
 
-	recorded := direct.recordedRevisionDiffs("workspace", 2, 3)
+	recorded := direct.receipts.recordedRevisionDiffs("workspace", 2, 3)
 	if len(recorded) != 1 {
 		t.Fatalf("duplicate committed plan receipts produced %d revision diffs: %#v", len(recorded), recorded)
 	}

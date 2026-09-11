@@ -14,7 +14,7 @@ import (
 
 const modernDebugTimeout = 5 * time.Minute
 
-func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) debug(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if name == "debug_inspect" && action == "evaluate" {
 		policy, _ := arguments["policy"].(string)
@@ -33,13 +33,13 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 			return result
 		}
 	}
-	backend, err := d.debugProvider(ctx, workspace)
+	backend, err := h.pool.debug(ctx, workspace)
 	if err != nil {
 		result := debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
 		result["next"] = debugFailureNext(name, action)
 		return result
 	}
-	operation, providerArguments, err := d.debugOperation(workspace, name, action, arguments)
+	operation, providerArguments, err := h.debugOperation(workspace, name, action, arguments)
 	if err != nil {
 		return modernFailure(requestID, workspace, "debug_target_invalid", err)
 	}
@@ -47,7 +47,7 @@ func (d *directWorkspaces) debug(ctx context.Context, requestID, name string, wo
 		for _, item := range initial {
 			breakpoint, _ := item.(map[string]any)
 			target, _ := breakpoint["target"].(map[string]any)
-			resolved, resolveErr := d.debugTargetArguments(workspace, target, breakpoint)
+			resolved, resolveErr := h.debugTargetArguments(workspace, target, breakpoint)
 			if resolveErr != nil {
 				return modernFailure(requestID, workspace, "debug_target_invalid", resolveErr)
 			}
@@ -94,7 +94,7 @@ func callModernDebugProvider(ctx context.Context, requestID string, workspace *w
 	return result.Value, nil
 }
 
-func (d *directWorkspaces) debugOperation(workspace *workspacecore.Workspace, name, action string, arguments map[string]any) (string, map[string]any, error) {
+func (h *toolHandlers) debugOperation(workspace *workspacecore.Workspace, name, action string, arguments map[string]any) (string, map[string]any, error) {
 	copied := copyDebugArguments(arguments)
 	switch name {
 	case "debug_session":
@@ -118,7 +118,7 @@ func (d *directWorkspaces) debugOperation(workspace *workspacecore.Workspace, na
 			return "debug_breakpoints", copied, nil
 		case "set", "remove":
 			target, _ := arguments["target"].(map[string]any)
-			resolved, err := d.debugTargetArguments(workspace, target, arguments)
+			resolved, err := h.debugTargetArguments(workspace, target, arguments)
 			if err != nil {
 				return "", nil, err
 			}
@@ -145,7 +145,7 @@ func (d *directWorkspaces) debugOperation(workspace *workspacecore.Workspace, na
 			return "debug_step", copied, nil
 		case "run_to":
 			target, _ := arguments["target"].(map[string]any)
-			resolved, err := d.debugTargetArguments(workspace, target, arguments)
+			resolved, err := h.debugTargetArguments(workspace, target, arguments)
 			if err != nil {
 				return "", nil, err
 			}
@@ -182,7 +182,7 @@ func copyDebugArguments(arguments map[string]any) map[string]any {
 	return copied
 }
 
-func (d *directWorkspaces) debugTargetArguments(workspace *workspacecore.Workspace, target map[string]any, arguments map[string]any) (map[string]any, error) {
+func (h *toolHandlers) debugTargetArguments(workspace *workspacecore.Workspace, target map[string]any, arguments map[string]any) (map[string]any, error) {
 	if target == nil {
 		return nil, errors.New("missing source target")
 	}

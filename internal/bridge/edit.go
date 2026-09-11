@@ -8,7 +8,7 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *toolHandlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operation, ok := arguments["operation"].(map[string]any)
 	if !ok || operation["kind"] != "replace_range" {
 		return modernEnvelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})
@@ -92,7 +92,7 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 		revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 		data["document_revision"] = after.Revision
 		verification := map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
-		backend, providerErr := d.resyncCanonicalProvider(ctx, workspace)
+		backend, providerErr := h.pool.resync(ctx, workspace)
 		if providerErr == nil {
 			report, evidenceErr := recordProviderDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
 				Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
