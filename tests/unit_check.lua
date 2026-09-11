@@ -48,7 +48,7 @@ local function any(list, text)
 end
 
 do
-    local original_exepath, original_system = vim.fn.exepath, vim.system
+    local original_exepath, original_expand, original_system = vim.fn.exepath, vim.fn.expand, vim.system
 	local original_path, original_gem_home, original_gem_path = vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH
     local calls = {}
     vim.fn.exepath = function(name) return "/test/bin/" .. name end
@@ -57,11 +57,15 @@ do
         local code = #calls == 1 and 1 or 0
         return { wait = function() return { code = code, stdout = "", stderr = "" } end }
     end
+	vim.fn.expand = function(path)
+		if path == "~/.cargo/bin/cargo" then return "/home/test/.cargo/bin/cargo" end
+		return original_expand(path)
+	end
     local ok, why = install._ensure_ruby_lsp_bundler({
         get_install_path = function() return "/mason/packages/ruby-lsp" end,
     })
 	local provider_path = vim.env.PATH
-    vim.fn.exepath, vim.system = original_exepath, original_system
+    vim.fn.exepath, vim.fn.expand, vim.system = original_exepath, original_expand, original_system
 	vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH = original_path, original_gem_home, original_gem_path
     check("ruby-lsp installs a missing Bundler inside its Mason package",
         ok == true and why == nil and #calls == 3
@@ -149,10 +153,14 @@ check("a plain Lua project is not started as a config",
 vim.fn.delete(lib_root, "rf")
 
 do
-    local original_exepath, original_system = vim.fn.exepath, vim.system
+    local original_exepath, original_expand, original_system = vim.fn.exepath, vim.fn.expand, vim.system
     vim.fn.exepath = function(name)
         return name == "dotnet" and "/usr/bin/dotnet" or original_exepath(name)
     end
+	vim.fn.expand = function(path)
+		if path == "~/.cargo/bin/cargo" then return "/home/test/.cargo/bin/cargo" end
+		return original_expand(path)
+	end
     vim.system = function(command)
         if command[1] == "/usr/bin/dotnet" and command[2] == "--list-sdks" then
             return { wait = function() return { code = 0, stdout = "", stderr = "" } end }
@@ -160,7 +168,7 @@ do
         return original_system(command)
     end
     local ok, why = install._server_prerequisite("csharp-language-server")
-    vim.fn.exepath, vim.system = original_exepath, original_system
+    vim.fn.exepath, vim.fn.expand, vim.system = original_exepath, original_expand, original_system
     check("C# administration distinguishes a runtime-only dotnet install from an SDK",
         ok == nil and why:find("only the runtime is available", 1, true) ~= nil, why)
 end
@@ -284,11 +292,15 @@ do
 end
 
 do
-    local original_exepath, original_system = vim.fn.exepath, vim.system
+    local original_exepath, original_expand, original_system = vim.fn.exepath, vim.fn.expand, vim.system
     vim.fn.exepath = function(name)
         if name == "cargo" then return "/home/test/.local/share/mise/shims/cargo" end
         return original_exepath(name)
     end
+	vim.fn.expand = function(path)
+		if path == "~/.cargo/bin/cargo" then return "/home/test/.cargo/bin/cargo" end
+		return original_expand(path)
+	end
     vim.system = function(command)
         if command[1] == "/home/test/.local/share/mise/shims/cargo" and command[2] == "--version" then
             return {
@@ -300,13 +312,41 @@ do
         return original_system(command)
     end
     local ok, why = install._server_prerequisite("rust-analyzer")
-    vim.fn.exepath, vim.system = original_exepath, original_system
+    vim.fn.exepath, vim.fn.expand, vim.system = original_exepath, original_expand, original_system
     check("Rust administration rejects an executable but broken cargo shim actionably",
         ok == nil
             and why:find("/home/test/.local/share/mise/shims/cargo", 1, true) ~= nil
             and why:find("No version is set", 1, true) ~= nil
             and why:find("mise use -g rust@stable", 1, true) ~= nil,
         why)
+end
+
+do
+	local original_exepath, original_expand, original_system, original_stat = vim.fn.exepath, vim.fn.expand, vim.system, vim.uv.fs_stat
+	local original_path = vim.env.PATH
+	vim.fn.exepath = function(name)
+		if name == "cargo" then return "/home/test/.local/share/mise/shims/cargo" end
+		return original_exepath(name)
+	end
+	vim.fn.expand = function(path)
+		if path == "~/.cargo/bin/cargo" then return "/home/test/.cargo/bin/cargo" end
+		return original_expand(path)
+	end
+	vim.uv.fs_stat = function(path)
+		if path == "/home/test/.cargo/bin/cargo" or path == "/home/test/.cargo/bin" then return { type = path:match("/bin$") and "directory" or "file" } end
+		return original_stat(path)
+	end
+	vim.system = function(command)
+		return { wait = function()
+			if command[1] == "/home/test/.cargo/bin/cargo" then return { code = 0, stdout = "cargo 1.0", stderr = "" } end
+			return { code = 1, stdout = "", stderr = "mise shim is unset" }
+		end }
+	end
+	local ok = install._server_prerequisite("rust-analyzer")
+	vim.fn.exepath, vim.fn.expand, vim.system, vim.uv.fs_stat = original_exepath, original_expand, original_system, original_stat
+	check("Rust administration uses a working rustup cargo behind a broken service shim",
+		ok == true and vim.env.PATH:sub(1, #"/home/test/.cargo/bin" + 1) == "/home/test/.cargo/bin:", vim.env.PATH)
+	vim.env.PATH = original_path
 end
 
 do

@@ -1275,6 +1275,17 @@ local function server_prerequisite(package)
                 .. "fix the Huyang user service PATH, then restart the provider"):format(cargo)
         end
         if result.code ~= 0 then
+			-- A service manager PATH commonly exposes a broken version-manager
+			-- shim before rustup's real user installation. Prefer the usable
+			-- local toolchain when it exists, and make it visible to the server.
+			local fallback = vim.fn.expand("~/.cargo/bin/cargo")
+			if fallback ~= cargo and vim.uv.fs_stat(fallback) then
+				local fallback_result = vim.system({ fallback, "--version" }, { text = true }):wait(3000)
+				if fallback_result and fallback_result.code == 0 then
+					ensure_mason_bin_on_path(vim.fs.dirname(fallback))
+					return true
+				end
+			end
             local detail = vim.trim((result.stderr or "") .. " " .. (result.stdout or "")):gsub("%s+", " ")
             if #detail > 240 then detail = detail:sub(1, 237) .. "..." end
             return nil, ("rust-analyzer requires a working Cargo toolchain, but `%s --version` exited %s%s; "
