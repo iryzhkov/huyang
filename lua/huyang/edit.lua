@@ -1164,6 +1164,9 @@ function M.diagnostic_evidence(args)
             end
         end
     end
+    -- The completion carries the batches structurally as well, so the Go
+    -- side can read evidence without parsing the value.
+    require("huyang.rpc").report_evidence(batches)
     return { batches = batches }
 end
 

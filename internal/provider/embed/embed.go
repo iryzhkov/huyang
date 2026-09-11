@@ -26,16 +26,37 @@ const (
 	healthTimeout = 2 * time.Second
 	stderrLimit   = 32 << 10
 
-	protocolVersion  = 1
-	completionMethod = "agent99/result"
+	// defaultCancelGrace bounds how long a cancelled call waits for the
+	// kernel to acknowledge cooperative cancellation before the generation
+	// is replaced.
+	defaultCancelGrace = 3 * time.Second
+	// probeAbandonTimeout bounds a health probe whose caller gave up: an
+	// event loop that has not answered for this long is treated as dead.
+	probeAbandonTimeout = 10 * time.Second
+	// enterTimeout bounds the wait for v:vim_did_enter during bootstrap.
+	enterTimeout = 5 * time.Second
+
+	// Kernel protocol range accepted by this binary. Both sides ship
+	// together, so the range is one version wide until a migration needs
+	// more.
+	protocolMin      = 2
+	protocolMax      = 2
+	completionMethod = "huyang/result"
+	// minAPILevel is Neovim 0.11's API level. The kernel depends on
+	// vim.lsp.config and vim.lsp.enable, which arrived there.
+	minAPILevel = 13
 )
+
+// kernelMethods are the Lua entry points the Go side calls; the handshake
+// must advertise every one of them.
+var kernelMethods = []string{"start_notify", "cancel"}
 
 var (
 	instanceSeq atomic.Int64
 	requestSeq  atomic.Uint64
 )
 
-var capabilities = []provider.Capability{
+var knownCapabilities = []provider.Capability{
 	provider.CapabilityExecute,
 	provider.CapabilityNavigation,
 	provider.CapabilityRename,
@@ -51,10 +72,14 @@ type Config struct {
 	Debug       bool
 	Executable  string
 	Trace       func(executable string, args []string)
+	// CancelGrace overrides how long a cancelled call waits for the kernel
+	// to acknowledge before the generation is replaced. Zero means the
+	// default.
+	CancelGrace time.Duration
 }
 
 type completion struct {
-	payload string
+	payload map[string]any
 }
 
 type generation struct {
@@ -92,6 +117,9 @@ func Open(config Config) (*Backend, error) {
 	if config.Executable == "" {
 		config.Executable = "nvim"
 	}
+	if config.CancelGrace <= 0 {
+		config.CancelGrace = defaultCancelGrace
+	}
 	lock, err := acquireRootLock(config.Root)
 	if err != nil {
 		return nil, &provider.Failure{
@@ -108,14 +136,14 @@ func Open(config Config) (*Backend, error) {
 			ID:           provider.ID("embed_" + hex.EncodeToString(sum[:8])),
 			Backend:      "embed",
 			Root:         config.Root,
-			Cancellation: provider.CancellationProviderRestart,
+			Cancellation: provider.CancellationCooperative,
 			Languages:    []string{"*"},
-			Capabilities: append([]provider.Capability(nil), capabilities...),
+			Capabilities: append([]provider.Capability(nil), knownCapabilities...),
 		},
 		health: provider.Health{
 			State:        provider.HealthStarting,
 			ObservedAt:   time.Now(),
-			Cancellation: provider.CancellationProviderRestart,
+			Cancellation: provider.CancellationCooperative,
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
@@ -138,6 +166,11 @@ func (b *Backend) Descriptor() provider.Descriptor {
 }
 
 // Health performs a bounded event-loop probe and reports classified lifecycle state.
+//
+// The probe goroutine is bounded by the generation: it ends when the probe
+// answers, when the generation dies, or when probeAbandonTimeout passes with
+// no answer, in which case the unresponsive generation is terminated so the
+// next call restarts it.
 func (b *Backend) Health(ctx context.Context) provider.Health {
 	b.mu.Lock()
 	g := b.generation
@@ -153,12 +186,24 @@ func (b *Backend) Health(ctx context.Context) provider.Health {
 	}
 	probed := make(chan error, 1)
 	go func() {
-		var entered int
-		err := g.nvim.Eval("v:vim_did_enter", &entered)
-		if err == nil && entered != 1 {
-			err = fmt.Errorf("VimEnter is incomplete: v:vim_did_enter=%d", entered)
+		answered := make(chan error, 1)
+		go func() {
+			var entered int
+			err := g.nvim.Eval("v:vim_did_enter", &entered)
+			if err == nil && entered != 1 {
+				err = fmt.Errorf("VimEnter is incomplete: v:vim_did_enter=%d", entered)
+			}
+			answered <- err
+		}()
+		select {
+		case err := <-answered:
+			probed <- err
+		case <-g.done:
+			probed <- errors.New("generation exited during probe")
+		case <-time.After(probeAbandonTimeout):
+			b.terminate(g)
+			probed <- errors.New("event loop did not answer the probe")
 		}
-		probed <- err
 	}()
 	select {
 	case err := <-probed:
@@ -174,6 +219,13 @@ func (b *Backend) Health(ctx context.Context) provider.Health {
 }
 
 // Call starts one Lua request and completes from its request-ID notification.
+//
+// When the caller's context ends first, the kernel is asked to cancel the
+// request cooperatively and the call waits up to CancelGrace for the
+// completion that acknowledges it. Other in-flight calls are unaffected.
+// Only a kernel that never acknowledges (work that does not yield) costs the
+// generation: it is replaced, every concurrent call fails with
+// provider_died and the epoch advances.
 func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.Result{}, contextFailure(err, 0)
@@ -209,7 +261,15 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 		b.mu.Unlock()
 	}()
 
-	payload := map[string]any{"tool": request.Operation, "args": request.Arguments}
+	arguments := request.Arguments
+	if arguments == nil {
+		arguments = map[string]any{}
+	}
+	payload := map[string]any{
+		"tool":    request.Operation,
+		"args":    arguments,
+		"context": requestContext(request.Context, id, g.epoch),
+	}
 	var started string
 	if err := g.nvim.ExecLua(
 		`return require("huyang.rpc").start_notify(...)`,
@@ -234,16 +294,77 @@ func (b *Backend) Call(ctx context.Context, request provider.Request) (provider.
 		return provider.Result{}, deathFailure(g, err)
 	case <-ctx.Done():
 		cause := ctx.Err()
+		if result, ok := b.cancelCooperatively(g, id, cause, completed); ok {
+			value, err := decodeCompletion(g.epoch, result.payload)
+			if err == nil {
+				// The kernel finished the work before the cancel reached it;
+				// the result is real and the caller may still want it.
+				return value, nil
+			}
+			if provider.ErrorCode(err) == "provider_cancelled" {
+				failure := contextFailure(cause, g.epoch)
+				failure.Detail += "; acknowledged by the kernel"
+				return provider.Result{}, failure
+			}
+			return provider.Result{}, err
+		}
 		b.terminate(g)
 		<-g.done
 		restartCtx, cancel := context.WithTimeout(context.Background(), startTimeout)
 		_, restartErr := b.ensureGeneration(restartCtx)
 		cancel()
 		failure := contextFailure(cause, g.epoch)
+		failure.Detail += "; the kernel did not acknowledge cancellation within " +
+			b.config.CancelGrace.String() + ", generation replaced"
 		if restartErr != nil {
 			failure.Detail += "; restart failed: " + restartErr.Error()
 		}
 		return provider.Result{}, failure
+	}
+}
+
+// cancelCooperatively asks the kernel to cancel one request and waits up to
+// CancelGrace for its completion. It reports the completion and true when
+// the kernel acknowledged in time.
+func (b *Backend) cancelCooperatively(g *generation, id string, cause error, completed <-chan completion) (completion, bool) {
+	reason := "cancelled by the service"
+	if errors.Is(cause, context.DeadlineExceeded) {
+		reason = "request deadline exceeded"
+	}
+	go func() {
+		var acknowledged bool
+		_ = g.nvim.ExecLua(`return require("huyang.rpc").cancel(...)`, &acknowledged, id, reason)
+	}()
+	select {
+	case result := <-completed:
+		return result, true
+	case <-g.done:
+		return completion{}, false
+	case <-time.After(b.config.CancelGrace):
+		return completion{}, false
+	}
+}
+
+// requestContext is the provider-visible request identity the kernel keeps
+// per coroutine. TransactionID tells the kernel whether the call reads the
+// staged view of a transaction or the canonical buffers.
+func requestContext(rc provider.RequestContext, id string, epoch uint64) map[string]any {
+	var deadline int64
+	if !rc.Deadline.IsZero() {
+		deadline = rc.Deadline.UnixMilli()
+	}
+	cancellation := rc.Cancellation
+	if cancellation == "" {
+		cancellation = provider.CancellationCooperative
+	}
+	return map[string]any{
+		"request_id":     id,
+		"actor":          rc.Actor,
+		"workspace_id":   rc.WorkspaceID,
+		"epoch":          epoch,
+		"transaction_id": rc.TransactionID,
+		"deadline_ms":    deadline,
+		"cancellation":   string(cancellation),
 	}
 }
 
@@ -256,44 +377,24 @@ func (b *Backend) Close(context.Context) error {
 		g := b.generation
 		b.health = provider.Health{
 			State: provider.HealthClosed, Epoch: b.descriptor.Epoch,
-			ObservedAt: time.Now(), Cancellation: provider.CancellationProviderRestart,
+			ObservedAt: time.Now(), Cancellation: provider.CancellationCooperative,
 		}
 		close(b.done)
 		b.mu.Unlock()
 		if g == nil || !g.alive.Load() {
 			return
 		}
-		lspFinished := make(chan struct{})
-		go func() {
+		g.within(stopTimeout, func() {
 			_ = g.nvim.ExecLua("pcall(function() for _, client in ipairs(vim.lsp.get_clients()) do client:stop(true) end vim.wait(2000, function() return #vim.lsp.get_clients() == 0 end, 20) end)", nil)
-			close(lspFinished)
-		}()
-		select {
-		case <-lspFinished:
-		case <-time.After(stopTimeout):
-		}
+		})
 		if b.config.Debug {
-			finished := make(chan struct{})
-			go func() {
+			g.within(stopTimeout, func() {
 				_ = g.nvim.ExecLua(`pcall(function() require("huyang.dap").shutdown_sync() end)`, nil)
-				close(finished)
-			}()
-			select {
-			case <-finished:
-			case <-time.After(stopTimeout):
-			}
+			})
 		}
-		finished := make(chan error, 1)
-		go func() { finished <- g.nvim.Command("qa!") }()
+		g.within(stopTimeout, func() { _ = g.nvim.Command("qa!") })
 		select {
 		case <-g.done:
-		case <-finished:
-			select {
-			case <-g.done:
-			case <-time.After(stopTimeout):
-				b.terminate(g)
-				<-g.done
-			}
 		case <-time.After(stopTimeout):
 			b.terminate(g)
 			<-g.done
@@ -301,6 +402,23 @@ func (b *Backend) Close(context.Context) error {
 		_ = g.nvim.Close()
 	})
 	return nil
+}
+
+// within runs one RPC exchange and returns when it finishes, when the
+// generation dies, or when the timeout passes. A call that outlives the
+// timeout keeps its goroutine only until the generation is gone: Close and
+// terminate both end the connection, which fails the outstanding request.
+func (g *generation) within(timeout time.Duration, fn func()) {
+	finished := make(chan struct{})
+	go func() {
+		fn()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-g.done:
+	case <-time.After(timeout):
+	}
 }
 
 // Done closes only when the backend is permanently closed; generations may restart.
@@ -360,7 +478,7 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 		epoch: epoch, nvim: client, command: command, stdin: stdin,
 		stderr: stderr, done: make(chan error, 1),
 	}
-	if err := client.RegisterHandler(completionMethod, func(id, payload string) {
+	if err := client.RegisterHandler(completionMethod, func(id string, payload map[string]any) {
 		b.deliver(g.epoch, id, payload)
 	}); err != nil {
 		_ = command.Process.Kill()
@@ -373,17 +491,19 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 	b.descriptor.ProcessID = command.Process.Pid
 	b.health = provider.Health{
 		State: provider.HealthStarting, Epoch: epoch, ObservedAt: time.Now(),
-		Cancellation: provider.CancellationProviderRestart,
+		Cancellation: provider.CancellationCooperative,
 	}
 	go b.serve(g)
-	if err := b.bootstrap(ctx, g); err != nil {
+	capabilities, err := b.bootstrap(ctx, g)
+	if err != nil {
 		b.terminate(g)
 		<-g.done
 		return nil, err
 	}
+	b.descriptor.Capabilities = capabilities
 	b.health = provider.Health{
 		State: provider.HealthHealthy, Epoch: epoch, ObservedAt: time.Now(),
-		Cancellation: provider.CancellationProviderRestart,
+		Cancellation: provider.CancellationCooperative,
 	}
 	return g, nil
 }
@@ -409,15 +529,19 @@ func (b *Backend) serve(g *generation) {
 		b.health = provider.Health{
 			State: provider.HealthFailed, FailureCode: string(provider.FailureDied),
 			Detail: detail, Epoch: g.epoch, ObservedAt: time.Now(),
-			Cancellation: provider.CancellationProviderRestart,
+			Cancellation: provider.CancellationCooperative,
 		}
 	}
 	b.mu.Unlock()
 }
 
-func (b *Backend) bootstrap(ctx context.Context, g *generation) error {
+// bootstrap follows the documented embed sequence: client info, API level
+// check, VimEnter, shipped runtime, kernel handshake. It returns the
+// capabilities the kernel advertised.
+func (b *Backend) bootstrap(ctx context.Context, g *generation) ([]provider.Capability, error) {
 	type outcome struct {
-		failure *provider.Failure
+		capabilities []provider.Capability
+		failure      *provider.Failure
 	}
 	finished := make(chan outcome, 1)
 	go func() {
@@ -436,28 +560,31 @@ func (b *Backend) bootstrap(ctx context.Context, g *generation) error {
 			finished <- fail(provider.FailureBootstrap, "reading Neovim API info: "+err.Error(), err)
 			return
 		}
+		if len(info) < 2 {
+			finished <- fail(provider.FailureProtocol, fmt.Sprintf("nvim_get_api_info returned %d elements", len(info)), nil)
+			return
+		}
 		channel, ok := info[0].(int64)
 		if !ok {
 			finished <- fail(provider.FailureProtocol, fmt.Sprintf("unexpected channel ID type %T", info[0]), nil)
 			return
 		}
 		g.channel = int(channel)
-		var version map[string]any
-		if err := g.nvim.ExecLua(`return vim.version()`, &version); err != nil {
-			finished <- fail(provider.FailureBootstrap, "reading Neovim version: "+err.Error(), err)
+		if failure := checkAPILevel(g.epoch, info[1]); failure != nil {
+			finished <- outcome{failure: failure}
 			return
 		}
-		major, majorOK := integer(version["major"])
-		minor, minorOK := integer(version["minor"])
-		if !majorOK || !minorOK || major != 0 || (minor != 11 && minor != 12) {
-			finished <- fail(provider.FailureIncompatible,
-				fmt.Sprintf("Neovim version %v.%v is outside supported range 0.11-0.12", version["major"], version["minor"]), nil)
-			return
-		}
-		var entered int
-		if err := g.nvim.Eval("v:vim_did_enter", &entered); err != nil || entered != 1 {
+		// --headless reaches VimEnter without a UI, but not necessarily
+		// before the first RPC request is answered. Waiting here also gives
+		// VimEnter-scheduled provider setup (language servers enabled by the
+		// init) its event-loop turn before the first semantic call.
+		var entered bool
+		if err := g.nvim.ExecLua(
+			`return vim.wait(..., function() return vim.v.vim_did_enter == 1 end, 10)`,
+			&entered, enterTimeout.Milliseconds(),
+		); err != nil || !entered {
 			finished <- fail(provider.FailureBootstrap,
-				fmt.Sprintf("headless startup did not reach VimEnter (value %d): %v", entered, err), err)
+				fmt.Sprintf("headless startup did not reach VimEnter within %s: %v", enterTimeout, err), err)
 			return
 		}
 		if b.config.RuntimePath != "" {
@@ -471,36 +598,86 @@ func (b *Backend) bootstrap(ctx context.Context, g *generation) error {
 			finished <- fail(provider.FailureBootstrap, "loading huyang kernel: "+err.Error(), err)
 			return
 		}
-		versionValue, ok := integer(handshake["protocol_version"])
-		if !ok || versionValue != protocolVersion || handshake["completion_method"] != completionMethod {
-			finished <- fail(provider.FailureIncompatible,
-				fmt.Sprintf("kernel handshake mismatch: protocol=%v completion=%v", handshake["protocol_version"], handshake["completion_method"]), nil)
+		capabilities, failure := checkHandshake(g.epoch, handshake)
+		if failure != nil {
+			finished <- outcome{failure: failure}
 			return
 		}
-		// The socket oracle necessarily spends at least one 100 ms readiness
-		// interval before returning. Give VimEnter-scheduled provider setup the
-		// same bounded event-loop turn so an immediate first semantic call sees
-		// the language servers enabled by the user's init.
-		if err := g.nvim.ExecLua(`vim.wait(100)`, nil); err != nil {
-			finished <- fail(provider.FailureBootstrap, "settling provider startup: "+err.Error(), err)
-			return
-		}
-		finished <- outcome{}
+		finished <- outcome{capabilities: capabilities}
 	}()
 	select {
 	case result := <-finished:
 		if result.failure != nil {
-			return result.failure
+			return nil, result.failure
 		}
-		return nil
+		return result.capabilities, nil
 	case err := <-g.done:
-		return deathFailure(g, err)
+		return nil, deathFailure(g, err)
 	case <-ctx.Done():
-		return contextFailure(ctx.Err(), g.epoch)
+		return nil, contextFailure(ctx.Err(), g.epoch)
 	}
 }
 
-func (b *Backend) deliver(epoch uint64, id, payload string) {
+// checkAPILevel accepts any Neovim whose API level is at least minAPILevel.
+func checkAPILevel(epoch uint64, metadata any) *provider.Failure {
+	meta, ok := metadata.(map[string]any)
+	if !ok {
+		return &provider.Failure{Code: provider.FailureProtocol, Epoch: epoch,
+			Detail: fmt.Sprintf("unexpected API metadata type %T", metadata)}
+	}
+	version, _ := meta["version"].(map[string]any)
+	level, ok := integer(version["api_level"])
+	if !ok {
+		return &provider.Failure{Code: provider.FailureIncompatible, Epoch: epoch,
+			Detail: fmt.Sprintf("Neovim API info has no api_level (version %v)", version)}
+	}
+	if level < minAPILevel {
+		return &provider.Failure{Code: provider.FailureIncompatible, Epoch: epoch,
+			Detail: fmt.Sprintf("Neovim %v.%v (API level %d) is too old: Huyang needs API level %d (Neovim 0.11) or newer",
+				version["major"], version["minor"], level, minAPILevel)}
+	}
+	return nil
+}
+
+// checkHandshake validates the kernel's protocol range, completion method,
+// cancellation mode and the entry points the Go side calls, and returns the
+// capabilities it advertised.
+func checkHandshake(epoch uint64, handshake map[string]any) ([]provider.Capability, *provider.Failure) {
+	incompatible := func(format string, args ...any) ([]provider.Capability, *provider.Failure) {
+		return nil, &provider.Failure{Code: provider.FailureIncompatible, Epoch: epoch, Detail: fmt.Sprintf(format, args...)}
+	}
+	version, ok := integer(handshake["protocol_version"])
+	if !ok || version < protocolMin || version > protocolMax {
+		return incompatible("kernel protocol version %v is outside the accepted range %d-%d",
+			handshake["protocol_version"], protocolMin, protocolMax)
+	}
+	if handshake["completion_method"] != completionMethod {
+		return incompatible("kernel completion method %v, want %s", handshake["completion_method"], completionMethod)
+	}
+	if handshake["cancellation"] != string(provider.CancellationCooperative) {
+		return incompatible("kernel cancellation %v, want %s", handshake["cancellation"], provider.CancellationCooperative)
+	}
+	methods := stringList(handshake["methods"])
+	for _, method := range kernelMethods {
+		if !containsString(methods, method) {
+			return incompatible("kernel handshake does not advertise method %s (has %v)", method, methods)
+		}
+	}
+	var capabilities []provider.Capability
+	for _, name := range stringList(handshake["capabilities"]) {
+		for _, known := range knownCapabilities {
+			if provider.Capability(name) == known {
+				capabilities = append(capabilities, known)
+			}
+		}
+	}
+	if len(capabilities) == 0 {
+		return incompatible("kernel handshake advertises no known capabilities (has %v)", handshake["capabilities"])
+	}
+	return capabilities, nil
+}
+
+func (b *Backend) deliver(epoch uint64, id string, payload map[string]any) {
 	key := pendingKey(epoch, id)
 	b.mu.Lock()
 	completed := b.pending[key]
@@ -529,7 +706,7 @@ func (b *Backend) currentHealth() provider.Health {
 func (b *Backend) failedHealth(epoch uint64, code provider.FailureCode, detail string) provider.Health {
 	return provider.Health{
 		State: provider.HealthFailed, FailureCode: string(code), Detail: detail,
-		Epoch: epoch, ObservedAt: time.Now(), Cancellation: provider.CancellationProviderRestart,
+		Epoch: epoch, ObservedAt: time.Now(), Cancellation: provider.CancellationCooperative,
 	}
 }
 
@@ -537,22 +714,78 @@ func pendingKey(epoch uint64, id string) string {
 	return fmt.Sprintf("%d\x00%s", epoch, id)
 }
 
-func decodeCompletion(epoch uint64, payload string) (provider.Result, error) {
-	var response struct {
-		OK     bool   `json:"ok"`
-		Result any    `json:"result"`
-		Error  string `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(payload), &response); err != nil {
+// completionPayload is the kernel's completion table, carried natively over
+// MessagePack and decoded here through JSON so the result value keeps the
+// shape callers relied on (float64 numbers, map[string]any objects).
+type completionPayload struct {
+	OK       bool                        `json:"ok"`
+	Result   any                         `json:"result"`
+	Error    *completionError            `json:"error"`
+	Touched  []provider.DocumentSnapshot `json:"touched"`
+	Evidence []provider.EvidenceBatch    `json:"evidence"`
+	Health   *completionHealth           `json:"health"`
+}
+
+type completionError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Detail  any    `json:"detail"`
+}
+
+type completionHealth struct {
+	State       string `json:"state"`
+	LSPClients  int    `json:"lsp_clients"`
+	Transaction string `json:"transaction"`
+}
+
+func decodeCompletion(epoch uint64, payload map[string]any) (provider.Result, error) {
+	protocol := func(detail string, err error) (provider.Result, error) {
 		return provider.Result{}, &provider.Failure{
-			Code: provider.FailureProtocol, Epoch: epoch,
-			Detail: "unparseable completion notification: " + err.Error(), Err: err,
+			Code: provider.FailureProtocol, Epoch: epoch, Detail: detail, Err: err,
+		}
+	}
+	if payload == nil {
+		return protocol("empty completion notification", nil)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return protocol("unencodable completion notification: "+err.Error(), err)
+	}
+	var response completionPayload
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		return protocol("unparseable completion notification: "+err.Error(), err)
+	}
+	result := provider.Result{
+		Touched:  response.Touched,
+		Evidence: response.Evidence,
+	}
+	if response.Health != nil {
+		detail := fmt.Sprintf("%d language server clients", response.Health.LSPClients)
+		if response.Health.Transaction != "" {
+			detail += "; transaction " + response.Health.Transaction + " holds the lease"
+		}
+		result.Health = provider.Health{
+			State: provider.HealthState(response.Health.State), Detail: detail,
+			Epoch: epoch, ObservedAt: time.Now(), Cancellation: provider.CancellationCooperative,
 		}
 	}
 	if !response.OK {
-		return provider.Result{}, errors.New(response.Error)
+		if response.Error == nil {
+			return protocol("failed completion carries no error", nil)
+		}
+		operation := &provider.ProviderError{
+			Code: response.Error.Code, Message: response.Error.Message, Epoch: epoch,
+		}
+		if response.Error.Detail != nil {
+			operation.Detail = fmt.Sprint(response.Error.Detail)
+		}
+		if operation.Code == "" {
+			operation.Code = "lua_error"
+		}
+		return result, operation
 	}
-	return provider.Result{Value: response.Result}, nil
+	result.Value = response.Result
+	return result, nil
 }
 
 func contextFailure(err error, epoch uint64) *provider.Failure {
@@ -594,6 +827,29 @@ func integer(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func stringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func containsString(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 type tailBuffer struct {

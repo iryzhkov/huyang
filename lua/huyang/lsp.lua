@@ -1274,6 +1274,10 @@ local dispatch_table = {
     verdict_carry = function() return {} end,
 }
 
+-- Registered under both names: the bridge sends workspace_resync, the unit
+-- tests and older callers the huyang_ prefixed form.
+dispatch_table.workspace_resync = dispatch_table.huyang_workspace_resync
+
 -- Every tool that writes, wrapped once here rather than guarded in each of
 -- them: a path outside the workspace the call was routed to is refused
 -- before anything is opened. Reading outside stays allowed; see
@@ -1408,7 +1412,8 @@ function M.dispatch(tool, args)
     -- ui_follow and enclosing_symbols are the bridge's own calls in the
     -- middle of serving a read or a grep, not replies the agent sees: they
     -- take no carry (it would vanish) and keep absolute paths.
-    local internal = tool == "ui_follow" or tool == "enclosing_symbols" or tool:match("^huyang_") ~= nil
+    local internal = tool == "ui_follow" or tool == "enclosing_symbols"
+        or tool == "workspace_resync" or tool:match("^huyang_") ~= nil
     -- Verdicts owed from earlier edits (deferred by wait=false, or
     -- diagnostics that arrived after their report) ride on this reply.
     if not internal and type(result) == "table"

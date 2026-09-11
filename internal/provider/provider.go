@@ -66,10 +66,101 @@ type Request struct {
 	Arguments map[string]any
 }
 
-// Result is the common provider result boundary. Evidence and touched-document
-// fields are populated by later stages without changing Provider.Call.
+// Result is the common provider result boundary. Value is the operation's own
+// reply; the other fields are the kernel's account of the call and are empty
+// when the kernel had nothing to report for that operation.
 type Result struct {
 	Value any
+	// Touched lists the documents the call changed or staged, as the kernel
+	// saw them when the call completed.
+	Touched []DocumentSnapshot
+	// Evidence carries diagnostic batches the call collected, in the shape
+	// huyang_diagnostic_evidence returns.
+	Evidence []EvidenceBatch
+	// Health is the kernel's own view of the generation at completion time.
+	// State is empty when the kernel reported none.
+	Health Health
+}
+
+// DocumentSnapshot is the kernel's view of one buffer at completion time. It
+// is the shared DocumentSnapshot contract: URI, changedtick, content hash,
+// disk fingerprint and dirty state.
+type DocumentSnapshot struct {
+	URI             string `json:"uri"`
+	Path            string `json:"path"`
+	ChangedTick     int64  `json:"changedtick"`
+	ContentSHA256   string `json:"sha256,omitempty"`
+	DiskFingerprint string `json:"disk_fingerprint,omitempty"`
+	Dirty           bool   `json:"dirty"`
+	Exists          bool   `json:"exists"`
+}
+
+// EvidenceRange is a one-based line and character range.
+type EvidenceRange struct {
+	StartLine      int `json:"start_line"`
+	StartCharacter int `json:"start_character"`
+	EndLine        int `json:"end_line"`
+	EndCharacter   int `json:"end_character"`
+}
+
+// EvidenceFinding is one normalized diagnostic inside an EvidenceBatch.
+type EvidenceFinding struct {
+	Range    EvidenceRange `json:"range"`
+	Severity int           `json:"severity"`
+	Code     string        `json:"code,omitempty"`
+	Source   string        `json:"source,omitempty"`
+	Message  string        `json:"message"`
+}
+
+// EvidenceBatch is one producer's diagnostic report for one document, in the
+// shape the kernel's huyang_diagnostic_evidence operation returns.
+type EvidenceBatch struct {
+	Kind             string            `json:"kind"`
+	ProviderID       string            `json:"provider_id"`
+	Producer         string            `json:"producer"`
+	ProducerVersion  string            `json:"producer_version,omitempty"`
+	Document         string            `json:"document,omitempty"`
+	DocumentRevision string            `json:"document_revision,omitempty"`
+	DocumentVersion  *int64            `json:"document_version,omitempty"`
+	ExpectedVersion  *int64            `json:"expected_version,omitempty"`
+	ResultID         string            `json:"result_id,omitempty"`
+	TransactionID    string            `json:"transaction_id,omitempty"`
+	Complete         bool              `json:"complete"`
+	TimedOut         bool              `json:"timed_out,omitempty"`
+	Reason           string            `json:"reason,omitempty"`
+	ProgressPending  bool              `json:"progress_pending,omitempty"`
+	ChangeBarrier    bool              `json:"change_barrier,omitempty"`
+	Selected         bool              `json:"selected"`
+	Dimension        string            `json:"dimension,omitempty"`
+	Findings         []EvidenceFinding `json:"findings,omitempty"`
+}
+
+// ProviderError is an operation failure the kernel reported. Error returns
+// the message alone so callers matching on kernel wording keep working; Code
+// is the stable classification ("lsp_not_configured", "workspace_busy",
+// "provider_cancelled", or "lua_error" for an unclassified raise).
+type ProviderError struct {
+	Code    string
+	Message string
+	Detail  string
+	Epoch   uint64
+}
+
+func (e *ProviderError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+// ErrorCode returns the ProviderError code inside err, or "" when err is not
+// a kernel operation failure.
+func ErrorCode(err error) string {
+	var operation *ProviderError
+	if errors.As(err, &operation) {
+		return operation.Code
+	}
+	return ""
 }
 
 // HealthState is the lifecycle state visible to the workspace core.

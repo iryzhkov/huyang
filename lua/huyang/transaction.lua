@@ -1,6 +1,24 @@
+-- Provider-side staging for Huyang transactions: prepare stages exact bytes
+-- into buffers without saving, commit or rollback releases them.
+--
+-- One lease at a time: `active` is a single module-level record because the
+-- phase-one design stages in the canonical buffers, so two transactions
+-- cannot hold staged views of the same provider at once. The Go coordinator
+-- serialises prepare calls per workspace and every entry point here checks
+-- the plan id against the holder, so the single slot is a deliberate
+-- exclusivity gate rather than shared request state. Per-transaction
+-- sandboxes (separate providers) replace it in the target design.
+
 local M = {}
 
 local active
+
+-- Fault injection for the Go lifecycle tests, honoured only when the
+-- provider was started with HUYANG_TEST_FAULTS=1 so a production caller
+-- cannot make prepare exit the editor or fail on purpose.
+local function faults_enabled()
+    return vim.env.HUYANG_TEST_FAULTS == "1"
+end
 
 local function err(fmt, ...)
     error(string.format(fmt, ...), 0)
@@ -88,6 +106,7 @@ local function restore(preimages)
     local failures = {}
     for i = #preimages, 1, -1 do
         local pre = preimages[i]
+        require("huyang.rpc").touch(pre.buf)
         local ok, reason = pcall(function()
             if not vim.api.nvim_buf_is_valid(pre.buf) then
                 err("buffer disappeared: %s", pre.path)
@@ -130,11 +149,12 @@ function M.prepare(args)
             set_buffer_bytes(pre.buf, after)
             require("huyang.edit").mark_diagnostic_change(pre.buf)
             vim.b[pre.buf].huyang_deleted = file.after_exists ~= true
-            if tonumber(args.exit_provider_after) == index then
+            require("huyang.rpc").touch(pre.buf)
+            if faults_enabled() and tonumber(args.exit_provider_after) == index then
                 vim.cmd("qa!")
             end
             vim.bo[pre.buf].modified = true
-            if tonumber(args.fail_after) == index then
+            if faults_enabled() and tonumber(args.fail_after) == index then
                 err("injected provider apply failure after %d", index)
             end
         end
@@ -184,6 +204,7 @@ function M.commit(args)
     local count = 0
     for _, pre in ipairs(active.preimages) do
         if vim.api.nvim_buf_is_valid(pre.buf) then
+            require("huyang.rpc").touch(pre.buf)
             if vim.b[pre.buf].huyang_deleted then
                 vim.api.nvim_buf_delete(pre.buf, { force = true })
             else
