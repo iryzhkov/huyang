@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
@@ -42,6 +43,53 @@ func languageServerAttachmentConfirmed(value any) bool {
 	}
 }
 
+// languageSupport is what the provider's workspace_support report says
+// once the languages are tallied: which servers attached, which languages
+// have none, which configured servers failed, and the install options per
+// missing language.
+type languageSupport struct {
+	attachedLanguages int
+	attachedServers   []string
+	missing           []string
+	failedAttachments []string
+	installOptions    map[string][]string
+}
+
+func summariseLanguageSupport(support map[string]any) languageSupport {
+	tally := languageSupport{attachedServers: []string{}, missing: []string{}, failedAttachments: []string{}, installOptions: map[string][]string{}}
+	seenServers := map[string]struct{}{}
+	for _, raw := range mcpapi.AnySlice(support["languages"]) {
+		entry, _ := raw.(map[string]any)
+		reconcileParserSupport(entry)
+		language := fmt.Sprint(entry["filetype"])
+		lsp := fmt.Sprint(entry["lsp"])
+		if lsp != "" && lsp != "none" && !strings.HasPrefix(lsp, "none (") {
+			tally.attachedLanguages++
+			for _, name := range strings.Split(lsp, ",") {
+				name = strings.TrimSpace(name)
+				if _, seen := seenServers[name]; name != "" && !seen {
+					seenServers[name] = struct{}{}
+					tally.attachedServers = append(tally.attachedServers, name)
+				}
+			}
+			continue
+		}
+		if language == "" {
+			continue
+		}
+		tally.missing = append(tally.missing, language)
+		if strings.HasPrefix(lsp, "none (configured:") {
+			tally.failedAttachments = append(tally.failedAttachments, language)
+		}
+		for _, rawOption := range mcpapi.AnySlice(entry["install_options"]) {
+			if option := strings.TrimSpace(fmt.Sprint(rawOption)); option != "" && !slices.Contains(tally.installOptions[language], option) {
+				tally.installOptions[language] = append(tally.installOptions[language], option)
+			}
+		}
+	}
+	return tally
+}
+
 func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
 	backend, err := h.pool.Canonical(ctx, workspace)
 	if err != nil {
@@ -57,78 +105,44 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 		return result
 	}
 	support, _ := value.(map[string]any)
-	attachedLanguages, missing := 0, []string{}
-	failedAttachments := []string{}
-	seenServers := map[string]struct{}{}
-	attachedServers := []string{}
-	installOptions := map[string][]string{}
-	for _, raw := range mcpapi.AnySlice(support["languages"]) {
-		entry, _ := raw.(map[string]any)
-		reconcileParserSupport(entry)
-		language := fmt.Sprint(entry["filetype"])
-		lsp := fmt.Sprint(entry["lsp"])
-		if lsp != "" && lsp != "none" && !strings.HasPrefix(lsp, "none (") {
-			attachedLanguages++
-			for _, name := range strings.Split(lsp, ",") {
-				name = strings.TrimSpace(name)
-				if _, seen := seenServers[name]; name != "" && !seen {
-					seenServers[name] = struct{}{}
-					attachedServers = append(attachedServers, name)
-				}
-			}
-		} else if language != "" {
-			missing = append(missing, language)
-			if strings.HasPrefix(lsp, "none (configured:") {
-				failedAttachments = append(failedAttachments, language)
-			}
-			for _, rawOption := range mcpapi.AnySlice(entry["install_options"]) {
-				if option := strings.TrimSpace(fmt.Sprint(rawOption)); option != "" {
-					duplicate := false
-					for _, existing := range installOptions[language] {
-						if existing == option {
-							duplicate = true
-							break
-						}
-					}
-					if !duplicate {
-						installOptions[language] = append(installOptions[language], option)
-					}
-				}
-			}
-		}
-	}
-	outcome := "ok"
-	summary := fmt.Sprintf("%d unique language servers attached across %d workspace language modes", len(attachedServers), attachedLanguages)
-	code := ""
-	if len(attachedServers) == 0 {
+	tally := summariseLanguageSupport(support)
+	outcome, code := "ok", ""
+	summary := fmt.Sprintf("%d unique language servers attached across %d workspace language modes", len(tally.attachedServers), tally.attachedLanguages)
+	if len(tally.attachedServers) == 0 {
 		outcome, code, summary = "unavailable", "language_server_unavailable", "No workspace language server is attached"
-	} else if len(failedAttachments) > 0 {
+	} else if len(tally.failedAttachments) > 0 {
 		outcome, code = "partial", "language_server_attachment_incomplete"
-		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(attachedServers), strings.Join(failedAttachments, ", "))
+		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(tally.attachedServers), strings.Join(tally.failedAttachments, ", "))
 	}
 	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"provider": providerpool.Status(ctx, backend), "language_servers": mcpapi.CompactLanguageSupport(support),
-		"attached_language_count": attachedLanguages, "attached_server_count": len(attachedServers),
-		"attached_servers": attachedServers, "missing_languages": missing,
-		"failed_attachment_languages": failedAttachments, "install_options": installOptions,
+		"attached_language_count": tally.attachedLanguages, "attached_server_count": len(tally.attachedServers),
+		"attached_servers": tally.attachedServers, "missing_languages": tally.missing,
+		"failed_attachment_languages": tally.failedAttachments, "install_options": tally.installOptions,
 	})
-	if len(missing) > 0 {
+	if len(tally.missing) > 0 {
 		result["warnings"] = []string{"Some workspace languages have no attached language server."}
-		next := make([]any, 0, 2)
-		for _, language := range missing {
-			if len(next) == 2 {
-				break
-			}
-			action := map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "use_new_idempotency_key": true}
-			if options := installOptions[language]; len(options) > 0 {
-				action["install_options_key"] = language
-				action["selection"] = "automatic_preferred"
-			}
-			next = append(next, action)
-		}
-		result["next"] = next
+		result["next"] = installMissingLanguagesNext(tally)
 	}
 	return result
+}
+
+// installMissingLanguagesNext offers an install for the first two missing
+// languages, pointing at their install options when the provider listed any.
+func installMissingLanguagesNext(tally languageSupport) []any {
+	next := make([]any, 0, 2)
+	for _, language := range tally.missing {
+		if len(next) == 2 {
+			break
+		}
+		action := map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "use_new_idempotency_key": true}
+		if options := tally.installOptions[language]; len(options) > 0 {
+			action["install_options_key"] = language
+			action["selection"] = "automatic_preferred"
+		}
+		next = append(next, action)
+	}
+	return next
 }
 
 func failedLanguageServerInstallNext(status, language, requestedServer string) []any {
@@ -148,50 +162,65 @@ func failedLanguageServerInstallNext(status, language, requestedServer string) [
 
 func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
-	if action == "restart" {
-		before := h.languageServerStatus(ctx, requestID, workspace)
-		previouslyAttached := []string{}
-		if beforeData, _ := before["data"].(map[string]any); beforeData != nil {
-			for _, server := range mcpapi.AnySlice(beforeData["attached_servers"]) {
-				if name := strings.TrimSpace(fmt.Sprint(server)); name != "" {
-					previouslyAttached = append(previouslyAttached, name)
-				}
-			}
-		}
-		backend, err := h.pool.Restart(ctx, workspace)
-		if err != nil {
-			return mcpapi.Failure(requestID, workspace, "semantic_provider_restart_failed", err)
-		}
-		verified := h.languageServerStatus(ctx, requestID, workspace)
-		data, _ := verified["data"].(map[string]any)
-		if data == nil {
-			data = map[string]any{}
-		}
-		data["provider"] = providerpool.Status(ctx, backend)
-		verified["data"] = data
-		current := map[string]bool{}
-		for _, server := range mcpapi.AnySlice(data["attached_servers"]) {
-			current[strings.TrimSpace(fmt.Sprint(server))] = true
-		}
-		lost := []string{}
-		for _, server := range previouslyAttached {
-			if !current[server] {
-				lost = append(lost, server)
-			}
-		}
-		if len(lost) == 0 && verified["outcome"] == "ok" {
-			verified["summary"] = "Owned Neovim provider restarted and installed language-server attachments were verified"
-		} else {
-			data["lost_attached_servers"] = lost
-			verified["outcome"] = "provisional"
-			verified["code"] = "language_server_restart_incomplete"
-			verified["summary"] = "Owned Neovim provider restarted, but one or more installed language servers did not reattach"
-		}
-		return verified
-	}
-	if action != "install" {
+	switch action {
+	case "restart":
+		return h.restartLanguageServers(ctx, requestID, workspace)
+	case "install":
+		return h.installLanguageServer(ctx, requestID, workspace, arguments)
+	default:
 		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_language_server_action", "action must be install or restart", map[string]any{})
 	}
+}
+
+// restartLanguageServers replaces the canonical provider and verifies that
+// every server attached before the restart attached again.
+func (h *Handlers) restartLanguageServers(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
+	before := h.languageServerStatus(ctx, requestID, workspace)
+	previouslyAttached := attachedServerNames(before)
+	backend, err := h.pool.Restart(ctx, workspace)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, "semantic_provider_restart_failed", err)
+	}
+	verified := h.languageServerStatus(ctx, requestID, workspace)
+	data, _ := verified["data"].(map[string]any)
+	if data == nil {
+		data = map[string]any{}
+	}
+	data["provider"] = providerpool.Status(ctx, backend)
+	verified["data"] = data
+	current := attachedServerNames(verified)
+	lost := []string{}
+	for _, server := range previouslyAttached {
+		if !slices.Contains(current, server) {
+			lost = append(lost, server)
+		}
+	}
+	if len(lost) == 0 && verified["outcome"] == "ok" {
+		verified["summary"] = "Owned Neovim provider restarted and installed language-server attachments were verified"
+		return verified
+	}
+	data["lost_attached_servers"] = lost
+	verified["outcome"] = "provisional"
+	verified["code"] = "language_server_restart_incomplete"
+	verified["summary"] = "Owned Neovim provider restarted, but one or more installed language servers did not reattach"
+	return verified
+}
+
+// attachedServerNames reads the attached servers out of a status envelope.
+func attachedServerNames(status map[string]any) []string {
+	names := []string{}
+	data, _ := status["data"].(map[string]any)
+	for _, server := range mcpapi.AnySlice(data["attached_servers"]) {
+		if name := strings.TrimSpace(fmt.Sprint(server)); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// installLanguageServer asks the provider to install support for one
+// language and classifies what the provider reports about the server.
+func (h *Handlers) installLanguageServer(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	language, _ := arguments["language"].(string)
 	if strings.TrimSpace(language) == "" {
 		return mcpapi.Envelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
@@ -214,15 +243,22 @@ func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, wo
 	data := map[string]any{"installation": value, "provider": providerpool.Status(ctx, backend)}
 	installation, _ := value.(map[string]any)
 	serverResult, _ := installation["server"].(map[string]any)
-	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
 	requestedServer := strings.TrimSpace(fmt.Sprint(arguments["server"]))
+	return installOutcome(requestID, workspace, language, requestedServer, serverResult, data)
+}
+
+// installOutcome turns the provider's server report into the tool result:
+// parser-only success, an installed server that did not attach, a failed
+// install, an unconfirmed attachment, or a confirmed one.
+func installOutcome(requestID string, workspace *workspacecore.Workspace, language, requestedServer string, serverResult, data map[string]any) map[string]any {
+	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
+	note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 	if requestedServer == "" && (len(serverResult) == 0 || status == "skipped" || status == "none") {
 		result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Parser support installation completed for %s; no language server was requested", language), data)
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_parser"}}
 		return result
 	}
 	if attached, present := serverResult["attached"]; present && attached == false {
-		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 		if note == "" {
 			note = "the language server did not attach after installation"
 		}
@@ -240,7 +276,6 @@ func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, wo
 		return result
 	}
 	if status == "failed" || status == "unknown" || status == "unsupported" || status == "skipped" {
-		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 		if note == "" {
 			note = "the provider did not supply installation diagnostics"
 		}
@@ -251,7 +286,6 @@ func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, wo
 		return result
 	}
 	if attached, present := serverResult["attached"]; !present || !languageServerAttachmentConfirmed(attached) {
-		note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
 		if note == "" || note == "<nil>" {
 			note = "the provider did not positively confirm attachment"
 		}
