@@ -637,7 +637,7 @@ end
 local SUPPORT_MAX_FILETYPES = 10
 
 local SUPPORT_ATTACH_MS = 2500
-local JAVA_RESTART_ATTACH_MS = 6000
+local JAVA_RESTART_ATTACH_MS = 15000
 local RUBY_RESTART_ATTACH_MS = 8000
 
 -- A warning when a JavaScript or TypeScript project's dependencies are not
@@ -682,10 +682,19 @@ local function configure_jdtls_sandbox_safety()
     local root_markers = vim.deepcopy(current.root_markers or {})
     settings.java = settings.java or {}
     settings.java.import = settings.java.import or {}
+    settings.java.project = settings.java.project or {}
     -- Eclipse metadata is editor state, not a source change. Ask jdtls not
     -- to generate it at the project root; provider shutdown also quiesces
     -- any background import before sandbox command auditing begins.
     settings.java.import.generatesMetadataFilesAtProjectRoot = false
+    -- Unmanaged Java fixtures have no Maven/Gradle metadata from which jdtls
+    -- can infer source roots. Keep an explicit conventional fallback so the
+    -- package declaration is checked relative to src/main/java (or src/test/java)
+    -- instead of relative to the workspace root. Respect an existing project
+    -- configuration when the user supplied one.
+    if settings.java.project.sourcePaths == nil then
+        settings.java.project.sourcePaths = { "src/main/java", "src/test/java", "src" }
+    end
     -- Safe-copy sandboxes intentionally omit .git. The trusted project policy
     -- remains at the sandbox root, so let it anchor jdtls there; otherwise
     -- jdtls roots each source package too deeply and emits false "expected
@@ -698,6 +707,12 @@ local function configure_jdtls_sandbox_safety()
     if not already_present then table.insert(root_markers, 1, huyang_markers) end
     vim.lsp.config("jdtls", { settings = settings, root_markers = root_markers })
 end
+
+-- Sandbox providers may run diagnostics without first serving a support or
+-- installation request. Configure jdtls before any Java buffer can attach so
+-- conventional src/main/java package roots are interpreted from the sandbox
+-- root rather than from an individual package directory.
+configure_jdtls_sandbox_safety()
 
 local function ensure_java_home()
     configure_jdtls_sandbox_safety()

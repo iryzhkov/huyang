@@ -273,55 +273,59 @@ func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdo
 
 	connect := func(restarting bool) error {
 		deadline := time.Now().Add(30 * time.Second)
-		var err error
 		for {
-			connection, err = net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
+			err := func() error {
+				candidate, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
+				if err != nil {
+					return fmt.Errorf("connect service at %s: %w", socketPath, err)
+				}
+				connection = candidate
+				fail := func(err error) error {
+					_ = candidate.Close()
+					return err
+				}
+				if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(profile)}); err != nil {
+					return fail(fmt.Errorf("identify service connection: %w", err))
+				}
+				reader := bufio.NewReader(candidate)
+				if restarting && clientInitialized && len(initializeRequest) > 0 {
+					if _, err := candidate.Write(initializeRequest); err != nil {
+						return fail(fmt.Errorf("send service reinitialize request: %w", err))
+					}
+					_ = candidate.SetReadDeadline(time.Now().Add(10 * time.Second))
+					for {
+						line, err := reader.ReadBytes('\n')
+						if err != nil {
+							return fail(fmt.Errorf("reinitialize service connection: %w", err))
+						}
+						if idKey(message(line).ID) == initializeID {
+							break
+						}
+					}
+					_ = candidate.SetReadDeadline(time.Time{})
+					if len(initializedNotification) > 0 {
+						if _, err := candidate.Write(initializedNotification); err != nil {
+							return fail(fmt.Errorf("send service initialized notification: %w", err))
+						}
+					}
+				}
+				for _, line := range outstanding {
+					if _, err := candidate.Write(line); err != nil {
+						return fail(fmt.Errorf("replay outstanding service request: %w", err))
+					}
+				}
+				generation++
+				go readProxyLines(reader, generation, backendEvents)
+				return nil
+			}()
 			if err == nil {
-				break
+				return nil
 			}
 			if !restarting || time.Now().After(deadline) {
-				return fmt.Errorf("connect service at %s: %w", socketPath, err)
+				return err
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile)}); err != nil {
-			_ = connection.Close()
-			return err
-		}
-		reader := bufio.NewReader(connection)
-		if restarting && clientInitialized && len(initializeRequest) > 0 {
-			if _, err := connection.Write(initializeRequest); err != nil {
-				_ = connection.Close()
-				return err
-			}
-			_ = connection.SetReadDeadline(time.Now().Add(10 * time.Second))
-			for {
-				line, err := reader.ReadBytes('\n')
-				if err != nil {
-					_ = connection.Close()
-					return fmt.Errorf("reinitialize service connection: %w", err)
-				}
-				if idKey(message(line).ID) == initializeID {
-					break
-				}
-			}
-			_ = connection.SetReadDeadline(time.Time{})
-			if len(initializedNotification) > 0 {
-				if _, err := connection.Write(initializedNotification); err != nil {
-					_ = connection.Close()
-					return err
-				}
-			}
-		}
-		for _, line := range outstanding {
-			if _, err := connection.Write(line); err != nil {
-				_ = connection.Close()
-				return err
-			}
-		}
-		generation++
-		go readProxyLines(reader, generation, backendEvents)
-		return nil
 	}
 
 	if err := connect(false); err != nil {

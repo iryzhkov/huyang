@@ -8,6 +8,8 @@ assert(adapter.executable.args[#adapter.executable.args] == "${port}")
 
 assert(probe.adapter_start_budget(3000) == 3000)
 assert(probe.adapter_start_budget(30000) == 15000)
+assert(probe.jdtls_attach_timeout_ms == 15000)
+assert(probe.jdtls_command_timeout_ms == 10000)
 
 local notice = probe.sanitize_debug_notice("Couldn't connect to 127.0.0.1:${port}: ECONNREFUSED")
 assert(not notice:find("${port}", 1, true))

@@ -205,7 +205,7 @@ end
 
 do
     check("restored jdtls gets a bounded cold-start readiness window",
-        install._support_attach_wait("java", nil, { "jdtls" }) == 6000
+		install._support_attach_wait("java", nil, { "jdtls" }) == 15000
             and install._support_attach_wait("java", 1200, { "jdtls" }) == 1200
             and install._support_attach_wait("ruby", nil, { "ruby_lsp" }) == 8000
             and install._support_attach_wait("ruby", 1200, { "ruby_lsp" }) == 1200
@@ -215,8 +215,10 @@ end
 do
     install._configure_jdtls_sandbox_safety()
     local markers = vim.lsp.config.jdtls.root_markers or {}
+    local source_paths = (((vim.lsp.config.jdtls.settings or {}).java or {}).project or {}).sourcePaths
     check("jdtls recognizes trusted safe-copy sandbox roots",
-        vim.deep_equal(markers[1], { ".huyang.toml", ".huyang/pipeline.json" }), markers)
+        vim.deep_equal(markers[1], { ".huyang.toml", ".huyang/pipeline.json" })
+            and vim.deep_equal(source_paths, { "src/main/java", "src/test/java", "src" }), markers)
 end
 
 do

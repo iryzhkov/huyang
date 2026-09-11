@@ -7,6 +7,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/neovim/go-client v1.2.1
 	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/yuin/goldmark v1.7.13
 	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )

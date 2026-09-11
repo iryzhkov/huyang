@@ -913,3 +913,32 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 		cleanup()
 	}
 }
+
+func TestChangePlanRequestBoundsAdvertiseChunkedRecovery(t *testing.T) {
+	schema := changePlanSchema(statefulProperties(), []string{"create_file"})
+	properties := schema["properties"].(map[string]any)
+	operations := properties["operations"].(map[string]any)
+	if operations["maxItems"] != maxPlanOperations || !strings.Contains(operations["description"].(string), "edit.mode=add") {
+		t.Fatalf("operations bound is not actionable: %#v", operations)
+	}
+	operation := operations["items"].(map[string]any)
+	content := operation["properties"].(map[string]any)["content"].(map[string]any)
+	if content["maxLength"] != maxPlanContentBytes {
+		t.Fatalf("content bound = %#v", content)
+	}
+	tooMany := make([]any, maxPlanOperations+1)
+	for index := range tooMany {
+		tooMany[index] = map[string]any{"op_id": fmt.Sprintf("op-%d", index), "kind": "create_file"}
+	}
+	err := validateToolArguments(schema, map[string]any{
+		"workspace_id": "ws_test", "idempotency_key": "bounded", "action": "create", "operations": tooMany,
+	})
+	if err == nil || !strings.Contains(err.Error(), "edit.mode=add") {
+		t.Fatalf("oversized plan error is not actionable: %v", err)
+	}
+	tooLarge := make(json.RawMessage, maxToolArgumentBytes+1)
+	err = validateToolArgumentSize(tooLarge)
+	if err == nil || !strings.Contains(err.Error(), "safe transport limit") || !strings.Contains(err.Error(), "edit.mode=add") {
+		t.Fatalf("oversized request error is not actionable: %v", err)
+	}
+}

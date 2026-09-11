@@ -140,6 +140,90 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	}
 }
 
+func TestChangePlanCreateReplayRecoversLostResponseAfterRestart(t *testing.T) {
+	base := t.TempDir()
+	stateDir := filepath.Join(base, "state")
+	root := filepath.Join(base, "project")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	direct := newDirectWorkspaces(stateDir)
+	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
+	arguments := map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "lost-create-response",
+		"action": "create", "operations": []any{map[string]any{
+			"op_id": "create", "kind": "create_file", "path": "created.txt", "content": "created\n",
+		}},
+	}
+	created := direct.call(context.Background(), "change_plan", arguments)
+	planID := created["transaction"].(map[string]any)["id"]
+	restarted := newDirectWorkspaces(stateDir)
+	replayed := restarted.call(context.Background(), "change_plan", arguments)
+	if replayed["idempotency"] != "replayed" || replayed["transaction"].(map[string]any)["id"] != planID {
+		t.Fatalf("lost create response was not recoverable: %#v", replayed)
+	}
+}
+
+func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
+	base := t.TempDir()
+	stateDir := filepath.Join(base, "state")
+	root := filepath.Join(base, "project")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("alpha beta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	direct := newDirectWorkspaces(stateDir)
+	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
+	searched := direct.call(context.Background(), "search", map[string]any{
+		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
+	})
+	hit := searched["data"].(map[string]any)["hits"].([]map[string]any)[0]
+	encodedRange, err := json.Marshal(hit["range"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fileRange map[string]any
+	if err := json.Unmarshal(encodedRange, &fileRange); err != nil {
+		t.Fatal(err)
+	}
+	arguments := map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "restart-during-diagnostics",
+		"operation": map[string]any{
+			"kind": "replace_range", "target": map[string]any{"file_range": fileRange}, "content": "gamma",
+		},
+	}
+	checkpointed, release := make(chan struct{}), make(chan struct{})
+	direct.replayCheckpointTestHook = func() {
+		close(checkpointed)
+		<-release
+	}
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	done := make(chan map[string]any, 1)
+	go func() { done <- direct.call(requestContext, "edit_apply", arguments) }()
+	<-checkpointed
+
+	restarted := newDirectWorkspaces(stateDir)
+	replayed := restarted.call(context.Background(), "edit_apply", arguments)
+	data := replayed["data"].(map[string]any)
+	if replayed["idempotency"] != "replayed" || replayed["outcome"] != "provisional" ||
+		data["canonical_changed"] != false || data["original_canonical_changed"] != true ||
+		data["revision"] != "wsrev_2" {
+		t.Fatalf("checkpointed edit receipt = %#v", replayed)
+	}
+	cancelRequest()
+	close(release)
+	<-done
+}
+
 func displayRangeTarget(path string) map[string]any {
 	return map[string]any{"file_range": map[string]any{
 		"path": path, "revision_id": "display-only", "byte_start": 0, "byte_end": 0,
@@ -243,6 +327,16 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	}
 	if len(listed.Tools) != 19 {
 		t.Fatalf("reconnected adapter catalog = %d tools, want 19", len(listed.Tools))
+	}
+
+	stopSecond()
+	_, stopSecond = startTestHuyangService(t, stateDir, socketPath, "")
+	listed, err = session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("same adapter session after second service restart: %v", err)
+	}
+	if len(listed.Tools) != 19 {
+		t.Fatalf("twice-reconnected adapter catalog = %d tools, want 19", len(listed.Tools))
 	}
 }
 

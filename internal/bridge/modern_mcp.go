@@ -50,6 +50,12 @@ type modernTool struct {
 	Idempotent  bool
 }
 
+const (
+	maxToolArgumentBytes = 32 << 20
+	maxPlanOperations    = 8
+	maxPlanContentBytes  = 4 << 20
+)
+
 var modernProfileOrder = []mcpProfile{profileFull, profileOrient, profileEdit, profileDebug}
 var modernProfileNames = map[mcpProfile][]string{
 	profileFull: {
@@ -151,10 +157,13 @@ func statefulProperties() map[string]any {
 
 func planOperationSchema(operationKinds []string) map[string]any {
 	return schemaObject(map[string]any{
-		"op_id":                   stringSchema("Stable operation identifier unique within the plan."),
-		"kind":                    enumSchema(operationKinds...),
-		"target":                  targetSchema(),
-		"content":                 stringSchema("Exact UTF-8 content for the declared operation."),
+		"op_id":  stringSchema("Stable operation identifier unique within the plan."),
+		"kind":   enumSchema(operationKinds...),
+		"target": targetSchema(),
+		"content": map[string]any{
+			"type": "string", "maxLength": maxPlanContentBytes,
+			"description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
+		},
 		"path":                    stringSchema("Workspace path for create_file or delete_file."),
 		"from":                    stringSchema("Source path for move_file."),
 		"to":                      stringSchema("Destination path for move_file."),
@@ -167,7 +176,10 @@ func planOperationSchema(operationKinds []string) map[string]any {
 
 func changePlanSchema(stateful map[string]any, operationKinds []string) map[string]any {
 	operation := planOperationSchema(operationKinds)
-	operations := map[string]any{"type": "array", "items": operation}
+	operations := map[string]any{
+		"type": "array", "items": operation, "maxItems": maxPlanOperations,
+		"description": "At most 8 operations per request. Build larger plans incrementally with action=edit and edit.mode=add.",
+	}
 	return schemaObject(map[string]any{
 		"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 		"action":            enumSchema("create", "edit", "preview", "inspect", "prepare", "apply", "discard"),
@@ -402,6 +414,10 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		started := time.Now()
 		client := modernClientName(request)
+		if err := validateToolArgumentSize(request.Params.Arguments); err != nil {
+			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
+			return nil, err
+		}
 		arguments, err := decodeArguments(request.Params.Arguments)
 		if err != nil {
 			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
@@ -677,8 +693,12 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 			}
 		}
 	case "string":
-		if _, ok := value.(string); !ok {
+		text, ok := value.(string)
+		if !ok {
 			return fmt.Errorf("%s must be a string", path)
+		}
+		if maximum, ok := schema["maxLength"].(int); ok && len(text) > maximum {
+			return fmt.Errorf("%s is %d bytes, maximum %d bytes", path, len(text), maximum)
 		}
 	case "boolean":
 		if _, ok := value.(bool); !ok {
@@ -693,6 +713,9 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 		array, ok := value.([]any)
 		if !ok {
 			return fmt.Errorf("%s must be an array", path)
+		}
+		if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
+			return fmt.Errorf("%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
 		}
 		itemSchema, _ := schema["items"].(map[string]any)
 		for index, item := range array {
@@ -720,6 +743,14 @@ func decodeArguments(raw json.RawMessage) (map[string]any, error) {
 	return arguments, nil
 }
 
+func validateToolArgumentSize(raw json.RawMessage) error {
+	if len(raw) <= maxToolArgumentBytes {
+		return nil
+	}
+	return fmt.Errorf("tool arguments are %d bytes, exceeding the %d-byte safe transport limit; split a large change plan into batches of at most %d operations using action=edit and edit.mode=add",
+		len(raw), maxToolArgumentBytes, maxPlanOperations)
+}
+
 func legacySDKResult(result map[string]any) *mcp.CallToolResult {
 	sdkResult := &mcp.CallToolResult{}
 	if value, ok := result["isError"].(bool); ok {
@@ -741,8 +772,9 @@ type directWorkspaces struct {
 	toolTimeout time.Duration
 	requests    atomic.Uint64
 
-	replayMu sync.Mutex
-	replays  map[string]*directReplay
+	replayMu                 sync.Mutex
+	replays                  map[string]*directReplay
+	replayCheckpointTestHook func()
 
 	persistMu    sync.Mutex
 	registryPath string
@@ -763,6 +795,18 @@ type directReplay struct {
 	result        map[string]any
 	done          chan struct{}
 	complete      bool
+	checkpointed  bool
+}
+
+type replayCheckpoint func(map[string]any) error
+type replayCheckpointKey struct{}
+
+func checkpointStatefulReceipt(ctx context.Context, result map[string]any) error {
+	checkpoint, _ := ctx.Value(replayCheckpointKey{}).(replayCheckpoint)
+	if checkpoint == nil {
+		return nil
+	}
+	return checkpoint(result)
 }
 
 type cachedVerification struct {
@@ -862,8 +906,41 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 	d.replays[replayKey] = pending
 	d.replayMu.Unlock()
 
+	ctx = context.WithValue(ctx, replayCheckpointKey{}, replayCheckpoint(func(receipt map[string]any) error {
+		persisted := cloneEnvelope(receipt)
+		persisted["idempotency"] = "created"
+		persisted["idempotency_persisted"] = true
+		d.replayMu.Lock()
+		pending.result = persisted
+		pending.complete = true
+		pending.checkpointed = true
+		d.replayMu.Unlock()
+		if err := d.persistRegistry(); err != nil {
+			d.replayMu.Lock()
+			pending.complete = false
+			pending.checkpointed = false
+			d.replayMu.Unlock()
+			return err
+		}
+		if d.replayCheckpointTestHook != nil {
+			d.replayCheckpointTestHook()
+		}
+		return nil
+	}))
 	result := d.executeScheduled(ctx, requestID, name, arguments)
 	timedOut := normalizeToolTimeout(ctx, d.toolTimeout, name, result)
+	if timedOut {
+		d.replayMu.Lock()
+		if pending.checkpointed {
+			result = cloneEnvelope(pending.result)
+			result["request_id"] = requestID
+			result["outcome"] = "provisional"
+			result["warnings"] = append(result["warnings"].([]string),
+				"Post-mutation work exceeded the tool timeout; the canonical mutation receipt was already persisted.")
+			timedOut = false
+		}
+		d.replayMu.Unlock()
+	}
 	result["idempotency"] = "created"
 	result["idempotency_persisted"] = !timedOut
 	if timedOut {
@@ -1236,7 +1313,7 @@ func (d *directWorkspaces) open(ctx context.Context, requestID string, arguments
 }
 
 func reconcilePipelineCapabilities(inspection *workspacecore.Inspection, policy workspacecore.PipelinePolicy) {
-	inspection.Optional["parser"] = "available_for_go_json_jsonl_toml_yaml"
+	inspection.Optional["parser"] = "available_for_go_json_jsonl_toml_yaml_markdown"
 	commandsConfigured := len(policy.Check) > 0 || len(policy.Tests) > 0
 	formatConfigured := len(policy.Format.Gate.Command) > 0 || len(policy.Format.Transform.Command) > 0
 	state := "unavailable"
@@ -1734,6 +1811,23 @@ func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace
 		"diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
 		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq),
 		"changed_paths":    []string{change.Diff.Path}, "canonical_changed": !preview,
+	}
+	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	if !preview {
+		checkpoint := modernEnvelope(requestID, workspace, "provisional", "",
+			"Guarded range edit applied; canonical receipt persisted before semantic diagnostics", data)
+		checkpoint["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
+		checkpoint["next"] = []any{
+			map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"},
+			map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": data["revision"]},
+		}
+		if persistErr := checkpointStatefulReceipt(ctx, checkpoint); persistErr != nil {
+			result := modernEnvelope(requestID, workspace, "provisional", "mutation_receipt_persist_failed",
+				"Guarded range edit applied, but its recovery receipt could not be persisted", data)
+			result["warnings"] = []string{persistErr.Error()}
+			result["next"] = []any{map[string]any{"tool": "revision_diff", "action": "inspect_current_revision_before_retry"}}
+			return result
+		}
 	}
 	evidenceIDs := make([]string, 0)
 	diagnosticRecovery := false

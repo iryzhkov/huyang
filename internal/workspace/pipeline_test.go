@@ -220,6 +220,7 @@ func TestParserVerificationReportsActualCoverage(t *testing.T) {
 	files := map[string]string{
 		"valid.go":   "package p\n",
 		"valid.json": "{\"ok\":true}\n",
+		"valid.md":   "# Contract\n\n- durable receipt\n",
 		"script.rb":  "puts 'ok'\n",
 		"README":     "plain text\n",
 		"broken.go":  "package p\nfunc broken( {\n",
@@ -243,6 +244,7 @@ func TestParserVerificationReportsActualCoverage(t *testing.T) {
 		{name: "empty scope", status: VerificationSkipped, exit: -1, complete: false, skipped: "no_files_to_parse"},
 		{name: "unsupported only", files: []string{"script.rb"}, status: VerificationSkipped, exit: -1, complete: false, considered: 1, skipped: "parser_unavailable:.rb"},
 		{name: "all supported", files: []string{"valid.go", "valid.json"}, status: VerificationPassed, exit: 0, complete: true, considered: 2, read: 2},
+		{name: "markdown", files: []string{"valid.md"}, status: VerificationPassed, exit: 0, complete: true, considered: 1, read: 1},
 		{name: "mixed support", files: []string{"valid.go", "script.rb", "README"}, status: VerificationSkipped, exit: -1, complete: false, considered: 3, read: 1, skipped: "parser_unavailable:.rb"},
 		{name: "malformed supported", files: []string{"broken.go"}, status: VerificationFailed, exit: 1, complete: true, considered: 1, read: 1},
 	}

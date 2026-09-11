@@ -21,6 +21,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
 )
 
@@ -649,7 +651,7 @@ func parserStage(root, revision string, files []string) VerificationStage {
 	skipped := map[string]bool{}
 	for _, relative := range files {
 		extension := strings.ToLower(filepath.Ext(relative))
-		supportedFormat := extension == ".go" || extension == ".json" || extension == ".jsonl" || extension == ".toml" || extension == ".yaml" || extension == ".yml"
+		supportedFormat := extension == ".go" || extension == ".json" || extension == ".jsonl" || extension == ".toml" || extension == ".yaml" || extension == ".yml" || extension == ".md" || extension == ".markdown"
 		if !supportedFormat {
 			reason := "parser_unavailable:" + extension
 			if extension == "" {
@@ -717,6 +719,8 @@ func parserStage(root, revision string, files []string) VerificationStage {
 				stage.Exit = 1
 				stage.Output += relative + ": " + err.Error() + "\n"
 			}
+		case ".md", ".markdown":
+			goldmark.DefaultParser().Parse(text.NewReader(content))
 		}
 	}
 	if supported == 0 {

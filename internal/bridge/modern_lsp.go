@@ -11,7 +11,7 @@ import (
 
 func verificationParserAvailable(language string) bool {
 	switch language {
-	case "go", "json", "jsonl", "toml", "yaml", "yml":
+	case "go", "json", "jsonl", "toml", "yaml", "yml", "markdown":
 		return true
 	default:
 		return false
@@ -135,11 +135,45 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if action == "restart" {
+		before := d.languageServerStatus(ctx, requestID, workspace)
+		previouslyAttached := []string{}
+		if beforeData, _ := before["data"].(map[string]any); beforeData != nil {
+			for _, server := range anySlice(beforeData["attached_servers"]) {
+				if name := strings.TrimSpace(fmt.Sprint(server)); name != "" {
+					previouslyAttached = append(previouslyAttached, name)
+				}
+			}
+		}
 		backend, err := d.restartCanonicalProvider(ctx, workspace)
 		if err != nil {
 			return modernFailure(requestID, workspace, "semantic_provider_restart_failed", err)
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", "Owned Neovim provider restarted; probe language-server attachment next", map[string]any{"provider": canonicalProviderStatus(backend)})
+		verified := d.languageServerStatus(ctx, requestID, workspace)
+		data, _ := verified["data"].(map[string]any)
+		if data == nil {
+			data = map[string]any{}
+		}
+		data["provider"] = canonicalProviderStatus(backend)
+		verified["data"] = data
+		current := map[string]bool{}
+		for _, server := range anySlice(data["attached_servers"]) {
+			current[strings.TrimSpace(fmt.Sprint(server))] = true
+		}
+		lost := []string{}
+		for _, server := range previouslyAttached {
+			if !current[server] {
+				lost = append(lost, server)
+			}
+		}
+		if len(lost) == 0 && verified["outcome"] == "ok" {
+			verified["summary"] = "Owned Neovim provider restarted and installed language-server attachments were verified"
+		} else {
+			data["lost_attached_servers"] = lost
+			verified["outcome"] = "provisional"
+			verified["code"] = "language_server_restart_incomplete"
+			verified["summary"] = "Owned Neovim provider restarted, but one or more installed language servers did not reattach"
+		}
+		return verified
 	}
 	if action != "install" {
 		return modernEnvelope(requestID, workspace, "failed", "invalid_language_server_action", "action must be install or restart", map[string]any{})

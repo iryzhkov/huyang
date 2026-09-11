@@ -889,7 +889,8 @@ local function ensure_java_bundle()
     end)
     return true
 end
-local JDTLS_ATTACH_MS = 90000
+local JDTLS_ATTACH_MS = 15000
+local JDTLS_COMMAND_MS = 10000
 
 -- A jdtls client attached to `file` (or any Java file of the root), waited
 -- for because jdtls takes a while to come up.
@@ -919,8 +920,8 @@ end
 local function jdtls_command(client, bufnr, command, arguments)
     local timer = uv.new_timer()
     local rpc_err, result = I().await(function(resume)
-        timer:start(60000, 0, vim.schedule_wrap(function()
-            resume({ message = "timed out after 60 s" }, nil)
+        timer:start(JDTLS_COMMAND_MS, 0, vim.schedule_wrap(function()
+            resume({ message = "timed out after 10 s; jdtls may still be importing the project, wait for language_server_status to report jdtls attached and retry with a new idempotency key" }, nil)
         end))
         local ok = client:request("workspace/executeCommand",
             { command = command, arguments = arguments or {} },
@@ -1006,6 +1007,9 @@ BUILTIN.java = {
                 if m.mainClass == main_class then project_name = m.projectName end
             end
         end
+		if not project_name then
+			err("jdtls has not associated %s with a Java project yet; pass file for the main class, wait for workspace import to finish, then retry", main_class)
+		end
         local paths = jdtls_command(client, bufnr, "vscode.java.resolveClasspath", { main_class, project_name })
         local cfg = {
             request = "launch",
@@ -2795,6 +2799,8 @@ end
 M._state = function() return state end
 M._test = {
     adapter_start_budget = adapter_start_budget,
+    jdtls_attach_timeout_ms = JDTLS_ATTACH_MS,
+    jdtls_command_timeout_ms = JDTLS_COMMAND_MS,
     sanitize_debug_notice = sanitize_debug_notice,
     js_debug_adapter = BUILTIN["js-debug"].adapter,
 }
