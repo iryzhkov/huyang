@@ -889,6 +889,24 @@ local function workspace_support(args)
                 local _, why = ensure_java_home()
                 prerequisite = why
             end
+			-- Each embedded provider owns exactly one workspace. Pin servers whose
+			-- upstream root discovery can fall back to Neovim's daemon cwd so they
+			-- attach to this workspace (and to an isolated preparation sandbox).
+			if ft == "typescript" or ft == "typescriptreact"
+				or ft == "javascript" or ft == "javascriptreact" then
+				local current = vim.lsp.config.ts_ls or {}
+				local init_options = vim.deepcopy(current.init_options or {})
+				local bundled_tsserver = vim.fn.stdpath("data")
+					.. "/mason/packages/typescript-language-server/node_modules/typescript/lib/tsserver.js"
+				if vim.uv.fs_stat(bundled_tsserver) then
+					init_options.tsserver = vim.tbl_extend("force", init_options.tsserver or {}, {
+						path = bundled_tsserver,
+					})
+				end
+				pcall(vim.lsp.config, "ts_ls", { root_dir = root, init_options = init_options })
+			elseif ft == "ruby" then
+				pcall(vim.lsp.config, "ruby_lsp", { root_dir = root })
+			end
 			local restored_servers = enable_installed_servers(ft)
 			local attach_wait_ms = support_attach_wait(ft, requested_attach_wait, restored_servers)
             local configs = enabled_lsp_configs_for(ft)

@@ -2270,6 +2270,14 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 		}
 		if plan.State == workspacecore.PlanProvisional {
 			result["outcome"] = "provisional"
+			if plan.Preparation != nil {
+				result["next"] = []any{map[string]any{
+					"tool": "change_plan", "action": "apply", "plan_id": plan.PlanID,
+					"plan_revision": plan.PlanRevision, "prepared_revision": plan.Preparation.PreparedRevision,
+					"use_new_idempotency_key": true,
+					"note":                    "Apply only if you explicitly accept the incomplete verification evidence for this exact prepared revision.",
+				}}
+			}
 		}
 		if plan.Preview != nil && plan.Preview.Outcome == "conflict" {
 			result["outcome"] = "conflict"
@@ -2436,6 +2444,8 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 			code, outcome = "workspace_epoch_changed", "conflict"
 		case strings.Contains(err.Error(), "recovery"), plan.State == workspacecore.PlanRecoveryRequired:
 			code = "commit_recovery_required"
+		case strings.Contains(err.Error(), "undeclared_tool_write"):
+			code = "undeclared_tool_write"
 		case strings.Contains(err.Error(), "provider"):
 			code = "provider_prepare_failed"
 		}
@@ -2457,6 +2467,11 @@ func (d *directWorkspaces) changePlan(ctx context.Context, requestID string, wor
 				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
 				map[string]any{"tool": "change_plan", "action": "discard", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
 			}
+		} else if code == "undeclared_tool_write" {
+			result["next"] = []any{map[string]any{
+				"action": "update_pipeline_command", "scope": ".huyang.toml",
+				"note": "Declare the reported cache/output path in the command's writes list, or configure that tool to disable or redirect its cache, then prepare again with a new idempotency key.",
+			}}
 		} else if action == "apply" && code == "workspace_epoch_changed" && plan.PlanID != "" {
 			result["next"] = []any{
 				map[string]any{"tool": "change_plan", "action": "inspect", "plan_id": plan.PlanID, "plan_revision": plan.PlanRevision},
@@ -2486,6 +2501,20 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 			return modernFailure(requestID, workspace, "invalid_verification_stage", errors.New("verification stage must be a string"))
 		}
 		stages = append(stages, stage)
+	}
+	// For languages without a built-in exact parser, the trusted project check
+	// is the declared parser corroborator. Include it when parser verification
+	// is requested alone so explicit verification agrees with plan preparation
+	// and with language_server_status recovery guidance.
+	hasParser, hasCheck := false, false
+	for _, stage := range stages {
+		hasParser = hasParser || stage == "parser"
+		hasCheck = hasCheck || stage == "check"
+	}
+	if hasParser && !hasCheck {
+		if policy, err := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, ""); err == nil && policy.Trusted && len(policy.Check) > 0 {
+			stages = append(stages, "check")
+		}
 	}
 	testScope := fmt.Sprint(arguments["test_scope"])
 	request := workspacecore.VerificationRequest{

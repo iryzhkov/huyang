@@ -391,6 +391,7 @@ func (d *directWorkspaces) recordedRevisionDiffs(workspaceID string, fromSeq, to
 	defer d.replayMu.Unlock()
 
 	var recorded []recordedRevisionDiff
+	seen := map[string]bool{}
 	prefix := workspaceID + "\x00"
 	for key, replay := range d.replays {
 		if !replay.complete || !strings.HasPrefix(key, prefix) {
@@ -438,9 +439,17 @@ func (d *directWorkspaces) recordedRevisionDiffs(workspaceID string, fromSeq, to
 			if !ok {
 				continue
 			}
+			path := fmt.Sprint(diff["path"])
+			beforeSHA := fmt.Sprint(diff["before_sha256"])
+			afterSHA := fmt.Sprint(diff["after_sha256"])
+			identity := fmt.Sprintf("%d\x00%d\x00%s\x00%s\x00%s\x00%s", left, right, path, beforeSHA, afterSHA, fmt.Sprint(diff["patch"]))
+			if seen[identity] {
+				continue
+			}
+			seen[identity] = true
 			recorded = append(recorded, recordedRevisionDiff{
-				from: left, to: right, diff: diff, path: fmt.Sprint(diff["path"]),
-				beforeSHA: fmt.Sprint(diff["before_sha256"]), afterSHA: fmt.Sprint(diff["after_sha256"]),
+				from: left, to: right, diff: diff, path: path,
+				beforeSHA: beforeSHA, afterSHA: afterSHA,
 			})
 		}
 	}

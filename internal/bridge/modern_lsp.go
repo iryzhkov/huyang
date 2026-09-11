@@ -68,6 +68,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	support, _ := value.(map[string]any)
 	attachedLanguages, missing := 0, []string{}
+	failedAttachments := []string{}
 	seenServers := map[string]struct{}{}
 	attachedServers := []string{}
 	installOptions := map[string][]string{}
@@ -87,6 +88,9 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 			}
 		} else if language != "" {
 			missing = append(missing, language)
+			if strings.HasPrefix(lsp, "none (configured:") {
+				failedAttachments = append(failedAttachments, language)
+			}
 			for _, rawOption := range anySlice(entry["install_options"]) {
 				if option := strings.TrimSpace(fmt.Sprint(rawOption)); option != "" {
 					duplicate := false
@@ -105,14 +109,18 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	outcome := "ok"
 	summary := fmt.Sprintf("%d unique language servers attached across %d workspace language modes", len(attachedServers), attachedLanguages)
+	code := ""
 	if len(attachedServers) == 0 {
-		outcome, summary = "unavailable", "No workspace language server is attached"
+		outcome, code, summary = "unavailable", "language_server_unavailable", "No workspace language server is attached"
+	} else if len(failedAttachments) > 0 {
+		outcome, code = "partial", "language_server_attachment_incomplete"
+		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(attachedServers), strings.Join(failedAttachments, ", "))
 	}
-	result := modernEnvelope(requestID, workspace, outcome, "", summary, map[string]any{
+	result := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"provider": canonicalProviderStatus(backend), "language_servers": support,
 		"attached_language_count": attachedLanguages, "attached_server_count": len(attachedServers),
 		"attached_servers": attachedServers, "missing_languages": missing,
-		"install_options": installOptions,
+		"failed_attachment_languages": failedAttachments, "install_options": installOptions,
 	})
 	if len(missing) > 0 {
 		result["warnings"] = []string{"Some workspace languages have no attached language server."}

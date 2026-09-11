@@ -1049,15 +1049,23 @@ function M.diagnostic_evidence(args)
             local filetype = vim.bo[bufnr].filetype
             for _, existing in ipairs(vim.lsp.get_clients()) do
                 local config = existing.config or {}
-                local root = config.root_dir
                 local filetypes = config.filetypes
-                if root and vim.fs.relpath(root, path)
-                    and (not filetypes or vim.tbl_contains(filetypes, filetype)) then
+                -- The embedded provider owns exactly one workspace, so a
+                -- matching server is safe to reuse for another buffer in it.
+                -- Client root_dir can remain a discovery callback on newer
+                -- Neovim versions and is not a reliable containment value.
+                if not filetypes or vim.tbl_contains(filetypes, filetype) then
                     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
                 end
             end
             local clients = vim.lsp.get_clients({ bufnr = bufnr })
             local configured = enabled_lsp_configs_for(vim.bo[bufnr].filetype)
+            if #clients == 0 and #configured > 0 then
+                pcall(function()
+                    vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
+                end)
+                clients = vim.lsp.get_clients({ bufnr = bufnr })
+            end
             local startable = {}
             if #clients == 0 then
                 for _, name in ipairs(configured) do
