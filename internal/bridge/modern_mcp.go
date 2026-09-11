@@ -22,8 +22,10 @@ import (
 )
 
 const (
-	modernAPIVersion       = "huyang.workspace/v1alpha1"
-	defaultToolCallTimeout = 2 * time.Minute
+	modernAPIVersion                 = "huyang.workspace/v1alpha1"
+	defaultToolCallTimeout           = 2 * time.Minute
+	verificationProviderAttachWaitMS = 1500
+	verificationDiagnosticSettleWait = 1500 * time.Millisecond
 )
 
 var errGlobalToolCallTimeout = errors.New("global tool-call timeout exceeded")
@@ -1095,7 +1097,7 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		result["evidence"] = map[string]any{"ids": []string{evidence.ID}, "truncated": false}
 		return result
 	case "edit_apply":
-		return d.edit(requestID, workspace, arguments)
+		return d.edit(ctx, requestID, workspace, arguments)
 	case "change_plan":
 		return d.changePlan(ctx, requestID, workspace, arguments)
 	case "verify_run":
@@ -1603,6 +1605,12 @@ func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, 
 	next := []any{}
 	if resolution.Code != workspacecore.ConflictTargetDeleted {
 		next = append(next, map[string]any{"tool": "read", "action": "refresh_path", "path": path})
+	} else if destination, ok := workspace.RecentRenameDestination(path); ok {
+		result["summary"] = fmt.Sprintf("The revision-bound target moved from %s to %s", path, destination)
+		next = append(next, map[string]any{
+			"tool": "read", "action": "recover_at_detected_rename",
+			"path": destination, "source_path": path,
+		})
 	} else {
 		next = append(next, map[string]any{
 			"tool": "search", "action": "inspect_git_rename_history",
@@ -1616,7 +1624,7 @@ func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, 
 	return result
 }
 
-func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (d *directWorkspaces) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operation, ok := arguments["operation"].(map[string]any)
 	if !ok || operation["kind"] != "replace_range" {
 		return modernEnvelope(requestID, workspace, "unavailable", "operation_unavailable", "S07 direct edit supports only replace_range", map[string]any{})
@@ -1673,22 +1681,62 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		"changed_paths":    []string{change.Diff.Path}, "canonical_changed": !preview,
 	}
 	evidenceIDs := make([]string, 0)
+	diagnosticRecovery := false
 	if !preview {
-		outcome = "provisional"
-		summary = "Guarded range edit applied; semantic diagnostics are unavailable until verification runs"
-		data["verification"] = map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
+		revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 		data["document_revision"] = after.Revision
+		verification := map[string]any{"confidence": "unavailable", "reasons": []string{"semantic_provider_unavailable"}}
+		backend, providerErr := d.canonicalProvider(ctx, workspace)
+		if providerErr == nil {
+			report, evidenceErr := recordProviderDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
+				Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
+				BeforeExists: true, AfterExists: true,
+			}}, revision, "edit_"+requestID)
+			if evidenceErr == nil {
+				evidenceIDs = append(evidenceIDs, report.EvidenceIDs...)
+				data["diagnostic_delta"] = map[string]any{"new": report.New, "resolved": report.Resolved}
+				verification = map[string]any{
+					"confidence": report.Confidence,
+					"reasons":    nonNilStrings(report.ProvisionalReasons),
+				}
+				if report.Confidence == workspacecore.ConfidenceAuthoritative || report.Confidence == workspacecore.ConfidenceCorroborated {
+					outcome = "ok"
+					summary = "Guarded range edit applied; current semantic diagnostics captured"
+				} else {
+					outcome = "provisional"
+					summary = "Guarded range edit applied; semantic diagnostics remain incomplete"
+					diagnosticRecovery = true
+				}
+			} else {
+				providerErr = evidenceErr
+			}
+		}
+		if providerErr != nil {
+			outcome = "provisional"
+			summary = "Guarded range edit applied; semantic diagnostic refresh failed"
+			verification = map[string]any{"confidence": "unavailable", "reasons": []string{providerErr.Error()}}
+			diagnosticRecovery = true
+		}
+		data["verification"] = verification
 	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 	if resolution != nil && resolution.Status == workspacecore.ResolutionRelocated {
 		if preview {
 			summary = "Guarded range preview is ready after safely relocating the stale target; canonical bytes unchanged"
+		} else if outcome == "ok" {
+			summary = "Guarded range edit applied after safely relocating the stale target; current semantic diagnostics captured"
 		} else {
-			summary = "Guarded range edit applied after safely relocating the stale target; semantic diagnostics are unavailable until verification runs"
+			summary = "Guarded range edit applied after safely relocating the stale target; semantic diagnostics remain incomplete"
 		}
 	}
 	result := modernEnvelope(requestID, workspace, outcome, "", summary, data)
 	result["evidence"] = map[string]any{"ids": nonNilStrings(evidenceIDs), "truncated": false}
+	if diagnosticRecovery {
+		result["next"] = []any{
+			map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"},
+			map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": data["revision"]},
+		}
+	}
 	return result
 }
 
@@ -1758,7 +1806,7 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		diffs := make([]any, 0, len(known))
 		paths := make([]string, 0, len(known))
 		for _, item := range known {
-			diffs = append(diffs, item.diff)
+			diffs = append(diffs, compactRevisionDiff(item.diff))
 			if item.path != "" {
 				paths = append(paths, item.path)
 			}
@@ -1793,7 +1841,7 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		if ends.before != "" && ends.before == ends.after {
 			continue
 		}
-		diffs = append(diffs, item.diff)
+		diffs = append(diffs, compactRevisionDiff(item.diff))
 	}
 	netChangedPaths := 0
 	for _, ends := range byPath {
@@ -1806,6 +1854,20 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		"from_revision": from, "to_revision": to, "current_revision": current, "diffs": diffs,
 		"semantics": "net endpoint identity with ordered edit evidence",
 	})
+}
+
+// compactRevisionDiff keeps the default revision history response bounded by
+// omitting complete endpoint bodies. The patch and endpoint hashes retain exact,
+// independently checkable evidence without JSON's base64 expansion of []byte.
+func compactRevisionDiff(value any) any {
+	switch diff := value.(type) {
+	case workspacecore.ExactDiff:
+		return map[string]any{"path": diff.Path, "before_sha256": diff.BeforeSHA256, "after_sha256": diff.AfterSHA256, "patch": diff.Patch}
+	case map[string]any:
+		return map[string]any{"path": diff["path"], "before_sha256": diff["before_sha256"], "after_sha256": diff["after_sha256"], "patch": diff["patch"]}
+	default:
+		return map[string]any{"detail": "diff receipt unavailable", "value_type": fmt.Sprintf("%T", value)}
+	}
 }
 
 func uniqueStrings(values []string) []string {
@@ -1971,22 +2033,46 @@ func compactVerificationResult(result workspacecore.VerificationResult) (map[str
 	return compacted, nonNilStrings(uniqueStrings(evidenceIDs))
 }
 
+func fullVerificationFallback(result workspacecore.VerificationResult) map[string]any {
+	if result.Impact == nil || !result.Impact.RecommendFull || result.Targeted == nil || result.Targeted.Status != "unavailable" {
+		return nil
+	}
+	stages := make([]string, 0, len(result.Stages))
+	seen := map[string]bool{}
+	for _, stage := range result.Stages {
+		if stage.Stage != "" && !seen[stage.Stage] {
+			stages = append(stages, stage.Stage)
+			seen[stage.Stage] = true
+		}
+	}
+	return map[string]any{
+		"tool":                    "verify_run",
+		"action":                  "run_full_verification",
+		"revision_or_transaction": result.Revision,
+		"stages":                  stages,
+		"test_scope":              "full",
+		"use_new_idempotency_key": true,
+	}
+}
+
 func modernVerificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult) map[string]any {
 	compacted, evidenceIDs := compactVerificationResult(result)
 	envelope := modernEnvelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"verification": compacted, "cache": cache,
 	})
 	envelope["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
-	if len(evidenceIDs) > 0 {
-		next := make([]any, 0, len(evidenceIDs))
-		for _, id := range evidenceIDs {
-			next = append(next, map[string]any{"tool": "evidence_get", "action": "inspect_verification_evidence", "evidence_id": id})
-		}
+	next := make([]any, 0, len(evidenceIDs)+1)
+	if fallback := fullVerificationFallback(result); fallback != nil {
+		next = append(next, fallback)
+	}
+	for _, id := range evidenceIDs {
+		next = append(next, map[string]any{"tool": "evidence_get", "action": "inspect_verification_evidence", "evidence_id": id})
+	}
+	if len(next) > 0 {
 		envelope["next"] = next
 	}
 	return envelope
 }
-
 func nonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -2288,12 +2374,12 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 				providerOpened = providerErr == nil
 				if providerErr == nil {
 					_, providerErr = callCanonicalProvider(ctx, "workspace_support_"+requestID, workspace, diagnosticProvider,
-						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": 12000})
+						"workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
 				}
 				if providerErr == nil {
 
 					request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, staged []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-						report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, 12*time.Second)
+						report, evidenceErr := recordProviderDiagnostics(verifyCtx, workspace, diagnosticProvider, staged, revision, "verify_"+requestID, verificationDiagnosticSettleWait)
 						return diagnosticVerificationStage(revision, report), evidenceErr
 					}
 				}
@@ -2315,7 +2401,15 @@ func (d *directWorkspaces) verify(ctx context.Context, requestID string, workspa
 		}
 	}
 	if err != nil {
-		return modernVerificationEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), "", result)
+		code, summary := "verification_failed", err.Error()
+		resultEnvelope := modernVerificationEnvelope(requestID, workspace, "failed", code, summary, "", result)
+		if timeoutCode, timeoutSummary, recovery, ok := verificationTimeoutRecovery(revision, stages, testScope, result); ok {
+			resultEnvelope["code"] = timeoutCode
+			resultEnvelope["summary"] = timeoutSummary
+			next, _ := resultEnvelope["next"].([]any)
+			resultEnvelope["next"] = append(next, recovery)
+		}
+		return resultEnvelope
 	}
 	outcome := "ok"
 	for _, stage := range result.Stages {

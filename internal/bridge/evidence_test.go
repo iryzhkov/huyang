@@ -6,9 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
+
+func TestDiagnosticEvidenceTimeoutIncludesOnlyBoundedProviderOverhead(t *testing.T) {
+	if got, want := diagnosticEvidenceTimeout(1500), 3500*time.Millisecond; got != want {
+		t.Fatalf("timeout = %s, want %s", got, want)
+	}
+	if got, want := diagnosticEvidenceTimeout(-1), 2*time.Second; got != want {
+		t.Fatalf("negative-wait timeout = %s, want %s", got, want)
+	}
+}
 
 func TestUnavailableDiagnosticReasonSurvivesJSONAndReachesStageCoverage(t *testing.T) {
 	var payload providerDiagnosticPayload

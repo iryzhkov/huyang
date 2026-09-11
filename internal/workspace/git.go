@@ -641,6 +641,37 @@ func unique(values []string, value string) []string {
 	}
 	return append(values, value)
 }
+func (w *Workspace) RecentRenameDestination(path string) (string, bool) {
+	g, err := w.gitRepository()
+	if err != nil {
+		return "", false
+	}
+	_, target, err := w.gitPath(g, path)
+	if err != nil {
+		return "", false
+	}
+	out, _, err := runGitAt(g.root, nil, "log", "-n", "50", "--format=", "--name-status", "--find-renames", "HEAD")
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 || !strings.HasPrefix(fields[0], "R") || fields[1] != target || !within(fields[2], g.prefix) {
+			continue
+		}
+		info, statErr := os.Stat(filepath.Join(g.root, filepath.FromSlash(fields[2])))
+		if statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		destination := fields[2]
+		if g.prefix != "" {
+			destination = strings.TrimPrefix(destination, g.prefix+"/")
+		}
+		return destination, true
+	}
+	return "", false
+}
+
 func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult, error) {
 	g, err := w.gitRepository()
 	if err != nil {

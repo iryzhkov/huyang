@@ -47,6 +47,33 @@ local function any(list, text)
     return false
 end
 
+do
+    local original_exepath, original_system = vim.fn.exepath, vim.system
+	local original_path, original_gem_home, original_gem_path = vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH
+    local calls = {}
+    vim.fn.exepath = function(name) return "/test/bin/" .. name end
+    vim.system = function(command)
+        calls[#calls + 1] = command
+        local code = #calls == 1 and 1 or 0
+        return { wait = function() return { code = code, stdout = "", stderr = "" } end }
+    end
+    local ok, why = install._ensure_ruby_lsp_bundler({
+        get_install_path = function() return "/mason/packages/ruby-lsp" end,
+    })
+	local provider_path = vim.env.PATH
+    vim.fn.exepath, vim.system = original_exepath, original_system
+	vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH = original_path, original_gem_home, original_gem_path
+    check("ruby-lsp installs a missing Bundler inside its Mason package",
+        ok == true and why == nil and #calls == 3
+            and calls[2][1] == "/test/bin/gem"
+            and calls[2][5] == "/mason/packages/ruby-lsp"
+            and calls[2][6] == "bundler"
+            and provider_path:find("/mason/packages/ruby-lsp/bin", 1, true) == 1
+            and vim.lsp.config.ruby_lsp.cmd_env.GEM_HOME == "/mason/packages/ruby-lsp"
+            and vim.lsp.config.ruby_lsp.cmd_env.PATH:find("/mason/packages/ruby-lsp/bin", 1, true) == 1,
+        { calls = calls, cmd_env = vim.lsp.config.ruby_lsp.cmd_env })
+end
+
 -- The configuration this Neovim actually loads is checked by starting
 -- Neovim on it: its real breakage is load-time, and no static check sees it.
 local this_config = vim.fn.stdpath("config")

@@ -134,6 +134,17 @@ func TestGitRecentHistoryDirtyPreparedAndSearch(t *testing.T) {
 	}
 }
 
+func TestRecentRenameDestinationFindsCurrentPath(t *testing.T) {
+	workspace, root := newGitWorkspace(t)
+	gitTestRun(t, root, "mv", "note.txt", "renamed.txt")
+	gitTestRun(t, root, "commit", "-m", "rename note")
+
+	destination, ok := workspace.RecentRenameDestination("note.txt")
+	if !ok || destination != "renamed.txt" {
+		t.Fatalf("rename destination = %q, %v; want renamed.txt, true", destination, ok)
+	}
+}
+
 func TestGitRecentCommitsExposeFirstParentMergeShape(t *testing.T) {
 	workspace, root := newGitWorkspace(t)
 	mainBranch := gitTestRun(t, root, "symbolic-ref", "--short", "HEAD")

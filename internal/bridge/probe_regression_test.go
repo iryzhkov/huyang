@@ -84,12 +84,17 @@ func TestWorkspaceInspectViewsExposeAndAdvanceCanonicalRevision(t *testing.T) {
 	if applied["outcome"] != "provisional" {
 		t.Fatalf("edit failed: %#v", applied)
 	}
-	if !strings.Contains(applied["summary"].(string), "diagnostics are unavailable") {
-		t.Fatalf("edit misreported unavailable diagnostics: %#v", applied)
+	if !strings.Contains(applied["summary"].(string), "diagnostic refresh failed") {
+		t.Fatalf("edit misreported provider refresh failure: %#v", applied)
 	}
 	verification := applied["data"].(map[string]any)["verification"].(map[string]any)
 	if verification["confidence"] != "unavailable" {
 		t.Fatalf("edit invented diagnostic timeout evidence: %#v", applied)
+	}
+	next := applied["next"].([]any)
+	if len(next) != 2 || next[0].(map[string]any)["tool"] != "language_server_status" ||
+		next[1].(map[string]any)["revision_or_transaction"] != "wsrev_2" {
+		t.Fatalf("edit provider failure is not actionable: %#v", applied)
 	}
 	inspected := callModern(t, session, "workspace_inspect", map[string]any{
 		"workspace_id": workspaceID, "view": "status",
@@ -381,6 +386,20 @@ func TestStaleRangeRecoveryNeverSuggestsEmptySearch(t *testing.T) {
 	next := result["next"].([]any)
 	if len(next) != 1 || next[0].(map[string]any)["tool"] != "read" {
 		t.Fatalf("range conflict suggested a search with no query: %#v", result)
+	}
+}
+
+func TestVerificationTimeoutRecoveryPrioritizesTimeout(t *testing.T) {
+	result := workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{
+		{Stage: "format_gate", Status: workspacecore.VerificationFailed},
+		{Stage: "check", Status: workspacecore.VerificationTimedOut, DurationMS: 20006},
+	}}
+	code, summary, recovery, ok := verificationTimeoutRecovery("wsrev_8", []string{"check"}, "full", result)
+	if !ok || code != "verification_timed_out" || !strings.Contains(summary, "check stage after 20006 ms") {
+		t.Fatalf("timeout summary is not truthful: %q %q %#v", code, summary, recovery)
+	}
+	if recovery["action"] != "retry_timed_out_stage" || recovery["revision_or_transaction"] != "wsrev_8" || recovery["use_new_idempotency_key"] != true {
+		t.Fatalf("timeout recovery is not precise: %#v", recovery)
 	}
 }
 

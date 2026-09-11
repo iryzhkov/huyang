@@ -30,7 +30,7 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 			paths = append(paths, filepath.Join(descriptor.Root, filepath.FromSlash(file.Path)))
 		}
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	result, err := backend.Call(callCtx, provider.Request{
@@ -78,6 +78,17 @@ func recordProviderDiagnostics(ctx context.Context, workspace *workspacecore.Wor
 		}
 	}
 	return report, nil
+}
+
+// diagnosticEvidenceTimeout bounds provider overhead while still allowing the
+// caller-requested diagnostic settle window. A stalled LSP therefore produces
+// provisional timed-out evidence promptly instead of consuming the whole
+// tool-call deadline.
+func diagnosticEvidenceTimeout(waitMS int) time.Duration {
+	if waitMS < 0 {
+		waitMS = 0
+	}
+	return time.Duration(waitMS)*time.Millisecond + 2*time.Second
 }
 
 func diagnosticVerificationStage(revision string, report workspacecore.DiagnosticReport) workspacecore.VerificationStage {

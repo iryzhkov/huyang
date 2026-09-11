@@ -253,7 +253,7 @@ func (s *sandboxPlanStager) Stage(ctx context.Context, request workspacecore.Pla
 		return err
 	}
 	s.provider = replacement
-	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree})
+	_, _ = callCanonicalProvider(ctx, fmt.Sprintf("workspace_support_%s", s.planID), s.workspace, replacement, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": verificationProviderAttachWaitMS})
 	diagnosticReport, err := recordProviderDiagnostics(ctx, s.workspace, s.provider, request.Files, s.baseRevision, s.planID)
 	if err != nil {
 		return err

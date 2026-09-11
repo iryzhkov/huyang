@@ -36,6 +36,12 @@ type controlHello struct {
 	Profile string
 }
 
+type proxyLineEvent struct {
+	line       []byte
+	err        error
+	generation uint64
+}
+
 type huyangService struct {
 	config        serviceConfig
 	direct        *directWorkspaces
@@ -236,26 +242,162 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 }
 
 func proxyHuyangMCP(socketPath string, profile mcpProfile, stdin io.Reader, stdout io.Writer) error {
-	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
-	if err != nil {
-		return fmt.Errorf("connect service at %s: %w", socketPath, err)
+	type envelope struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
 	}
-	defer connection.Close()
-	if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile)}); err != nil {
+
+	clientEvents := make(chan proxyLineEvent, 32)
+	go readProxyLines(stdin, 0, clientEvents)
+	backendEvents := make(chan proxyLineEvent, 32)
+
+	var connection *net.UnixConn
+	var generation uint64
+	var initializeRequest, initializedNotification []byte
+	var initializeID string
+	clientInitialized := false
+	outstanding := make(map[string][]byte)
+
+	message := func(line []byte) envelope {
+		var value envelope
+		_ = json.Unmarshal(line, &value)
+		return value
+	}
+	idKey := func(id json.RawMessage) string {
+		value := strings.TrimSpace(string(id))
+		if value == "" || value == "null" {
+			return ""
+		}
+		return value
+	}
+
+	connect := func(restarting bool) error {
+		deadline := time.Now().Add(30 * time.Second)
+		var err error
+		for {
+			connection, err = net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
+			if err == nil {
+				break
+			}
+			if !restarting || time.Now().After(deadline) {
+				return fmt.Errorf("connect service at %s: %w", socketPath, err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile)}); err != nil {
+			_ = connection.Close()
+			return err
+		}
+		reader := bufio.NewReader(connection)
+		if restarting && clientInitialized && len(initializeRequest) > 0 {
+			if _, err := connection.Write(initializeRequest); err != nil {
+				_ = connection.Close()
+				return err
+			}
+			_ = connection.SetReadDeadline(time.Now().Add(10 * time.Second))
+			for {
+				line, err := reader.ReadBytes('\n')
+				if err != nil {
+					_ = connection.Close()
+					return fmt.Errorf("reinitialize service connection: %w", err)
+				}
+				if idKey(message(line).ID) == initializeID {
+					break
+				}
+			}
+			_ = connection.SetReadDeadline(time.Time{})
+			if len(initializedNotification) > 0 {
+				if _, err := connection.Write(initializedNotification); err != nil {
+					_ = connection.Close()
+					return err
+				}
+			}
+		}
+		for _, line := range outstanding {
+			if _, err := connection.Write(line); err != nil {
+				_ = connection.Close()
+				return err
+			}
+		}
+		generation++
+		go readProxyLines(reader, generation, backendEvents)
+		return nil
+	}
+
+	if err := connect(false); err != nil {
 		return err
 	}
-	readDone := make(chan error, 1)
-	go func() {
-		_, copyErr := io.Copy(stdout, connection)
-		readDone <- copyErr
+	defer func() {
+		if connection != nil {
+			_ = connection.Close()
+		}
 	}()
-	_, writeErr := io.Copy(connection, stdin)
-	_ = connection.CloseWrite()
-	readErr := <-readDone
-	if writeErr != nil {
-		return writeErr
+
+	for {
+		select {
+		case event := <-clientEvents:
+			if event.err != nil {
+				if errors.Is(event.err, io.EOF) {
+					return nil
+				}
+				return event.err
+			}
+			value := message(event.line)
+			key := idKey(value.ID)
+			if value.Method == "initialize" {
+				initializeRequest = append([]byte(nil), event.line...)
+				initializeID = key
+			}
+			if value.Method == "notifications/initialized" || value.Method == "initialized" {
+				initializedNotification = append([]byte(nil), event.line...)
+			}
+			if key != "" && value.Method != "" {
+				outstanding[key] = append([]byte(nil), event.line...)
+			}
+			if _, err := connection.Write(event.line); err != nil {
+				_ = connection.Close()
+				if err := connect(true); err != nil {
+					return fmt.Errorf("reconnect service after write failure: %w", err)
+				}
+			}
+		case event := <-backendEvents:
+			if event.generation != generation {
+				continue
+			}
+			if event.err != nil {
+				_ = connection.Close()
+				if err := connect(true); err != nil {
+					return fmt.Errorf("reconnect service after disconnect: %w", err)
+				}
+				continue
+			}
+			value := message(event.line)
+			key := idKey(value.ID)
+			if key != "" {
+				delete(outstanding, key)
+				if key == initializeID {
+					clientInitialized = true
+				}
+			}
+			if _, err := stdout.Write(event.line); err != nil {
+				return err
+			}
+		}
 	}
-	return readErr
+}
+
+func readProxyLines(reader io.Reader, generation uint64, events chan<- proxyLineEvent) {
+	buffered := bufio.NewReader(reader)
+	for {
+		line, err := buffered.ReadBytes('\n')
+		if len(line) > 0 {
+			events <- proxyLineEvent{line: line, generation: generation}
+		}
+		if err != nil {
+			events <- proxyLineEvent{err: err, generation: generation}
+			return
+		}
+	}
 }
 
 type structReadCloser struct {

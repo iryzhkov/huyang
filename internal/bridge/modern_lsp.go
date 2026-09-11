@@ -8,6 +8,23 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+func verificationParserAvailable(language string) bool {
+	switch language {
+	case "go", "json":
+		return true
+	default:
+		return false
+	}
+}
+
+func reconcileParserSupport(entry map[string]any) {
+	installed, _ := entry["treesitter_parser"].(bool)
+	available := installed && verificationParserAvailable(fmt.Sprint(entry["filetype"]))
+	entry["treesitter_parser_installed"] = installed
+	entry["verification_parser"] = available
+	entry["treesitter_parser"] = available
+}
+
 func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
 	backend, err := d.canonicalProvider(ctx, workspace)
 	if err != nil {
@@ -29,6 +46,7 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	installOptions := map[string][]string{}
 	for _, raw := range anySlice(support["languages"]) {
 		entry, _ := raw.(map[string]any)
+		reconcileParserSupport(entry)
 		language := fmt.Sprint(entry["filetype"])
 		lsp := fmt.Sprint(entry["lsp"])
 		if lsp != "" && lsp != "none" && !strings.HasPrefix(lsp, "none (") {
@@ -87,7 +105,6 @@ func (d *directWorkspaces) languageServerStatus(ctx context.Context, requestID s
 	}
 	return result
 }
-
 func (d *directWorkspaces) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if action == "restart" {

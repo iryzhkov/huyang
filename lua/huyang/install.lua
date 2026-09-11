@@ -1037,6 +1037,57 @@ local function attached_client(root, ft)
     return nil, why
 end
 
+-- Mason's ruby-lsp package relies on Bundler at runtime but does not install
+-- it on Ruby distributions that omit the default Bundler gem. Keep the
+-- dependency inside the Mason package so the generated launcher, whose
+-- GEM_PATH points there, can load it without mutating the user's gem home.
+local function ensure_ruby_lsp_bundler(pkg)
+    local ruby, gem = vim.fn.exepath("ruby"), vim.fn.exepath("gem")
+    if ruby == "" or gem == "" then
+        return nil, "ruby-lsp requires RubyGems and Bundler; install ruby and gem, then retry"
+    end
+    local install_path = tostring(pkg:get_install_path())
+    local env = { GEM_HOME = install_path, GEM_PATH = install_path .. ":" .. (vim.env.GEM_PATH or "") }
+	-- The ruby-lsp launcher execs Bundler from a child shell. Keep the provider's
+	-- isolated process environment aligned with cmd_env so that child sees the
+	-- package-local bundle executable as well.
+	vim.env.GEM_PATH = env.GEM_PATH
+	vim.env.GEM_HOME = env.GEM_HOME
+	if not (vim.env.PATH or ""):find(install_path .. "/bin", 1, true) then
+		vim.env.PATH = install_path .. "/bin:" .. (vim.env.PATH or "")
+	end
+	local configured, config_err = pcall(function()
+		local current = vim.deepcopy((vim.lsp.config.ruby_lsp or {}).cmd_env or {})
+		current.GEM_HOME = env.GEM_HOME
+		current.GEM_PATH = env.GEM_PATH
+		current.PATH = install_path .. "/bin:" .. (vim.env.PATH or "")
+		vim.lsp.config("ruby_lsp", { cmd_env = current })
+	end)
+	if not configured then
+		return nil, "ruby-lsp Bundler is installed but its runtime environment could not be configured: "
+			.. tostring(config_err) .. "; add " .. install_path .. "/bin to ruby_lsp cmd_env.PATH"
+	end
+    local function probe()
+        local result = vim.system({ ruby, "-e", "require 'bundler'" }, { text = true, env = env }):wait(3000)
+        return result and result.code == 0
+    end
+    if probe() then return true end
+    local result = vim.system({ gem, "install", "--no-document", "--install-dir", install_path, "bundler" },
+        { text = true }):wait(120000)
+    if not result then
+        return nil, "installing ruby-lsp dependency Bundler did not finish within 120s; "
+            .. "run `gem install --no-document --install-dir " .. install_path .. " bundler` and retry"
+    end
+    if result.code ~= 0 or not probe() then
+        local detail = vim.trim((result.stderr or "") .. " " .. (result.stdout or "")):gsub("%s+", " ")
+        if #detail > 240 then detail = detail:sub(1, 237) .. "..." end
+        return nil, "ruby-lsp cannot load Bundler; run `gem install --no-document --install-dir "
+            .. install_path .. " bundler` and retry"
+            .. (detail ~= "" and (" (" .. detail .. ")") or "")
+    end
+    return true
+end
+
 -- A language server Mason does not package can still be on the machine:
 -- Qt ships qmlls with the distro, and some toolchains carry their own. Look
 -- through the lspconfig configs on the runtimepath for one that covers the
@@ -1250,6 +1301,15 @@ local function install_server(ft, wanted, root)
             return out
         end
         out.java_home = java_home
+    elseif lspname == "ruby_lsp" then
+        local ready, why = ensure_ruby_lsp_bundler(pkg)
+        if not ready then
+            out.status = "prerequisite missing"
+            out.attached = false
+            out.note = why
+            return out
+        end
+        out.runtime_dependency = "bundler"
     end
     pcall(vim.lsp.enable, lspname)
     local cmd = vim.tbl_get(vim.lsp.config, lspname, "cmd")
@@ -1300,5 +1360,6 @@ M.guess_check_command = guess_check_command
 M.command_store = command_store
 M.workspace_support = workspace_support
 M.install_language = install_language
+M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 
 return M

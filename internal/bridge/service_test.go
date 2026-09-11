@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -194,6 +195,54 @@ func TestHuyangMCPAdapterDefaultsToFullAndProxiesService(t *testing.T) {
 	_ = fromAdapterReader.Close()
 	if err := <-adapterDone; err != nil && !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal(err)
+	}
+}
+
+func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
+	base := t.TempDir()
+	stateDir := filepath.Join(base, "state")
+	socketPath := filepath.Join(base, "control.sock")
+	_, stopFirst := startTestHuyangService(t, stateDir, socketPath, "")
+
+	toAdapterReader, toAdapterWriter := io.Pipe()
+	fromAdapterReader, fromAdapterWriter := io.Pipe()
+	adapterDone := make(chan error, 1)
+	go func() {
+		adapterDone <- runHuyang([]string{"mcp", "--socket", socketPath}, toAdapterReader, fromAdapterWriter, io.Discard)
+	}()
+	client := mcp.NewClient(&mcp.Implementation{Name: "huyang-restart-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.IOTransport{
+		Reader: fromAdapterReader, Writer: toAdapterWriter,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stopSecond func()
+	defer func() {
+		_ = session.Close()
+		_ = toAdapterWriter.Close()
+		_ = fromAdapterReader.Close()
+		if err := <-adapterDone; err != nil && !errors.Is(err, io.ErrClosedPipe) {
+			t.Errorf("adapter: %v", err)
+		}
+		if stopSecond != nil {
+			stopSecond()
+		}
+	}()
+	if _, err := session.ListTools(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	stopFirst()
+	_, stopSecond = startTestHuyangService(t, stateDir, socketPath, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("same adapter session after service restart: %v", err)
+	}
+	if len(listed.Tools) != 19 {
+		t.Fatalf("reconnected adapter catalog = %d tools, want 19", len(listed.Tools))
 	}
 }
 
