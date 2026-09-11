@@ -290,7 +290,7 @@ func (w *Workspace) markPlanRecovered(planID string, revision uint64) error {
 	plan.Conflict = nil
 	recordPlanEvent(&plan, "startup_recovery", "preimages_restored")
 	w.plans[planID] = plan
-	return w.persistPlansLocked()
+	return w.finishPlanLocked(planID)
 }
 
 // markPlanCommitted reconciles a plan whose committed journal outlived its COMMITTED
@@ -320,7 +320,7 @@ func (w *Workspace) markPlanCommitted(journal CommitJournal) error {
 	plan.Conflict = nil
 	recordPlanEvent(&plan, "startup_reconcile", "committed_journal_found")
 	w.plans[journal.PlanID] = plan
-	return w.persistPlansLocked()
+	return w.finishPlanLocked(journal.PlanID)
 }
 
 func (w *Workspace) compensationJournalPath(planID string) string {

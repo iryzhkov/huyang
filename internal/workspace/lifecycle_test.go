@@ -225,7 +225,7 @@ func TestInspectRecordsNoEventAndEventsAreCapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statePath := ws.planStatePath()
+	statePath := ws.planRecordPath(plan.PlanID)
 	info, err := os.Stat(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -418,26 +418,22 @@ func TestCommittedJournalReconcilesLaggingPlanRecordAtStartup(t *testing.T) {
 	}
 	// Simulate a process that died after the committed journal but before the plan record
 	// recorded COMMITTED.
-	content, err := os.ReadFile(ws.planStatePath())
+	content, err := os.ReadFile(ws.planRecordPath(prepared.PlanID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var state persistedPlans
-	if err := json.Unmarshal(content, &state); err != nil {
+	var record persistedPlan
+	if err := json.Unmarshal(content, &record); err != nil {
 		t.Fatal(err)
 	}
-	for i := range state.Plans {
-		if state.Plans[i].PlanID == prepared.PlanID {
-			state.Plans[i].State = PlanCommitting
-			state.Plans[i].Preparation.CanonicalRevision = ""
-			state.Plans[i].Preparation.JournalID = ""
-		}
-	}
-	content, err = json.Marshal(state)
+	record.Plan.State = PlanCommitting
+	record.Plan.Preparation.CanonicalRevision = ""
+	record.Plan.Preparation.JournalID = ""
+	content, err = json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(ws.planStatePath(), content, 0o600); err != nil {
+	if err := os.WriteFile(ws.planRecordPath(prepared.PlanID), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reopened := reopenCommitWorkspace(t, ws, root, stateDir)
