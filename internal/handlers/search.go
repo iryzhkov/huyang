@@ -10,56 +10,70 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+// search dispatches on the request shape: a bounded Git history search, a
+// refinement of a frozen result set, or a fresh query over current source.
 func (h *Handlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if source, ok := arguments["git_history"].(map[string]any); ok {
-		fields := make([]string, 0)
-		for _, value := range mcpapi.AnySlice(source["fields"]) {
-			if field, ok := value.(string); ok {
-				fields = append(fields, field)
-			}
-		}
-		query, _ := source["query"].(string)
-		ref, _ := source["ref"].(string)
-		result, err := workspace.SearchHistory(workspacecore.HistorySearchRequest{
-			Query: query, Fields: fields, Ref: ref, Limit: argInt(source, "limit", 20),
-		})
-		if err != nil {
-			return mcpapi.Failure(requestID, workspace, "git_history_search_failed", err)
-		}
-		noun := "matches"
-		if len(result.Hits) == 1 {
-			noun = "match"
-		}
-		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
+		return searchHistory(requestID, workspace, source)
 	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
-		refine, _ := arguments["refine"].(map[string]any)
-		matched, _ := refine["matched_text"].(map[string]any)
-		path, _ := refine["path"].(string)
-		literal, _ := matched["literal"].(string)
-		regex, _ := matched["regex"].(string)
-		result, err := workspace.RefineResultSet(workspacecore.ResultSetID(parent), workspacecore.ResultRefinement{
-			Path: path, MatchLiteral: literal, MatchRegex: regex,
-		})
-		if err != nil {
-			var conflict *workspacecore.Conflict
-			if errors.As(err, &conflict) {
-				return mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"result_set_handle": parent})
-			}
-			return mcpapi.Failure(requestID, workspace, "search_refinement_failed", err)
-		}
-		limit := argInt(arguments, "limit", 50)
-		includeRanges, _ := arguments["include_ranges"].(bool)
-		hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges)
-		envelope := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
-			"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
-		})
-		if truncated {
-			envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d retained matches", len(hits), result.Retained)}
-			envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.Handle}}
-		}
-		return envelope
+		return refineSearch(requestID, workspace, parent, arguments)
 	}
+	return searchSource(requestID, workspace, arguments)
+}
+
+func searchHistory(requestID string, workspace *workspacecore.Workspace, source map[string]any) map[string]any {
+	fields := make([]string, 0)
+	for _, value := range mcpapi.AnySlice(source["fields"]) {
+		if field, ok := value.(string); ok {
+			fields = append(fields, field)
+		}
+	}
+	query, _ := source["query"].(string)
+	ref, _ := source["ref"].(string)
+	result, err := workspace.SearchHistory(workspacecore.HistorySearchRequest{
+		Query: query, Fields: fields, Ref: ref, Limit: argInt(source, "limit", 20),
+	})
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, "git_history_search_failed", err)
+	}
+	noun := "matches"
+	if len(result.Hits) == 1 {
+		noun = "match"
+	}
+	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
+}
+
+func refineSearch(requestID string, workspace *workspacecore.Workspace, parent string, arguments map[string]any) map[string]any {
+	refine, _ := arguments["refine"].(map[string]any)
+	matched, _ := refine["matched_text"].(map[string]any)
+	path, _ := refine["path"].(string)
+	literal, _ := matched["literal"].(string)
+	regex, _ := matched["regex"].(string)
+	result, err := workspace.RefineResultSet(workspacecore.ResultSetID(parent), workspacecore.ResultRefinement{
+		Path: path, MatchLiteral: literal, MatchRegex: regex,
+	})
+	if err != nil {
+		var conflict *workspacecore.Conflict
+		if errors.As(err, &conflict) {
+			return mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{"result_set_handle": parent})
+		}
+		return mcpapi.Failure(requestID, workspace, "search_refinement_failed", err)
+	}
+	limit := argInt(arguments, "limit", 50)
+	includeRanges, _ := arguments["include_ranges"].(bool)
+	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges)
+	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
+		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
+	})
+	if truncated {
+		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d retained matches", len(hits), result.Retained)}
+		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.Handle}}
+	}
+	return envelope
+}
+
+func searchSource(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
 	mode := workspacecore.SearchMode("literal")
 	if requested, _ := arguments["mode"].(string); requested != "" {
@@ -67,8 +81,7 @@ func (h *Handlers) search(requestID string, workspace *workspacecore.Workspace, 
 	}
 	result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
 	if err != nil {
-		code := "search_failed"
-		failure := mcpapi.Failure(requestID, workspace, code, err)
+		failure := mcpapi.Failure(requestID, workspace, "search_failed", err)
 		if mode == workspacecore.SearchRegex {
 			failure["code"] = "invalid_regex"
 			failure["summary"] = "The regular expression is invalid: " + err.Error()
