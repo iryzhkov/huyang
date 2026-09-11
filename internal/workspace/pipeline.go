@@ -168,6 +168,7 @@ func LoadPipelinePolicy(projectRoot, userConfig string) (PipelinePolicy, error) 
 	}
 	var user userPipelinePolicy
 	if userConfig != "" {
+		policy.UserConfig = userConfig
 		if content, err := os.ReadFile(userConfig); err == nil {
 			if _, err := toml.Decode(string(content), &user); err != nil {
 				return PipelinePolicy{}, fmt.Errorf("invalid user policy: %w", err)

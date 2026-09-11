@@ -507,13 +507,20 @@ func debugProviderFailure(requestID string, workspace *workspacecore.Workspace, 
 }
 
 func debugUnavailable(requestID string, workspace *workspacecore.Workspace, code string, err error) map[string]any {
-	result := modernEnvelope(requestID, workspace, "unavailable", code, err.Error(), map[string]any{
+	detail := strings.ReplaceAll(err.Error(), "agent99", "Huyang")
+	summary := "Debugger unavailable; install or configure the requested DAP adapter and language runtime, then retry"
+	result := modernEnvelope(requestID, workspace, "unavailable", code, summary, map[string]any{
 		"coverage": map[string]any{"complete": false, "unavailable": []string{"debug_adapter_or_runtime"}},
-		"repair":   map[string]any{"inspect": "workspace_inspect", "detail": err.Error()},
+		"repair": map[string]any{
+			"action": "install_or_configure_dap_adapter", "detail": detail,
+			"supported_adapters": []string{"delve", "debugpy", "codelldb", "lldb-dap", "gdb", "js-debug", "java"},
+		},
 	})
-	result["next"] = []any{map[string]any{"tool": "workspace_inspect", "arguments": map[string]any{
-		"workspace_id": string(workspace.Identity().ID),
-	}}}
+	result["warnings"] = []string{detail}
+	result["next"] = []any{
+		map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_status", "view": "status"},
+		map[string]any{"tool": "debug_session", "action": "retry_after_adapter_install"},
+	}
 	return result
 }
 

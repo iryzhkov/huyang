@@ -98,8 +98,19 @@ systemctl --user enable --now huyang.service
 ```
 
 Register the MCP command in each harness as
-`~/.local/share/huyang/bin/huyang mcp --profile full`. Remove the old
-`agent99-bridge mcp` registration so only one semantic workspace backend is advertised.
+`~/.local/share/huyang/bin/huyang mcp -socket /run/user/1000/huyang/control.sock -profile full`.
+Pinning the socket matters for harness subprocesses that do not inherit `XDG_RUNTIME_DIR`.
+Remove the old `agent99-bridge mcp` registration so only one semantic workspace backend
+is advertised.
+
+## Friction logging scope
+
+Friction logging is evaluated in the process that services the tool call. With the
+long-lived user daemon, set `HUYANG_FRICTION` and `HUYANG_FRICTION_DIR` in
+`huyang.service` (or use the daemon's default spool under
+`$XDG_DATA_HOME/toolfeedback/huyang`). Environment variables set only on an MCP adapter
+process do not cross the adapter/service boundary and therefore cannot relocate the daemon's
+spool.
 
 ## Trust and repository commands
 

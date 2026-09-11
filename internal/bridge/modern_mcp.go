@@ -277,7 +277,7 @@ func requestedMCPProfile(arguments []string) (mcpProfile, error) {
 		return profileLegacy, nil
 	}
 	if len(arguments) != 2 || arguments[0] != "--profile" {
-		return "", errors.New("usage: agent99-bridge mcp [--profile full|orient|edit|debug|legacy]")
+		return "", errors.New("usage: huyang mcp [--profile full|orient|edit|debug|legacy]")
 	}
 	profile := mcpProfile(arguments[1])
 	switch profile {
@@ -413,7 +413,7 @@ func registerModernTool(server *mcp.Server, descriptor modernTool, direct *direc
 		}
 		return &mcp.CallToolResult{
 			Content:           []mcp.Content{&mcp.TextContent{Text: string(pretty)}},
-			StructuredContent: envelope,
+			StructuredContent: compactStructuredEnvelope(envelope),
 			IsError:           isError,
 		}, nil
 	})
@@ -485,6 +485,106 @@ func compactTextData(value any) any {
 		}
 	}
 	return compact
+}
+
+const maxStructuredEntries = 100
+
+func compactStructuredEnvelope(envelope map[string]any) map[string]any {
+	compact := cloneEnvelope(envelope)
+	compact["data"] = compactStructuredData(envelope["data"])
+	return compact
+}
+
+func compactStructuredData(value any) any {
+	data, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	compact := make(map[string]any, len(data))
+	for key, item := range data {
+		switch typed := item.(type) {
+		case workspacecore.Orientation:
+			entries := typed.Entries
+			truncated := len(entries) > maxStructuredEntries
+			if truncated {
+				entries = entries[:maxStructuredEntries]
+			}
+			compact[key] = map[string]any{
+				"workspace": typed.Workspace, "coverage": typed.Coverage,
+				"entries": entries, "entry_count": len(typed.Entries), "entries_truncated": truncated,
+			}
+		case workspacecore.PlanRecord:
+			compact[key] = compactPlanRecord(typed)
+		default:
+			compact[key] = item
+		}
+	}
+	return compact
+}
+
+func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
+	operations := make([]map[string]any, 0, len(plan.Operations))
+	for _, operation := range plan.Operations {
+		item := map[string]any{
+			"op_id": operation.OpID, "kind": operation.Kind,
+			"path": operation.Path, "from": operation.From, "to": operation.To,
+			"revision_id": operation.Revision, "destination_revision_id": operation.DestinationRevision,
+			"depends_on": operation.DependsOn, "indentation": operation.Indentation,
+		}
+		if operation.Content != "" {
+			sum := sha256.Sum256([]byte(operation.Content))
+			item["content_bytes"] = len(operation.Content)
+			item["content_sha256"] = fmt.Sprintf("%x", sum[:])
+		}
+		if operation.Target != nil {
+			target := map[string]any{}
+			if operation.Target.Handle != "" {
+				target["handle"] = operation.Target.Handle
+			}
+			if operation.Target.FileRange != nil {
+				target["file_range"] = map[string]any{
+					"path":        operation.Target.FileRange.Path,
+					"revision_id": operation.Target.FileRange.Revision,
+				}
+			}
+			if operation.Target.SymbolLocator != nil {
+				target["symbol_locator"] = operation.Target.SymbolLocator
+			}
+			item["target"] = target
+		}
+		operations = append(operations, item)
+	}
+	result := map[string]any{
+		"plan_id": plan.PlanID, "workspace_id": plan.WorkspaceID, "state": plan.State,
+		"plan_revision": plan.PlanRevision, "base_state_seq": plan.BaseStateSeq,
+		"operations": operations, "operation_count": len(plan.Operations),
+		"event_count": len(plan.Events), "created_at": plan.CreatedAt, "updated_at": plan.UpdatedAt,
+	}
+	if plan.Preview != nil {
+		diffs := make([]map[string]any, 0, len(plan.Preview.Diffs))
+		for _, diff := range plan.Preview.Diffs {
+			diffs = append(diffs, map[string]any{
+				"path": diff.Path, "before_sha256": diff.BeforeSHA256, "after_sha256": diff.AfterSHA256,
+				"before_bytes": len(diff.Before), "after_bytes": len(diff.After), "patch_bytes": len(diff.Patch),
+			})
+		}
+		result["preview"] = map[string]any{
+			"preview_revision": plan.Preview.PreviewRevision, "plan_revision": plan.Preview.PlanRevision,
+			"outcome": plan.Preview.Outcome, "normalized_order": plan.Preview.NormalizedOrder,
+			"affected_files": plan.Preview.AffectedFiles, "diffs": diffs,
+			"conflicts": plan.Preview.Conflicts, "canonical_changed": plan.Preview.CanonicalChanged,
+		}
+	}
+	if plan.Preparation != nil {
+		preparation := *plan.Preparation
+		preparation.ToolDelta = append([]workspacecore.ToolDelta(nil), plan.Preparation.ToolDelta...)
+		for index := range preparation.ToolDelta {
+			preparation.ToolDelta[index].Before = nil
+			preparation.ToolDelta[index].After = nil
+		}
+		result["preparation"] = preparation
+	}
+	return result
 }
 
 func validateToolArguments(schema map[string]any, arguments map[string]any) error {
@@ -703,12 +803,31 @@ func (d *directWorkspaces) call(ctx context.Context, name string, arguments map[
 		select {
 		case <-previous.done:
 			if previous.argumentsHash != argumentsHash {
-				return modernEnvelope(requestID, nil, "conflict", "idempotency_key_reused",
-					"Idempotency key was already used with different arguments", map[string]any{})
+				result := modernEnvelope(requestID, nil, "conflict", "idempotency_key_reused",
+					"Idempotency key was already used with different arguments; use a new key for a different request", map[string]any{
+						"tool": name, "idempotency_key": idempotencyKey,
+					})
+				result["next"] = []any{map[string]any{
+					"tool": name, "action": "retry_with_new_idempotency_key",
+				}}
+				return result
 			}
 			replayed := cloneEnvelope(previous.result)
 			replayed["request_id"] = requestID
 			replayed["idempotency"] = "replayed"
+			replayed["summary"] = "Idempotent replay returned the original receipt; this call made no new mutation"
+			if originalData, ok := previous.result["data"].(map[string]any); ok {
+				replayData := make(map[string]any, len(originalData)+2)
+				for key, value := range originalData {
+					replayData[key] = value
+				}
+				if changed, ok := replayData["canonical_changed"].(bool); ok {
+					replayData["original_canonical_changed"] = changed
+					replayData["canonical_changed"] = false
+				}
+				replayData["replayed_request"] = true
+				replayed["data"] = replayData
+			}
 			return replayed
 		case <-ctx.Done():
 			return modernEnvelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
@@ -815,25 +934,52 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 		inspection := workspace.Inspect()
 		policy, policyErr := workspacecore.LoadPipelinePolicy(workspace.Identity().Root, "")
 		if policyErr != nil {
-			return modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
+			result := modernFailure(requestID, workspace, "workspace_policy_invalid", policyErr)
+			result["next"] = []any{map[string]any{
+				"tool": "workspace_inspect", "action": "repair_pipeline_configuration",
+				"project_config": filepath.Join(workspace.Identity().Root, ".huyang.toml"),
+			}}
+			return result
 		}
 		view, _ := arguments["view"].(string)
 		if view == "" {
 			view = "status"
 		}
+		pipelineState := "not_configured"
+		pipelineReason := "No project .huyang.toml is present; only built-in parser checks are available."
+		if policy.ProjectConfig != "" && policy.Trusted {
+			pipelineState = "configured_trusted"
+			pipelineReason = "Project commands are configured and this workspace root is trusted."
+		} else if policy.ProjectConfig != "" {
+			pipelineState = "configured_untrusted"
+			pipelineReason = "Project commands are configured but disabled until this workspace root is trusted in the user policy."
+		}
 		base := map[string]any{
 			"view": view, "revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
 			"inspection": inspection, "scheduler": d.scheduler.description(), "pipeline_policy": policy,
+			"pipeline_state": map[string]any{
+				"state": pipelineState, "configured": policy.ProjectConfig != "", "trusted": policy.Trusted,
+				"reason": pipelineReason, "project_config": policy.ProjectConfig, "user_config": policy.UserConfig,
+			},
 		}
+		summary := "Workspace inspection is current"
 		if view == "overview" || view == "map" {
 			orientation, err := workspace.Orient()
 			if err != nil {
 				return modernFailure(requestID, workspace, "workspace_map_failed", err)
 			}
 			base["overview"] = orientation
-			return modernEnvelope(requestID, workspace, "ok", "", fmt.Sprintf("%d workspace entries", len(orientation.Entries)), base)
+			summary = fmt.Sprintf("%d workspace entries", len(orientation.Entries))
 		}
-		return modernEnvelope(requestID, workspace, "ok", "", "Workspace inspection is current", base)
+		result := modernEnvelope(requestID, workspace, "ok", "", summary, base)
+		if pipelineState == "configured_untrusted" {
+			result["warnings"] = []string{pipelineReason}
+			result["next"] = []any{map[string]any{
+				"tool": "workspace_inspect", "action": "trust_workspace_root",
+				"root": workspace.Identity().Root, "user_config": policy.UserConfig,
+			}}
+		}
+		return result
 	case "search":
 		return d.search(requestID, workspace, arguments)
 	case "symbol_find":
@@ -847,13 +993,22 @@ func (d *directWorkspaces) execute(ctx context.Context, requestID, name string, 
 			return modernFailure(requestID, workspace, "diagnostic_cursor_invalid", err)
 		}
 		outcome := "ok"
+		summary := "Diagnostic evidence retrieved from the durable workspace inbox"
 		if report.Confidence == workspacecore.ConfidenceProvisional {
 			outcome = "provisional"
+			summary = "Only provisional diagnostic evidence is available"
 		} else if report.Confidence == workspacecore.ConfidenceUnavailable {
 			outcome = "unavailable"
+			summary = "Diagnostic evidence is unavailable for this workspace"
 		}
-		result := modernEnvelope(requestID, workspace, outcome, "", "Diagnostic evidence retrieved from the durable workspace inbox", map[string]any{"diagnostics": report})
+		result := modernEnvelope(requestID, workspace, outcome, "", summary, map[string]any{"diagnostics": report})
 		result["evidence"] = map[string]any{"ids": nonNilStrings(report.EvidenceIDs), "truncated": false}
+		if outcome == "unavailable" {
+			result["next"] = []any{
+				map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status"},
+				map[string]any{"tool": "verify_run", "action": "run_configured_diagnostics_for_exact_revision"},
+			}
+		}
 		return result
 	case "evidence_get":
 		evidence, err := workspace.Evidence(fmt.Sprint(arguments["evidence_id"]))
@@ -1017,13 +1172,25 @@ func (d *directWorkspaces) search(requestID string, workspace *workspacecore.Wor
 	}
 	result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
 	if err != nil {
-		return modernFailure(requestID, workspace, "search_failed", err)
+		code := "search_failed"
+		failure := modernFailure(requestID, workspace, code, err)
+		if mode == workspacecore.SearchRegex {
+			failure["code"] = "invalid_regex"
+			failure["summary"] = "The regular expression is invalid: " + err.Error()
+			failure["next"] = []any{map[string]any{
+				"tool": "search", "action": "retry_as_literal", "query": query, "mode": "literal",
+			}}
+		}
+		return failure
 	}
 	limit := argInt(arguments, "limit", 50)
 	hits, truncated := compactSearchHits(result.Hits, limit)
 	summary := fmt.Sprintf("%d matches", len(result.Hits))
+	if len(result.Hits) == 1 {
+		summary = "1 match"
+	}
 	if !result.Coverage.Complete {
-		summary = fmt.Sprintf("%d matches; search coverage incomplete", len(result.Hits))
+		summary += "; search coverage incomplete"
 	}
 	data := map[string]any{
 		"workspace": result.Workspace, "hits": hits, "returned": len(hits), "total": len(result.Hits),
@@ -1264,9 +1431,10 @@ func modernHandleConflict(requestID string, workspace *workspacecore.Workspace, 
 	}
 	result := modernEnvelope(requestID, workspace, "conflict", string(resolution.Code), summary, resolution)
 	path := resolution.Original.Path
-	result["next"] = []any{
-		map[string]any{"tool": "read", "action": "refresh_path", "path": path},
-		map[string]any{"tool": "search", "action": "relocate_target", "path": path, "query": resolution.Original.NamePath},
+	result["next"] = []any{map[string]any{"tool": "read", "action": "refresh_path", "path": path}}
+	if resolution.Original.NamePath != "" {
+		result["next"] = append(result["next"].([]any),
+			map[string]any{"tool": "search", "action": "relocate_target", "path": path, "query": resolution.Original.NamePath})
 	}
 	return result
 }
@@ -1334,6 +1502,13 @@ func (d *directWorkspaces) edit(requestID string, workspace *workspacecore.Works
 		data["document_revision"] = after.Revision
 	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	if resolution != nil && resolution.Status == workspacecore.ResolutionRelocated {
+		if preview {
+			summary = "Guarded range preview is ready after safely relocating the stale target; canonical bytes unchanged"
+		} else {
+			summary = "Guarded range edit applied after safely relocating the stale target; semantic diagnostics are unavailable until verification runs"
+		}
+	}
 	result := modernEnvelope(requestID, workspace, outcome, "", summary, data)
 	result["evidence"] = map[string]any{"ids": nonNilStrings(evidenceIDs), "truncated": false}
 	return result
@@ -1383,19 +1558,65 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		}
 	}
 	d.replayMu.Unlock()
-	sort.Slice(recorded, func(i, j int) bool { return recorded[i].from < recorded[j].from })
-	covered := make([]recordedDiff, 0, len(recorded))
+	sort.Slice(recorded, func(i, j int) bool {
+		if recorded[i].from != recorded[j].from {
+			return recorded[i].from < recorded[j].from
+		}
+		return recorded[i].to < recorded[j].to
+	})
+	known := make([]recordedDiff, 0, len(recorded))
+	segments := make([]any, 0, len(recorded))
+	gaps := make([]any, 0)
 	cursor := fromSeq
 	for _, item := range recorded {
-		if item.from != cursor {
+		if item.to <= cursor || item.from < cursor {
 			continue
 		}
-		covered = append(covered, item)
+		if item.from > cursor {
+			gaps = append(gaps, map[string]any{
+				"from_revision": fmt.Sprintf("wsrev_%d", cursor),
+				"to_revision":   fmt.Sprintf("wsrev_%d", item.from),
+			})
+		}
+		known = append(known, item)
+		segments = append(segments, map[string]any{
+			"from_revision": fmt.Sprintf("wsrev_%d", item.from),
+			"to_revision":   fmt.Sprintf("wsrev_%d", item.to),
+			"path":          item.path,
+		})
 		cursor = item.to
+	}
+	if cursor < toSeq {
+		gaps = append(gaps, map[string]any{
+			"from_revision": fmt.Sprintf("wsrev_%d", cursor),
+			"to_revision":   fmt.Sprintf("wsrev_%d", toSeq),
+		})
+	}
+	if len(gaps) > 0 {
+		diffs := make([]any, 0, len(known))
+		paths := make([]string, 0, len(known))
+		for _, item := range known {
+			diffs = append(diffs, item.diff)
+			if item.path != "" {
+				paths = append(paths, item.path)
+			}
+		}
+		sort.Strings(paths)
+		paths = uniqueStrings(paths)
+		result := modernEnvelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Known native edit segments are returned with explicit uncovered revision gaps", map[string]any{
+			"from_revision": from, "to_revision": to, "current_revision": current,
+			"known_segments": segments, "gaps": gaps, "diffs": diffs,
+		})
+		result["warnings"] = []string{"Uncovered gaps may contain external writes, provider edits, or expired receipts; no diff is inferred for them."}
+		result["next"] = []any{
+			map[string]any{"tool": "read", "action": "inspect_known_changed_paths", "paths": paths},
+			map[string]any{"tool": "workspace_inspect", "action": "record_current_revision_as_new_baseline", "view": "status"},
+		}
+		return result
 	}
 	type endpoints struct{ before, after string }
 	byPath := map[string]endpoints{}
-	for _, item := range covered {
+	for _, item := range known {
 		ends, exists := byPath[item.path]
 		if !exists {
 			ends.before = item.beforeSHA
@@ -1403,21 +1624,13 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		ends.after = item.afterSHA
 		byPath[item.path] = ends
 	}
-	diffs := make([]any, 0, len(covered))
-	for _, item := range covered {
+	diffs := make([]any, 0, len(known))
+	for _, item := range known {
 		ends := byPath[item.path]
 		if ends.before != "" && ends.before == ends.after {
 			continue
 		}
 		diffs = append(diffs, item.diff)
-	}
-	if cursor != toSeq {
-		result := modernEnvelope(requestID, workspace, "partial", "diff_evidence_incomplete", "Native edit evidence does not cover the full requested revision range", map[string]any{
-			"from_revision": from, "to_revision": to, "current_revision": current, "covered_through": fmt.Sprintf("wsrev_%d", cursor), "diffs": diffs,
-		})
-		result["warnings"] = []string{"The uncovered revision may contain an external write, provider edit, or expired receipt."}
-		result["next"] = []any{map[string]any{"tool": "read", "action": "inspect_current_files"}}
-		return result
 	}
 	netChangedPaths := 0
 	for _, ends := range byPath {
@@ -1430,6 +1643,19 @@ func (d *directWorkspaces) revisionDiff(requestID string, workspace *workspaceco
 		"from_revision": from, "to_revision": to, "current_revision": current, "diffs": diffs,
 		"semantics": "net endpoint identity with ordered edit evidence",
 	})
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	result := values[:1]
+	for _, value := range values[1:] {
+		if value != result[len(result)-1] {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func workspaceRevisionSequence(revision string) (uint64, error) {

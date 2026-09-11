@@ -1,6 +1,8 @@
 package bridge
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,5 +189,212 @@ func TestCompactTextDataSummarizesOrientationWithoutDroppingResults(t *testing.T
 	}
 	if _, present := summary["entries"]; present {
 		t.Fatalf("compact text duplicated orientation entries: %#v", summary)
+	}
+}
+
+func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
+	files := make(map[string]string, maxStructuredEntries+25)
+	for index := 0; index < maxStructuredEntries+25; index++ {
+		files[fmt.Sprintf("pkg/file_%03d.go", index)] = "package pkg\n"
+	}
+	files["large.txt"] = "seed"
+	direct, workspaceID, _ := openProbeProject(t, files)
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+
+	inspected := callModern(t, session, "workspace_inspect", map[string]any{
+		"workspace_id": workspaceID, "view": "map",
+	})
+	overview := inspected["data"].(map[string]any)["overview"].(map[string]any)
+	if overview["entry_count"] != float64(len(files)) || overview["entries_truncated"] != true {
+		t.Fatalf("bounded map metadata = %#v", overview)
+	}
+	if entries := overview["entries"].([]any); len(entries) != maxStructuredEntries {
+		t.Fatalf("bounded map returned %d entries", len(entries))
+	}
+
+	searched := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "seed", "mode": "literal",
+	})
+	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
+	large := strings.Repeat("x", 128<<10)
+	created := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "large-plan-create", "action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "large-replace", "kind": "replace_range",
+			"target": map[string]any{"file_range": hit["range"]}, "content": large,
+		}},
+	})
+	if created["outcome"] != "ok" {
+		t.Fatalf("large plan create failed: %#v", created)
+	}
+	encoded, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 16<<10 || strings.Contains(string(encoded), large[:1024]) {
+		t.Fatalf("large plan response was not bounded: %d bytes", len(encoded))
+	}
+	plan := created["data"].(map[string]any)["plan"].(map[string]any)
+	operation := plan["operations"].([]any)[0].(map[string]any)
+	if plan["plan_id"] == "" || operation["op_id"] != "large-replace" ||
+		operation["content_bytes"] != float64(len(large)) || operation["content_sha256"] == "" {
+		t.Fatalf("bounded plan omitted follow-up identifiers: %#v", plan)
+	}
+	previewed := callModern(t, session, "change_plan", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "large-plan-preview", "action": "preview",
+		"plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+	})
+	previewBytes, err := json.Marshal(previewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewed["outcome"] != "ok" || len(previewBytes) > 16<<10 ||
+		strings.Contains(string(previewBytes), large[:1024]) {
+		t.Fatalf("large plan preview response was not bounded: %d bytes, %#v", len(previewBytes), previewed)
+	}
+	preview := previewed["data"].(map[string]any)["plan"].(map[string]any)["preview"].(map[string]any)
+	if preview["preview_revision"] == "" || len(preview["diffs"].([]any)) != 1 {
+		t.Fatalf("bounded preview omitted revision or diff identity: %#v", previewed)
+	}
+}
+
+func TestRevisionDiffReturnsKnownSegmentsAfterExternalGap(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{
+		"first.txt": "before\n", "second.txt": "alpha beta\n",
+	})
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	if _, err := workspace.Refresh(filepath.Join(root, "first.txt"), workspacecore.ProviderLayer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "first.txt"), []byte("external\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.Refresh(filepath.Join(root, "first.txt"), workspacecore.ProviderLayer{}); err != nil {
+		t.Fatal(err)
+	}
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+	inspected := callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID})
+	if inspected["data"].(map[string]any)["revision"] != "wsrev_2" {
+		t.Fatalf("external change was not observed: %#v", inspected)
+	}
+	applyLiteralProbeEdit(t, direct, workspaceID, "beta", "gamma", "post-gap-edit")
+	diffed := callModern(t, session, "revision_diff", map[string]any{
+		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "current",
+	})
+	if diffed["outcome"] != "partial" || diffed["code"] != "diff_evidence_incomplete" {
+		t.Fatalf("gap diff outcome = %#v", diffed)
+	}
+	data := diffed["data"].(map[string]any)
+	if len(data["gaps"].([]any)) != 1 || len(data["known_segments"].([]any)) != 1 || len(data["diffs"].([]any)) != 1 {
+		t.Fatalf("known diff segments or explicit gaps missing: %#v", diffed)
+	}
+}
+
+func TestInspectionExplainsUntrustedPipelineAndRecovery(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	direct, workspaceID, root := openProbeProject(t, map[string]string{
+		".huyang.toml": "version = 1\n[[check]]\nname = \"check\"\ncommand = [\"go\", \"test\", \"./...\"]\n",
+		"main.go":      "package sample\n",
+	})
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+	inspected := callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID})
+	state := inspected["data"].(map[string]any)["pipeline_state"].(map[string]any)
+	if state["state"] != "configured_untrusted" || state["configured"] != true || state["trusted"] != false {
+		t.Fatalf("pipeline state is ambiguous: %#v", inspected)
+	}
+	next := inspected["next"].([]any)
+	if len(next) != 1 || next[0].(map[string]any)["root"] != root ||
+		next[0].(map[string]any)["user_config"] != filepath.Join(configHome, "huyang", "config.toml") {
+		t.Fatalf("pipeline trust recovery is not actionable: %#v", inspected)
+	}
+}
+
+func TestSearchDiagnosticsAndIdempotencyFailuresAreActionable(t *testing.T) {
+	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "only once\n"})
+	session, cleanup := connectOfficialClient(t, profileEdit, direct)
+	defer cleanup()
+
+	singular := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "once", "mode": "literal",
+	})
+	if singular["summary"] != "1 match" {
+		t.Fatalf("singular search summary = %#v", singular)
+	}
+	invalid := callModern(t, session, "search", map[string]any{
+		"workspace_id": workspaceID, "query": "(", "mode": "regex",
+	})
+	if invalid["code"] != "invalid_regex" || len(invalid["next"].([]any)) == 0 {
+		t.Fatalf("invalid regex has no recovery: %#v", invalid)
+	}
+	diagnostics := callModern(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})
+	if diagnostics["outcome"] != "unavailable" ||
+		strings.Contains(diagnostics["summary"].(string), "retrieved") || len(diagnostics["next"].([]any)) == 0 {
+		t.Fatalf("unavailable diagnostics are misleading: %#v", diagnostics)
+	}
+
+	hit := singular["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
+	arguments := map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "replay-key",
+		"operation": map[string]any{
+			"kind": "replace_range", "target": map[string]any{"file_range": hit["range"]}, "content": "twice",
+		},
+	}
+	first := callModern(t, session, "edit_apply", arguments)
+	replayed := callModern(t, session, "edit_apply", arguments)
+	replayData := replayed["data"].(map[string]any)
+	if first["idempotency"] != "created" || replayed["idempotency"] != "replayed" ||
+		replayData["canonical_changed"] != false || replayData["original_canonical_changed"] != true ||
+		!strings.Contains(strings.ToLower(replayed["summary"].(string)), "no new mutation") {
+		t.Fatalf("idempotent replay wording is ambiguous: %#v", replayed)
+	}
+	conflictArguments := map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "replay-key",
+		"operation": map[string]any{
+			"kind": "replace_range", "target": map[string]any{"file_range": hit["range"]}, "content": "different",
+		},
+	}
+	conflict := callModern(t, session, "edit_apply", conflictArguments)
+	if conflict["code"] != "idempotency_key_reused" || len(conflict["next"].([]any)) == 0 {
+		t.Fatalf("idempotency conflict has no recovery: %#v", conflict)
+	}
+}
+
+func TestStaleRangeRecoveryNeverSuggestsEmptySearch(t *testing.T) {
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: t.TempDir(), StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := modernHandleConflict("req_test", workspace, workspacecore.HandleResolution{
+		Status:   workspacecore.ResolutionConflicted,
+		Code:     workspacecore.ConflictDocumentChanged,
+		Original: workspacecore.SemanticLocator{Path: "note.txt"},
+	})
+	next := result["next"].([]any)
+	if len(next) != 1 || next[0].(map[string]any)["tool"] != "read" {
+		t.Fatalf("range conflict suggested a search with no query: %#v", result)
+	}
+}
+
+func TestDebuggerUnavailableNamesHuyangAndGivesRepairStep(t *testing.T) {
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{
+		Kind: workspacecore.KindProject, Root: t.TempDir(), StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := debugUnavailable("req_test", workspace, "debugger_unavailable", fmt.Errorf("agent99 adapter not installed"))
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "agent99") || len(result["next"].([]any)) != 2 ||
+		result["data"].(map[string]any)["repair"].(map[string]any)["action"] != "install_or_configure_dap_adapter" {
+		t.Fatalf("debugger recovery is obsolete or not actionable: %#v", result)
 	}
 }
