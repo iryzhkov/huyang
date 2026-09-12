@@ -1096,7 +1096,10 @@ compaction of a default result, or a new stable code. No mutation precondition w
 - The envelope omits `evidence` when it has no IDs and `idempotency_persisted` when true;
   `evidence` is no longer a required output property.
 - The envelope carries `guide`, an array of one-line rules for calling the server at its
-  cheapest, on the first reply for a workspace and never again for it. It rides on
+  cheapest, on the first reply a client gets for a workspace and never again for it. The
+  registry outlives a session, so this is per client rather than per workspace: the next
+  agent to work in a repository is told the rules even though the workspace has been open
+  for days. It rides on
   whatever call opened the workspace, which is usually not `workspace_open`: naming
   `root` on an ordinary call is the cheaper way in, and an agent that takes it would
   otherwise never be told the rules.

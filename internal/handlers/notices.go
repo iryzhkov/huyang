@@ -86,17 +86,18 @@ func (n *noticeDelivery) record(workspaceID workspacecore.ID, client string, cur
 // first call ran. A client that has just connected is not owed the backlog
 // of everything that happened before it existed, and starting it here rather
 // than after the call keeps the findings its own call produced. A client
-// already known keeps its cursor.
-func (n *noticeDelivery) Register(workspaceID workspacecore.ID, client string, head uint64) {
+// already known keeps its cursor. The result reports that this client had
+// not met this workspace before, which is also when it is told the rules.
+func (n *noticeDelivery) Register(workspaceID workspacecore.ID, client string, head uint64) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	clients := n.delivered[workspaceID]
-	if clients != nil {
+	if clients := n.delivered[workspaceID]; clients != nil {
 		if _, known := clients.cursors[client]; known {
-			return
+			return false
 		}
 	}
 	n.track(workspaceID, client).cursors[client] = head
+	return true
 }
 
 // track returns the cursor table of a workspace, adding the client to it and

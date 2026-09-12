@@ -15,9 +15,9 @@ only when you want its answer: the top-level overview, the verification commands
 whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
 every mutating call; pass one only when you intend to retry the same call.
 
-The first reply for a workspace carries a `guide` array: the handful of rules from this
-page that decide what a session costs. It is sent once, on whatever call opened the
-workspace, and never repeated for it.
+The first reply a session gets for a workspace carries a `guide` array: the handful of
+rules from this page that decide what a session costs. It is sent once, on whatever call
+first reached the workspace, and never repeated for it.
 
 | Operation | Call | Calls | Request tokens | Response tokens | Built-in (modelled) |
 |---|---|---|---|---|---|

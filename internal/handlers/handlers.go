@@ -131,6 +131,13 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		guide = guideFor(opened)
 		workspaceID, _ = arguments["workspace_id"].(string)
 	}
+	// Registered before the call runs, so the notices it produces are
+	// delivered and the ones that predate this client are not.
+	if workspace := h.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
+		if h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead()) {
+			guide = cheapestCallRules
+		}
+	}
 	result := h.route(ctx, requestID, name, workspaceID, arguments)
 	if len(guide) > 0 {
 		result["guide"] = guide
@@ -150,9 +157,6 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	if workspace == nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
-	// Before the call runs, so the notices it produces are delivered and the
-	// ones that predate this client are not.
-	h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead())
 	// Provider-touching calls are serialised by the scheduler lanes in the
 	// service, and plans stage in isolated sandboxes with their own
 	// providers, so the canonical provider never shows a staged view. The

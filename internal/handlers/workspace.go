@@ -58,7 +58,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	}
 	// Opening is where a client first meets a workspace; from here on it is
 	// told what changes, not what was already there.
-	h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
+	firstMeeting := h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
 		canonicalBackend, _ = h.pool.Canonical(ctx, opened)
@@ -102,7 +102,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"commands":          commands,
 		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
-	if created {
+	if firstMeeting {
 		result["guide"] = cheapestCallRules
 	}
 	return result

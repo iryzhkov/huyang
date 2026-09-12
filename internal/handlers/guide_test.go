@@ -46,4 +46,16 @@ func TestGuideIsSentOnceWhenAWorkspaceIsFirstOpened(t *testing.T) {
 	if rules, _ := fresh["guide"].([]string); len(rules) == 0 {
 		t.Fatalf("workspace_open of a new root = %#v", fresh)
 	}
+
+	// The registry outlives a session, so "first" is per client and not per
+	// workspace: the next agent to work in this repository is told the rules
+	// even though the workspace has been open for days.
+	nextSession := WithClientIdentity(context.Background(), "session-2")
+	later := handlers.Execute(nextSession, "req_later", "search", map[string]any{"root": root, "query": "package"})
+	if rules, _ := later["guide"].([]string); len(rules) == 0 {
+		t.Fatalf("a second session in an open workspace = %#v", later)
+	}
+	if again := handlers.Execute(nextSession, "req_again", "search", map[string]any{"root": root, "query": "package"}); again["guide"] != nil {
+		t.Fatalf("the guide repeated within a session: %#v", again["guide"])
+	}
 }

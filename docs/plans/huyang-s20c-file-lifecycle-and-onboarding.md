@@ -481,8 +481,11 @@ calls or misled, and each was fixed in the same branch:
 
 And one thing the agent could not have known without being told: the guide to the
 cheapest correct call lives in `docs/agent-guide.md`, which an agent working in another
-repository never sees. The first reply for a workspace now carries a `guide` array of
-five one-line rules, sent once, on whatever call opened the workspace.
+repository never sees. The first reply a session gets for a workspace now carries a
+`guide` array of five one-line rules, sent once, on whatever call first reached the
+workspace. It is tracked per client, beside the diagnostic-notice cursor, because the
+workspace registry outlives a session and "the first time this workspace was opened"
+would have been days ago.
 
 ## Out of scope
 
