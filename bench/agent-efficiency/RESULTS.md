@@ -208,6 +208,57 @@ record.
   builtin, 3 huyang (all R1). Retried once. Runs after 00:47 PDT ran against the friction
   pass build (commit 2ea1453 and later), which changes the Huyang family's response sizes
   mid-batch; `score.py` output should be read with the thread's start time in mind.
+- The Muse free quota ran out at 01:10 PDT with 75 runs succeeded; the 22 retries and the
+  last pending tasks were cancelled. The table below is the final agent measurement for
+  this batch (`runs/after-scores.json`). Rows with 0 calls are the failed threads
+  (R1 for every family, R2 for bash): the agent never called a tool before ending
+  without the done marker, so those scenarios have no agent data.
+
+### Agent scores, batch `after` (Go fixture, cl100k tokens, mean of the runs found)
+
+| Scenario | Family | Runs | Calls | Req tokens | Resp tokens | Tool ms |
+|---|---|---|---|---|---|---|
+| E1 | bash | 3 | 2.0 | 155 | 396 | 310 |
+| E1 | builtin | 3 | 3.7 | 392 | 1622 | 449 |
+| E1 | huyang | 3 | 3.7 | 317 | 1669 | 4750 |
+| E2 | bash | 3 | 6.3 | 518 | 7970 | 471 |
+| E2 | builtin | 3 | 4.7 | 709 | 1052 | 425 |
+| E2 | huyang | 3 | 5.7 | 564 | 2648 | 869 |
+| E3 | bash | 3 | 7.7 | 310 | 5349 | 500 |
+| E3 | builtin | 3 | 5.0 | 788 | 3502 | 678 |
+| E3 | huyang | 3 | 6.7 | 718 | 5879 | 1290 |
+| E4 | bash | 3 | 6.3 | 1225 | 7344 | 565 |
+| E4 | builtin | 3 | 5.7 | 946 | 2658 | 543 |
+| E4 | huyang | 3 | 4.7 | 699 | 3333 | 9415 |
+| E5 | bash | 3 | 14.3 | 2408 | 12222 | 2128 |
+| E5 | builtin | 3 | 12.3 | 2233 | 10814 | 1183 |
+| E5 | huyang | 3 | 10.3 | 1546 | 11288 | 23773 |
+| E6 | bash | 3 | 9.7 | 1223 | 11814 | 1020 |
+| E6 | builtin | 3 | 18.0 | 2808 | 15083 | 1268 |
+| E6 | huyang | 3 | 21.3 | 2014 | 16868 | 13237 |
+| R2 | builtin | 3 | 0.7 | 48 | 179 | 33 |
+| R2 | huyang | 3 | 2.3 | 157 | 1370 | 263 |
+| R3 | bash | 3 | 4.0 | 135 | 2056 | 342 |
+| R3 | builtin | 3 | 5.3 | 528 | 4471 | 293 |
+| R3 | huyang | 3 | 4.0 | 296 | 5269 | 304 |
+| R4 | bash | 3 | 2.3 | 129 | 1174 | 318 |
+| R4 | builtin | 3 | 3.3 | 354 | 2782 | 206 |
+| R4 | huyang | 3 | 2.7 | 207 | 3318 | 253 |
+| V1 | bash | 3 | 1.7 | 135 | 112 | 491 |
+| V1 | builtin | 3 | 2.3 | 199 | 159 | 574 |
+| V1 | huyang | 3 | 2.0 | 174 | 1184 | 8305 |
+
+What the agent data says, honestly: with the Muse model the Huyang family used fewer or
+equal calls than the built-in tools on E4, E5, R3 and R4 and fewer request tokens on every
+edit scenario, but paid more response tokens on every scenario. Three causes are visible
+in the transcripts: `workspace_open` at the start of every task (about 840 tokens; the
+friction pass makes it unnecessary through `root`, but these agents were not told),
+the pre-friction reply shape for most runs (patch echo, diagnostic notices, envelope
+boilerplate; the after-f protocol numbers above show what the same calls cost now), and
+`verify_run` answering several times the size of a shell's exit status, both when the
+fixture root was untrusted and afterwards because the stage report is structured. The
+tool time column is wall time inside the tool: `verify_run` runs the real tests, while
+for the shell families the harness records only the command's own duration.
 
 Preliminary scores, 22 of 99 runs (before the trust change; `score.py --batch after`):
 
