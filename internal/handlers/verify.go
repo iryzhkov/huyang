@@ -229,15 +229,36 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 		}
 		return resultEnvelope
 	}
-	outcome := "ok"
+	outcome, summary := verificationOutcome(result)
+	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
+	return modernVerificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result)
+}
+
+// verificationOutcome reduces the stages to the envelope outcome and a
+// summary that names the reason when nothing ran, so an agent whose root is
+// not trusted learns what to do instead of reading two skipped stages.
+func verificationOutcome(result workspacecore.VerificationResult) (string, string) {
+	ran, skipped := 0, map[string]int{}
 	for _, stage := range result.Stages {
-		if stage.Status == workspacecore.VerificationSkipped {
-			outcome = "partial"
-			break
+		if stage.Status != workspacecore.VerificationSkipped {
+			ran++
+			continue
+		}
+		for _, reason := range stage.Coverage.Skipped {
+			skipped[reason]++
 		}
 	}
-	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
-	return modernVerificationEnvelope(requestID, workspace, outcome, "", "Verification completed against exact sandbox bytes", "revision_miss", result)
+	if len(skipped) == 0 {
+		return "ok", "Verification completed against exact sandbox bytes"
+	}
+	if ran == 0 && skipped["workspace_not_trusted"] > 0 {
+		return "partial", "No stage ran: the workspace root is not trusted; list it (or a parent directory) under [trust] roots in " +
+			workspacecore.UserConfigPath() + " and retry, or run the command in the shell"
+	}
+	if ran == 0 && skipped["not_configured"] > 0 {
+		return "partial", "No stage ran: no command is declared or detected for the requested stages; write .huyang.toml at the workspace root"
+	}
+	return "partial", fmt.Sprintf("Verification completed against exact sandbox bytes; %d stage(s) unavailable", len(result.Stages)-ran)
 }
 
 // verifyCanonical materialises a throwaway sandbox of the canonical tree,

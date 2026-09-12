@@ -233,6 +233,25 @@ func TestVerificationEnvelopeOffersRunnableFullFallback(t *testing.T) {
 	}
 }
 
+// A verification in which every stage was skipped because the root is not
+// trusted says so in the summary and names the user config file, instead of
+// claiming completion; a mixed result stays partial with a count.
+func TestVerificationOutcomeNamesWhyNothingRan(t *testing.T) {
+	skipped := workspacecore.VerificationStage{Stage: "check", Status: workspacecore.VerificationSkipped, Coverage: workspacecore.Coverage{Skipped: []string{"workspace_not_trusted"}}}
+	outcome, summary := verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{skipped, skipped}})
+	if outcome != "partial" || !strings.Contains(summary, "not trusted") || !strings.Contains(summary, workspacecore.UserConfigPath()) {
+		t.Fatalf("untrusted outcome=%q summary=%q", outcome, summary)
+	}
+	ran := workspacecore.VerificationStage{Stage: "tests", Status: workspacecore.VerificationPassed}
+	outcome, summary = verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{ran, skipped}})
+	if outcome != "partial" || !strings.Contains(summary, "1 stage(s) unavailable") {
+		t.Fatalf("mixed outcome=%q summary=%q", outcome, summary)
+	}
+	if outcome, summary = verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{ran}}); outcome != "ok" || strings.Contains(summary, "unavailable") {
+		t.Fatalf("clean outcome=%q summary=%q", outcome, summary)
+	}
+}
+
 // Provider attach and diagnostic settle waits during verification stay
 // within a routine tool call.
 func TestVerificationProviderWaitsStayBounded(t *testing.T) {

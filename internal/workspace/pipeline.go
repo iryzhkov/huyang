@@ -271,6 +271,10 @@ func loadProjectPolicy(projectRoot string, policy *PipelinePolicy) error {
 }
 
 // defaultUserConfigPath returns the explicit user config path, or the XDG default.
+// UserConfigPath is the user policy file consulted for trust roots and
+// resource caps, for messages that tell the user where to grant trust.
+func UserConfigPath() string { return defaultUserConfigPath("") }
+
 func defaultUserConfigPath(userConfig string) string {
 	if userConfig != "" {
 		return userConfig

@@ -113,6 +113,18 @@ to 100 times the built-in cost, which is why an agent reached for `sed`.
   current` a moment later (E5 in `runs/protocol-after-d.json` before the `current` alias).
   `verify_run` accepts `current`; the guide recommends it.
 - Handle and result-set lifetime is 30 minutes, not one minute as the field report said.
+- `diagnostic_updates` on every reply in this repository ran to the 20-notice cap while
+  gopls churned during edits: about 800 response tokens per call of `new`/`stale`/`resolved`
+  notices for the same ids, each with an `attribution: {rank: unattributed}` object. A
+  5-line edit therefore cost about 1,300 tokens here against 422 in the protocol
+  measurement on a quiet fixture. Not fixed yet; the delta should collapse to one line per
+  id and drop the empty attribution.
+- `edit_apply` on a file outside any repository answered `semantic diagnostic refresh
+  failed` in its summary although nothing failed; a documents workspace has no provider.
+  Cosmetic, not fixed yet.
+- `verify_run` on an untrusted root returned two identical skipped stages under the summary
+  `Verification completed`, and the Muse agents fell back to bash every time. The summary now
+  names the cause and the config file to edit.
 
 ## Agent measurement (Muse through the t3-steward backlog)
 
@@ -120,3 +132,45 @@ The scenarios were submitted as backlog tasks with `submit.sh`; the batch log is
 `runs/`. Results are appended here by `score.py --batch NAME --markdown` once the steward
 has run the tasks in a quiet slot. Until then this section carries only the submission
 record.
+
+### Batch `after` (submitted 2026-09-11 22:52 PDT)
+
+- `submit.sh after --reps 3`: 99 tasks (11 scenarios x 3 families x 3 reps, Go fixture),
+  logged in `runs/after.tsv`; `t3-steward backlog list --project huyang` showed 99 new
+  workflow runs. Model `opencode/muse-spark-1.3-contributor-free`, max 4 turns per task.
+- The batch runs against commit `6552560` (replace_literal, compact responses, detected
+  commands, implicit single-file edits) deployed to the local service before submission,
+  so it measures only the new build. A comparable pre-change agent batch was not run; the
+  before/after comparison is the protocol measurement above.
+- First 35 attempts failed at workspace preparation: the steward clones over
+  `ssh://igor@normandy/...` and the forced-command wrapper on the worker key
+  (`~/.local/libexec/t3-steward-f02-worker`) allow-listed `git-upload-pack` only for the
+  citadel repository. Added the huyang entry, restarted the steward and retried the failed
+  tasks with `t3-steward backlog retry`. Threads are auto-titled by the steward, so
+  `score.py` now matches threads by their prompt text and assigns them to reps in creation
+  order.
+- The first 21 runs verified through bash because the cloned fixture root was untrusted
+  (`verify_run` answered two skipped stages). Trusted
+  `~/.local/state/t3-steward/backlog-v2-workspaces/workers` in `~/.config/huyang/config.toml`
+  after that; later runs in the same batch can use `verify_run`. The untrusted reply itself
+  now says why nothing ran and where to grant trust.
+- OpenCode records no context-window events, so provider token columns are 0 for this
+  batch; the tool-call columns (cl100k) are the measurement.
+
+Preliminary scores, 22 of 99 runs (before the trust change; `score.py --batch after`):
+
+| Scenario | Lang | Family | Runs | Calls | Req tokens | Resp tokens |
+|---|---|---|---|---|---|---|
+| E1 | go | builtin | 3 | 3.7 | 392 | 1622 |
+| E1 | go | huyang | 2 | 4.0 | 356 | 1682 |
+| E2 | go | bash | 3 | 6.3 | 518 | 7970 |
+| E2 | go | builtin | 3 | 4.7 | 709 | 1052 |
+| E2 | go | huyang | 3 | 5.7 | 564 | 2648 |
+| E3 | go | bash | 3 | 7.7 | 310 | 5349 |
+| E3 | go | builtin | 1 | 5.0 | 791 | 3470 |
+| E3 | go | huyang | 2 | 6.5 | 696 | 5939 |
+
+What the live E1 Huyang run spent: `workspace_open` 839 response tokens, `edit_apply` 457,
+`verify_run` 375 (skipped, untrusted), then `go build` through bash. The edit itself is at
+the protocol cost; the open and the wasted verify are the overhead to attack next
+(`workspace_open` on a fresh clone carries the overview and the untrusted-commands text).

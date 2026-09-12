@@ -3,10 +3,13 @@
 
 Usage: score.py --batch NAME [--db ~/.t3/userdata/state.sqlite] [--markdown]
 
-For every row of runs/NAME.tsv the thread with the same title is looked up in the T3
-state database. Its tool activities give the ordered tool calls with exact arguments and
+For every row of runs/NAME.tsv the matching thread is looked up in the T3 state database
+by its first user message (the rendered prompt), since the steward titles threads itself;
+threads of one scenario are assigned to the rows in creation order. Its tool activities give the ordered tool calls with exact arguments and
 results; the context-window events give the provider's own token counts per turn; the
-final assistant message gives the agent's BENCH REPORT. Token counts for arguments and
+final assistant message gives the agent's BENCH REPORT. The OpenCode provider records no
+context-window events, so provider token columns read 0 for Muse batches; the tool-call
+columns are the measurement. Token counts for arguments and
 results use the cl100k_base tokenizer through `go run ./bench/agent-efficiency/protocol
 count`, the same tokenizer the protocol measurement uses.
 
@@ -24,6 +27,7 @@ import sqlite3
 import statistics
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -64,7 +68,17 @@ def tool_calls(connection: sqlite3.Connection, thread_id: str) -> list[dict]:
         data = payload.get("data") or {}
         item = data.get("item") or {}
         kind = payload.get("itemType")
-        if kind == "mcp_tool_call":
+        state = data.get("state") or {}
+        if data.get("tool") and "input" in state:
+            # OpenCode-backed threads: every tool kind carries tool, state.input,
+            # state.output and state.time regardless of itemType.
+            name = str(data["tool"]).removeprefix("huyang_")
+            arguments = state.get("input")
+            output = state.get("output") or ""
+            text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+            time = state.get("time") or {}
+            duration = (time["end"] - time["start"]) if "start" in time and "end" in time else state.get("durationMs")
+        elif kind == "mcp_tool_call":
             name = item.get("tool") or item.get("name") or payload.get("detail", "").split(":")[0]
             arguments = item.get("arguments")
             result = item.get("result") or {}
@@ -119,17 +133,51 @@ def bench_report(connection: sqlite3.Connection, thread_id: str) -> str:
     return match.group(0) if match else ""
 
 
-def find_thread(connection: sqlite3.Connection, title: str) -> str | None:
-    row = connection.execute(
-        "select thread_id from projection_threads where title = ? and deleted_at is null "
-        "order by created_at desc limit 1",
-        (title,),
-    ).fetchone()
-    return row[0] if row else None
+PROMPT_PREFIX = "You are running one scenario of the Huyang agent-efficiency benchmark"
 
 
-def score_run(connection: sqlite3.Connection, tokenizer: Tokenizer, row: dict) -> dict:
-    thread_id = find_thread(connection, row["title"])
+def batch_started(rows: list[dict]) -> str:
+    """UTC timestamp of the earliest task file in the batch, from its file name."""
+    stamps = []
+    for row in rows:
+        match = re.search(r"-(\d{8}-\d{6})\.md$", row["task_file"])
+        if match:
+            local = datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").astimezone()
+            stamps.append(local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+    return min(stamps) if stamps else "1970-01-01T00:00:00"
+
+
+def batch_threads(connection: sqlite3.Connection, since: str) -> dict[tuple, list[str]]:
+    """Map (scenario, language, family) to the benchmark threads started since `since`.
+
+    The steward titles threads itself, so a thread is recognised by its first user
+    message, which is the rendered prompt; threads of one scenario are interchangeable
+    and are assigned to the batch rows in creation order.
+    """
+    threads: dict[tuple, list[str]] = {}
+    seen: set[str] = set()
+    rows = connection.execute(
+        "select thread_id, text from projection_thread_messages where role = 'user' "
+        "and text like ? and created_at >= ? order by created_at",
+        (PROMPT_PREFIX + "%", since),
+    )
+    for thread_id, text in rows:
+        if thread_id in seen:
+            continue
+        seen.add(thread_id)
+        scenario = re.search(r"Task \((\w+):", text)
+        family = re.search(r"Tool family under test: (\w+)", text)
+        language = re.search(r"fixtures/(\w+)", text)
+        if scenario and family and language:
+            key = (scenario.group(1), language.group(1), family.group(1))
+            threads.setdefault(key, []).append(thread_id)
+    return threads
+
+
+def score_run(connection: sqlite3.Connection, tokenizer: Tokenizer, row: dict, threads: dict[tuple, list[str]]) -> dict:
+    candidates = threads.get((row["scenario"], row["language"], row["family"]), [])
+    index = int(row["rep"]) - 1
+    thread_id = candidates[index] if index < len(candidates) else None
     scored = dict(row, thread_id=thread_id, found=thread_id is not None)
     if thread_id is None:
         return scored
@@ -195,7 +243,8 @@ def main() -> None:
     connection = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     tokenizer = Tokenizer()
     try:
-        runs = [score_run(connection, tokenizer, row) for row in rows]
+        threads = batch_threads(connection, batch_started(rows))
+        runs = [score_run(connection, tokenizer, row, threads) for row in rows]
     finally:
         tokenizer.close()
     missing = [run["title"] for run in runs if not run["found"]]
