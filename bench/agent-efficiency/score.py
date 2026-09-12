@@ -181,6 +181,31 @@ def provider_tokens(connection: sqlite3.Connection, thread_id: str) -> dict:
     return totals
 
 
+def turn_windows(connection: sqlite3.Connection, thread_id: str) -> list[tuple[datetime, datetime]]:
+    """The start and end of every finished turn of a thread.
+
+    One benchmark task is one user prompt, so these windows are the agent's
+    wall-clock runtime: model thinking, tool execution and the harness
+    between them.
+    """
+    windows = []
+    rows = connection.execute(
+        "select started_at, completed_at from projection_turns where thread_id = ? order by requested_at",
+        (thread_id,),
+    )
+    for started_at, completed_at in rows:
+        if not started_at or not completed_at:
+            continue
+        try:
+            start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if end >= start:
+            windows.append((start, end))
+    return windows
+
+
 def bench_report(connection: sqlite3.Connection, thread_id: str) -> str:
     row = connection.execute(
         "select text from projection_thread_messages where thread_id = ? and role = 'assistant' "
@@ -246,11 +271,18 @@ def score_run(connection: sqlite3.Connection, tokenizer: Tokenizer, row: dict, t
         call["request_tokens"] = tokenizer.count(call["request"] or "")
         call["response_tokens"] = tokenizer.count(call["response"] or "")
     times = [c["created_at"] for c in calls]
+    windows = turn_windows(connection, thread_id)
+    tool_ms = sum(int(c["duration_ms"] or 0) for c in calls)
+    wall_ms = sum((end - start).total_seconds() * 1000 for start, end in windows)
     scored.update({
         "calls": calls, "call_count": len(calls),
         "request_tokens": sum(c["request_tokens"] for c in calls),
         "response_tokens": sum(c["response_tokens"] for c in calls),
-        "tool_ms": sum(int(c["duration_ms"] or 0) for c in calls),
+        "tool_ms": tool_ms,
+        # wall_ms is the whole turn; the remainder is the model thinking and
+        # the harness, which no tool choice can be blamed for directly.
+        "wall_ms": wall_ms, "model_ms": max(wall_ms - tool_ms, 0), "turns": len(windows),
+        "turn_windows": [[start.isoformat(), end.isoformat()] for start, end in windows],
         "first_call_at": times[0] if times else None, "last_call_at": times[-1] if times else None,
         "provider_tokens": provider_tokens(connection, thread_id),
         "report": bench_report(connection, thread_id),
@@ -271,6 +303,7 @@ def summarise(runs: list[dict]) -> list[dict]:
             "scenario": scenario, "language": language, "family": family, "runs": len(items),
             "calls": mean("call_count"), "request_tokens": mean("request_tokens"),
             "response_tokens": mean("response_tokens"), "tool_ms": mean("tool_ms"),
+            "wall_ms": mean("wall_ms"), "model_ms": mean("model_ms"),
             "provider_input": statistics.mean(i["provider_tokens"]["input"] for i in items),
             "provider_output": statistics.mean(i["provider_tokens"]["output"] for i in items),
         })
@@ -279,13 +312,14 @@ def summarise(runs: list[dict]) -> list[dict]:
 
 def markdown(rows: list[dict]) -> str:
     lines = [
-        "| Scenario | Lang | Family | Runs | Calls | Req tokens | Resp tokens | Tool ms | Provider in | Provider out |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Scenario | Lang | Family | Runs | Calls | Req tokens | Resp tokens | Wall s | Tool s | Model s | Provider in | Provider out |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
             f"| {row['scenario']} | {row['language']} | {row['family']} | {row['runs']} | {row['calls']:.1f} | "
-            f"{row['request_tokens']:.0f} | {row['response_tokens']:.0f} | {row['tool_ms']:.0f} | "
+            f"{row['request_tokens']:.0f} | {row['response_tokens']:.0f} | "
+            f"{row['wall_ms'] / 1000:.1f} | {row['tool_ms'] / 1000:.1f} | {row['model_ms'] / 1000:.1f} | "
             f"{row['provider_input']:.0f} | {row['provider_output']:.0f} |"
         )
     return "\n".join(lines)

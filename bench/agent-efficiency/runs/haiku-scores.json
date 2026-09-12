@@ -36,6 +36,15 @@
    "request_tokens": 151,
    "response_tokens": 2051,
    "tool_ms": 1492,
+   "wall_ms": 24846.0,
+   "model_ms": 23354.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:45:49.796000+00:00",
+     "2026-09-12T21:46:14.642000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:46:02.698Z",
    "last_call_at": "2026-09-12T21:46:05.134Z",
    "provider_tokens": {
@@ -83,6 +92,15 @@
    "request_tokens": 144,
    "response_tokens": 2041,
    "tool_ms": 2189,
+   "wall_ms": 26337.0,
+   "model_ms": 24148.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:49:35.937000+00:00",
+     "2026-09-12T21:50:02.274000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:49:48.101Z",
    "last_call_at": "2026-09-12T21:49:50.451Z",
    "provider_tokens": {
@@ -130,6 +148,15 @@
    "request_tokens": 147,
    "response_tokens": 2039,
    "tool_ms": 2041,
+   "wall_ms": 26048.0,
+   "model_ms": 24007.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:51:18.083000+00:00",
+     "2026-09-12T21:51:44.131000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:51:30.368Z",
    "last_call_at": "2026-09-12T21:51:32.516Z",
    "provider_tokens": {
@@ -167,6 +194,15 @@
    "request_tokens": 106,
    "response_tokens": 1290,
    "tool_ms": 2490,
+   "wall_ms": 16423.0,
+   "model_ms": 13933.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:53:20.405000+00:00",
+     "2026-09-12T21:53:36.828000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:53:29.720Z",
    "last_call_at": "2026-09-12T21:53:29.720Z",
    "provider_tokens": {
@@ -204,6 +240,15 @@
    "request_tokens": 109,
    "response_tokens": 1290,
    "tool_ms": 2213,
+   "wall_ms": 17146.0,
+   "model_ms": 14933.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:55:10.884000+00:00",
+     "2026-09-12T21:55:28.030000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:55:20.375Z",
    "last_call_at": "2026-09-12T21:55:20.375Z",
    "provider_tokens": {
@@ -241,6 +286,15 @@
    "request_tokens": 111,
    "response_tokens": 1290,
    "tool_ms": 2343,
+   "wall_ms": 21055.0,
+   "model_ms": 18712.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:57:05.445000+00:00",
+     "2026-09-12T21:57:26.500000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:57:16.216Z",
    "last_call_at": "2026-09-12T21:57:16.216Z",
    "provider_tokens": {
@@ -288,6 +342,15 @@
    "request_tokens": 77,
    "response_tokens": 1205,
    "tool_ms": 1185,
+   "wall_ms": 21121.0,
+   "model_ms": 19936.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:59:37.464000+00:00",
+     "2026-09-12T21:59:58.585000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:59:46.150Z",
    "last_call_at": "2026-09-12T21:59:50.913Z",
    "provider_tokens": {
@@ -325,6 +388,15 @@
    "request_tokens": 31,
    "response_tokens": 1030,
    "tool_ms": 390,
+   "wall_ms": 15708.0,
+   "model_ms": 15318.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T22:00:41.106000+00:00",
+     "2026-09-12T22:00:56.814000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T22:00:49.157Z",
    "last_call_at": "2026-09-12T22:00:49.157Z",
    "provider_tokens": {
@@ -362,6 +434,15 @@
    "request_tokens": 26,
    "response_tokens": 1030,
    "tool_ms": 664,
+   "wall_ms": 15028.0,
+   "model_ms": 14364.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T22:02:43.672000+00:00",
+     "2026-09-12T22:02:58.700000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T22:02:51.295Z",
    "last_call_at": "2026-09-12T22:02:51.295Z",
    "provider_tokens": {
@@ -419,6 +500,15 @@
    "request_tokens": 202,
    "response_tokens": 1615,
    "tool_ms": 1390,
+   "wall_ms": 19463.0,
+   "model_ms": 18073.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:28:31.440000+00:00",
+     "2026-09-12T21:28:50.903000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:28:40.828Z",
    "last_call_at": "2026-09-12T21:28:45.246Z",
    "provider_tokens": {
@@ -466,6 +556,15 @@
    "request_tokens": 155,
    "response_tokens": 1425,
    "tool_ms": 2137,
+   "wall_ms": 23040.0,
+   "model_ms": 20903.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:32:46.274000+00:00",
+     "2026-09-12T21:33:09.314000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:32:57.509Z",
    "last_call_at": "2026-09-12T21:33:00.529Z",
    "provider_tokens": {
@@ -523,6 +622,15 @@
    "request_tokens": 192,
    "response_tokens": 1588,
    "tool_ms": 4240,
+   "wall_ms": 24126.0,
+   "model_ms": 19886.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T22:05:44.229000+00:00",
+     "2026-09-12T22:06:08.355000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T22:05:55.588Z",
    "last_call_at": "2026-09-12T22:06:01.274Z",
    "provider_tokens": {
@@ -580,6 +688,15 @@
    "request_tokens": 284,
    "response_tokens": 567,
    "tool_ms": 4698,
+   "wall_ms": 27808.0,
+   "model_ms": 23110.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:29:57.613000+00:00",
+     "2026-09-12T21:30:25.421000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:30:08.676Z",
    "last_call_at": "2026-09-12T21:30:19.432Z",
    "provider_tokens": {
@@ -617,6 +734,15 @@
    "request_tokens": 116,
    "response_tokens": 8811,
    "tool_ms": 2898,
+   "wall_ms": 19062.0,
+   "model_ms": 16164.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:31:07.265000+00:00",
+     "2026-09-12T21:31:26.327000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:31:17.460Z",
    "last_call_at": "2026-09-12T21:31:17.460Z",
    "provider_tokens": {
@@ -674,6 +800,15 @@
    "request_tokens": 160,
    "response_tokens": 228,
    "tool_ms": 3282,
+   "wall_ms": 21774.0,
+   "model_ms": 18492.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T22:03:51.683000+00:00",
+     "2026-09-12T22:04:13.457000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T22:04:01.340Z",
    "last_call_at": "2026-09-12T22:04:07.703Z",
    "provider_tokens": {
@@ -721,6 +856,15 @@
    "request_tokens": 82,
    "response_tokens": 188,
    "tool_ms": 1299,
+   "wall_ms": 16908.0,
+   "model_ms": 15609.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:34:46.203000+00:00",
+     "2026-09-12T21:35:03.111000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:34:54.980Z",
    "last_call_at": "2026-09-12T21:34:57.733Z",
    "provider_tokens": {
@@ -768,6 +912,15 @@
    "request_tokens": 86,
    "response_tokens": 188,
    "tool_ms": 1608,
+   "wall_ms": 16378.0,
+   "model_ms": 14770.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:36:26.179000+00:00",
+     "2026-09-12T21:36:42.557000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:36:35.147Z",
    "last_call_at": "2026-09-12T21:36:37.291Z",
    "provider_tokens": {
@@ -815,6 +968,15 @@
    "request_tokens": 249,
    "response_tokens": 214,
    "tool_ms": 3986,
+   "wall_ms": 16557.0,
+   "model_ms": 12571.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:38:07.906000+00:00",
+     "2026-09-12T21:38:24.463000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:38:17.739Z",
    "last_call_at": "2026-09-12T21:38:19.766Z",
    "provider_tokens": {
@@ -862,6 +1024,15 @@
    "request_tokens": 171,
    "response_tokens": 1449,
    "tool_ms": 4803,
+   "wall_ms": 25481.0,
+   "model_ms": 20678.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:12:31.309000+00:00",
+     "2026-09-12T21:12:56.790000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:12:41.508Z",
    "last_call_at": "2026-09-12T21:12:45.455Z",
    "provider_tokens": {
@@ -909,6 +1080,15 @@
    "request_tokens": 145,
    "response_tokens": 1435,
    "tool_ms": 1366,
+   "wall_ms": 19542.0,
+   "model_ms": 18176.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:14:11.609000+00:00",
+     "2026-09-12T21:14:31.151000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:14:21.374Z",
    "last_call_at": "2026-09-12T21:14:24.197Z",
    "provider_tokens": {
@@ -956,6 +1136,15 @@
    "request_tokens": 152,
    "response_tokens": 1445,
    "tool_ms": 4362,
+   "wall_ms": 25295.0,
+   "model_ms": 20933.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:15:41.735000+00:00",
+     "2026-09-12T21:16:07.030000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:15:53.933Z",
    "last_call_at": "2026-09-12T21:15:57.029Z",
    "provider_tokens": {
@@ -1053,6 +1242,15 @@
    "request_tokens": 595,
    "response_tokens": 12431,
    "tool_ms": 9937,
+   "wall_ms": 37785.0,
+   "model_ms": 27848.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:18:38.233000+00:00",
+     "2026-09-12T21:19:16.018000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:18:46.738Z",
    "last_call_at": "2026-09-12T21:19:08.953Z",
    "provider_tokens": {
@@ -1150,6 +1348,15 @@
    "request_tokens": 585,
    "response_tokens": 12431,
    "tool_ms": 13269,
+   "wall_ms": 47279.0,
+   "model_ms": 34010.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:19:02.668000+00:00",
+     "2026-09-12T21:19:49.947000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:19:09.761Z",
    "last_call_at": "2026-09-12T21:19:40.228Z",
    "provider_tokens": {
@@ -1227,6 +1434,15 @@
    "request_tokens": 412,
    "response_tokens": 3296,
    "tool_ms": 9861,
+   "wall_ms": 33734.0,
+   "model_ms": 23873.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:44:11.429000+00:00",
+     "2026-09-12T21:44:45.163000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:44:20.110Z",
    "last_call_at": "2026-09-12T21:44:38.600Z",
    "provider_tokens": {
@@ -1304,6 +1520,15 @@
    "request_tokens": 334,
    "response_tokens": 1137,
    "tool_ms": 4765,
+   "wall_ms": 27034.0,
+   "model_ms": 22269.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:21:34.783000+00:00",
+     "2026-09-12T21:22:01.817000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:21:42.288Z",
    "last_call_at": "2026-09-12T21:21:56.447Z",
    "provider_tokens": {
@@ -1371,6 +1596,15 @@
    "request_tokens": 214,
    "response_tokens": 1104,
    "tool_ms": 1609,
+   "wall_ms": 21128.0,
+   "model_ms": 19519.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:24:23.110000+00:00",
+     "2026-09-12T21:24:44.238000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:24:30.576Z",
    "last_call_at": "2026-09-12T21:24:39.141Z",
    "provider_tokens": {
@@ -1438,6 +1672,15 @@
    "request_tokens": 257,
    "response_tokens": 971,
    "tool_ms": 2081,
+   "wall_ms": 22444.0,
+   "model_ms": 20363.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:25:57.164000+00:00",
+     "2026-09-12T21:26:19.608000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:26:05.584Z",
    "last_call_at": "2026-09-12T21:26:15.538Z",
    "provider_tokens": {
@@ -1485,6 +1728,15 @@
    "request_tokens": 158,
    "response_tokens": 3078,
    "tool_ms": 3485,
+   "wall_ms": 23075.0,
+   "model_ms": 19590.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:59:05.431000+00:00",
+     "2026-09-12T20:59:28.506000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:59:15.365Z",
    "last_call_at": "2026-09-12T20:59:17.300Z",
    "provider_tokens": {
@@ -1532,6 +1784,15 @@
    "request_tokens": 163,
    "response_tokens": 3095,
    "tool_ms": 1960,
+   "wall_ms": 26573.0,
+   "model_ms": 24613.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:00:41.837000+00:00",
+     "2026-09-12T21:01:08.410000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:00:52.799Z",
    "last_call_at": "2026-09-12T21:00:55.668Z",
    "provider_tokens": {
@@ -1579,6 +1840,15 @@
    "request_tokens": 165,
    "response_tokens": 3097,
    "tool_ms": 3445,
+   "wall_ms": 22750.0,
+   "model_ms": 19305.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:03:57.371000+00:00",
+     "2026-09-12T21:04:20.121000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:04:05.905Z",
    "last_call_at": "2026-09-12T21:04:09.235Z",
    "provider_tokens": {
@@ -1636,6 +1906,15 @@
    "request_tokens": 316,
    "response_tokens": 2160,
    "tool_ms": 4488,
+   "wall_ms": 26946.0,
+   "model_ms": 22458.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:05:21.472000+00:00",
+     "2026-09-12T21:05:48.418000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:05:31.180Z",
    "last_call_at": "2026-09-12T21:05:37.341Z",
    "provider_tokens": {
@@ -1693,6 +1972,15 @@
    "request_tokens": 319,
    "response_tokens": 2160,
    "tool_ms": 4977,
+   "wall_ms": 28032.0,
+   "model_ms": 23055.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:11:11.621000+00:00",
+     "2026-09-12T21:11:39.653000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:11:21.926Z",
    "last_call_at": "2026-09-12T21:11:29.932Z",
    "provider_tokens": {
@@ -1750,6 +2038,15 @@
    "request_tokens": 331,
    "response_tokens": 2160,
    "tool_ms": 5586,
+   "wall_ms": 29537.0,
+   "model_ms": 23951.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:22:40.797000+00:00",
+     "2026-09-12T21:23:10.334000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:22:52.335Z",
    "last_call_at": "2026-09-12T21:22:59.753Z",
    "provider_tokens": {
@@ -1807,6 +2104,15 @@
    "request_tokens": 46,
    "response_tokens": 1752,
    "tool_ms": 1577,
+   "wall_ms": 23536.0,
+   "model_ms": 21959.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:06:22.488000+00:00",
+     "2026-09-12T21:06:46.024000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:06:29.342Z",
    "last_call_at": "2026-09-12T21:06:33.814Z",
    "provider_tokens": {
@@ -1864,6 +2170,15 @@
    "request_tokens": 82,
    "response_tokens": 1752,
    "tool_ms": 1107,
+   "wall_ms": 16290.0,
+   "model_ms": 15183.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:09:25.040000+00:00",
+     "2026-09-12T21:09:41.330000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:09:32.045Z",
    "last_call_at": "2026-09-12T21:09:32.379Z",
    "provider_tokens": {
@@ -1921,6 +2236,15 @@
    "request_tokens": 87,
    "response_tokens": 1752,
    "tool_ms": 2009,
+   "wall_ms": 19276.0,
+   "model_ms": 17267.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:10:17.165000+00:00",
+     "2026-09-12T21:10:36.441000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:10:24.864Z",
    "last_call_at": "2026-09-12T21:10:25.736Z",
    "provider_tokens": {
@@ -2008,6 +2332,15 @@
    "request_tokens": 346,
    "response_tokens": 1838,
    "tool_ms": 28529,
+   "wall_ms": 56854.0,
+   "model_ms": 28325.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:50:32.404000+00:00",
+     "2026-09-12T20:51:29.258000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:50:43.044Z",
    "last_call_at": "2026-09-12T20:51:22.601Z",
    "provider_tokens": {
@@ -2075,6 +2408,15 @@
    "request_tokens": 345,
    "response_tokens": 2334,
    "tool_ms": 7208,
+   "wall_ms": 31320.0,
+   "model_ms": 24112.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:39:18.557000+00:00",
+     "2026-09-12T21:39:49.877000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:39:30.481Z",
    "last_call_at": "2026-09-12T21:39:43.025Z",
    "provider_tokens": {
@@ -2132,6 +2474,15 @@
    "request_tokens": 206,
    "response_tokens": 1105,
    "tool_ms": 23700,
+   "wall_ms": 44856.0,
+   "model_ms": 21156.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T21:41:12.925000+00:00",
+     "2026-09-12T21:41:57.781000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T21:41:24.967Z",
    "last_call_at": "2026-09-12T21:41:52.330Z",
    "provider_tokens": {
@@ -2199,6 +2550,15 @@
    "request_tokens": 485,
    "response_tokens": 1476,
    "tool_ms": 8370,
+   "wall_ms": 22813.0,
+   "model_ms": 14443.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:50:05.816000+00:00",
+     "2026-09-12T20:50:28.629000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:50:14.207Z",
    "last_call_at": "2026-09-12T20:50:24.829Z",
    "provider_tokens": {
@@ -2256,6 +2616,15 @@
    "request_tokens": 377,
    "response_tokens": 1427,
    "tool_ms": 6594,
+   "wall_ms": 19034.0,
+   "model_ms": 12440.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:52:58.856000+00:00",
+     "2026-09-12T20:53:17.890000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:53:06.904Z",
    "last_call_at": "2026-09-12T20:53:14.649Z",
    "provider_tokens": {
@@ -2313,6 +2682,15 @@
    "request_tokens": 371,
    "response_tokens": 1425,
    "tool_ms": 6519,
+   "wall_ms": 20585.0,
+   "model_ms": 14066.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:55:31.108000+00:00",
+     "2026-09-12T20:55:51.693000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:55:39.384Z",
    "last_call_at": "2026-09-12T20:55:46.654Z",
    "provider_tokens": {
@@ -2380,6 +2758,15 @@
    "request_tokens": 331,
    "response_tokens": 74,
    "tool_ms": 6356,
+   "wall_ms": 24548.0,
+   "model_ms": 18192.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:54:02.074000+00:00",
+     "2026-09-12T20:54:26.622000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:54:15.511Z",
    "last_call_at": "2026-09-12T20:54:22.748Z",
    "provider_tokens": {
@@ -2447,6 +2834,15 @@
    "request_tokens": 335,
    "response_tokens": 74,
    "tool_ms": 4095,
+   "wall_ms": 20067.0,
+   "model_ms": 15972.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:57:37.464000+00:00",
+     "2026-09-12T20:57:57.531000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:57:46.666Z",
    "last_call_at": "2026-09-12T20:57:51.513Z",
    "provider_tokens": {
@@ -2534,6 +2930,15 @@
    "request_tokens": 206,
    "response_tokens": 243,
    "tool_ms": 1982,
+   "wall_ms": 19225.0,
+   "model_ms": 17243.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:59:32.055000+00:00",
+     "2026-09-12T20:59:51.280000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:59:38.605Z",
    "last_call_at": "2026-09-12T20:59:46.835Z",
    "provider_tokens": {
@@ -2621,6 +3026,15 @@
    "request_tokens": 625,
    "response_tokens": 2008,
    "tool_ms": 24454,
+   "wall_ms": 52856.0,
+   "model_ms": 28402.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:38:32.756000+00:00",
+     "2026-09-12T20:39:25.612000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:38:44.976Z",
    "last_call_at": "2026-09-12T20:39:19.659Z",
    "provider_tokens": {
@@ -2718,6 +3132,15 @@
    "request_tokens": 679,
    "response_tokens": 2405,
    "tool_ms": 29537,
+   "wall_ms": 68927.0,
+   "model_ms": 39390.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:39:19.645000+00:00",
+     "2026-09-12T20:40:28.572000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:39:32.939Z",
    "last_call_at": "2026-09-12T20:40:21.197Z",
    "provider_tokens": {
@@ -2805,6 +3228,15 @@
    "request_tokens": 732,
    "response_tokens": 2504,
    "tool_ms": 29521,
+   "wall_ms": 59257.0,
+   "model_ms": 29736.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:40:02.412000+00:00",
+     "2026-09-12T20:41:01.669000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:40:14.744Z",
    "last_call_at": "2026-09-12T20:40:55.683Z",
    "provider_tokens": {
@@ -2862,6 +3294,15 @@
    "request_tokens": 726,
    "response_tokens": 8949,
    "tool_ms": 10352,
+   "wall_ms": 31708.0,
+   "model_ms": 21356.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:42:49.624000+00:00",
+     "2026-09-12T20:43:21.332000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:42:58.592Z",
    "last_call_at": "2026-09-12T20:43:16.248Z",
    "provider_tokens": {
@@ -2919,6 +3360,15 @@
    "request_tokens": 552,
    "response_tokens": 8941,
    "tool_ms": 8915,
+   "wall_ms": 29516.0,
+   "model_ms": 20601.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:44:25.970000+00:00",
+     "2026-09-12T20:44:55.486000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:44:34.643Z",
    "last_call_at": "2026-09-12T20:44:50.948Z",
    "provider_tokens": {
@@ -2986,6 +3436,15 @@
    "request_tokens": 676,
    "response_tokens": 9052,
    "tool_ms": 10023,
+   "wall_ms": 30290.0,
+   "model_ms": 20267.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:48:31.408000+00:00",
+     "2026-09-12T20:49:01.698000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:48:41.239Z",
    "last_call_at": "2026-09-12T20:48:56.352Z",
    "provider_tokens": {
@@ -3083,6 +3542,15 @@
    "request_tokens": 672,
    "response_tokens": 748,
    "tool_ms": 10962,
+   "wall_ms": 30848.0,
+   "model_ms": 19886.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:43:59.647000+00:00",
+     "2026-09-12T20:44:30.495000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:44:09.891Z",
    "last_call_at": "2026-09-12T20:44:25.616Z",
    "provider_tokens": {
@@ -3260,6 +3728,15 @@
    "request_tokens": 1481,
    "response_tokens": 1627,
    "tool_ms": 19403,
+   "wall_ms": 54820.0,
+   "model_ms": 35417.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:45:43.063000+00:00",
+     "2026-09-12T20:46:37.883000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:45:51.975Z",
    "last_call_at": "2026-09-12T20:46:32.825Z",
    "provider_tokens": {
@@ -3347,6 +3824,15 @@
    "request_tokens": 966,
    "response_tokens": 438,
    "tool_ms": 10562,
+   "wall_ms": 31593.0,
+   "model_ms": 21031.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:46:40.348000+00:00",
+     "2026-09-12T20:47:11.941000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:46:47.899Z",
    "last_call_at": "2026-09-12T20:47:06.252Z",
    "provider_tokens": {
@@ -3414,6 +3900,15 @@
    "request_tokens": 473,
    "response_tokens": 2535,
    "tool_ms": 23750,
+   "wall_ms": 51081.0,
+   "model_ms": 27331.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:24:24.447000+00:00",
+     "2026-09-12T20:25:15.528000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:24:33.505Z",
    "last_call_at": "2026-09-12T20:25:10.256Z",
    "provider_tokens": {
@@ -3501,6 +3996,15 @@
    "request_tokens": 550,
    "response_tokens": 3056,
    "tool_ms": 23225,
+   "wall_ms": 62055.0,
+   "model_ms": 38830.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:26:07.725000+00:00",
+     "2026-09-12T20:27:09.780000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:26:19.707Z",
    "last_call_at": "2026-09-12T20:27:02.938Z",
    "provider_tokens": {
@@ -3608,6 +4112,15 @@
    "request_tokens": 635,
    "response_tokens": 3825,
    "tool_ms": 25689,
+   "wall_ms": 62442.0,
+   "model_ms": 36753.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:27:01.833000+00:00",
+     "2026-09-12T20:28:04.275000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:27:13.014Z",
    "last_call_at": "2026-09-12T20:27:57.773Z",
    "provider_tokens": {
@@ -3665,6 +4178,15 @@
    "request_tokens": 625,
    "response_tokens": 1422,
    "tool_ms": 9141,
+   "wall_ms": 27250.0,
+   "model_ms": 18109.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:27:55.073000+00:00",
+     "2026-09-12T20:28:22.323000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:28:03.844Z",
    "last_call_at": "2026-09-12T20:28:17.899Z",
    "provider_tokens": {
@@ -3722,6 +4244,15 @@
    "request_tokens": 621,
    "response_tokens": 1424,
    "tool_ms": 7474,
+   "wall_ms": 29465.0,
+   "model_ms": 21991.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:31:15.332000+00:00",
+     "2026-09-12T20:31:44.797000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:31:24.945Z",
    "last_call_at": "2026-09-12T20:31:40.951Z",
    "provider_tokens": {
@@ -3789,6 +4320,15 @@
    "request_tokens": 774,
    "response_tokens": 1636,
    "tool_ms": 10346,
+   "wall_ms": 29593.0,
+   "model_ms": 19247.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:32:54.888000+00:00",
+     "2026-09-12T20:33:24.481000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:33:03.914Z",
    "last_call_at": "2026-09-12T20:33:19.442Z",
    "provider_tokens": {
@@ -3866,6 +4406,15 @@
    "request_tokens": 215,
    "response_tokens": 4732,
    "tool_ms": 4393,
+   "wall_ms": 40961.0,
+   "model_ms": 36568.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:30:53.548000+00:00",
+     "2026-09-12T20:31:34.509000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:31:00.615Z",
    "last_call_at": "2026-09-12T20:31:29.503Z",
    "provider_tokens": {
@@ -3943,6 +4492,15 @@
    "request_tokens": 125,
    "response_tokens": 1291,
    "tool_ms": 2679,
+   "wall_ms": 55580.0,
+   "model_ms": 52901.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:33:53.546000+00:00",
+     "2026-09-12T20:34:49.126000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:34:01.617Z",
    "last_call_at": "2026-09-12T20:34:39.853Z",
    "provider_tokens": {
@@ -4040,6 +4598,15 @@
    "request_tokens": 169,
    "response_tokens": 1254,
    "tool_ms": 2656,
+   "wall_ms": 40492.0,
+   "model_ms": 37836.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:34:52.999000+00:00",
+     "2026-09-12T20:35:33.491000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:34:59.499Z",
    "last_call_at": "2026-09-12T20:35:22.013Z",
    "provider_tokens": {
@@ -4107,6 +4674,15 @@
    "request_tokens": 525,
    "response_tokens": 2462,
    "tool_ms": 21143,
+   "wall_ms": 43181.0,
+   "model_ms": 22038.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:15:06.659000+00:00",
+     "2026-09-12T20:15:49.840000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:15:15.461Z",
    "last_call_at": "2026-09-12T20:15:43.633Z",
    "provider_tokens": {
@@ -4174,6 +4750,15 @@
    "request_tokens": 465,
    "response_tokens": 2459,
    "tool_ms": 21210,
+   "wall_ms": 62799.0,
+   "model_ms": 41589.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:21:39.085000+00:00",
+     "2026-09-12T20:22:41.884000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:21:52.016Z",
    "last_call_at": "2026-09-12T20:22:35.172Z",
    "provider_tokens": {
@@ -4261,6 +4846,15 @@
    "request_tokens": 583,
    "response_tokens": 3667,
    "tool_ms": 27295,
+   "wall_ms": 54601.0,
+   "model_ms": 27306.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:24:41.769000+00:00",
+     "2026-09-12T20:25:36.370000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:24:51.497Z",
    "last_call_at": "2026-09-12T20:25:28.381Z",
    "provider_tokens": {
@@ -4328,6 +4922,15 @@
    "request_tokens": 755,
    "response_tokens": 1628,
    "tool_ms": 10567,
+   "wall_ms": 36648.0,
+   "model_ms": 26081.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:17:01.924000+00:00",
+     "2026-09-12T20:17:38.572000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:17:12.014Z",
    "last_call_at": "2026-09-12T20:17:31.858Z",
    "provider_tokens": {
@@ -4395,6 +4998,15 @@
    "request_tokens": 765,
    "response_tokens": 1535,
    "tool_ms": 8794,
+   "wall_ms": 39593.0,
+   "model_ms": 30799.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:17:48.224000+00:00",
+     "2026-09-12T20:18:27.817000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:17:57.930Z",
    "last_call_at": "2026-09-12T20:18:22.189Z",
    "provider_tokens": {
@@ -4462,6 +5074,15 @@
    "request_tokens": 520,
    "response_tokens": 1470,
    "tool_ms": 9108,
+   "wall_ms": 31281.0,
+   "model_ms": 22173.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:19:46.811000+00:00",
+     "2026-09-12T20:20:18.092000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:19:54.051Z",
    "last_call_at": "2026-09-12T20:20:08.945Z",
    "provider_tokens": {
@@ -4579,6 +5200,15 @@
    "request_tokens": 408,
    "response_tokens": 1672,
    "tool_ms": 3883,
+   "wall_ms": 29581.0,
+   "model_ms": 25698.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:19:29.652000+00:00",
+     "2026-09-12T20:19:59.233000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:19:36.345Z",
    "last_call_at": "2026-09-12T20:19:53.830Z",
    "provider_tokens": {
@@ -4666,6 +5296,15 @@
    "request_tokens": 478,
    "response_tokens": 1779,
    "tool_ms": 7666,
+   "wall_ms": 28563.0,
+   "model_ms": 20897.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:20:51.086000+00:00",
+     "2026-09-12T20:21:19.649000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:21:01.282Z",
    "last_call_at": "2026-09-12T20:21:14.910Z",
    "provider_tokens": {
@@ -4773,6 +5412,15 @@
    "request_tokens": 547,
    "response_tokens": 2055,
    "tool_ms": 8038,
+   "wall_ms": 33351.0,
+   "model_ms": 25313.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:29:29.608000+00:00",
+     "2026-09-12T20:30:02.959000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:29:39.348Z",
    "last_call_at": "2026-09-12T20:29:57.338Z",
    "provider_tokens": {
@@ -4880,6 +5528,15 @@
    "request_tokens": 2127,
    "response_tokens": 5995,
    "tool_ms": 43564,
+   "wall_ms": 83272.0,
+   "model_ms": 39708.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:04:57.208000+00:00",
+     "2026-09-12T20:06:20.480000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:05:05.612Z",
    "last_call_at": "2026-09-12T20:06:10.987Z",
    "provider_tokens": {
@@ -5127,6 +5784,15 @@
    "request_tokens": 2762,
    "response_tokens": 16751,
    "tool_ms": 64875,
+   "wall_ms": 110627.0,
+   "model_ms": 45752.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:06:49.067000+00:00",
+     "2026-09-12T20:08:39.694000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:06:59.269Z",
    "last_call_at": "2026-09-12T20:08:29.529Z",
    "provider_tokens": {
@@ -5274,6 +5940,15 @@
    "request_tokens": 2030,
    "response_tokens": 14806,
    "tool_ms": 55482,
+   "wall_ms": 100837.0,
+   "model_ms": 45355.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:08:18.422000+00:00",
+     "2026-09-12T20:09:59.259000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:08:27.771Z",
    "last_call_at": "2026-09-12T20:09:43.262Z",
    "provider_tokens": {
@@ -5411,6 +6086,15 @@
    "request_tokens": 2663,
    "response_tokens": 3864,
    "tool_ms": 30065,
+   "wall_ms": 67703.0,
+   "model_ms": 37638.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:08:00.801000+00:00",
+     "2026-09-12T20:09:08.504000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:08:09.827Z",
    "last_call_at": "2026-09-12T20:08:53.716Z",
    "provider_tokens": {
@@ -5558,6 +6242,15 @@
    "request_tokens": 2819,
    "response_tokens": 4138,
    "tool_ms": 17924,
+   "wall_ms": 57563.0,
+   "model_ms": 39639.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:10:40.079000+00:00",
+     "2026-09-12T20:11:37.642000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:10:49.305Z",
    "last_call_at": "2026-09-12T20:11:26.443Z",
    "provider_tokens": {
@@ -5725,6 +6418,15 @@
    "request_tokens": 2749,
    "response_tokens": 3979,
    "tool_ms": 21539,
+   "wall_ms": 61102.0,
+   "model_ms": 39563.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:12:56.043000+00:00",
+     "2026-09-12T20:13:57.145000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:13:02.503Z",
    "last_call_at": "2026-09-12T20:13:50.771Z",
    "provider_tokens": {
@@ -5932,6 +6634,15 @@
    "request_tokens": 1832,
    "response_tokens": 4851,
    "tool_ms": 16249,
+   "wall_ms": 81964.0,
+   "model_ms": 65715.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:11:40.640000+00:00",
+     "2026-09-12T20:13:02.604000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:11:50.321Z",
    "last_call_at": "2026-09-12T20:12:54.814Z",
    "provider_tokens": {
@@ -6169,6 +6880,15 @@
    "request_tokens": 1651,
    "response_tokens": 3183,
    "tool_ms": 16059,
+   "wall_ms": 67969.0,
+   "model_ms": 51910.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:12:39.488000+00:00",
+     "2026-09-12T20:13:47.457000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:12:46.157Z",
    "last_call_at": "2026-09-12T20:13:38.223Z",
    "provider_tokens": {
@@ -6376,6 +7096,15 @@
    "request_tokens": 1330,
    "response_tokens": 3908,
    "tool_ms": 17311,
+   "wall_ms": 61124.0,
+   "model_ms": 43813.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:14:14.769000+00:00",
+     "2026-09-12T20:15:15.893000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:14:21.183Z",
    "last_call_at": "2026-09-12T20:15:06.880Z",
    "provider_tokens": {
@@ -6503,6 +7232,15 @@
    "request_tokens": 1444,
    "response_tokens": 6404,
    "tool_ms": 26634,
+   "wall_ms": 66202.0,
+   "model_ms": 39568.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:56:44.854000+00:00",
+     "2026-09-12T19:57:51.056000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:56:52.979Z",
    "last_call_at": "2026-09-12T19:57:39.628Z",
    "provider_tokens": {
@@ -6660,6 +7398,15 @@
    "request_tokens": 4004,
    "response_tokens": 7589,
    "tool_ms": 38930,
+   "wall_ms": 91629.0,
+   "model_ms": 52699.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:57:15.370000+00:00",
+     "2026-09-12T19:58:46.999000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:57:24.534Z",
    "last_call_at": "2026-09-12T19:58:34.948Z",
    "provider_tokens": {
@@ -6817,6 +7564,15 @@
    "request_tokens": 1674,
    "response_tokens": 7873,
    "tool_ms": 34993,
+   "wall_ms": 88441.0,
+   "model_ms": 53448.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:57:50.999000+00:00",
+     "2026-09-12T19:59:19.440000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:58:00.457Z",
    "last_call_at": "2026-09-12T19:59:08.849Z",
    "provider_tokens": {
@@ -6974,6 +7730,15 @@
    "request_tokens": 3382,
    "response_tokens": 4203,
    "tool_ms": 36158,
+   "wall_ms": 82074.0,
+   "model_ms": 45916.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:59:22.655000+00:00",
+     "2026-09-12T20:00:44.729000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:59:31.979Z",
    "last_call_at": "2026-09-12T20:00:33.243Z",
    "provider_tokens": {
@@ -7141,6 +7906,15 @@
    "request_tokens": 3568,
    "response_tokens": 4656,
    "tool_ms": 38516,
+   "wall_ms": 91332.0,
+   "model_ms": 52816.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:00:54.849000+00:00",
+     "2026-09-12T20:02:26.181000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:01:05.500Z",
    "last_call_at": "2026-09-12T20:02:11.788Z",
    "provider_tokens": {
@@ -7328,6 +8102,15 @@
    "request_tokens": 3489,
    "response_tokens": 4549,
    "tool_ms": 38153,
+   "wall_ms": 85667.0,
+   "model_ms": 47514.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:01:33.063000+00:00",
+     "2026-09-12T20:02:58.730000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:01:41.651Z",
    "last_call_at": "2026-09-12T20:02:46.456Z",
    "provider_tokens": {
@@ -7685,6 +8468,15 @@
    "request_tokens": 1875,
    "response_tokens": 4533,
    "tool_ms": 12891,
+   "wall_ms": 73455.0,
+   "model_ms": 60564.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:02:26.501000+00:00",
+     "2026-09-12T20:03:39.956000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:02:33.435Z",
    "last_call_at": "2026-09-12T20:03:31.398Z",
    "provider_tokens": {
@@ -7892,6 +8684,15 @@
    "request_tokens": 1095,
    "response_tokens": 4362,
    "tool_ms": 16298,
+   "wall_ms": 61480.0,
+   "model_ms": 45182.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:04:01.645000+00:00",
+     "2026-09-12T20:05:03.125000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:04:11.373Z",
    "last_call_at": "2026-09-12T20:04:52.199Z",
    "provider_tokens": {
@@ -8149,6 +8950,15 @@
    "request_tokens": 2661,
    "response_tokens": 4021,
    "tool_ms": 32212,
+   "wall_ms": 84104.0,
+   "model_ms": 51892.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T20:04:24.143000+00:00",
+     "2026-09-12T20:05:48.247000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T20:04:34.062Z",
    "last_call_at": "2026-09-12T20:05:38.380Z",
    "provider_tokens": {
@@ -8206,6 +9016,15 @@
    "request_tokens": 198,
    "response_tokens": 1198,
    "tool_ms": 20289,
+   "wall_ms": 43207.0,
+   "model_ms": 22918.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:49:45.117000+00:00",
+     "2026-09-12T19:50:28.324000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:49:56.530Z",
    "last_call_at": "2026-09-12T19:50:23.081Z",
    "provider_tokens": {
@@ -8263,6 +9082,15 @@
    "request_tokens": 194,
    "response_tokens": 1185,
    "tool_ms": 16179,
+   "wall_ms": 39587.0,
+   "model_ms": 23408.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:54:36.546000+00:00",
+     "2026-09-12T19:55:16.133000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:54:48.902Z",
    "last_call_at": "2026-09-12T19:55:09.430Z",
    "provider_tokens": {
@@ -8330,6 +9158,15 @@
    "request_tokens": 260,
    "response_tokens": 1382,
    "tool_ms": 16050,
+   "wall_ms": 34639.0,
+   "model_ms": 18589.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:55:08.938000+00:00",
+     "2026-09-12T19:55:43.577000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:55:18.855Z",
    "last_call_at": "2026-09-12T19:55:38.917Z",
    "provider_tokens": {
@@ -8387,6 +9224,15 @@
    "request_tokens": 667,
    "response_tokens": 458,
    "tool_ms": 7441,
+   "wall_ms": 43911.0,
+   "model_ms": 36470.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:50:50.606000+00:00",
+     "2026-09-12T19:51:34.517000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:51:21.266Z",
    "last_call_at": "2026-09-12T19:51:29.160Z",
    "provider_tokens": {
@@ -8444,6 +9290,15 @@
    "request_tokens": 684,
    "response_tokens": 463,
    "tool_ms": 3387,
+   "wall_ms": 29649.0,
+   "model_ms": 26262.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:51:05.514000+00:00",
+     "2026-09-12T19:51:35.163000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:51:24.007Z",
    "last_call_at": "2026-09-12T19:51:30.214Z",
    "provider_tokens": {
@@ -8501,6 +9356,15 @@
    "request_tokens": 650,
    "response_tokens": 455,
    "tool_ms": 7674,
+   "wall_ms": 32296.0,
+   "model_ms": 24622.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:53:22.688000+00:00",
+     "2026-09-12T19:53:54.984000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:53:41.322Z",
    "last_call_at": "2026-09-12T19:53:49.183Z",
    "provider_tokens": {
@@ -8568,6 +9432,15 @@
    "request_tokens": 432,
    "response_tokens": 108,
    "tool_ms": 6659,
+   "wall_ms": 24488.0,
+   "model_ms": 17829.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:53:04.697000+00:00",
+     "2026-09-12T19:53:29.185000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:53:14.211Z",
    "last_call_at": "2026-09-12T19:53:21.879Z",
    "provider_tokens": {
@@ -8655,6 +9528,15 @@
    "request_tokens": 198,
    "response_tokens": 166,
    "tool_ms": 4043,
+   "wall_ms": 24008.0,
+   "model_ms": 19965.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:55:39.911000+00:00",
+     "2026-09-12T19:56:03.919000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:55:48.368Z",
    "last_call_at": "2026-09-12T19:55:59.749Z",
    "provider_tokens": {
@@ -8732,6 +9614,15 @@
    "request_tokens": 144,
    "response_tokens": 701,
    "tool_ms": 2809,
+   "wall_ms": 19679.0,
+   "model_ms": 16870.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:58:42.445000+00:00",
+     "2026-09-12T19:59:02.124000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:58:49.221Z",
    "last_call_at": "2026-09-12T19:58:57.873Z",
    "provider_tokens": {
@@ -8799,6 +9690,15 @@
    "request_tokens": 242,
    "response_tokens": 2010,
    "tool_ms": 11091,
+   "wall_ms": 35648.0,
+   "model_ms": 24557.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:40:59.579000+00:00",
+     "2026-09-12T19:41:35.227000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:41:09.479Z",
    "last_call_at": "2026-09-12T19:41:28.877Z",
    "provider_tokens": {
@@ -8866,6 +9766,15 @@
    "request_tokens": 264,
    "response_tokens": 1539,
    "tool_ms": 22736,
+   "wall_ms": 42664.0,
+   "model_ms": 19928.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:42:15.635000+00:00",
+     "2026-09-12T19:42:58.299000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:42:26.034Z",
    "last_call_at": "2026-09-12T19:42:52.809Z",
    "provider_tokens": {
@@ -8933,6 +9842,15 @@
    "request_tokens": 231,
    "response_tokens": 1992,
    "tool_ms": 13294,
+   "wall_ms": 32777.0,
+   "model_ms": 19483.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:42:58.684000+00:00",
+     "2026-09-12T19:43:31.461000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:43:08.123Z",
    "last_call_at": "2026-09-12T19:43:26.494Z",
    "provider_tokens": {
@@ -9010,6 +9928,15 @@
    "request_tokens": 1005,
    "response_tokens": 1085,
    "tool_ms": 10431,
+   "wall_ms": 65655.0,
+   "model_ms": 55224.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:44:34.453000+00:00",
+     "2026-09-12T19:45:40.108000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:45:18.461Z",
    "last_call_at": "2026-09-12T19:45:34.513Z",
    "provider_tokens": {
@@ -9077,6 +10004,15 @@
    "request_tokens": 1023,
    "response_tokens": 694,
    "tool_ms": 10453,
+   "wall_ms": 61298.0,
+   "model_ms": 50845.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:44:58.249000+00:00",
+     "2026-09-12T19:45:59.547000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:45:07.719Z",
    "last_call_at": "2026-09-12T19:45:53.223Z",
    "provider_tokens": {
@@ -9154,6 +10090,15 @@
    "request_tokens": 1162,
    "response_tokens": 1342,
    "tool_ms": 12201,
+   "wall_ms": 72519.0,
+   "model_ms": 60318.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:46:50.053000+00:00",
+     "2026-09-12T19:48:02.572000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:47:35.806Z",
    "last_call_at": "2026-09-12T19:47:53.036Z",
    "provider_tokens": {
@@ -9221,6 +10166,15 @@
    "request_tokens": 296,
    "response_tokens": 892,
    "tool_ms": 5767,
+   "wall_ms": 28757.0,
+   "model_ms": 22990.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:47:14.890000+00:00",
+     "2026-09-12T19:47:43.647000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:47:27.869Z",
    "last_call_at": "2026-09-12T19:47:37.043Z",
    "provider_tokens": {
@@ -9308,6 +10262,15 @@
    "request_tokens": 415,
    "response_tokens": 606,
    "tool_ms": 8386,
+   "wall_ms": 27965.0,
+   "model_ms": 19579.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:48:32.763000+00:00",
+     "2026-09-12T19:49:00.728000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:48:41.889Z",
    "last_call_at": "2026-09-12T19:48:55.048Z",
    "provider_tokens": {
@@ -9385,6 +10348,15 @@
    "request_tokens": 308,
    "response_tokens": 1031,
    "tool_ms": 3139,
+   "wall_ms": 31296.0,
+   "model_ms": 28157.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:51:30.579000+00:00",
+     "2026-09-12T19:52:01.875000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:51:39.990Z",
    "last_call_at": "2026-09-12T19:51:51.734Z",
    "provider_tokens": {
@@ -9442,6 +10414,15 @@
    "request_tokens": 274,
    "response_tokens": 874,
    "tool_ms": 10685,
+   "wall_ms": 31380.0,
+   "model_ms": 20695.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:31:16.247000+00:00",
+     "2026-09-12T19:31:47.627000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:31:25.971Z",
    "last_call_at": "2026-09-12T19:31:42.227Z",
    "provider_tokens": {
@@ -9579,6 +10560,15 @@
    "request_tokens": 490,
    "response_tokens": 14256,
    "tool_ms": 36406,
+   "wall_ms": 103301.0,
+   "model_ms": 66895.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:33:07.509000+00:00",
+     "2026-09-12T19:34:50.810000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:33:16.378Z",
    "last_call_at": "2026-09-12T19:34:39.288Z",
    "provider_tokens": {
@@ -9646,6 +10636,15 @@
    "request_tokens": 314,
    "response_tokens": 1047,
    "tool_ms": 15269,
+   "wall_ms": 38459.0,
+   "model_ms": 23190.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:33:32.566000+00:00",
+     "2026-09-12T19:34:11.025000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:33:40.716Z",
    "last_call_at": "2026-09-12T19:34:04.189Z",
    "provider_tokens": {
@@ -9773,6 +10772,15 @@
    "request_tokens": 508,
    "response_tokens": 3514,
    "tool_ms": 11211,
+   "wall_ms": 69090.0,
+   "model_ms": 57879.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:35:05.999000+00:00",
+     "2026-09-12T19:36:15.089000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:35:16.073Z",
    "last_call_at": "2026-09-12T19:35:53.931Z",
    "provider_tokens": {
@@ -9810,6 +10818,15 @@
    "request_tokens": 116,
    "response_tokens": 12,
    "tool_ms": 2913,
+   "wall_ms": 13279.0,
+   "model_ms": 10366.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:36:03.214000+00:00",
+     "2026-09-12T19:36:16.493000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:36:12.504Z",
    "last_call_at": "2026-09-12T19:36:12.504Z",
    "provider_tokens": {
@@ -9877,6 +10894,15 @@
    "request_tokens": 454,
    "response_tokens": 934,
    "tool_ms": 5270,
+   "wall_ms": 28125.0,
+   "model_ms": 22855.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:38:01.021000+00:00",
+     "2026-09-12T19:38:29.146000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:38:10.076Z",
    "last_call_at": "2026-09-12T19:38:16.955Z",
    "provider_tokens": {
@@ -9944,6 +10970,15 @@
    "request_tokens": 393,
    "response_tokens": 275,
    "tool_ms": 6027,
+   "wall_ms": 25260.0,
+   "model_ms": 19233.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:37:38.571000+00:00",
+     "2026-09-12T19:38:03.831000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:37:47.899Z",
    "last_call_at": "2026-09-12T19:37:55.921Z",
    "provider_tokens": {
@@ -9991,6 +11026,15 @@
    "request_tokens": 248,
    "response_tokens": 23,
    "tool_ms": 4764,
+   "wall_ms": 14345.0,
+   "model_ms": 9581.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:39:15.196000+00:00",
+     "2026-09-12T19:39:29.541000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:39:23.549Z",
    "last_call_at": "2026-09-12T19:39:26.822Z",
    "provider_tokens": {
@@ -10028,6 +11072,15 @@
    "request_tokens": 124,
    "response_tokens": 12,
    "tool_ms": 1846,
+   "wall_ms": 13722.0,
+   "model_ms": 11876.0,
+   "turns": 1,
+   "turn_windows": [
+    [
+     "2026-09-12T19:40:07.323000+00:00",
+     "2026-09-12T19:40:21.045000+00:00"
+    ]
+   ],
    "first_call_at": "2026-09-12T19:40:17.149Z",
    "last_call_at": "2026-09-12T19:40:17.149Z",
    "provider_tokens": {
@@ -10051,6 +11104,8 @@
    "request_tokens": 290.6666666666667,
    "response_tokens": 130.33333333333334,
    "tool_ms": 4144.333333333333,
+   "wall_ms": 21280.0,
+   "model_ms": 17135.666666666668,
    "provider_input": 42941.333333333336,
    "provider_output": 1436
   },
@@ -10063,6 +11118,8 @@
    "request_tokens": 411,
    "response_tokens": 1442.6666666666667,
    "tool_ms": 7161,
+   "wall_ms": 20810.666666666668,
+   "model_ms": 13649.666666666666,
    "provider_input": 44429.666666666664,
    "provider_output": 1309.3333333333333
   },
@@ -10075,6 +11132,8 @@
    "request_tokens": 299,
    "response_tokens": 1759,
    "tool_ms": 19812.333333333332,
+   "wall_ms": 44343.333333333336,
+   "model_ms": 24531.0,
    "provider_input": 45231.666666666664,
    "provider_output": 1943.3333333333333
   },
@@ -10087,6 +11146,8 @@
    "request_tokens": 1039.6666666666667,
    "response_tokens": 937.6666666666666,
    "tool_ms": 13642.333333333334,
+   "wall_ms": 39087.0,
+   "model_ms": 25444.666666666668,
    "provider_input": 47059,
    "provider_output": 2869.6666666666665
   },
@@ -10099,6 +11160,8 @@
    "request_tokens": 651.3333333333334,
    "response_tokens": 8980.666666666666,
    "tool_ms": 9763.333333333334,
+   "wall_ms": 30504.666666666668,
+   "model_ms": 20741.333333333332,
    "provider_input": 54452.666666666664,
    "provider_output": 2203.6666666666665
   },
@@ -10111,6 +11174,8 @@
    "request_tokens": 678.6666666666666,
    "response_tokens": 2305.6666666666665,
    "tool_ms": 27837.333333333332,
+   "wall_ms": 60346.666666666664,
+   "model_ms": 32509.333333333332,
    "provider_input": 47665.333333333336,
    "provider_output": 3589
   },
@@ -10123,6 +11188,8 @@
    "request_tokens": 169.66666666666666,
    "response_tokens": 2425.6666666666665,
    "tool_ms": 3242.6666666666665,
+   "wall_ms": 45677.666666666664,
+   "model_ms": 42435.0,
    "provider_input": 48626,
    "provider_output": 3811
   },
@@ -10135,6 +11202,8 @@
    "request_tokens": 673.3333333333334,
    "response_tokens": 1494,
    "tool_ms": 8987,
+   "wall_ms": 28769.333333333332,
+   "model_ms": 19782.333333333332,
    "provider_input": 45274.333333333336,
    "provider_output": 2084.6666666666665
   },
@@ -10147,6 +11216,8 @@
    "request_tokens": 552.6666666666666,
    "response_tokens": 3138.6666666666665,
    "tool_ms": 24221.333333333332,
+   "wall_ms": 58526.0,
+   "model_ms": 34304.666666666664,
    "provider_input": 48470.666666666664,
    "provider_output": 3446
   },
@@ -10159,6 +11230,8 @@
    "request_tokens": 477.6666666666667,
    "response_tokens": 1835.3333333333333,
    "tool_ms": 6529,
+   "wall_ms": 30498.333333333332,
+   "model_ms": 23969.333333333332,
    "provider_input": 46006.666666666664,
    "provider_output": 2206.3333333333335
   },
@@ -10171,6 +11244,8 @@
    "request_tokens": 680,
    "response_tokens": 1544.3333333333333,
    "tool_ms": 9489.666666666666,
+   "wall_ms": 35840.666666666664,
+   "model_ms": 26351.0,
    "provider_input": 45847,
    "provider_output": 2790.6666666666665
   },
@@ -10183,6 +11258,8 @@
    "request_tokens": 524.3333333333334,
    "response_tokens": 2862.6666666666665,
    "tool_ms": 23216,
+   "wall_ms": 53527.0,
+   "model_ms": 30311.0,
    "provider_input": 47729.666666666664,
    "provider_output": 3053.6666666666665
   },
@@ -10195,6 +11272,8 @@
    "request_tokens": 1604.3333333333333,
    "response_tokens": 3980.6666666666665,
    "tool_ms": 16539.666666666668,
+   "wall_ms": 70352.33333333333,
+   "model_ms": 53812.666666666664,
    "provider_input": 53578.666666666664,
    "provider_output": 5795.333333333333
   },
@@ -10207,6 +11286,8 @@
    "request_tokens": 2743.6666666666665,
    "response_tokens": 3993.6666666666665,
    "tool_ms": 23176,
+   "wall_ms": 62122.666666666664,
+   "model_ms": 38946.666666666664,
    "provider_input": 52268,
    "provider_output": 6208.333333333333
   },
@@ -10219,6 +11300,8 @@
    "request_tokens": 2306.3333333333335,
    "response_tokens": 12517.333333333334,
    "tool_ms": 54640.333333333336,
+   "wall_ms": 98245.33333333333,
+   "model_ms": 43605.0,
    "provider_input": 63833.666666666664,
    "provider_output": 6508.666666666667
   },
@@ -10231,6 +11314,8 @@
    "request_tokens": 1877,
    "response_tokens": 4305.333333333333,
    "tool_ms": 20467,
+   "wall_ms": 73013.0,
+   "model_ms": 52546.0,
    "provider_input": 54966.333333333336,
    "provider_output": 5903.666666666667
   },
@@ -10243,6 +11328,8 @@
    "request_tokens": 3479.6666666666665,
    "response_tokens": 4469.333333333333,
    "tool_ms": 37609,
+   "wall_ms": 86357.66666666667,
+   "model_ms": 48748.666666666664,
    "provider_input": 54244.666666666664,
    "provider_output": 7613.333333333333
   },
@@ -10255,6 +11342,8 @@
    "request_tokens": 2374,
    "response_tokens": 7288.666666666667,
    "tool_ms": 33519,
+   "wall_ms": 82090.66666666667,
+   "model_ms": 48571.666666666664,
    "provider_input": 56845,
    "provider_output": 6939
   },
@@ -10267,6 +11356,8 @@
    "request_tokens": 258,
    "response_tokens": 325,
    "tool_ms": 4503.666666666667,
+   "wall_ms": 22725.0,
+   "model_ms": 18221.333333333332,
    "provider_input": 43302,
    "provider_output": 1528.6666666666667
   },
@@ -10279,6 +11370,8 @@
    "request_tokens": 667,
    "response_tokens": 458.6666666666667,
    "tool_ms": 6167.333333333333,
+   "wall_ms": 35285.333333333336,
+   "model_ms": 29118.0,
    "provider_input": 44817.666666666664,
    "provider_output": 2914.3333333333335
   },
@@ -10291,6 +11384,8 @@
    "request_tokens": 217.33333333333334,
    "response_tokens": 1255,
    "tool_ms": 17506,
+   "wall_ms": 39144.333333333336,
+   "model_ms": 21638.333333333332,
    "provider_input": 44342.333333333336,
    "provider_output": 1728
   },
@@ -10303,6 +11398,8 @@
    "request_tokens": 339.6666666666667,
    "response_tokens": 843,
    "tool_ms": 5764,
+   "wall_ms": 29339.333333333332,
+   "model_ms": 23575.333333333332,
    "provider_input": 44101.666666666664,
    "provider_output": 1879.6666666666667
   },
@@ -10315,6 +11412,8 @@
    "request_tokens": 1063.3333333333333,
    "response_tokens": 1040.3333333333333,
    "tool_ms": 11028.333333333334,
+   "wall_ms": 66490.66666666667,
+   "model_ms": 55462.333333333336,
    "provider_input": 48195,
    "provider_output": 5696
   },
@@ -10327,6 +11426,8 @@
    "request_tokens": 245.66666666666666,
    "response_tokens": 1847,
    "tool_ms": 15707,
+   "wall_ms": 37029.666666666664,
+   "model_ms": 21322.666666666668,
    "provider_input": 45106,
    "provider_output": 1713.6666666666667
   },
@@ -10339,6 +11440,8 @@
    "request_tokens": 44.666666666666664,
    "response_tokens": 1088.3333333333333,
    "tool_ms": 746.3333333333334,
+   "wall_ms": 17285.666666666668,
+   "model_ms": 16539.333333333332,
    "provider_input": 43091,
    "provider_output": 1244.3333333333333
   },
@@ -10351,6 +11454,8 @@
    "request_tokens": 108.66666666666667,
    "response_tokens": 1290,
    "tool_ms": 2348.6666666666665,
+   "wall_ms": 18208.0,
+   "model_ms": 15859.333333333334,
    "provider_input": 43201.666666666664,
    "provider_output": 1215
   },
@@ -10363,6 +11468,8 @@
    "request_tokens": 147.33333333333334,
    "response_tokens": 2043.6666666666667,
    "tool_ms": 1907.3333333333333,
+   "wall_ms": 25743.666666666668,
+   "model_ms": 23836.333333333332,
    "provider_input": 44698,
    "provider_output": 1724
   },
@@ -10375,6 +11482,8 @@
    "request_tokens": 139,
    "response_tokens": 196.66666666666666,
    "tool_ms": 2297.6666666666665,
+   "wall_ms": 16614.333333333332,
+   "model_ms": 14316.666666666666,
    "provider_input": 42270.333333333336,
    "provider_output": 1000.3333333333334
   },
@@ -10387,6 +11496,8 @@
    "request_tokens": 186.66666666666666,
    "response_tokens": 3202,
    "tool_ms": 3626,
+   "wall_ms": 22881.333333333332,
+   "model_ms": 19255.333333333332,
    "provider_input": 46174.333333333336,
    "provider_output": 1447.6666666666667
   },
@@ -10399,6 +11510,8 @@
    "request_tokens": 183,
    "response_tokens": 1542.6666666666667,
    "tool_ms": 2589,
+   "wall_ms": 22209.666666666668,
+   "model_ms": 19620.666666666668,
    "provider_input": 44123.333333333336,
    "provider_output": 1399.3333333333333
   },
@@ -10411,6 +11524,8 @@
    "request_tokens": 268.3333333333333,
    "response_tokens": 1070.6666666666667,
    "tool_ms": 2818.3333333333335,
+   "wall_ms": 23535.333333333332,
+   "model_ms": 20717.0,
    "provider_input": 44402.666666666664,
    "provider_output": 2120.3333333333335
   },
@@ -10423,6 +11538,8 @@
    "request_tokens": 530.6666666666666,
    "response_tokens": 9386,
    "tool_ms": 11022.333333333334,
+   "wall_ms": 39599.333333333336,
+   "model_ms": 28577.0,
    "provider_input": 55282.333333333336,
    "provider_output": 3116
   },
@@ -10435,6 +11552,8 @@
    "request_tokens": 156,
    "response_tokens": 1443,
    "tool_ms": 3510.3333333333335,
+   "wall_ms": 23439.333333333332,
+   "model_ms": 19929.0,
    "provider_input": 43882.666666666664,
    "provider_output": 1805.6666666666667
   },
@@ -10447,6 +11566,8 @@
    "request_tokens": 71.66666666666667,
    "response_tokens": 1752,
    "tool_ms": 1564.3333333333333,
+   "wall_ms": 19700.666666666668,
+   "model_ms": 18136.333333333332,
    "provider_input": 44121,
    "provider_output": 1412
   },
@@ -10459,6 +11580,8 @@
    "request_tokens": 322,
    "response_tokens": 2160,
    "tool_ms": 5017,
+   "wall_ms": 28171.666666666668,
+   "model_ms": 23154.666666666668,
    "provider_input": 44944,
    "provider_output": 1958.6666666666667
   },
@@ -10471,6 +11594,8 @@
    "request_tokens": 162,
    "response_tokens": 3090,
    "tool_ms": 2963.3333333333335,
+   "wall_ms": 24132.666666666668,
+   "model_ms": 21169.333333333332,
    "provider_input": 46038.666666666664,
    "provider_output": 1737
   },
@@ -10483,6 +11608,8 @@
    "request_tokens": 255,
    "response_tokens": 103.33333333333333,
    "tool_ms": 4212.333333333333,
+   "wall_ms": 17775.666666666668,
+   "model_ms": 13563.333333333334,
    "provider_input": 42390.333333333336,
    "provider_output": 1126
   },
@@ -10495,6 +11622,8 @@
    "request_tokens": 359.3333333333333,
    "response_tokens": 1486.6666666666667,
    "tool_ms": 6464.666666666667,
+   "wall_ms": 36831.333333333336,
+   "model_ms": 30366.666666666668,
    "provider_input": 45218,
    "provider_output": 2776.3333333333335
   },
@@ -10507,6 +11636,8 @@
    "request_tokens": 359.3333333333333,
    "response_tokens": 5392.333333333333,
    "tool_ms": 20786.666666666668,
+   "wall_ms": 57713.333333333336,
+   "model_ms": 36926.666666666664,
    "provider_input": 51326.333333333336,
    "provider_output": 3229
   }

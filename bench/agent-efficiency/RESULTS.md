@@ -383,6 +383,57 @@ What the numbers say:
   tokens per run, which beats the built-in tools on calls and on both token columns.
   The prompt now names `root` instead, so the next batch measures the intended shape.
 
+### What Huyang costs in wall-clock time (batch `haiku`)
+
+The scored runs carry the turn's own start and end, so the agent's whole runtime is
+measured, not only the time inside tools. Per run, averaged over all 13 scenarios:
+
+| Family | Wall | Inside tools | Model and harness |
+|---|---|---|---|
+| huyang | 48.2 s | 19.1 s | 29.1 s |
+| builtin | 39.4 s | 10.9 s | 28.5 s |
+| bash | 32.8 s | 6.7 s | 26.1 s |
+
+Huyang cost 8.8 seconds more per run than the built-in tools, and 8.2 seconds of that
+is time inside tools: the model's own thinking time is the same for all three families,
+as it should be. Where that tool time goes is not where the reputation says. Mean
+seconds per call, and the comparable built-in tool:
+
+| Huyang call | Mean | Built-in equivalent | Mean |
+|---|---|---|---|
+| `read` (66 calls) | 0.65 s | `Read` (78 calls) | 1.89 s |
+| `edit_apply` (41 calls) | 2.39 s | `Edit` (42 calls) | 3.74 s |
+| `search` (10 calls) | 0.72 s | a `grep` through Bash | 0.92 s |
+| `workspace_open` (39 calls) | 2.05 s | none | |
+| `verify_run` (33 calls) | 14.35 s | `go build` or `go test` through Bash | about 5 s |
+
+Reading, editing and searching are each faster through Huyang than through the built-in
+tools, by two to three times. The whole wall-clock penalty is `verify_run`, which was
+three times the cost of running the same command in the shell, plus the two seconds of
+the open. Split by scenario the picture is clean: on the four read scenarios, which call
+no verification, Huyang averaged 23.9 seconds against the built-in tools' 27.2; on the
+nine scenarios that verify, it was slower every time.
+
+**Why `verify_run` was slow, and the fix.** Every command stage was given a throwaway
+HOME *and* a throwaway `GOCACHE`, so each stage compiled the fixture from scratch and one
+`verify_run` paid it twice. On this fixture a cold `go build ./...` takes 7.73 s against
+0.06 s warm, and a cold `go test ./...` 11.52 s against 6.62 s. The build cache is now
+shared across runs under `<state-dir>/command-cache/go-build`, while HOME and
+`XDG_CACHE_HOME` stay throwaway: cache entries are addressed by the hash of their inputs,
+so reuse cannot make a later build wrong, which is the same reasoning that already
+forwarded `GOMODCACHE`. `HUYANG_COMMAND_CACHE=off` restores the old behaviour. Measured
+by rerunning the protocol benchmark on the Go fixture, total `verify_run` time fell from
+57.9 s to 18.4 s; per scenario, E6 from 12.5 s to 0.32 s, E7 from 11.8 s to 0.28 s, E8
+from 10.4 s to 0.47 s, and E5, which edits five files and runs first, from 22.7 s to
+16.3 s. The first verification of a session still pays a cold build.
+
+Two caveats on these numbers. The batch ran two and later four tasks at a time on one
+machine, so a run overlapped 0.74 other runs on average for Huyang against 0.62 and 0.54
+for the built-in and Bash families; longer runs overlap more by construction, which
+inflates Huyang's figure slightly. And the tool time of the shell families counts only
+the command they ran, while `verify_run` also materialises the sandbox and captures the
+tree before and after.
+
 Friction the transcripts show, to fix next:
 
 - **A passing `verify_run` is not believed.** In V1 the agent ran `verify_run` with the

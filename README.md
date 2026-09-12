@@ -154,6 +154,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_HEADLESS_INIT` | unset | Init file handed to every embedded Neovim the service starts, for language-server configuration. | `AGENT99_HEADLESS_INIT` |
 | `HUYANG_FRICTION` | unset | `1` enables the friction spool, `0` disables it; otherwise the spool is enabled by a file named `enabled` in the spool directory. | `AGENT99_FRICTION`, then `TOOLFEEDBACK` |
 | `HUYANG_FRICTION_DIR` | `$XDG_DATA_HOME/toolfeedback`, else `~/.local/share/toolfeedback` | Spool directory; Huyang writes under its own `huyang/` subdirectory. | `AGENT99_FRICTION_DIR`, then `TOOLFEEDBACK_DIR` |
+| `HUYANG_COMMAND_CACHE` | on | `off`, `0` or `false` gives every verification command a throwaway compiler build cache instead of the shared one under the state directory. Full isolation, at the price of recompiling the package set in every stage. | no |
 | `HUYANG_DIRECT_STATE_DIR` | a fresh temporary directory | State directory for the in-process direct mode; only the test suites call that path. The service uses `--state-dir`. | no |
 | `HUYANG_TEST_FAULTS` | unset | `1` arms the kernel's fault-injection hooks in the embedded provider. Test-only. | no |
 | `HUYANG_FORMAT` | off | Formatting after a provider-side symbol edit: `range`, `file`, or off. Read by the Lua kernel from the provider's environment. | `AGENT99_FORMAT` |
@@ -240,6 +241,7 @@ is a named constant in the code:
 | `diagnostics/<workspace>.json` | Diagnostic ledger, format version 1 (`diagnosticStateVersion`). Findings whose document changed are marked `stale`. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
 | `test-history/<workspace>.json` | Revision-keyed test history, format version 1 (`testHistoryVersion`). | last 1000 entries |
 | `sandboxes/sandbox-*/` | Isolated preparation trees, each with an `owner.json` marker (version 1). Sandboxes whose plan is no longer referenced are removed on service start. | one per prepared plan |
+| `command-cache/go-build` | Compiler build cache shared by every verification stage, so a repeated `verify_run` does not recompile the package set. Entries are addressed by the hash of their inputs; HOME and `XDG_CACHE_HOME` stay throwaway per run. | trimmed by the Go toolchain on its own schedule, not by Huyang; delete the directory to reclaim it, or set `HUYANG_COMMAND_CACHE=off` for a throwaway cache per run |
 | `http-token` | Bearer token for `--http` and `--pprof`. | one file |
 
 In-memory stores are bounded too: 32 revisions per document (`maxRevisionsPerDocument`),

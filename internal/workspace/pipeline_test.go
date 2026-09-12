@@ -326,9 +326,52 @@ func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
 	}
 }
 
+// The compiler build cache is shared across runs and lives beside the
+// service state, while HOME and XDG_CACHE_HOME stay throwaway; the escape
+// hatch restores a per-run cache.
+func TestCommandEnvironmentSharesTheBuildCacheAndIsolatesTheHome(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("HUYANG_STATE_DIR", state)
+	t.Setenv("HUYANG_COMMAND_CACHE", "")
+	read := func() map[string]string {
+		environment, cleanup, err := isolatedCommandEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		values := map[string]string{}
+		for _, entry := range environment {
+			if parts := strings.SplitN(entry, "=", 2); len(parts) == 2 {
+				values[parts[0]] = parts[1]
+			}
+		}
+		return values
+	}
+	first, second := read(), read()
+	want := filepath.Join(state, "command-cache", "go-build")
+	if first["GOCACHE"] != want || second["GOCACHE"] != want {
+		t.Fatalf("build cache = %q and %q, want the shared %q", first["GOCACHE"], second["GOCACHE"], want)
+	}
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Fatalf("shared build cache is not a directory: %v", err)
+	}
+	if first["HOME"] == second["HOME"] || first["XDG_CACHE_HOME"] == second["XDG_CACHE_HOME"] {
+		t.Fatalf("home or cache home was shared between runs: %q %q", first, second)
+	}
+	if strings.HasPrefix(first["HOME"], state) {
+		t.Fatalf("isolated home %q is inside the state directory", first["HOME"])
+	}
+	t.Setenv("HUYANG_COMMAND_CACHE", "off")
+	disabled, other := read(), read()
+	if disabled["GOCACHE"] == want || disabled["GOCACHE"] == other["GOCACHE"] {
+		t.Fatalf("disabling the shared cache did not restore a per-run one: %q %q", disabled["GOCACHE"], other["GOCACHE"])
+	}
+}
+
 func TestCommandStageProvidesIsolatedCacheEnvironment(t *testing.T) {
 	miseData := t.TempDir()
 	t.Setenv("MISE_DATA_DIR", miseData)
+	t.Setenv("HUYANG_COMMAND_CACHE", "off")
 	environment, cleanup, err := isolatedCommandEnv()
 	if err != nil {
 		t.Fatal(err)
