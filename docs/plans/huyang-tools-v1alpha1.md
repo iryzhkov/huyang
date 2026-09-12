@@ -1086,7 +1086,9 @@ compaction of a default result, or a new stable code. No mutation precondition w
   language server covers, or in a documents workspace, skips the semantic refresh and is
   `ok` with no recovery hints and no implicit-workspace warning.
 - `diagnostic_updates` is attached only to mutating calls and `workspace_inspect`, never
-  to reads. Its entries are `{id, kind, severity, path}` (`attribution` only when
+  to reads. A client is met at the notice head as it stood before its first call, so the
+  delta is what this session's calls changed and never the backlog of a repository it has
+  just connected to; the findings that already exist are what `diagnostics` is for. Its entries are `{id, kind, severity, path}` (`attribution` only when
   attributed), one per finding with its last state, newest first, findings whose last
   notice is `stale` dropped, capped at 5 with `diagnostic_updates_truncated`. The client's
   cursor advances to the newest notice examined, so a backlog is never replayed a page at

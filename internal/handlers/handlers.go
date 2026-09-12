@@ -150,6 +150,9 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	if workspace == nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
 	}
+	// Before the call runs, so the notices it produces are delivered and the
+	// ones that predate this client are not.
+	h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead())
 	// Provider-touching calls are serialised by the scheduler lanes in the
 	// service, and plans stage in isolated sandboxes with their own
 	// providers, so the canonical provider never shows a staged view. The

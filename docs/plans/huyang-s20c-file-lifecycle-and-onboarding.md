@@ -472,7 +472,12 @@ calls or misled, and each was fixed in the same branch:
 6. A diagnostic's identity included its range, so an edit above an untouched warning
    retired it and announced an identical one: every edit reported diagnostics it had not
    caused. Identity is now what the finding says plus its occurrence among identical ones
-   in the document, and the stored range follows the latest observation.
+   in the document, and the stored range follows the latest observation. The same report
+   had a second cause: a client the delivery table had not seen, which is every client
+   after a service restart, was owed every notice still retained, so its first edit reply
+   carried a history of errors from other sessions. A client is now met at the notice
+   head as it stood before its first call: the findings that call produces are delivered,
+   the backlog is not.
 
 And one thing the agent could not have known without being told: the guide to the
 cheapest correct call lives in `docs/agent-guide.md`, which an agent working in another

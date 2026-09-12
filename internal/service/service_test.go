@@ -459,8 +459,9 @@ func (t clientHeaderTransport) RoundTrip(request *http.Request) (*http.Response,
 }
 
 // Over the stateless HTTP transport a request that names its client with
-// X-Huyang-Client receives each diagnostic notice once; a request without
-// the header is a new session and receives the pending notices again.
+// X-Huyang-Client receives each diagnostic notice once. A client is met at
+// the current notice head, so its first request carries no backlog, and a
+// request without the header is a new session that starts at the head again.
 func TestHTTPClientHeaderMakesDiagnosticUpdatesADelta(t *testing.T) {
 	base := t.TempDir()
 	service, stop := startTestHuyangService(t, filepath.Join(base, "state"), filepath.Join(base, "control.sock"), "127.0.0.1:0")
@@ -473,7 +474,6 @@ func TestHTTPClientHeaderMakesDiagnosticUpdatesADelta(t *testing.T) {
 	opened := service.direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	identity := opened["workspace"].(workspacecore.Identity)
 	workspace := service.direct.get(identity.ID)
-	recordTestFinding(t, workspace, filepath.Join(root, "main.go"), 0)
 
 	inspect := func(client string) map[string]any {
 		t.Helper()
@@ -488,6 +488,12 @@ func TestHTTPClientHeaderMakesDiagnosticUpdatesADelta(t *testing.T) {
 		defer session.Close()
 		return callModern(t, session, "workspace_inspect", map[string]any{"workspace_id": string(identity.ID), "view": "status"})
 	}
+	for _, client := range []string{"agent-a", "agent-b"} {
+		if quiet := inspect(client); quiet["diagnostic_updates"] != nil {
+			t.Fatalf("%s was met with a backlog: %#v", client, quiet["diagnostic_updates"])
+		}
+	}
+	recordTestFinding(t, workspace, filepath.Join(root, "main.go"), 0)
 	if first := inspect("agent-a"); first["diagnostic_updates"] == nil {
 		t.Fatalf("first request with a client header saw no notices: %#v", first)
 	}
@@ -497,7 +503,9 @@ func TestHTTPClientHeaderMakesDiagnosticUpdatesADelta(t *testing.T) {
 	if other := inspect("agent-b"); other["diagnostic_updates"] == nil {
 		t.Fatalf("a different client did not receive the pending notices: %#v", other)
 	}
-	if anonymous := inspect(""); anonymous["diagnostic_updates"] == nil {
-		t.Fatalf("a request without the header did not receive the pending notices: %#v", anonymous)
+	// A request without the header is a session nobody has seen, so it is
+	// met at the head like any other and told what changes from there.
+	if anonymous := inspect(""); anonymous["diagnostic_updates"] != nil {
+		t.Fatalf("an unnamed session was met with a backlog: %#v", anonymous["diagnostic_updates"])
 	}
 }

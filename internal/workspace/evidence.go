@@ -857,6 +857,18 @@ func (s *diagnosticStore) pendingNotices(limit int) []DiagnosticNotice {
 	return out
 }
 
+// noticeHead is the cursor of the newest notice recorded, which is where a
+// client that has just connected starts.
+func (s *diagnosticStore) noticeHead() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	head := s.state.NoticeFloor
+	if len(s.state.Notices) > 0 {
+		head, _ = parseDiagnosticCursor(s.state.Notices[len(s.state.Notices)-1].Cursor)
+	}
+	return head
+}
+
 // noticesSince returns up to limit notices strictly after cursor without
 // acknowledging anything. The returned cursor names the last notice in the
 // page (or the caller's cursor when the page is empty) so the caller can
@@ -998,6 +1010,16 @@ func (w *Workspace) Diagnostics(since string) (DiagnosticReport, error) {
 }
 func (w *Workspace) DiagnosticNotices(limit int) []DiagnosticNotice {
 	return w.diagnostics.pendingNotices(limit)
+}
+
+// DiagnosticNoticeHead is the newest notice sequence recorded. A bridge
+// registers a client it has not seen before at the head, so its first reply
+// is not the backlog of everything that happened before it connected.
+func (w *Workspace) DiagnosticNoticeHead() uint64 {
+	if w.diagnostics == nil {
+		return 0
+	}
+	return w.diagnostics.noticeHead()
 }
 
 // DiagnosticNoticesSince returns a bounded page of notices strictly after

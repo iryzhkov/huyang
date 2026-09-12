@@ -38,12 +38,21 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID, workspace := openTestProject(t, direct, map[string]string{"main.go": "package main\n"})
 	file := filepath.Join(workspace.Identity().Root, "main.go")
-	for index := 0; index < handlers.MaxDiagnosticUpdates+5; index++ {
-		recordTestFinding(t, workspace, file, index)
-	}
 	clientA := handlers.WithClientIdentity(context.Background(), "client-a")
+	clientB := handlers.WithClientIdentity(context.Background(), "client-b")
+	clientC := handlers.WithClientIdentity(context.Background(), "client-c")
 	inspect := func(ctx context.Context) map[string]any {
 		return direct.call(ctx, "workspace_inspect", map[string]any{"workspace_id": workspaceID, "view": "status"})
+	}
+	// A client meets the workspace on its first call and is owed nothing
+	// that happened before it.
+	for _, client := range []context.Context{clientA, clientB, clientC} {
+		if quiet := inspect(client); quiet["diagnostic_updates"] != nil {
+			t.Fatalf("a client's first reply carried a backlog: %#v", quiet["diagnostic_updates"])
+		}
+	}
+	for index := 0; index < handlers.MaxDiagnosticUpdates+5; index++ {
+		recordTestFinding(t, workspace, file, index)
 	}
 	// Each recorded finding supersedes the previous one for the same
 	// document: ten findings leave one current and nine resolved. One
@@ -76,16 +85,18 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 	if second := inspect(clientA); second["diagnostic_updates"] != nil {
 		t.Fatalf("second reply replayed the backlog: %#v", second["diagnostic_updates"])
 	}
-	other := inspect(handlers.WithClientIdentity(context.Background(), "client-b"))
+	// Every client that was connected has its own cursor.
+	other := inspect(clientB)
 	updates, _ = other["diagnostic_updates"].([]handlers.DiagnosticUpdate)
 	if len(updates) != handlers.MaxDiagnosticUpdates || other["diagnostic_updates_truncated"] != true {
 		t.Fatalf("another client saw %d notices", len(updates))
 	}
-	// Acknowledging through the diagnostics cursor clears the inbox for everyone.
+	// Acknowledging through the diagnostics cursor clears the inbox for
+	// everyone, including the client that had not read it yet.
 	report := direct.call(clientA, "diagnostics", map[string]any{"workspace_id": workspaceID})
 	cursor := report["data"].(map[string]any)["diagnostics"].(map[string]any)["cursor"].(string)
 	direct.call(clientA, "diagnostics", map[string]any{"workspace_id": workspaceID, "since": cursor})
-	if after := inspect(handlers.WithClientIdentity(context.Background(), "client-c")); after["diagnostic_updates"] != nil {
+	if after := inspect(clientC); after["diagnostic_updates"] != nil {
 		t.Fatalf("acknowledged notices were still delivered: %#v", after["diagnostic_updates"])
 	}
 }

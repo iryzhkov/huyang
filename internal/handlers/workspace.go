@@ -14,7 +14,9 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+// decodeOpenOptions reads what to open. The second result is the reply that
+// says why the arguments name nothing openable.
+func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any) (workspacecore.OpenOptions, map[string]any) {
 	kind, _ := arguments["kind"].(string)
 	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1, Sectioner: workspacecore.NativeSectioner{}}
 	switch kind {
@@ -25,14 +27,23 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 			if name, ok := value.(string); ok {
 				absolute, err := filepath.Abs(name)
 				if err != nil {
-					return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
+					return options, mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
 				}
 				options.Files = append(options.Files, filepath.Clean(absolute))
 			}
 		}
 		sort.Strings(options.Files)
 	default:
-		return mcpapi.Envelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
+		return options, mcpapi.Envelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
+	}
+	return options, nil
+}
+
+func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+	kind, _ := arguments["kind"].(string)
+	options, failure := h.decodeOpenOptions(requestID, arguments)
+	if failure != nil {
+		return failure
 	}
 	opened, err := workspacecore.Open(options)
 	if err != nil {
@@ -45,6 +56,9 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	if err := opened.PrimeDocuments(); err != nil {
 		return mcpapi.Failure(requestID, opened, "workspace_baseline_failed", err)
 	}
+	// Opening is where a client first meets a workspace; from here on it is
+	// told what changes, not what was already there.
+	h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
 		canonicalBackend, _ = h.pool.Canonical(ctx, opened)

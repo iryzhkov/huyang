@@ -61,18 +61,47 @@ func newNoticeDelivery() *noticeDelivery {
 	return &noticeDelivery{delivered: make(map[workspacecore.ID]*clientCursors)}
 }
 
-func (n *noticeDelivery) last(workspaceID workspacecore.ID, client string) uint64 {
+// last is the newest notice already delivered to this client, and whether
+// the client has been seen at all.
+func (n *noticeDelivery) last(workspaceID workspacecore.ID, client string) (uint64, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if clients := n.delivered[workspaceID]; clients != nil {
-		return clients.cursors[client]
+		cursor, known := clients.cursors[client]
+		return cursor, known
 	}
-	return 0
+	return 0, false
 }
 
 func (n *noticeDelivery) record(workspaceID workspacecore.ID, client string, cursor uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	clients := n.track(workspaceID, client)
+	if cursor > clients.cursors[client] {
+		clients.cursors[client] = cursor
+	}
+}
+
+// Register starts a client at head, the newest notice recorded before its
+// first call ran. A client that has just connected is not owed the backlog
+// of everything that happened before it existed, and starting it here rather
+// than after the call keeps the findings its own call produced. A client
+// already known keeps its cursor.
+func (n *noticeDelivery) Register(workspaceID workspacecore.ID, client string, head uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients != nil {
+		if _, known := clients.cursors[client]; known {
+			return
+		}
+	}
+	n.track(workspaceID, client).cursors[client] = head
+}
+
+// track returns the cursor table of a workspace, adding the client to it and
+// evicting the oldest when the table is full. The caller holds the lock.
+func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *clientCursors {
 	clients := n.delivered[workspaceID]
 	if clients == nil {
 		clients = &clientCursors{cursors: make(map[string]uint64)}
@@ -85,9 +114,7 @@ func (n *noticeDelivery) record(workspaceID workspacecore.ID, client string, cur
 			clients.order = clients.order[1:]
 		}
 	}
-	if cursor > clients.cursors[client] {
-		clients.cursors[client] = cursor
-	}
+	return clients
 }
 
 func diagnosticCursorSequence(cursor string) uint64 {
@@ -101,14 +128,24 @@ func diagnosticCursorSequence(cursor string) uint64 {
 // AttachDiagnosticUpdates adds the diagnostic notices this client has not
 // yet seen, collapsed to the last state of each finding and capped at
 // MaxDiagnosticUpdates newest entries with a truncation marker; the field is
-// omitted when nothing is new. The client's cursor always advances to the
-// newest notice examined, so a busy repository never replays its backlog
-// a page at a time. Acknowledgement through the diagnostics cursor prunes
+// omitted when nothing is new. A client is registered at the current head on
+// its first reply and sees deltas from there. The client's cursor always
+// advances to the newest notice examined, so a busy repository never replays
+// its backlog a page at a time. Acknowledgement through the diagnostics cursor prunes
 // notices for every client.
 func (h *Handlers) AttachDiagnosticUpdates(ctx context.Context, workspace *workspacecore.Workspace, result map[string]any) {
 	workspaceID := workspace.Identity().ID
 	client := clientIdentity(ctx)
-	last := h.notices.last(workspaceID, client)
+	last, known := h.notices.last(workspaceID, client)
+	if !known {
+		// A client that has just connected has no backlog to catch up on.
+		// The delta says what this session changed; findings that were
+		// already there, possibly from another session or before a service
+		// restart, are what the diagnostics tool is for. Delivering them as
+		// new was read as an edit having caused them.
+		h.notices.record(workspaceID, client, workspace.DiagnosticNoticeHead())
+		return
+	}
 	page, err := workspace.DiagnosticNoticesSince(fmt.Sprintf("diagcur_%d", last), noticeScanLimit)
 	if err != nil || len(page.Notices) == 0 {
 		return
