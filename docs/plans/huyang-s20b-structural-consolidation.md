@@ -83,8 +83,10 @@ Design drift:
     delta and is omitted when empty.
 11. **v1alpha1 is amended by this stage and re-frozen after it.** The additions are optional
     inputs and compacted outputs. The contract document and fixtures are updated to match
-    the 19-tool roster; the freeze in the semantic-evidence plan applies from the end of
-    this stage.
+    the 19-tool roster. Amended 2026-09-12: the two friction passes and stage S20c
+    (`huyang-s20c-file-lifecycle-and-onboarding.md`) add further optional inputs under the
+    same rule, recorded as amendment 2 of the contract; the freeze in the semantic-evidence
+    plan applies from the end of S20c.
 
 ## Wave 0 (merged)
 
