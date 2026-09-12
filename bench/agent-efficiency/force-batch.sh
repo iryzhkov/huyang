@@ -28,19 +28,20 @@ done
 log="$HERE/runs/force-batch.log"
 mkdir -p "$HERE/runs"
 
+# The active count comes from the coordinator's task tally (a run's
+# progress in the list does not change while its one task runs); the ready
+# runs come from the list.
 snapshot() {
-    t3-steward backlog list --project huyang --json 2>/dev/null | python3 -c '
+    t3-steward backlog status --json 2>/dev/null | python3 -c '
 import json, sys
-active, ready = 0, []
+print(int(json.load(sys.stdin)["status"]["tasks"].get("active", 0)))
+'
+    t3-steward backlog list --project huyang --progress ready --json 2>/dev/null | python3 -c '
+import json, sys
 for entry in json.load(sys.stdin).get("workflows", []):
     run, workflow = entry.get("run", {}), entry.get("workflow", {})
-    progress = run.get("progress")
-    if progress in ("active", "running", "assigned", "dispatched"):
-        active += 1
-    elif progress == "ready" and workflow.get("taskIds"):
-        ready.append(run["id"] + "/" + workflow["taskIds"][0])
-print(active)
-print("\n".join(ready))
+    if run.get("progress") == "ready" and workflow.get("taskIds"):
+        print(run["id"] + "/" + workflow["taskIds"][0])
 '
 }
 
