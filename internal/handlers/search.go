@@ -63,9 +63,13 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges)
-	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), map[string]any{
-		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": result, "coverage": result.Coverage,
-	})
+	data := map[string]any{
+		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": mcpapi.CompactResultSet(&result),
+	}
+	if !result.Coverage.Complete {
+		data["coverage"] = result.Coverage
+	}
+	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d matches retained; %d eliminated", result.Retained, result.Eliminated), data)
 	if truncated {
 		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d retained matches", len(hits), result.Retained)}
 		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.Handle}}
@@ -102,8 +106,11 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		summary += "; search coverage incomplete"
 	}
 	data := map[string]any{
-		"workspace": result.Workspace, "hits": hits, "returned": len(hits), "total": len(result.Hits),
-		"coverage": result.Coverage, "query": result.Query, "mode": result.Mode, "result_set": result.ResultSet,
+		"hits": hits, "returned": len(hits), "total": len(result.Hits),
+		"result_set": mcpapi.CompactResultSet(result.ResultSet),
+	}
+	if !result.Coverage.Complete {
+		data["coverage"] = result.Coverage
 	}
 	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 	if truncated {
@@ -138,7 +145,8 @@ func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *
 			providerWarning = "Embedded semantic provider fallback failed: " + providerErr.Error()
 		} else {
 			value, _ := providerEvidence.(map[string]any)
-			records, providerWarning = registerProviderMatches(workspace, mcpapi.AnySlice(value["matches"]))
+			provided, warning := registerProviderMatches(workspace, mcpapi.AnySlice(value["matches"]))
+			records, providerWarning = mergeSymbolRecords(records, provided), warning
 			coverage = workspacecore.Coverage{Complete: providerWarning == "", Semantic: "embedded_nvim"}
 		}
 	}
@@ -206,4 +214,21 @@ func registerProviderMatches(workspace *workspacecore.Workspace, matches []any) 
 		records = append(records, record)
 	}
 	return records, warning
+}
+
+// mergeSymbolRecords adds the provider's declarations to the native ones,
+// skipping any declaration the native sectioner already found at the same
+// path and name.
+func mergeSymbolRecords(native, provided []workspacecore.HandleRecord) []workspacecore.HandleRecord {
+	seen := make(map[string]bool, len(native))
+	for _, record := range native {
+		seen[record.Locator.Path+"\x00"+record.Locator.NamePath] = true
+	}
+	merged := append([]workspacecore.HandleRecord(nil), native...)
+	for _, record := range provided {
+		if !seen[record.Locator.Path+"\x00"+record.Locator.NamePath] {
+			merged = append(merged, record)
+		}
+	}
+	return merged
 }

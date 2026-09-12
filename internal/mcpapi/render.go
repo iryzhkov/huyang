@@ -17,7 +17,8 @@ func RenderJSON(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", " ")
+	// No indentation: every byte of a tool result is a token the model pays
+	// for, and one-space indentation alone cost about a third more tokens.
 	if err := enc.Encode(v); err != nil {
 		return nil, err
 	}

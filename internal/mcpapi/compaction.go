@@ -107,6 +107,23 @@ func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges 
 	return compact, len(hits) > len(returned)
 }
 
+// CompactResultSet keeps the handle and the counts an agent decides on; the
+// per-set coverage, constraints and echoed query stay out of the reply.
+func CompactResultSet(set *workspacecore.ResultSet) map[string]any {
+	if set == nil {
+		return nil
+	}
+	compact := map[string]any{
+		"handle": set.Handle, "kind": set.Kind, "match_count": set.MatchCount, "file_count": set.FileCount,
+		"complete": set.Complete, "all_matches_eligible": set.AllMatchesEligible,
+		"retained": set.Retained, "eliminated": set.Eliminated, "expires_at": set.ExpiresAt,
+	}
+	if set.Parent != "" {
+		compact["parent"] = set.Parent
+	}
+	return compact
+}
+
 // CompactOrientation summarises a workspace overview by top-level entry:
 // directories carry their file count and byte total, files their kind and
 // size. The full entry listing stays behind overview=full.

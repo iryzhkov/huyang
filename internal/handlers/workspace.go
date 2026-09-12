@@ -14,7 +14,7 @@ import (
 
 func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
 	kind, _ := arguments["kind"].(string)
-	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1}
+	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1, Sectioner: workspacecore.NativeSectioner{}}
 	switch kind {
 	case "project":
 		options.Root, _ = arguments["root"].(string)
@@ -74,13 +74,38 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		overview = orientation
 	}
 	return mcpapi.Envelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
-		"revision":     fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
-		"capabilities": capabilities, "semantic_provider": semanticProvider,
-		"service_limits": map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
-		"overview":       overview,
-		"recent_commits": mcpapi.CompactRecentCommits(recent, 3),
-		"registry":       map[string]any{"persistent": true, "reused": !created},
+		"revision":          fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
+		"capabilities":      compactCapabilities(capabilities),
+		"semantic_provider": compactProviderStatus(semanticProvider),
+		"service_limits":    map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
+		"overview":          overview,
+		"recent_commits":    mcpapi.CompactRecentCommits(recent, 3),
+		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
+}
+
+// compactCapabilities keeps what an agent decides on: which native and
+// optional facilities exist and the semantic coverage label. Limits and
+// environment failures stay behind workspace_inspect.
+func compactCapabilities(inspection workspacecore.Inspection) map[string]any {
+	compact := map[string]any{"native": inspection.Native, "optional": inspection.Optional, "semantic": inspection.Coverage.Semantic}
+	if len(inspection.Failures) > 0 {
+		compact["failures"] = inspection.Failures
+	}
+	return compact
+}
+
+// compactProviderStatus keeps the provider's backend and health; the
+// process, endpoint and runtime detail stay behind workspace_inspect.
+func compactProviderStatus(status map[string]any) map[string]any {
+	if status == nil {
+		return nil
+	}
+	compact := map[string]any{"backend": status["backend"], "state": status["state"]}
+	if code := fmt.Sprint(status["failure_code"]); code != "" && code != "<nil>" {
+		compact["failure_code"] = code
+	}
+	return compact
 }
 
 func reconcilePipelineCapabilities(inspection *workspacecore.Inspection, policy workspacecore.PipelinePolicy) {

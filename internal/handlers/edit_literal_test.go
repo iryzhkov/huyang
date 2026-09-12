@@ -69,6 +69,7 @@ func TestReplaceLiteralIsOneCallWithCompactResponse(t *testing.T) {
 		t.Fatalf("revisions = %#v", data)
 	}
 	encoded, _ := json.Marshal(mcpapi.CompactTextEnvelope(result))
+	t.Logf("compact one-line edit response (%d bytes): %s", len(encoded), encoded)
 	if len(encoded) > 1500 {
 		t.Fatalf("compact one-line edit response is %d bytes:\n%s", len(encoded), encoded)
 	}

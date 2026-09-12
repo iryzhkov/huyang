@@ -158,9 +158,9 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 	if _, ok := hit["range"].(workspacecore.RangeHandle); !ok {
 		t.Fatalf("anchored hit lacks range: %#v", hit)
 	}
-	set := anchored["data"].(map[string]any)["result_set"].(*workspacecore.ResultSet)
+	set := anchored["data"].(map[string]any)["result_set"].(map[string]any)
 	refined := direct.call(context.Background(), "search", map[string]any{
-		"workspace_id": workspaceID, "result_set_handle": string(set.Handle), "refine": map[string]any{"path": "main"},
+		"workspace_id": workspaceID, "result_set_handle": fmt.Sprint(set["handle"]), "refine": map[string]any{"path": "main"},
 	})
 	hit = refined["data"].(map[string]any)["hits"].([]map[string]any)[0]
 	if _, present := hit["range"]; present {

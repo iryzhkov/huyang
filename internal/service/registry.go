@@ -82,7 +82,7 @@ func (r *workspaceRegistry) load() (legacy []persistedReplay, migrate bool, err 
 		opened, err := workspacecore.Open(workspacecore.OpenOptions{
 			Kind: record.Kind, Root: record.Root, Files: record.Files,
 			ProviderEpoch: record.ProviderEpoch, StateSeq: record.StateSeq,
-			StateDir: r.stateDir, Identity: record.ID,
+			StateDir: r.stateDir, Identity: record.ID, Sectioner: workspacecore.NativeSectioner{},
 		})
 		if err != nil {
 			return nil, false, fmt.Errorf("restore workspace %s: %w", record.ID, err)

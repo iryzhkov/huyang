@@ -10,7 +10,8 @@ import (
 )
 
 // readRequest is the decoded read call. Exactly one of Handle, Path,
-// Symbol (path and name_path) or the file_range path addresses the target.
+// Symbol (path and name_path) or the file_range path addresses a single
+// target; Targets carries several path or symbol reads for one call.
 type readRequest struct {
 	View      string
 	Handle    string
@@ -21,18 +22,30 @@ type readRequest struct {
 	StartLine int
 	EndLine   int
 	Limit     int
+	Targets   []map[string]any
 }
 
 func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
-	target, ok := arguments["target"].(map[string]any)
-	if !ok {
-		return readRequest{}, false
-	}
 	request := readRequest{
 		StartLine: argInt(arguments, "start_line", 0), EndLine: argInt(arguments, "end_line", 0),
 		Limit: argInt(arguments, "limit", 20),
 	}
 	request.View, _ = arguments["view"].(string)
+	for _, raw := range mcpapi.AnySlice(arguments["targets"]) {
+		if target, ok := raw.(map[string]any); ok {
+			request.Targets = append(request.Targets, target)
+		}
+	}
+	target, ok := arguments["target"].(map[string]any)
+	if !ok {
+		return request, len(request.Targets) > 0
+	}
+	decodeReadTarget(&request, target)
+	return request, true
+}
+
+// decodeReadTarget fills the single-target fields from one target object.
+func decodeReadTarget(request *readRequest, target map[string]any) {
 	request.Handle, _ = target["handle"].(string)
 	request.Path, request.HasPath = target["path"].(string)
 	request.Symbol, _ = target["symbol_locator"].(map[string]any)
@@ -40,14 +53,21 @@ func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
 		request.HasRange = true
 		request.Path, _ = fileRange["path"].(string)
 	}
-	return request, true
 }
 
 func (h *Handlers) read(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	request, ok := decodeReadRequest(arguments)
 	if !ok {
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "target must be an object", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "read requires target or targets", map[string]any{})
 	}
+	if len(request.Targets) > 0 && request.Handle == "" && !request.HasPath && request.Symbol == nil && !request.HasRange {
+		return h.readMany(ctx, requestID, workspace, request)
+	}
+	return h.readOne(ctx, requestID, workspace, request)
+}
+
+// readOne dispatches a single-target read on the shape of its target.
+func (h *Handlers) readOne(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	if request.View == "changes" {
 		return readCommitChanges(requestID, workspace, request)
 	}
@@ -63,6 +83,38 @@ func (h *Handlers) read(ctx context.Context, requestID string, workspace *worksp
 	default:
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
 	}
+}
+
+// readMany answers several path or symbol reads in one call. Each target
+// is read independently; a target that fails is reported in place with its
+// code and does not fail the others.
+func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
+	files := make([]map[string]any, 0, len(request.Targets))
+	failed := 0
+	for index, target := range request.Targets {
+		single := readRequest{View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0), Limit: request.Limit}
+		decodeReadTarget(&single, target)
+		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
+		if result["outcome"] != "ok" {
+			failed++
+			files = append(files, map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"]})
+			continue
+		}
+		data, _ := result["data"].(map[string]any)
+		files = append(files, data)
+	}
+	outcome, summary := "ok", fmt.Sprintf("Read %d targets", len(files))
+	if failed > 0 {
+		outcome, summary = "partial", fmt.Sprintf("Read %d of %d targets; %d failed", len(files)-failed, len(files), failed)
+	}
+	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"files": files})
+}
+
+func readTargetLabel(request readRequest) string {
+	if request.Symbol != nil {
+		return fmt.Sprintf("%v#%v", request.Symbol["path"], request.Symbol["name_path"])
+	}
+	return request.Path
 }
 
 // readCommitChanges answers the changes view from an opaque commit handle.
@@ -104,16 +156,20 @@ func readHandle(requestID string, workspace *workspacecore.Workspace, request re
 		request.StartLine = bytes.Count(read.Content[:resolved.ByteStart], []byte("\n")) + 1
 		request.EndLine = bytes.Count(read.Content[:resolved.ByteEnd], []byte("\n")) + 1
 	} else if request.StartLine == 0 && request.EndLine == 0 {
-		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), map[string]any{
-			"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]), "snapshot": read.Snapshot,
-			"coverage": read.Coverage, "resolution": resolution,
-		})
+		data := map[string]any{
+			"path": resolved.Path, "content": string(read.Content[resolved.ByteStart:resolved.ByteEnd]),
+			"revision_id": read.Snapshot.Revision, "handle": request.Handle,
+		}
+		if resolution.Status == workspacecore.ResolutionRelocated {
+			data["relocated"] = true
+		}
+		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), data)
 	}
 	return readPath(requestID, workspace, request)
 }
 
-// readSymbol reads the declaration a symbol locator names, resolving it
-// through the provider when the native text core has no parser coverage.
+// readSymbol reads the declaration a symbol locator names: natively when
+// the sectioner understands the language, otherwise through the provider.
 func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	rawPath, _ := request.Symbol["path"].(string)
 	rawName, _ := request.Symbol["name_path"].(string)
@@ -129,23 +185,16 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 		}
 	}
 	if len(exact) != 1 {
-		// The bridge configures no built-in sectioner, so the native
-		// FindSymbols never has parser coverage. Resolve through the
-		// same provider-backed path symbol_find uses, which registers
-		// durable handles the locator can then select.
+		// The native sectioner covers Go and Python; every other language
+		// resolves through the same provider-backed path symbol_find uses,
+		// which registers durable handles the locator can then select.
 		if record, ok := h.resolveSymbolLocatorViaProvider(ctx, requestID, workspace, path, name); ok {
 			exact = []workspacecore.HandleRecord{record}
 			coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
 		}
 	}
 	if len(exact) != 1 {
-		outcome, code, summary := "conflict", "symbol_not_found", "Symbol locator did not resolve uniquely"
-		if !coverage.Complete {
-			outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
-		}
-		result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
-		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
-		return result
+		return symbolReadMiss(requestID, workspace, coverage, exact, rawName, path)
 	}
 	resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
 	if resolveErr != nil {
@@ -159,10 +208,25 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 		return mcpapi.Failure(requestID, workspace, "read_failed", readErr)
 	}
 	current := resolved.Current
+	startLine := bytes.Count(read.Content[:current.ByteStart], []byte("\n")) + 1
+	endLine := bytes.Count(read.Content[:current.ByteEnd], []byte("\n")) + 1
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
-		"path": path, "content": string(read.Content[current.ByteStart:current.ByteEnd]), "snapshot": read.Snapshot,
-		"coverage": coverage, "resolution": resolved,
+		"path": path, "name_path": name, "kind": current.Kind, "content": string(read.Content[current.ByteStart:current.ByteEnd]),
+		"revision_id": read.Snapshot.Revision, "handle": resolved.Handle, "start_line": startLine, "end_line": endLine,
+		"coverage": coverage,
 	})
+}
+
+// symbolReadMiss answers a locator that resolved to no or several
+// declarations, with the cheapest recovery for each case.
+func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact []workspacecore.HandleRecord, rawName, path string) map[string]any {
+	outcome, code, summary := "conflict", "symbol_not_found", "Symbol locator did not resolve uniquely"
+	if !coverage.Complete {
+		outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
+	}
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
+	result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+	return result
 }
 
 // readPath answers the history, outline or source view of one path.
@@ -191,15 +255,18 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 	if rangeErr != nil {
 		return mcpapi.Failure(requestID, workspace, "invalid_line_range", rangeErr)
 	}
-	data := map[string]any{"path": read.Path, "content": string(content), "snapshot": read.Snapshot, "coverage": read.Coverage}
+	data := map[string]any{"path": read.Path, "content": string(content), "revision_id": read.Snapshot.Revision, "lines": lineCount(read.Content)}
 	if request.StartLine != 0 || request.EndLine != 0 {
 		data["start_line"], data["end_line"] = actualStart, actualEnd
+	}
+	if !read.Coverage.Complete {
+		data["coverage"] = read.Coverage
 	}
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
 }
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the
-// declaration when the native text core cannot section the document.
+// declaration when the native sectioner cannot section the document.
 func (h *Handlers) resolveSymbolLocatorViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path, name string) (workspacecore.HandleRecord, bool) {
 	if record, err := workspace.ResolveSymbolLocator(path, name); err == nil {
 		return record, true
