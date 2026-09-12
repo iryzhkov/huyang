@@ -249,15 +249,17 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 			"symbol": stringSchema("Declaration name; resolved to its one declaration so no target is needed."),
 		}, "relation")},
-		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content and the document revision; use view=outline for the declarations of a file.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
-			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional start_line/end_line, or a symbol_locator.", "items": schemaObject(map[string]any{
+			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional start_line/end_line/max_lines, or a symbol_locator.", "items": schemaObject(map[string]any{
 				"path": stringSchema("Workspace-relative file path."), "start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
+				"max_lines":      map[string]any{"type": "integer", "minimum": 1, "description": "Cap for this target; overrides the call-level max_lines."},
 				"symbol_locator": schemaObject(map[string]any{"path": stringSchema("File path."), "name_path": stringSchema("Declaration name path.")}, "path", "name_path"),
 			})},
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
-			"numbered": map[string]any{"type": "boolean", "description": "Prefix each line with its number and a tab."},
-			"limit":    map[string]any{"type": "integer", "minimum": 1, "description": "history and changes views: number of entries."},
+			"max_lines": map[string]any{"type": "integer", "minimum": 1, "description": "Deliver at most this many lines per source target; a capped reply says truncated and reports the total line count."},
+			"numbered":  map[string]any{"type": "boolean", "description": "Prefix each line with its number and a tab."},
+			"limit":     map[string]any{"type": "integer", "minimum": 1, "description": "history and changes views: number of entries."},
 		})},
 		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(),

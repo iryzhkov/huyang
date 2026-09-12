@@ -39,6 +39,50 @@ func TestReadTargetsAnswersSeveralFilesInOneCall(t *testing.T) {
 	}
 }
 
+// max_lines caps a delivery, the reply says so with the total and the
+// next line to continue from, and a multi-target reply lists every
+// target's size ahead of the bodies.
+func TestReadMaxLinesTruncatesAndListsEntries(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{
+		"big.txt": "l1\nl2\nl3\nl4\nl5\n", "small.txt": "one\n",
+	})
+	single := handlers.Execute(context.Background(), "req_cap", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "big.txt"}, "max_lines": 2, "numbered": true,
+	})
+	data := single["data"].(map[string]any)
+	if data["content"] != "1\tl1\n2\tl2\n" || data["truncated"] != true || data["lines"] != 5 || data["delivered_end_line"] != 2 {
+		t.Fatalf("capped read = %#v", data)
+	}
+	if next := single["next"].([]any); len(next) != 2 || next[1].(map[string]any)["start_line"] != 3 {
+		t.Fatalf("capped read next = %#v", single["next"])
+	}
+	if !strings.Contains(single["summary"].(string), "truncated at max_lines") {
+		t.Fatalf("capped read summary = %q", single["summary"])
+	}
+	uncapped := handlers.Execute(context.Background(), "req_uncapped", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "big.txt"}, "max_lines": 5,
+	})
+	if _, present := uncapped["data"].(map[string]any)["truncated"]; present {
+		t.Fatalf("read within the cap reports truncation: %#v", uncapped)
+	}
+	many := handlers.Execute(context.Background(), "req_many_cap", "read", map[string]any{
+		"workspace_id": workspaceID, "max_lines": 2,
+		"targets": []any{map[string]any{"path": "big.txt"}, map[string]any{"path": "small.txt"}, map[string]any{"path": "big.txt", "max_lines": 4}},
+	})
+	manyData := many["data"].(map[string]any)
+	entries := manyData["entries"].([]map[string]any)
+	if len(entries) != 3 || entries[0]["lines"] != 5 || entries[0]["truncated"] != true || entries[1]["path"] != "small.txt" || entries[1]["truncated"] != nil {
+		t.Fatalf("entries = %#v", entries)
+	}
+	files := manyData["files"].([]map[string]any)
+	if files[0]["content"] != "l1\nl2\n" || files[2]["content"] != "l1\nl2\nl3\nl4\n" {
+		t.Fatalf("per-target cap = %#v", files)
+	}
+	if !strings.Contains(many["summary"].(string), "2 truncated") {
+		t.Fatalf("multi summary = %q", many["summary"])
+	}
+}
+
 // A Go declaration is read by name natively, without a provider, and the
 // response is compact: content, revision, handle and line span.
 func TestReadSymbolResolvesNativelyForGo(t *testing.T) {

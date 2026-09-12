@@ -23,13 +23,17 @@ type readRequest struct {
 	EndLine   int
 	Limit     int
 	Numbered  bool
-	Targets   []map[string]any
+	// MaxLines caps the lines delivered for a source read; zero is no cap.
+	// A capped read says so and reports the total, so the agent can window
+	// or outline the rest instead of receiving a blind dump.
+	MaxLines int
+	Targets  []map[string]any
 }
 
 func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
 	request := readRequest{
 		StartLine: argInt(arguments, "start_line", 0), EndLine: argInt(arguments, "end_line", 0),
-		Limit: argInt(arguments, "limit", 20),
+		Limit: argInt(arguments, "limit", 20), MaxLines: argInt(arguments, "max_lines", 0),
 	}
 	request.Numbered, _ = arguments["numbered"].(bool)
 	request.View, _ = arguments["view"].(string)
@@ -89,27 +93,62 @@ func (h *Handlers) readOne(ctx context.Context, requestID string, workspace *wor
 
 // readMany answers several path or symbol reads in one call. Each target
 // is read independently; a target that fails is reported in place with its
-// code and does not fail the others.
+// code and does not fail the others. The reply lists every target's size
+// under entries, which sorts ahead of the bodies, so a client that shows
+// only the head of a large reply still shows what each target weighs.
 func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	files := make([]map[string]any, 0, len(request.Targets))
-	failed := 0
+	entries := make([]map[string]any, 0, len(request.Targets))
+	failed, truncated := 0, 0
 	for index, target := range request.Targets {
-		single := readRequest{View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0), Limit: request.Limit, Numbered: request.Numbered}
+		single := readRequest{
+			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
+			Limit: request.Limit, Numbered: request.Numbered, MaxLines: argInt(target, "max_lines", request.MaxLines),
+		}
 		decodeReadTarget(&single, target)
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
 			failed++
 			files = append(files, map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"]})
+			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
 			continue
 		}
 		data, _ := result["data"].(map[string]any)
 		files = append(files, data)
+		entry := readEntry(data)
+		if entry["truncated"] == true {
+			truncated++
+		}
+		entries = append(entries, entry)
 	}
 	outcome, summary := "ok", fmt.Sprintf("Read %d targets", len(files))
 	if failed > 0 {
 		outcome, summary = "partial", fmt.Sprintf("Read %d of %d targets; %d failed", len(files)-failed, len(files), failed)
 	}
-	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"files": files})
+	if truncated > 0 {
+		summary += fmt.Sprintf("; %d truncated at max_lines", truncated)
+	}
+	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
+}
+
+// readEntry is the size line of one delivered target: its path, the total
+// lines of the document or declaration, the bytes delivered, and whether
+// the delivery stopped at max_lines.
+func readEntry(data map[string]any) map[string]any {
+	content, _ := data["content"].(string)
+	entry := map[string]any{"path": data["path"], "bytes": len(content)}
+	if lines, ok := data["lines"].(int); ok {
+		entry["lines"] = lines
+	} else {
+		entry["lines"] = lineCount([]byte(content))
+	}
+	if name, ok := data["name_path"]; ok {
+		entry["name_path"] = name
+	}
+	if data["truncated"] == true {
+		entry["truncated"] = true
+	}
+	return entry
 }
 
 func readTargetLabel(request readRequest) string {
@@ -261,6 +300,7 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 	if firstLine == 0 {
 		firstLine = 1
 	}
+	content, capped := capLines(content, request.MaxLines)
 	if request.Numbered {
 		content = numberLines(content, firstLine)
 	}
@@ -271,7 +311,20 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 	if !read.Coverage.Complete {
 		data["coverage"] = read.Coverage
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
+	summary := fmt.Sprintf("Read %s", read.Path)
+	if capped {
+		lastLine := firstLine + request.MaxLines - 1
+		data["truncated"], data["delivered_end_line"] = true, lastLine
+		summary = fmt.Sprintf("Read %s: lines %d to %d of %d; truncated at max_lines", read.Path, firstLine, lastLine, lineCount(read.Content))
+	}
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
+	if capped {
+		result["next"] = []any{
+			map[string]any{"tool": "read", "action": "outline_then_window_what_matters", "path": read.Path, "view": "outline"},
+			map[string]any{"tool": "read", "action": "continue_from_line", "path": read.Path, "start_line": firstLine + request.MaxLines},
+		}
+	}
+	return result
 }
 
 // numberLines prefixes every line with its 1-based number and a tab, so an

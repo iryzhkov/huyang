@@ -91,6 +91,20 @@ func providerLineByteRange(content []byte, lines string) (int, int, error) {
 	return start, end, nil
 }
 
+// capLines keeps the first max lines of content and reports whether
+// anything was cut. A zero max means no cap; content within the cap is
+// returned unchanged.
+func capLines(content []byte, max int) ([]byte, bool) {
+	if max <= 0 || lineCount(content) <= max {
+		return content, false
+	}
+	_, end, err := lineSpan(content, 1, max, true)
+	if err != nil {
+		return content, false
+	}
+	return content[:end], true
+}
+
 // boundedLines returns the requested line window. A zero start and end mean
 // the whole document; a zero end alone means the single start line. The
 // returned bounds are the actual lines delivered after clamping the end.
