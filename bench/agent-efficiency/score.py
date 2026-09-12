@@ -55,9 +55,38 @@ class Tokenizer:
         self.process.wait()
 
 
+def tool_durations(connection: sqlite3.Connection, thread_id: str) -> dict[str, float]:
+    """Milliseconds between the start and the completion of each tool call.
+
+    Claude-agent threads record no duration in the payload; the two
+    activities of one call share a toolCallId and carry timestamps.
+    """
+    started: dict[str, datetime] = {}
+    durations: dict[str, float] = {}
+    rows = connection.execute(
+        "select kind, payload_json, created_at from projection_thread_activities "
+        "where thread_id = ? and kind in ('tool.started', 'tool.completed') order by sequence",
+        (thread_id,),
+    )
+    for kind, payload_json, created_at in rows:
+        call_id = (json.loads(payload_json) or {}).get("toolCallId")
+        if not call_id or not created_at:
+            continue
+        try:
+            at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if kind == "tool.started":
+            started[call_id] = at
+        elif call_id in started:
+            durations[call_id] = (at - started.pop(call_id)).total_seconds() * 1000
+    return durations
+
+
 def tool_calls(connection: sqlite3.Connection, thread_id: str) -> list[dict]:
     """Return the completed tool calls of a thread in order."""
     calls = []
+    durations = tool_durations(connection, thread_id)
     rows = connection.execute(
         "select payload_json, created_at from projection_thread_activities "
         "where thread_id = ? and kind = 'tool.completed' order by sequence",
@@ -69,7 +98,22 @@ def tool_calls(connection: sqlite3.Connection, thread_id: str) -> list[dict]:
         item = data.get("item") or {}
         kind = payload.get("itemType")
         state = data.get("state") or {}
-        if data.get("tool") and "input" in state:
+        if data.get("toolName") and isinstance(data.get("result"), dict):
+            # Claude-agent threads: every item type (mcp_tool_call,
+            # dynamic_tool_call, file_change, command_execution) carries
+            # toolName, input and result.content, which is a string or a
+            # list of content blocks.
+            name = str(data["toolName"]).removeprefix("mcp__huyang__").removeprefix("huyang_")
+            arguments = data.get("input")
+            content = (data["result"] or {}).get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = "".join(block.get("text", "") for block in content if isinstance(block, dict))
+            else:
+                text = "" if content is None else json.dumps(content, ensure_ascii=False)
+            duration = durations.get(payload.get("toolCallId"))
+        elif data.get("tool") and "input" in state:
             # OpenCode-backed threads: every tool kind carries tool, state.input,
             # state.output and state.time regardless of itemType.
             name = str(data["tool"]).removeprefix("huyang_")
@@ -105,8 +149,17 @@ def tool_calls(connection: sqlite3.Connection, thread_id: str) -> list[dict]:
 
 
 def provider_tokens(connection: sqlite3.Connection, thread_id: str) -> dict:
-    """Sum the provider's per-turn token counts for a thread."""
-    totals = {"input": 0, "cached_input": 0, "output": 0, "turns": 0}
+    """The provider's own token counts for a thread.
+
+    Two shapes exist. A provider that reports per-turn counts
+    (lastInputTokens and friends) is summed. A Claude-agent thread reports
+    the context window instead: inputTokens is the whole conversation the
+    turn read and therefore grows, while outputTokens is that turn's own
+    output. Summing the input would count the conversation once per turn,
+    so the peak is kept as input and the outputs are summed; the last event
+    also carries totalProcessedTokens, the provider's own total.
+    """
+    totals = {"input": 0, "cached_input": 0, "output": 0, "turns": 0, "total_processed": 0, "input_is_peak": False}
     rows = connection.execute(
         "select payload_json from projection_thread_activities "
         "where thread_id = ? and kind = 'context-window.updated' order by sequence",
@@ -114,10 +167,17 @@ def provider_tokens(connection: sqlite3.Connection, thread_id: str) -> dict:
     )
     for (payload_json,) in rows:
         payload = json.loads(payload_json)
-        totals["input"] += int(payload.get("lastInputTokens") or 0)
-        totals["cached_input"] += int(payload.get("lastCachedInputTokens") or 0)
-        totals["output"] += int(payload.get("lastOutputTokens") or 0)
         totals["turns"] += 1
+        if payload.get("lastInputTokens") is not None or payload.get("lastOutputTokens") is not None:
+            totals["input"] += int(payload.get("lastInputTokens") or 0)
+            totals["cached_input"] += int(payload.get("lastCachedInputTokens") or 0)
+            totals["output"] += int(payload.get("lastOutputTokens") or 0)
+            continue
+        totals["input_is_peak"] = True
+        totals["input"] = max(totals["input"], int(payload.get("inputTokens") or 0))
+        totals["output"] += int(payload.get("outputTokens") or 0)
+        if payload.get("totalProcessedTokens"):
+            totals["total_processed"] = int(payload["totalProcessedTokens"])
     return totals
 
 
@@ -178,7 +238,7 @@ def score_run(connection: sqlite3.Connection, tokenizer: Tokenizer, row: dict, t
     candidates = threads.get((row["scenario"], row["language"], row["family"]), [])
     index = int(row["rep"]) - 1
     thread_id = candidates[index] if index < len(candidates) else None
-    scored = dict(row, thread_id=thread_id, found=thread_id is not None)
+    scored: dict = dict(row, thread_id=thread_id, found=thread_id is not None)
     if thread_id is None:
         return scored
     calls = tool_calls(connection, thread_id)

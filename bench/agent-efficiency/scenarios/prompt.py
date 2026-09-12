@@ -55,8 +55,9 @@ def render(spec: dict, scenario_id: str, language: str, family: str) -> str:
     ]
     if family == "huyang":
         parts += [
-            "Start with workspace_open on the absolute path of the fixture directory and",
-            "pass the returned workspace_id to every later huyang call.",
+            "Name the fixture directory with the root argument on your first huyang call",
+            "and pass the workspace_id the reply carries to every later call. Call",
+            "workspace_open only when you want its overview and verification commands.",
         ]
     parts += ["", f"Task ({scenario['id']}: {scenario['title']}):", scenario["task"][language], ""]
     if command:

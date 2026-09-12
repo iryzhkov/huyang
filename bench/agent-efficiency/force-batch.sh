@@ -39,8 +39,10 @@ print(int(json.load(sys.stdin)["status"]["tasks"].get("active", 0)))
     t3-steward backlog list --project huyang --progress ready --json 2>/dev/null | python3 -c '
 import json, sys
 for entry in json.load(sys.stdin).get("workflows", []):
-    run, workflow = entry.get("run", {}), entry.get("workflow", {})
-    if run.get("progress") == "ready" and workflow.get("taskIds"):
+    run, workflow, counts = entry.get("run", {}), entry.get("workflow", {}), entry.get("progress", {})
+    # A run stays "ready" while its one task is preparing or active; the
+    # per-run task counters tell the two apart.
+    if run.get("progress") == "ready" and workflow.get("taskIds") and counts.get("ready", 1) > 0 and counts.get("active", 0) == 0:
         print(run["id"] + "/" + workflow["taskIds"][0])
 '
 }

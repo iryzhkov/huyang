@@ -301,6 +301,107 @@ record.
   (R1 for every family, R2 for bash): the agent never called a tool before ending
   without the done marker, so those scenarios have no agent data.
 
+### Agent scores, batch `haiku` (Claude Haiku 4.5, Go fixture, cl100k tokens, mean of 3 runs)
+
+Submitted 2026-09-12 against the S20c build `67b0045` (file-lifecycle kinds, capped
+reads, project-derived command detection, warm language servers), run through the
+steward backlog on `claudeAgent/claude-haiku-4-5` with a maximum of four turns. All 117
+runs produced a thread and tool calls; no run was lost, so unlike batch `after` every
+cell below is measured. Tool milliseconds are wall time inside the tool: `verify_run`
+builds and runs the real tests, while for the shell families the harness times only the
+command.
+
+| Scenario | Family | Calls | Req tokens | Resp tokens | Tool ms | Provider in | Provider out |
+|---|---|---|---|---|---|---|---|
+| R1 | bash | 1.3 | 45 | 1088 | 746 | 43091 | 1244 |
+| R1 | builtin | 1.0 | 109 | 1290 | 2349 | 43202 | 1215 |
+| R1 | huyang | 2.0 | 147 | 2044 | 1907 | 44698 | 1724 |
+| R2 | bash | 2.0 | 139 | 197 | 2298 | 42270 | 1000 |
+| R2 | builtin | 2.3 | 187 | 3202 | 3626 | 46174 | 1448 |
+| R2 | huyang | 2.7 | 183 | 1543 | 2589 | 44123 | 1399 |
+| R3 | bash | 4.3 | 268 | 1071 | 2818 | 44403 | 2120 |
+| R3 | builtin | 6.3 | 531 | 9386 | 11022 | 55282 | 3116 |
+| R3 | huyang | 2.0 | 156 | 1443 | 3510 | 43883 | 1806 |
+| R4 | bash | 3.0 | 72 | 1752 | 1564 | 44121 | 1412 |
+| R4 | builtin | 3.0 | 322 | 2160 | 5017 | 44944 | 1959 |
+| R4 | huyang | 2.0 | 162 | 3090 | 2963 | 46039 | 1737 |
+| E1 | bash | 4.7 | 291 | 130 | 4144 | 42941 | 1436 |
+| E1 | builtin | 3.3 | 411 | 1443 | 7161 | 44430 | 1309 |
+| E1 | huyang | 4.3 | 299 | 1759 | 19812 | 45232 | 1943 |
+| E2 | bash | 9.3 | 1040 | 938 | 13642 | 47059 | 2870 |
+| E2 | builtin | 3.3 | 651 | 8981 | 9763 | 54453 | 2204 |
+| E2 | huyang | 6.3 | 679 | 2306 | 27837 | 47665 | 3589 |
+| E3 | bash | 5.7 | 170 | 2426 | 3243 | 48626 | 3811 |
+| E3 | builtin | 3.3 | 673 | 1494 | 8987 | 45274 | 2085 |
+| E3 | huyang | 6.0 | 553 | 3139 | 24221 | 48471 | 3446 |
+| E4 | bash | 7.7 | 478 | 1835 | 6529 | 46007 | 2206 |
+| E4 | builtin | 4.0 | 680 | 1544 | 9490 | 45847 | 2791 |
+| E4 | huyang | 4.7 | 524 | 2863 | 23216 | 47730 | 3054 |
+| E5 | bash | 19.0 | 1604 | 3981 | 16540 | 53579 | 5795 |
+| E5 | builtin | 12.3 | 2744 | 3994 | 23176 | 52268 | 6208 |
+| E5 | huyang | 14.0 | 2306 | 12517 | 54640 | 63834 | 6509 |
+| E6 | bash | 24.7 | 1877 | 4305 | 20467 | 54966 | 5904 |
+| E6 | builtin | 14.3 | 3480 | 4469 | 37609 | 54245 | 7613 |
+| E6 | huyang | 12.0 | 2374 | 7289 | 33519 | 56845 | 6939 |
+| E7 | bash | 5.0 | 258 | 325 | 4504 | 43302 | 1529 |
+| E7 | builtin | 3.0 | 667 | 459 | 6167 | 44818 | 2914 |
+| E7 | huyang | 3.3 | 217 | 1255 | 17506 | 44342 | 1728 |
+| E8 | bash | 5.0 | 340 | 843 | 5764 | 44102 | 1880 |
+| E8 | builtin | 4.7 | 1063 | 1040 | 11028 | 48195 | 5696 |
+| E8 | huyang | 4.0 | 246 | 1847 | 15707 | 45106 | 1714 |
+| V1 | bash | 2.3 | 255 | 103 | 4212 | 42390 | 1126 |
+| V1 | builtin | 5.0 | 359 | 1487 | 6465 | 45218 | 2776 |
+| V1 | huyang | 6.0 | 359 | 5392 | 20787 | 51326 | 3229 |
+
+Per run across all 13 scenarios: Huyang 5.3 calls, 631 request and 3,576 response
+tokens; the built-in tools 5.1 calls, 914 request and 3,150 response tokens; Bash 7.2
+calls, 526 request and 1,461 response tokens.
+
+What the numbers say:
+
+- **Request tokens are Huyang's structural win, and the file-lifecycle scenarios show
+  why.** E8 (move a file, then test) cost 246 request tokens against 1,063 for the
+  built-in tools, E7 (copy) 217 against 667, because the file content never enters the
+  request: the agent names two paths while Read plus Write carries the whole file
+  through its context twice. The same effect appears in E6 (2,374 against 3,480) and
+  R3 (156 against 531).
+- **Call counts are won where a tool answers a question rather than a file.** R3 (find
+  every call site) is 2 calls against 6.3, because `search` answers it once while the
+  built-in family greps and then reads the hits. E6 (signature change and recovery) is
+  12 against 14.3 and against Bash's 24.7: the diagnostics in the edit reply replace a
+  build round trip.
+- **Response tokens are still Huyang's weak side.** Attributing every Huyang response
+  token to its tool over the 39 runs: `read` 80,512 over 66 calls (mean 1,219),
+  `workspace_open` 27,073 over 39 calls (mean 694), `edit_apply` 15,943 over 41 calls
+  (mean 388), `search` 582 per call, `verify_run` 169 per call. The edit and verify
+  means match the protocol measurement, so the gap against the built-in tools is not
+  the edit path; it is one fixed open per task plus agents reading more than they need.
+- **The open was this batch's own fault.** The benchmark prompt still told the Huyang
+  family to start with `workspace_open`, which the `root` argument has made unnecessary
+  since the first friction pass. That mandated call is 694 response tokens of every run.
+  Without it the Huyang family averages 4.3 calls, 521 request and 2,882 response
+  tokens per run, which beats the built-in tools on calls and on both token columns.
+  The prompt now names `root` instead, so the next batch measures the intended shape.
+
+Friction the transcripts show, to fix next:
+
+- **A passing `verify_run` is not believed.** In V1 the agent ran `verify_run` with the
+  tests stage, got a passing one-line stage record, and then ran `go test ./...`
+  through Bash anyway to see the output; its own report says "to see full output and
+  confirm test results". That is the whole V1 gap (6 calls against Bash's 2.3). A
+  passing stage should carry a short evidence line (tests run, package count, duration)
+  rather than only a verdict.
+- **The one-call literal edit is not reached for.** In E1 the agent opened, searched for
+  `MaxEntries`, read the line, then edited, verified and read the file again: 6 calls
+  for a one-line change it already knew the text of. The `edit_apply` descriptor says
+  "in one call with no prior search", but nothing in the reply of the preceding call
+  points at it. The agents were not given `docs/agent-guide.md`; the descriptors alone
+  did not change the search-first habit.
+- **Tool time is real and large.** Huyang's tool milliseconds are two to five times the
+  shell families' because `verify_run` compiles and runs the suite inside the call
+  while the shell families' numbers time only the command they ran. E5's 54.6 seconds
+  is mostly the Go build in the sandbox.
+
 ### Agent scores, batch `after` (Go fixture, cl100k tokens, mean of the runs found)
 
 | Scenario | Family | Runs | Calls | Req tokens | Resp tokens | Tool ms |
