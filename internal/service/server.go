@@ -48,6 +48,9 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
+		// Decode before validating: a client whose cached schema predates
+		// the server sends new arguments as text.
+		arguments = mcpapi.NormalizeArguments(arguments)
 		if err := mcpapi.ValidateToolArguments(descriptor.InputSchema, arguments); err != nil {
 			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
