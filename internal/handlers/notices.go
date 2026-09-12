@@ -54,11 +54,30 @@ type noticeDelivery struct {
 
 type clientCursors struct {
 	cursors map[string]uint64
-	order   []string
+	// owed are the clients that have not been told the rules yet. The
+	// reply that registers a client is not always one the client sees:
+	// the service resolves a root into a workspace before the call runs
+	// and discards that reply, so the debt is remembered here and settled
+	// by the first reply that does reach the client.
+	owed  map[string]bool
+	order []string
 }
 
 func newNoticeDelivery() *noticeDelivery {
 	return &noticeDelivery{delivered: make(map[workspacecore.ID]*clientCursors)}
+}
+
+// TakeGuide reports whether this client still has to be told the rules for
+// this workspace, and records that it now has been.
+func (n *noticeDelivery) TakeGuide(workspaceID workspacecore.ID, client string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil || !clients.owed[client] {
+		return false
+	}
+	delete(clients.owed, client)
+	return true
 }
 
 // last is the newest notice already delivered to this client, and whether
@@ -86,18 +105,22 @@ func (n *noticeDelivery) record(workspaceID workspacecore.ID, client string, cur
 // first call ran. A client that has just connected is not owed the backlog
 // of everything that happened before it existed, and starting it here rather
 // than after the call keeps the findings its own call produced. A client
-// already known keeps its cursor. The result reports that this client had
-// not met this workspace before, which is also when it is told the rules.
-func (n *noticeDelivery) Register(workspaceID workspacecore.ID, client string, head uint64) bool {
+// already known keeps its cursor. A client meeting this workspace for the
+// first time is also owed the rules, which TakeGuide hands over.
+func (n *noticeDelivery) Register(workspaceID workspacecore.ID, client string, head uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if clients := n.delivered[workspaceID]; clients != nil {
 		if _, known := clients.cursors[client]; known {
-			return false
+			return
 		}
 	}
-	n.track(workspaceID, client).cursors[client] = head
-	return true
+	clients := n.track(workspaceID, client)
+	clients.cursors[client] = head
+	if clients.owed == nil {
+		clients.owed = map[string]bool{}
+	}
+	clients.owed[client] = true
 }
 
 // track returns the cursor table of a workspace, adding the client to it and
@@ -112,6 +135,7 @@ func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *cli
 		clients.order = append(clients.order, client)
 		for len(clients.order) > maxNoticeClients {
 			delete(clients.cursors, clients.order[0])
+			delete(clients.owed, clients.order[0])
 			clients.order = clients.order[1:]
 		}
 	}

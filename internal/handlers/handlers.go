@@ -119,28 +119,32 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
 	if name == "workspace_open" {
-		return h.open(ctx, requestID, arguments)
+		return h.withGuide(ctx, h.open(ctx, requestID, arguments))
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
-	var guide []string
 	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
-		opened := h.open(ctx, requestID, map[string]any{"kind": "project", "root": root})
-		if failure := adoptOpenedProject(requestID, opened, arguments); failure != nil {
+		if failure := h.adoptImplicitProject(ctx, requestID, root, arguments); failure != nil {
 			return failure
 		}
-		guide = guideFor(opened)
 		workspaceID, _ = arguments["workspace_id"].(string)
 	}
 	// Registered before the call runs, so the notices it produces are
 	// delivered and the ones that predate this client are not.
-	if workspace := h.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
-		if h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead()) {
-			guide = cheapestCallRules
-		}
+	workspace := h.registry.Lookup(workspacecore.ID(workspaceID))
+	if workspace != nil {
+		h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead())
 	}
-	result := h.route(ctx, requestID, name, workspaceID, arguments)
-	if len(guide) > 0 {
-		result["guide"] = guide
+	return h.withGuide(ctx, h.route(ctx, requestID, name, workspaceID, arguments))
+}
+
+// withGuide adds the rules for calling this server at its cheapest to the
+// first reply a client gets for a workspace. It is applied to replies that
+// leave the service, never to the workspace a root argument opened on the
+// way in, because that reply is discarded.
+func (h *Handlers) withGuide(ctx context.Context, result map[string]any) map[string]any {
+	identity, ok := result["workspace"].(workspacecore.Identity)
+	if ok && h.notices.TakeGuide(identity.ID, clientIdentity(ctx)) {
+		result["guide"] = cheapestCallRules
 	}
 	return result
 }

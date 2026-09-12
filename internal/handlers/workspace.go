@@ -58,7 +58,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	}
 	// Opening is where a client first meets a workspace; from here on it is
 	// told what changes, not what was already there.
-	firstMeeting := h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
+	h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
 		canonicalBackend, _ = h.pool.Canonical(ctx, opened)
@@ -102,9 +102,6 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"commands":          commands,
 		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
-	if firstMeeting {
-		result["guide"] = cheapestCallRules
-	}
 	return result
 }
 
@@ -119,15 +116,6 @@ var cheapestCallRules = []string{
 	"Several edits at once: edit_apply operations; change_plan when they must be atomic.",
 	"Move, copy and delete files with edit_apply, then run the git command under next.",
 	"A file over 500 lines: read view=outline or max_lines before the whole file.",
-}
-
-// guideFor carries the rules onto the reply of whatever call opened the
-// workspace, which is often not workspace_open at all: naming the root on an
-// ordinary call is the cheaper way in, and an agent that takes it would
-// otherwise never see them.
-func guideFor(opened map[string]any) []string {
-	guide, _ := opened["guide"].([]string)
-	return guide
 }
 
 // warmAttachWait is the per-language attach wait the background probe

@@ -34,6 +34,26 @@ func recordTestFinding(t *testing.T, workspace *workspacecore.Workspace, file st
 	return report
 }
 
+// The service resolves a root into a workspace before the scheduler lane,
+// on a reply nobody sees, so the rules for calling it cheaply have to reach
+// the client on the reply of the call that named the root.
+func TestGuideSurvivesTheServiceResolvingARootFirst(t *testing.T) {
+	direct := newDirectWorkspaces(t.TempDir())
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := handlers.WithClientIdentity(context.Background(), "session-1")
+	first := direct.call(client, "search", map[string]any{"root": root, "query": "package"})
+	if rules, _ := first["guide"].([]string); first["outcome"] != "ok" || len(rules) == 0 {
+		t.Fatalf("first call naming a root = %#v", first)
+	}
+	second := direct.call(client, "search", map[string]any{"root": root, "query": "package"})
+	if second["guide"] != nil {
+		t.Fatalf("the guide repeated within a session: %#v", second["guide"])
+	}
+}
+
 func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID, workspace := openTestProject(t, direct, map[string]string{"main.go": "package main\n"})
