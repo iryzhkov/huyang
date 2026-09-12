@@ -260,8 +260,8 @@ func verificationOutcome(result workspacecore.VerificationResult) (string, strin
 		return "ok", "Verification completed against exact sandbox bytes"
 	}
 	if ran == 0 && skipped["workspace_not_trusted"] > 0 {
-		return "partial", "No stage ran: the workspace root is not trusted; list it (or a parent directory) under [trust] roots in " +
-			workspacecore.UserConfigPath() + " and retry, or run the command in the shell"
+		return "partial", "No stage ran: the workspace root is not trusted; run `huyang trust <root>` (it lists the root under [trust] roots in " +
+			workspacecore.UserConfigPath() + ") and retry, or run the command in the shell"
 	}
 	if ran == 0 && skipped["not_configured"] > 0 {
 		return "partial", "No stage ran: no command is declared or detected for the requested stages; write .huyang.toml at the workspace root"

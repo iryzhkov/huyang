@@ -69,7 +69,7 @@ func Main() {
 
 func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: huyang <serve|mcp>")
+		return errors.New("usage: huyang <serve|mcp|trust>")
 	}
 	switch arguments[0] {
 	case "serve":
@@ -121,8 +121,10 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 			return err
 		}
 		return proxyHuyangMCP(socketPath, profile, stdin, stdout)
+	case "trust":
+		return runTrust(arguments[1:], stdout, stderr)
 	default:
-		return fmt.Errorf("unknown subcommand %q; usage: huyang <serve|mcp>", arguments[0])
+		return fmt.Errorf("unknown subcommand %q; usage: huyang <serve|mcp|trust>", arguments[0])
 	}
 }
 
