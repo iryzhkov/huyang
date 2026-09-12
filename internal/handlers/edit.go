@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
@@ -11,26 +12,59 @@ import (
 )
 
 // editRequest is the decoded edit_apply call: one replace_range operation
-// addressed by an opaque handle or an exact file range.
+// addressed by an opaque handle or an exact file range, one replace_literal
+// operation addressed by the text it replaces, or one create_file.
 type editRequest struct {
-	Preview bool
-	Content string
-	Handle  string
-	Range   map[string]any
+	Kind          string
+	Preview       bool
+	Verbose       bool
+	Content       string
+	Handle        string
+	Range         map[string]any
+	Path          string
+	Old           string
+	New           string
+	ExpectedCount int
 }
 
 func decodeEditRequest(arguments map[string]any) (editRequest, error) {
 	operation, ok := arguments["operation"].(map[string]any)
-	if !ok || operation["kind"] != "replace_range" {
-		return editRequest{}, errors.New("S07 direct edit supports only replace_range")
+	if !ok {
+		return editRequest{}, errors.New("operation is required")
+	}
+	request := editRequest{}
+	request.Kind, _ = operation["kind"].(string)
+	switch request.Kind {
+	case "replace_range", "replace_literal", "create_file":
+	default:
+		return editRequest{}, fmt.Errorf("edit_apply supports replace_range, replace_literal and create_file, not %q", request.Kind)
 	}
 	target, _ := operation["target"].(map[string]any)
-	request := editRequest{}
 	request.Preview, _ = arguments["preview_only"].(bool)
+	request.Verbose, _ = arguments["verbose"].(bool)
 	request.Content, _ = operation["content"].(string)
 	request.Handle, _ = target["handle"].(string)
 	request.Range, _ = target["file_range"].(map[string]any)
+	request.Path, _ = operation["path"].(string)
+	request.Old, _ = operation["old"].(string)
+	request.New, _ = operation["new"].(string)
+	request.ExpectedCount = argInt(operation, "expected_count", 1)
 	return request, nil
+}
+
+// appliedEdit is what every edit kind produces before the shared
+// checkpoint, diagnostic refresh and response shaping.
+type appliedEdit struct {
+	files        []workspacecore.PlanStageFile
+	patches      []string
+	revisions    map[string]workspacecore.RevisionID
+	fromStateSeq uint64
+	replacements int
+	summary      string
+	warnings     []string
+	// verbose detail, only reported on request
+	change     *workspacecore.TextChange
+	resolution *workspacecore.HandleResolution
 }
 
 func (h *Handlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -38,41 +72,38 @@ func (h *Handlers) edit(ctx context.Context, requestID string, workspace *worksp
 	if err != nil {
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "operation_unavailable", err.Error(), map[string]any{})
 	}
+	switch request.Kind {
+	case "replace_literal":
+		return h.editLiteral(ctx, requestID, workspace, request)
+	case "create_file":
+		return h.editCreateFile(ctx, requestID, workspace, request)
+	}
+	return h.editRange(ctx, requestID, workspace, request)
+}
+
+// editRange applies one guarded range replacement.
+func (h *Handlers) editRange(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest) map[string]any {
 	handle, resolution, failure := resolveEditTarget(requestID, workspace, request)
 	if failure != nil {
 		return failure
 	}
-	change, after, err := applyEdit(workspace, handle, request)
+	change, _, err := applyEdit(workspace, handle, request)
 	if err != nil {
 		return editFailure(requestID, workspace, handle, err)
 	}
-	data := map[string]any{
-		"change": mcpapi.CompactTextChange(change), "resolution": resolution, "tool_delta": []any{},
-		"diagnostic_delta": map[string]any{"new": []any{}, "resolved": []any{}},
-		"from_revision":    fmt.Sprintf("wsrev_%d", change.Before.Workspace.StateSeq),
-		"changed_paths":    []string{change.Diff.Path}, "canonical_changed": !request.Preview,
-		"revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+	applied := appliedEdit{
+		files:   []workspacecore.PlanStageFile{{Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After, BeforeExists: true, AfterExists: true, Patch: change.Diff.Patch}},
+		patches: []string{change.Diff.Patch}, fromStateSeq: change.Before.Workspace.StateSeq, replacements: 1,
+		change: &change, resolution: resolution,
 	}
-	if request.Preview {
-		result := mcpapi.Envelope(requestID, workspace, "ok", "", editSummary(resolution, true, "ok"), data)
-		result["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
-		return result
+	if !request.Preview {
+		if snapshot, snapErr := workspace.Snapshot(change.Diff.Path, workspacecore.ProviderLayer{}); snapErr == nil {
+			applied.revisions = map[string]workspacecore.RevisionID{change.Diff.Path: snapshot.Revision}
+		}
 	}
-	if failure := h.checkpointEdit(ctx, requestID, workspace, data); failure != nil {
-		return failure
-	}
-	data["document_revision"] = after.Revision
-	outcome, summary, evidenceIDs := h.refreshEditDiagnostics(ctx, requestID, workspace, change, data)
-	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
-	if resolution != nil && resolution.Status == workspacecore.ResolutionRelocated {
-		summary = editSummary(resolution, false, outcome)
-	}
-	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, data)
-	result["evidence"] = map[string]any{"ids": mcpapi.NonNilStrings(evidenceIDs), "truncated": false}
-	if outcome != "ok" {
-		result["next"] = editDiagnosticRecovery(data["revision"])
-	}
-	return result
+	relocated := resolution != nil && resolution.Status == workspacecore.ResolutionRelocated
+	applied.summary = editSummary(relocated, request.Preview)
+	return h.finishEdit(ctx, requestID, workspace, request, applied)
 }
 
 // resolveEditTarget turns the request's handle or file range into the exact
@@ -90,7 +121,7 @@ func resolveEditTarget(requestID string, workspace *workspacecore.Workspace, req
 	if err != nil {
 		result := mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
 		result["next"] = []any{
-			map[string]any{"tool": "workspace_inspect", "view": "status", "action": "confirm_current_revision"},
+			map[string]any{"tool": "edit_apply", "action": "retry_as_replace_literal_with_the_old_text", "expired_handle": request.Handle},
 			map[string]any{"tool": "search", "action": "repeat_source_query_and_retry_with_fresh_handle", "expired_handle": request.Handle},
 		}
 		return workspacecore.RangeHandle{}, nil, result
@@ -128,17 +159,84 @@ func editFailure(requestID string, workspace *workspacecore.Workspace, handle wo
 		"target": handle, "current_revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
 	})
 	result["next"] = []any{
+		map[string]any{"tool": "edit_apply", "action": "retry_as_replace_literal_with_the_old_text", "path": handle.Path},
 		map[string]any{"tool": "read", "action": "refresh_path", "path": handle.Path},
-		map[string]any{"tool": "search", "action": "relocate_target", "path": handle.Path},
 	}
 	return result
+}
+
+// finishEdit shapes the response every edit kind shares: the compact data,
+// the persisted receipt, and the post-edit diagnostics of the changed files.
+func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest, applied appliedEdit) map[string]any {
+	data := compactEditData(workspace, request, applied)
+	if request.Preview {
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", applied.summary, data)
+		result["warnings"] = mcpapi.NonNilStrings(applied.warnings)
+		return result
+	}
+	if failure := h.checkpointEdit(ctx, requestID, workspace, data); failure != nil {
+		return failure
+	}
+	outcome, detail, evidenceIDs := h.refreshEditDiagnostics(ctx, requestID, workspace, applied.files, data)
+	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	result := mcpapi.Envelope(requestID, workspace, outcome, "", applied.summary+"; "+detail, data)
+	result["warnings"] = mcpapi.NonNilStrings(applied.warnings)
+	result["evidence"] = map[string]any{"ids": mcpapi.NonNilStrings(evidenceIDs), "truncated": false}
+	if outcome != "ok" {
+		result["next"] = editDiagnosticRecovery(data["revision"])
+	}
+	return result
+}
+
+// compactEditData is the default edit response: what changed, the new
+// revision, one patch, and nothing the agent did not ask for. verbose adds
+// the full change record and the handle resolution.
+func compactEditData(workspace *workspacecore.Workspace, request editRequest, applied appliedEdit) map[string]any {
+	changed := make([]string, 0, len(applied.files))
+	for _, file := range applied.files {
+		changed = append(changed, file.Path)
+	}
+	data := map[string]any{
+		"changed_paths": changed, "canonical_changed": !request.Preview,
+		"diffs":         editDiffs(applied),
+		"from_revision": fmt.Sprintf("wsrev_%d", applied.fromStateSeq),
+		"revision":      fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+	}
+	if applied.replacements != 1 {
+		data["replacements"] = applied.replacements
+	}
+	switch len(applied.revisions) {
+	case 0:
+	case 1:
+		for _, revision := range applied.revisions {
+			data["document_revision"] = revision
+		}
+	default:
+		data["document_revisions"] = applied.revisions
+	}
+	if applied.resolution != nil && applied.resolution.Status == workspacecore.ResolutionRelocated && applied.resolution.Current != nil {
+		data["relocated"] = map[string]any{
+			"from_byte": applied.resolution.Original.ByteStart, "to_byte": applied.resolution.Current.ByteStart,
+			"code": applied.resolution.Code,
+		}
+	}
+	if request.Verbose {
+		if applied.change != nil {
+			data["change"] = mcpapi.CompactTextChange(*applied.change)
+		}
+		if applied.resolution != nil {
+			data["resolution"] = applied.resolution
+		}
+		data["tool_delta"] = []any{}
+	}
+	return data
 }
 
 // checkpointEdit persists the canonical mutation receipt before the
 // post-mutation diagnostics run, so a lost response can still be replayed.
 func (h *Handlers) checkpointEdit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, data map[string]any) map[string]any {
 	checkpoint := mcpapi.Envelope(requestID, workspace, "provisional", "",
-		"Guarded range edit applied; canonical receipt persisted before semantic diagnostics", data)
+		"Edit applied; canonical receipt persisted before semantic diagnostics", data)
 	checkpoint["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
 	checkpoint["next"] = editDiagnosticRecovery(data["revision"])
 	persistErr := checkpointStatefulReceipt(ctx, checkpoint)
@@ -146,55 +244,97 @@ func (h *Handlers) checkpointEdit(ctx context.Context, requestID string, workspa
 		return nil
 	}
 	result := mcpapi.Envelope(requestID, workspace, "provisional", "mutation_receipt_persist_failed",
-		"Guarded range edit applied, but its recovery receipt could not be persisted", data)
+		"Edit applied, but its recovery receipt could not be persisted", data)
 	result["warnings"] = []string{persistErr.Error()}
 	result["next"] = []any{map[string]any{"tool": "revision_diff", "action": "inspect_current_revision_before_retry"}}
 	return result
 }
 
 // refreshEditDiagnostics resyncs the canonical provider and records the
-// diagnostics of the edited document. It fills data's diagnostic_delta and
-// verification and returns the outcome the evidence supports, the summary
-// that words it, and the evidence IDs.
-func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string, workspace *workspacecore.Workspace, change workspacecore.TextChange, data map[string]any) (string, string, []string) {
+// diagnostics of the edited documents. It fills data's diagnostic_delta and
+// verification and returns the outcome the evidence supports, the wording
+// for the summary, and the evidence IDs.
+func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string, workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, data map[string]any) (string, string, []string) {
 	revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 	backend, err := h.pool.Resync(ctx, workspace)
 	var report workspacecore.DiagnosticReport
 	if err == nil {
-		report, err = providerpool.RecordDiagnostics(ctx, workspace, backend, []workspacecore.PlanStageFile{{
-			Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After,
-			BeforeExists: true, AfterExists: true,
-		}}, revision, "edit_"+requestID)
+		report, err = providerpool.RecordDiagnostics(ctx, workspace, backend, files, revision, "edit_"+requestID)
 	}
 	if err != nil {
 		data["verification"] = map[string]any{"confidence": "unavailable", "reasons": []string{err.Error()}}
-		return "provisional", "Guarded range edit applied; semantic diagnostic refresh failed", nil
+		return "provisional", "semantic diagnostic refresh failed", nil
 	}
-	data["diagnostic_delta"] = map[string]any{"new": report.New, "resolved": report.Resolved}
+	data["diagnostic_delta"] = compactDiagnosticDelta(workspace, report)
 	data["verification"] = map[string]any{
 		"confidence": report.Confidence,
 		"reasons":    mcpapi.NonNilStrings(report.ProvisionalReasons),
 	}
 	if report.Confidence == workspacecore.ConfidenceAuthoritative || report.Confidence == workspacecore.ConfidenceCorroborated {
-		return "ok", "Guarded range edit applied; current semantic diagnostics captured", report.EvidenceIDs
+		return "ok", diagnosticSummary(report), report.EvidenceIDs
 	}
-	return "provisional", "Guarded range edit applied; semantic diagnostics remain incomplete", report.EvidenceIDs
+	return "provisional", "semantic diagnostics remain incomplete", report.EvidenceIDs
 }
 
-// editSummary words a preview, or an applied edit whose stale target was
-// relocated first; applied edits without relocation are worded by the
-// diagnostic refresh.
-func editSummary(resolution *workspacecore.HandleResolution, preview bool, outcome string) string {
-	relocated := resolution != nil && resolution.Status == workspacecore.ResolutionRelocated
+// diagnosticSummary words the post-edit diagnostic outcome so the agent
+// can read the verdict without opening the delta.
+func diagnosticSummary(report workspacecore.DiagnosticReport) string {
+	current := 0
+	for _, item := range report.New {
+		if item.Status != workspacecore.DiagnosticStatusStale {
+			current++
+		}
+	}
+	switch {
+	case current == 0 && len(report.Resolved) == 0:
+		return "no new diagnostics"
+	case current == 0:
+		return fmt.Sprintf("%d diagnostic(s) resolved, none new", len(report.Resolved))
+	default:
+		return fmt.Sprintf("%d new diagnostic(s), %d resolved", current, len(report.Resolved))
+	}
+}
+
+// compactDiagnosticDelta keeps what an agent acts on from each new finding:
+// where it is, how bad it is and what it says. Resolved findings collapse
+// to their IDs.
+func compactDiagnosticDelta(workspace *workspacecore.Workspace, report workspacecore.DiagnosticReport) map[string]any {
+	root := workspace.Identity().Root + "/"
+	newItems := make([]map[string]any, 0, len(report.New))
+	for _, item := range report.New {
+		if item.Status == workspacecore.DiagnosticStatusStale {
+			continue
+		}
+		compact := map[string]any{
+			"id": item.ID, "severity": item.Finding.Severity, "message": item.Finding.Message,
+			"path": strings.TrimPrefix(item.Document, root), "line": item.Finding.Range.StartLine + 1,
+		}
+		if item.Finding.Code != "" {
+			compact["code"] = item.Finding.Code
+		}
+		if item.Producer != "" {
+			compact["producer"] = item.Producer
+		}
+		newItems = append(newItems, compact)
+	}
+	resolved := make([]string, 0, len(report.Resolved))
+	for _, item := range report.Resolved {
+		resolved = append(resolved, item.ID)
+	}
+	return map[string]any{"new": newItems, "resolved": resolved}
+}
+
+// editSummary words a range edit: preview or applied, relocated or exact.
+func editSummary(relocated, preview bool) string {
 	switch {
 	case preview && relocated:
 		return "Guarded range preview is ready after safely relocating the stale target; canonical bytes unchanged"
 	case preview:
 		return "Guarded range preview is ready; canonical bytes unchanged"
-	case outcome == "ok":
-		return "Guarded range edit applied after safely relocating the stale target; current semantic diagnostics captured"
+	case relocated:
+		return "Guarded range edit applied after safely relocating the stale target"
 	default:
-		return "Guarded range edit applied after safely relocating the stale target; semantic diagnostics remain incomplete"
+		return "Guarded range edit applied"
 	}
 }
 

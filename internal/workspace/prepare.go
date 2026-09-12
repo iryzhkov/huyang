@@ -17,6 +17,9 @@ type PlanStageFile struct {
 	AfterExists  bool         `json:"after_exists"`
 	BeforeDisk   DiskSnapshot `json:"before_disk"`
 	AfterDisk    DiskSnapshot `json:"after_disk"`
+	// Patch is the human-readable record of how Before became After when a
+	// native edit produced this file; plan stages leave it empty.
+	Patch string `json:"patch,omitempty"`
 }
 
 // PlanStageRequest is the complete, already validated batch applied under a workspace lease.

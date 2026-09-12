@@ -226,10 +226,12 @@ func trimReceipt(result map[string]any) map[string]any {
 			compact[key] = value
 		}
 	}
-	if change, ok := data["change"].(map[string]any); ok {
-		if diff, ok := change["diff"].(map[string]any); ok {
-			compact["change"] = map[string]any{"diff": compactDiffReceipt(diff)}
+	if diffs := editReceiptDiffs(data); len(diffs) > 0 {
+		compactDiffs := make([]any, 0, len(diffs))
+		for _, diff := range diffs {
+			compactDiffs = append(compactDiffs, compactDiffReceipt(diff))
 		}
+		compact["diffs"] = compactDiffs
 	}
 	var committed []any
 	switch plan := data["plan"].(type) {
@@ -525,7 +527,7 @@ func (s *receiptStore) CanonicalChangedPaths(workspaceID workspacecore.ID, targe
 		}
 		from, fromErr := handlers.RevisionSequence(fmt.Sprint(data["from_revision"]))
 		to, toErr := handlers.RevisionSequence(fmt.Sprint(data["revision"]))
-		if fromErr != nil || toErr != nil || from+1 != to || to != target {
+		if fromErr != nil || toErr != nil || from >= to || to != target {
 			continue
 		}
 		var changedPaths []string
@@ -540,10 +542,10 @@ func (s *receiptStore) CanonicalChangedPaths(workspaceID workspacecore.ID, targe
 			}
 		}
 		if len(changedPaths) == 0 {
-			change, _ := data["change"].(map[string]any)
-			diff, _ := change["diff"].(map[string]any)
-			if path, _ := diff["path"].(string); path != "" {
-				changedPaths = append(changedPaths, path)
+			for _, diff := range editReceiptDiffs(data) {
+				if path, _ := diff["path"].(string); path != "" {
+					changedPaths = append(changedPaths, path)
+				}
 			}
 		}
 		for _, path := range changedPaths {
@@ -600,9 +602,8 @@ func (s *receiptStore) RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq 
 		var diffs []any
 		switch {
 		case strings.HasPrefix(key, prefix+"edit_apply\x00"):
-			change, _ := data["change"].(map[string]any)
-			if diff, ok := change["diff"].(map[string]any); ok {
-				diffs = []any{diff}
+			for _, diff := range editReceiptDiffs(data) {
+				diffs = append(diffs, diff)
 			}
 		case strings.HasPrefix(key, prefix+"change_plan\x00"):
 			switch plan := data["plan"].(type) {

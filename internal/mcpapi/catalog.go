@@ -274,12 +274,19 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"parser": map[string]any{"type": "boolean"},
 		}, "workspace_id", "idempotency_key", "action")},
 		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
-		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Preview or apply exactly one guarded range replacement through the native workspace core.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit and get back the diff, the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file; kind=replace_range replaces a handle or file_range returned by search. Responses are compact unless verbose=true.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
-			"preview_only": map[string]any{"type": "boolean"},
+			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
+			"verbose":      map[string]any{"type": "boolean", "description": "Add the full change record, hashes and handle resolution to the response."},
 			"operation": schemaObject(map[string]any{
-				"kind": enumSchema("replace_range"), "target": mutationRangeTargetSchema(), "content": stringSchema("Exact replacement bytes as UTF-8 text."),
-			}, "kind", "target"),
+				"kind":           enumSchema("replace_literal", "create_file", "replace_range"),
+				"path":           stringSchema("replace_literal: file to search (omit to search the whole workspace); create_file: the new path."),
+				"old":            stringSchema("replace_literal: exact text to replace, may span lines. If it differs from the file only by a uniform indentation, the edit still applies and the response says so."),
+				"new":            stringSchema("replace_literal: replacement text."),
+				"expected_count": map[string]any{"type": "integer", "minimum": 1, "description": "replace_literal: how many occurrences old must have (default 1); any other count changes nothing and the response lists the locations."},
+				"target":         mutationRangeTargetSchema(),
+				"content":        stringSchema("replace_range: exact replacement bytes; create_file: the file content."),
+			}, "kind"),
 		}, "workspace_id", "idempotency_key", "operation")},
 		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
 		{Class: ClassExternalJob, Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
