@@ -84,6 +84,45 @@ func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 	return report, nil
 }
 
+// lateEvidenceTimeout bounds the collection of late batches: the kernel
+// answers from memory, so the call never waits on a server.
+const lateEvidenceTimeout = 2 * time.Second
+
+// CollectLateEvidence records the findings a language server published
+// after a verdict had already answered unavailable for the same buffer
+// version (a server that attached late). The kernel attributes each batch
+// to the transaction whose version it matched, so the ledger's notices
+// name that transaction; nothing is attributed by arrival time. It returns
+// how many batches were recorded and never fails the caller's own work.
+func CollectLateEvidence(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider) (int, error) {
+	if backend == nil {
+		return 0, nil
+	}
+	callCtx, cancel := context.WithTimeout(ctx, lateEvidenceTimeout)
+	defer cancel()
+	result, err := Call(callCtx, workspace, backend, CallSpec{RequestID: "late_evidence"}, "huyang_late_evidence", nil)
+	if err != nil {
+		return 0, err
+	}
+	payload, err := diagnosticPayload(result)
+	if err != nil {
+		return 0, err
+	}
+	descriptor := backend.Descriptor()
+	recorded := 0
+	for _, batch := range payload.Batches {
+		batch.Selected = true
+		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
+			batch.Document = filepath.Join(workspace.Identity().Root, relative)
+		}
+		if _, err := workspace.RecordDiagnosticEvidence(batch); err != nil {
+			return recorded, err
+		}
+		recorded++
+	}
+	return recorded, nil
+}
+
 // diagnosticPayload reads the diagnostic batches of a provider result. The
 // kernel reports them as typed Result.Evidence; the untyped Value is decoded
 // only for a provider that predates that field.

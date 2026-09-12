@@ -19,6 +19,45 @@ local function check(name, ok, detail)
     io.stdout:flush()
 end
 
+-- The Python interpreter comes from the project's venv, then VIRTUAL_ENV,
+-- and pyright is pointed at it before it starts.
+do
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root .. "/.venv/bin", "p")
+    local original_env = vim.env.VIRTUAL_ENV
+    vim.env.VIRTUAL_ENV = nil
+    check("no interpreter without a venv", install._project_python_interpreter(root) == nil)
+    vim.fn.writefile({ "#!/bin/sh" }, root .. "/.venv/bin/python")
+    vim.fn.setfperm(root .. "/.venv/bin/python", "rwxr-xr-x")
+    check("the project venv interpreter is found",
+        install._project_python_interpreter(root) == root .. "/.venv/bin/python")
+    local configured = install._configure_python_interpreter(root)
+    local settings = (vim.lsp.config.pyright or {}).settings or {}
+    check("pyright is pointed at the project interpreter",
+        configured == root .. "/.venv/bin/python" and settings.python and settings.python.pythonPath == configured,
+        settings)
+    local other = vim.fn.tempname()
+    vim.fn.mkdir(other .. "/bin", "p")
+    vim.fn.writefile({ "#!/bin/sh" }, other .. "/bin/python")
+    vim.fn.setfperm(other .. "/bin/python", "rwxr-xr-x")
+    vim.env.VIRTUAL_ENV = other
+    check("VIRTUAL_ENV is the fallback", install._project_python_interpreter(vim.fn.tempname()) == other .. "/bin/python")
+    vim.env.VIRTUAL_ENV = original_env
+    vim.fn.delete(root, "rf")
+    vim.fn.delete(other, "rf")
+end
+
+-- A started client that has not initialized is reported as starting.
+do
+    local original = vim.lsp.get_clients
+    vim.lsp.get_clients = function()
+        return { { name = "pyright", initialized = false }, { name = "gopls", initialized = true } }
+    end
+    check("a starting server is named", install._starting_server({ "pyright" }) == "pyright")
+    check("an initialized server is not starting", install._starting_server({ "gopls" }) == nil)
+    vim.lsp.get_clients = original
+end
+
 do
     local original_exepath, original_expand, original_system = vim.fn.exepath, vim.fn.expand, vim.system
 	local original_path, original_gem_home, original_gem_path = vim.env.PATH, vim.env.GEM_HOME, vim.env.GEM_PATH

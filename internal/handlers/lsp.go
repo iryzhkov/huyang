@@ -52,17 +52,24 @@ type languageSupport struct {
 	attachedServers   []string
 	missing           []string
 	failedAttachments []string
-	installOptions    map[string][]string
+	// starting lists languages whose server has a client on its way but
+	// not yet initialized: neither attached nor failed.
+	starting       []string
+	installOptions map[string][]string
 }
 
 func summariseLanguageSupport(support map[string]any) languageSupport {
-	tally := languageSupport{attachedServers: []string{}, missing: []string{}, failedAttachments: []string{}, installOptions: map[string][]string{}}
+	tally := languageSupport{attachedServers: []string{}, missing: []string{}, failedAttachments: []string{}, starting: []string{}, installOptions: map[string][]string{}}
 	seenServers := map[string]struct{}{}
 	for _, raw := range mcpapi.AnySlice(support["languages"]) {
 		entry, _ := raw.(map[string]any)
 		reconcileParserSupport(entry)
 		language := fmt.Sprint(entry["filetype"])
 		lsp := fmt.Sprint(entry["lsp"])
+		if fmt.Sprint(entry["attach"]) == "starting" || strings.HasPrefix(lsp, "starting (") {
+			tally.starting = append(tally.starting, language)
+			continue
+		}
 		if lsp != "" && lsp != "none" && !strings.HasPrefix(lsp, "none (") {
 			tally.attachedLanguages++
 			for _, name := range strings.Split(lsp, ",") {
@@ -108,8 +115,14 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 	tally := summariseLanguageSupport(support)
 	outcome, code := "ok", ""
 	summary := fmt.Sprintf("%d unique language servers attached across %d workspace language modes", len(tally.attachedServers), tally.attachedLanguages)
-	if len(tally.attachedServers) == 0 {
+	if len(tally.attachedServers) == 0 && len(tally.starting) > 0 {
+		outcome, code = "provisional", "language_server_starting"
+		summary = fmt.Sprintf("No language server is attached yet; still starting for: %s. Retry shortly rather than restarting", strings.Join(tally.starting, ", "))
+	} else if len(tally.attachedServers) == 0 {
 		outcome, code, summary = "unavailable", "language_server_unavailable", "No workspace language server is attached"
+	} else if len(tally.starting) > 0 {
+		outcome, code = "partial", "language_server_starting"
+		summary = fmt.Sprintf("%d language server(s) attached; still starting for: %s", len(tally.attachedServers), strings.Join(tally.starting, ", "))
 	} else if len(tally.failedAttachments) > 0 {
 		outcome, code = "partial", "language_server_attachment_incomplete"
 		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(tally.attachedServers), strings.Join(tally.failedAttachments, ", "))
@@ -118,7 +131,7 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 		"provider": providerpool.Status(ctx, backend), "language_servers": mcpapi.CompactLanguageSupport(support),
 		"attached_language_count": tally.attachedLanguages, "attached_server_count": len(tally.attachedServers),
 		"attached_servers": tally.attachedServers, "missing_languages": tally.missing,
-		"failed_attachment_languages": tally.failedAttachments, "install_options": tally.installOptions,
+		"failed_attachment_languages": tally.failedAttachments, "starting_languages": tally.starting, "install_options": tally.installOptions,
 	})
 	if len(tally.missing) > 0 {
 		result["warnings"] = []string{"Some workspace languages have no attached language server."}

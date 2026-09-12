@@ -141,6 +141,49 @@ end
 -- durable; re-enable installed servers before probing workspace buffers.
 local ensure_ruby_lsp_bundler
 
+-- Defined further down, used by workspace_support above their definition:
+-- the preferred server per filetype and the system-installed server lookup.
+local PREFERRED_SERVER, system_server, enable_system_server
+
+-- The interpreter a Python project's own environment provides: a venv
+-- directory under the root, else the one VIRTUAL_ENV names. pyright resolves
+-- imports against it, so a package installed by uv or poetry is seen and a
+-- test module's `import pytest` stops reading as unresolved.
+local function project_python_interpreter(root)
+    for _, venv in ipairs({ ".venv", "venv", "env" }) do
+        local python = root .. "/" .. venv .. "/bin/python"
+        if vim.fn.executable(python) == 1 then return python end
+    end
+    local active = vim.env.VIRTUAL_ENV
+    if type(active) == "string" and active ~= "" and vim.fn.executable(active .. "/bin/python") == 1 then
+        return active .. "/bin/python"
+    end
+    return nil
+end
+
+-- Point pyright and basedpyright at the project's interpreter before their
+-- first buffer attaches; a server already running keeps its settings until
+-- the provider restarts, which language_server_status says.
+local function configure_python_interpreter(root)
+    local python = project_python_interpreter(root)
+    if not python then return nil end
+    for _, name in ipairs({ "pyright", "basedpyright" }) do
+        pcall(vim.lsp.config, name, { settings = { python = { pythonPath = python } } })
+    end
+    return python
+end
+
+-- A started client that has not finished initializing yet: the server is
+-- on its way, which is neither attached nor absent.
+local function starting_server(configured)
+    for _, client in ipairs(vim.lsp.get_clients()) do
+        if vim.tbl_contains(configured, client.name) and not client.initialized then
+            return client.name
+        end
+    end
+    return nil
+end
+
 -- Mason packages are durable, but an owned headless provider may start
 -- without mason.setup() having prepended its launcher directory. Put that
 -- directory first explicitly so a version-manager shim with the same name
@@ -281,24 +324,48 @@ local function workspace_support(args)
 			-- Each embedded provider owns exactly one workspace. Pin servers whose
 			-- upstream root discovery can fall back to Neovim's daemon cwd so they
 			-- attach to this workspace (and to an isolated preparation sandbox).
+			local interpreter
 			if ft == "typescript" or ft == "typescriptreact"
 				or ft == "javascript" or ft == "javascriptreact" then
 				local current = vim.lsp.config.ts_ls or {}
 				local init_options = vim.deepcopy(current.init_options or {})
+				-- The project's own TypeScript first, so the diagnostics match
+				-- the version it builds with; Mason's bundled copy otherwise.
+				local project_tsserver = root .. "/node_modules/typescript/lib/tsserver.js"
 				local bundled_tsserver = vim.fn.stdpath("data")
 					.. "/mason/packages/typescript-language-server/node_modules/typescript/lib/tsserver.js"
-				if vim.uv.fs_stat(bundled_tsserver) then
-					init_options.tsserver = vim.tbl_extend("force", init_options.tsserver or {}, {
-						path = bundled_tsserver,
-					})
+				for _, tsserver in ipairs({ project_tsserver, bundled_tsserver }) do
+					if vim.uv.fs_stat(tsserver) then
+						init_options.tsserver = vim.tbl_extend("force", init_options.tsserver or {}, {
+							path = tsserver,
+						})
+						break
+					end
 				end
 				pcall(vim.lsp.config, "ts_ls", { root_dir = root, init_options = init_options })
+			elseif ft == "python" then
+				interpreter = configure_python_interpreter(root)
 			elseif ft == "ruby" then
 				pcall(vim.lsp.config, "ruby_lsp", { root_dir = root })
 			elseif ft == "java" then
 				pcall(pin_jdtls_workspace_root, root)
 			end
 			local restored_servers = enable_installed_servers(ft)
+			-- No Mason package and no enabled config: a server installed on the
+			-- machine (gopls on PATH, pyright from the distro) is enabled the
+			-- way language_server_setup would enable it, so the first edit does
+			-- not answer lsp_not_configured for a language the machine serves.
+			local system_enabled
+			if #enabled_lsp_configs_for(ft) == 0 and not DATA_FILETYPES[ft] and system_server then
+				local okn, sysname, syscmd = pcall(system_server, ft, PREFERRED_SERVER and PREFERRED_SERVER[ft])
+				if okn and sysname then
+					local oke, enabled = pcall(enable_system_server, ft, sysname, syscmd)
+					if oke and enabled and enabled.lspconfig then
+						system_enabled = sysname .. " (" .. syscmd .. ")"
+						restored_servers[#restored_servers + 1] = sysname
+					end
+				end
+			end
 			local attach_wait_ms = support_attach_wait(ft, requested_attach_wait, restored_servers)
             local configs = enabled_lsp_configs_for(ft)
             -- What could run this language under a debugger, so a client
@@ -350,9 +417,21 @@ local function workspace_support(args)
                 debugger = debugger,
                 install_options = install_options,
                 prerequisite = prerequisite,
+                interpreter = interpreter,
+                enabled_from_system = system_enabled,
             }
+            -- attach says where the server is: attached, still starting
+            -- (a client exists but has not initialized), configured but
+            -- absent after the wait, or not configured at all.
+            entry.attach = #clients > 0 and "attached" or (#configs == 0 and "unconfigured" or "not_started")
             if #clients == 0 and #configs > 0 then
-                entry.lsp = "none (configured: " .. table.concat(configs, ",") .. ", did not attach)"
+                local starting = starting_server(configs)
+                if starting then
+                    entry.attach = "starting"
+                    entry.lsp = "starting (" .. starting .. ")"
+                else
+                    entry.lsp = "none (configured: " .. table.concat(configs, ",") .. ", did not attach)"
+                end
             end
             if not parser and #clients == 0 and not DATA_FILETYPES[ft] then
                 blind[#blind + 1] = ft
@@ -398,7 +477,7 @@ local INSTALL_ATTACH_MS = 8000
 
 -- Preferred language server per filetype where Mason offers several; the
 -- lspconfig name, mapped to a Mason package through mason-lspconfig.
-local PREFERRED_SERVER = {
+PREFERRED_SERVER = {
     c = "clangd", cpp = "clangd", objc = "clangd", objcpp = "clangd",
     go = "gopls", gomod = "gopls",
     python = "pyright",
@@ -622,7 +701,7 @@ end
 -- filetype and whose command is executable here, including the versioned
 -- name a distro may install it under (qmlls6 for qmlls, clangd-19 for
 -- clangd), so a language is called unsupported only when nothing can run it.
-local function system_server(ft, wanted)
+system_server = function(ft, wanted)
     local seen, versioned = {}, nil
     for _, path in ipairs(vim.api.nvim_get_runtime_file("lsp/*.lua", true)) do
         local name = vim.fn.fnamemodify(path, ":t:r")
@@ -655,7 +734,7 @@ end
 
 -- Enable a server that is already on the machine, pointing its config at
 -- the command that actually exists, and report whether it attached.
-local function enable_system_server(ft, name, cmd, root, why)
+enable_system_server = function(ft, name, cmd, root, why)
     local out = { lspconfig = name, cmd = cmd, status = "on the system" }
     local okcfg = pcall(function()
         local current = (vim.lsp.config[name] or {}).cmd
@@ -944,6 +1023,9 @@ local function install_language(args)
 end
 M.workspace_support = workspace_support
 M.install_language = install_language
+M._project_python_interpreter = project_python_interpreter
+M._configure_python_interpreter = configure_python_interpreter
+M._starting_server = starting_server
 M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 M._enable_installed_servers = enable_installed_servers
 M._support_attach_wait = support_attach_wait

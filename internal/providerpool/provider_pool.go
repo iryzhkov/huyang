@@ -105,6 +105,19 @@ func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.W
 	return backend, nil
 }
 
+// Existing returns the workspace's running provider without starting one,
+// or nil when none is running. Late-evidence collection uses it: a
+// workspace with no provider has no server that could have published.
+func (p *Pool) Existing(workspace *workspacecore.Workspace) provider.Provider {
+	if workspace.Identity().Kind != workspacecore.KindProject {
+		return nil
+	}
+	slot := p.slotFor(workspace.Identity().ID)
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	return slot.backend
+}
+
 // restart closes the workspace's provider and starts a fresh one.
 func (p *Pool) Restart(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, error) {
 	slot := p.slotFor(workspace.Identity().ID)

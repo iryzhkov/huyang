@@ -849,6 +849,66 @@ local function note_published_for(name, path)
     per[path] = true
 end
 
+-- Late attachment. A diagnostic verdict answered `unavailable` because the
+-- server was still starting names the transaction and the buffer version
+-- it spoke for. When a server later publishes for that path, the publish is
+-- attributed to that transaction only if its version equals the version the
+-- transaction left; a publish for a newer version is ordinary evidence for
+-- whatever revision is current. Arrival time alone attributes nothing.
+-- Both tables are bounded: a path is pending once, and at most
+-- LATE_BATCHES_MAX batches wait for the Go side to collect them.
+local pending_late = {}    -- [path] = { transaction_id, revision, expected }
+local late_batches = {}
+local LATE_BATCHES_MAX = 64
+
+local function note_pending_late(path, transaction_id, revision, expected)
+    if not (path and path ~= "") then return end
+    pending_late[path] = { transaction_id = transaction_id, revision = revision, expected = expected }
+end
+
+-- Record the findings a late publish carries for a pending path. Exposed
+-- for the unit test; the publish handler is the production caller.
+local function capture_late(client_name, path, version, findings)
+    local pending = pending_late[path]
+    if not pending then return false end
+    if version ~= nil and version ~= pending.expected then
+        -- The server spoke for a newer buffer; the pending verdict stays
+        -- unanswered and the publish is not this transaction's evidence.
+        pending_late[path] = nil
+        return false
+    end
+    pending_late[path] = nil
+    late_batches[#late_batches + 1] = {
+        kind = "lsp_push",
+        provider_id = client_name .. "#late",
+        producer = client_name,
+        document = path,
+        document_revision = pending.revision,
+        document_version = version,
+        expected_version = pending.expected,
+        transaction_id = pending.transaction_id,
+        complete = true,
+        selected = true,
+        dimension = "edited_documents",
+        reason = "late_attach",
+        findings = findings,
+        candidates = { { transaction_id = pending.transaction_id, postimage_version_match = version ~= nil } },
+    }
+    while #late_batches > LATE_BATCHES_MAX do table.remove(late_batches, 1) end
+    return true
+end
+
+-- The batches late publishes produced since the last call; collecting
+-- clears them. The Go side records them into the diagnostic ledger.
+function M.late_evidence()
+    local out = late_batches
+    late_batches = {}
+    return { batches = out }
+end
+
+M._note_pending_late = note_pending_late
+M._capture_late = capture_late
+
 -- Servers that published in this session and are no longer running. Their
 -- diagnostics are still in the editor and nothing is refreshing them, so
 -- neither what they said nor what they did not say is current. After gopls
@@ -927,7 +987,30 @@ local function wrap_publish_handler(client)
                 if (per[client.name] or -1) < version then per[client.name] = version end
             end
         end
-        return inner(lsp_err, params, ctx, cfg)
+        local result = inner(lsp_err, params, ctx, cfg)
+        if params and params.uri and next(pending_late) then
+            local okf, fname = pcall(vim.uri_to_fname, params.uri)
+            if okf and pending_late[fname] then
+                local findings = {}
+                for _, d in ipairs(params.diagnostics or {}) do
+                    local range = d.range or {}
+                    local start = range.start or {}
+                    local finish = range["end"] or start
+                    findings[#findings + 1] = {
+                        range = {
+                            start_line = (start.line or 0) + 1, start_character = (start.character or 0) + 1,
+                            end_line = (finish.line or 0) + 1, end_character = (finish.character or 0) + 1,
+                        },
+                        severity = d.severity or 0,
+                        code = d.code and tostring(d.code) or nil,
+                        source = d.source,
+                        message = d.message or "",
+                    }
+                end
+                capture_late(client.name, fname, version, findings)
+            end
+        end
+        return result
     end
 end
 
@@ -1084,12 +1167,19 @@ function M.diagnostic_evidence(args)
                 sleep(math.min(50, math.max(1, remaining)))
                 clients = vim.lsp.get_clients({ bufnr = bufnr })
             end
+            local expected = vim.api.nvim_buf_get_changedtick(bufnr)
             if #clients == 0 then
                 local reason = #configured == 0 and "lsp_not_configured"
-                    or (#startable == 0 and "lsp_not_startable" or "lsp_attach_deadline_exceeded")
+                    or (#startable == 0 and "lsp_not_startable"
+                        or (core.starting_server(configured) and "lsp_starting" or "lsp_attach_deadline_exceeded"))
                 unavailable_batch(bufnr, reason, configured)
+                -- A server still on its way may publish for this exact
+                -- version later; the publish handler then records it
+                -- against this transaction instead of losing it.
+                if reason == "lsp_starting" or reason == "lsp_attach_deadline_exceeded" then
+                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected)
+                end
             end
-            local expected = vim.api.nvim_buf_get_changedtick(bufnr)
             for _, client in ipairs(clients) do
                 wrap_publish_handler(client)
                 local barrier_started = vim.uv.now()

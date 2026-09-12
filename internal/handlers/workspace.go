@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
@@ -47,6 +48,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	var canonicalBackend provider.Provider
 	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
 		canonicalBackend, _ = h.pool.Canonical(ctx, opened)
+		h.warmLanguageServers(opened, canonicalBackend)
 	}
 	orientation, err := opened.Orient()
 	if err != nil {
@@ -86,6 +88,33 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"commands":          commands,
 		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
+}
+
+// warmAttachWait is the per-language attach wait the background probe
+// allows itself; the servers it starts keep starting after it returns.
+const warmAttachWait = 250
+
+// warmLanguageServers starts the language servers of a project workspace
+// in the background once per provider generation, so the first edit finds
+// a warm client instead of paying the attach deadline. The open never
+// waits for it; the probe is the same workspace_support call
+// language_server_status makes, with a short attach wait, and it loads
+// one sample buffer per language so the servers auto-attach as they come
+// up. It is bounded by its own timeout and by the languages present.
+func (h *Handlers) warmLanguageServers(workspace *workspacecore.Workspace, backend provider.Provider) {
+	if backend == nil {
+		return
+	}
+	key := fmt.Sprintf("%s@%d", workspace.Identity().ID, backend.Descriptor().Epoch)
+	if _, done := h.warmed.LoadOrStore(key, true); done {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = providerpool.Call(ctx, workspace, backend, providerpool.CallSpec{RequestID: "warm_" + string(workspace.Identity().ID)},
+			"workspace_support", map[string]any{"root": workspace.Identity().Root, "attach_wait_ms": warmAttachWait, "warm": true})
+	}()
 }
 
 // compactCapabilities keeps what an agent decides on: which native and

@@ -523,6 +523,11 @@ local dispatch_table = {
     huyang_diagnostic_evidence = function(args)
         return require("huyang.edit").diagnostic_evidence(args)
     end,
+    -- Findings a server published after a verdict had already answered
+    -- unavailable for the same buffer version; collecting clears them.
+    huyang_late_evidence = function()
+        return require("huyang.edit").late_evidence()
+    end,
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
     code_actions = code_actions,

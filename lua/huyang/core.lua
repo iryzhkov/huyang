@@ -734,11 +734,29 @@ local function get_client(bufnr, method, timeout_ms)
             end
         end
         if vim.uv.now() >= deadline then
+            local ft = vim.bo[bufnr].filetype
+            local starting = M.starting_server(enabled_lsp_configs_for(ft))
+            if starting then
+                err("lsp_starting: %s is still starting for %s (filetype: %s); retry shortly, a restart would only begin it again",
+                    starting, vim.api.nvim_buf_get_name(bufnr), ft)
+            end
             err("lsp_attach_deadline_exceeded: no LSP client supporting %s attached to %s (filetype: %s); call language_server_setup restart",
-                method, vim.api.nvim_buf_get_name(bufnr), vim.bo[bufnr].filetype)
+                method, vim.api.nvim_buf_get_name(bufnr), ft)
         end
         sleep(100)
     end
+end
+
+-- A started client for one of the configured servers that has not finished
+-- initializing: the server is on its way, which is neither attached nor
+-- absent, and a wait that expires while it starts says so.
+function M.starting_server(configured)
+    for _, client in ipairs(vim.lsp.get_clients()) do
+        if vim.tbl_contains(configured or {}, client.name) and not client.initialized then
+            return client.name
+        end
+    end
+    return nil
 end
 
 -- LSP request that yields until the reply (or a timeout) arrives.

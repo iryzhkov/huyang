@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
@@ -70,6 +71,10 @@ type Handlers struct {
 	// schedulerInfo describes the scheduler classes and quotas for
 	// workspace_inspect; the scheduler itself belongs to the service.
 	schedulerInfo func() map[string]any
+	// warmed records the workspace and provider epoch pairs whose language
+	// servers were started in the background at open, so each provider
+	// generation is warmed once.
+	warmed sync.Map
 }
 
 // Config wires the handlers to what the service owns.
@@ -150,6 +155,12 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 	case "read":
 		return h.read(ctx, requestID, workspace, arguments)
 	case "diagnostics":
+		// A server that attached after an earlier verdict may hold findings
+		// for it; they are recorded before the ledger is read, never by
+		// starting a provider for the purpose.
+		if backend := h.pool.Existing(workspace); backend != nil {
+			_, _ = providerpool.CollectLateEvidence(ctx, workspace, backend)
+		}
 		return diagnostics(requestID, workspace, arguments)
 	case "evidence_get":
 		return evidenceGet(requestID, workspace, arguments)

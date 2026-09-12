@@ -371,6 +371,12 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 	backend, err := h.pool.Resync(ctx, workspace)
 	var report workspacecore.DiagnosticReport
 	if err == nil {
+		// Findings a server published after an earlier verdict went out
+		// as unavailable belong to that earlier transaction; recording them
+		// first puts them in this reply's diagnostic_updates.
+		if late, lateErr := providerpool.CollectLateEvidence(ctx, workspace, backend); lateErr == nil && late > 0 {
+			data["late_evidence_batches"] = late
+		}
 		report, err = providerpool.RecordDiagnostics(ctx, workspace, backend, files, revision, "edit_"+requestID)
 	}
 	if err != nil {
@@ -390,7 +396,40 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 		"confidence": report.Confidence,
 		"reasons":    mcpapi.NonNilStrings(report.ProvisionalReasons),
 	}
-	return "provisional", "semantic diagnostics remain incomplete", report.EvidenceIDs
+	return "provisional", provisionalSummary(report, files), report.EvidenceIDs
+}
+
+// provisionalSummary words an incomplete verdict so the agent can act on
+// it: which language server is missing, starting or absent, and for which
+// files, instead of a generic "remains incomplete". The outcome stays
+// provisional, because the evidence model is right that it is.
+func provisionalSummary(report workspacecore.DiagnosticReport, files []workspacecore.PlanStageFile) string {
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		if file.AfterExists && workspacecore.IsSemanticSource(file.Path) {
+			names = append(names, file.Path)
+		}
+	}
+	subject := "the edited files"
+	if len(names) > 0 && len(names) <= 3 {
+		subject = strings.Join(names, ", ")
+	}
+	for _, reason := range report.ProvisionalReasons {
+		switch reason {
+		case "lsp_not_configured":
+			return "no language server is configured for " + subject + " (lsp_not_configured); no diagnostics"
+		case "lsp_not_startable":
+			return "the language server configured for " + subject + " is not installed (lsp_not_startable); no diagnostics"
+		case "lsp_starting":
+			return "the language server for " + subject + " is still starting (lsp_starting); no diagnostics yet, its findings arrive with the next reply"
+		case "lsp_attach_deadline_exceeded":
+			return "no language server attached to " + subject + " within the wait (lsp_attach_deadline_exceeded); no diagnostics yet"
+		}
+	}
+	if len(report.ProvisionalReasons) > 0 {
+		return "semantic diagnostics remain incomplete (" + strings.Join(report.ProvisionalReasons, ", ") + ")"
+	}
+	return "semantic diagnostics remain incomplete"
 }
 
 // diagnosticSummary words the post-edit diagnostic outcome so the agent
