@@ -194,6 +194,42 @@ four diagnostics refreshes. This paragraph and the next were written with one su
   `Verification completed`, and the Muse agents fell back to bash every time. The summary now
   names the cause and the config file to edit.
 
+### Field report, 2026-09-12 (t3-steward, omarchy-setup, dev-fleet through the after-g build)
+
+A Claude session implemented about 1,500 lines across three repositories with about 30
+Huyang calls and reported: multi-target `read`, the `operations` list, the outline view
+and per-edit diagnostics were the reasons Huyang beat the shell; zero mis-edits. What
+pushed it back to the shell or left it guessing, with the fix in stage S20c
+(`docs/plans/huyang-s20c-file-lifecycle-and-onboarding.md`):
+
+- Copying an existing file had no Huyang path (a 15 KB `CLAUDE.md` into a checkout would
+  have round-tripped through the context); `cp` was used. Fixed: `edit_apply` `copy_file`
+  (source may be outside the workspace), `move_file`, `delete_file` and `create_file`
+  with `replace`, all in the `operations` list too, with the Git state and staging
+  command in the reply.
+- `create_file` on an existing path: the schema did not say whether it overwrites or
+  refuses. Fixed: the descriptor says it refuses, the refusal carries the revision, and
+  `replace: true` with it overwrites.
+- A 53 KB read was dumped whole and the harness preview showed only the first target.
+  Fixed: `read.max_lines` with `truncated` and the total, and `entries` (sizes) ahead of
+  the bodies in multi-target replies.
+- Python edits answered `provisional` with `lsp_not_configured` or
+  `lsp_attach_deadline_exceeded`; pyright attached once, late, and flagged a spurious
+  unresolved `pytest` import because it did not see the uv venv. Fixed: servers start in
+  the background at open, a system-installed server is enabled, pyright gets the venv
+  interpreter, a start in progress is `lsp_starting`, a late publish is recorded against
+  the transaction whose version it matches, and the summary names the reason.
+- Detected commands for dev-fleet were `python3 -m unittest` and an ad hoc syntax loop
+  while the project runs pytest and ruff through uv (Makefile `gate`, pyproject). Fixed:
+  detection reads Makefile targets, `[tool.pytest]`, `[tool.ruff]` and the project's
+  environment. t3-steward was untrusted, so `go test` ran in the shell: `huyang trust
+  <root>` now grants it in one command and the untrusted reply names it.
+- Result-set handles were returned and never used; `replace_literal` covered every edit.
+  No change: that is the intended default.
+- Memory files under `~/.claude/projects` went through the harness `Write` tool because the
+  instructions did not say which tool owns files outside a repository. Fixed in the
+  instructions: either is fine for a file that is not source.
+
 ## Agent measurement (Muse through the t3-steward backlog)
 
 The scenarios were submitted as backlog tasks with `submit.sh`; the batch log is in

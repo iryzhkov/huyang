@@ -132,7 +132,9 @@ Connect an MCP client through the stdio adapter:
 ```
 
 `huyang mcp` accepts `--profile full|orient|edit|debug` (default `full`) and
-`--socket PATH` (default as for `serve`). It refuses any other profile name. The adapter is
+`--socket PATH` (default as for `serve`). It refuses any other profile name. The third
+subcommand, `huyang trust`, administers the user trust policy (see "Trust and repository
+commands"). The adapter is
 intentionally thin: it forwards newline-delimited JSON-RPC to the service, and on a service
 disconnect it reconnects for up to 30 seconds, replays the client's `initialize` exchange,
 and resends outstanding requests. Workspace identity, receipts, providers, and recovery
@@ -260,10 +262,34 @@ argument values or replies.
 ## Trust and repository commands
 
 Huyang preserves bytes by default and never runs a discovered repository command merely
-because it exists. Checked-in `.huyang.toml` declares formatter/check/test stages. User
+because it exists. Checked-in `.huyang.toml` declares formatter/check/test stages; without
+one, the commands are detected from the repository (a Makefile's `test`, `lint` and
+`check` targets, `go.mod`, a Python project's declared pytest and ruff through its own
+`.venv`, `uv.lock` or `poetry.lock` environment, a `package.json` test script). User
 policy under `$XDG_CONFIG_HOME/huyang/config.toml` must trust the workspace root before
-those commands can execute. Verification always reports its exact revision, scope,
+those commands can execute:
+
+```sh
+huyang trust /path/to/repository   # appends the resolved root to [trust].roots
+huyang trust --list
+huyang trust --remove /path/to/repository
+```
+
+`huyang trust` edits the file textually, keeps its comments, validates the result before
+writing and creates the file with mode 0600 when absent; the running service reads the
+policy on the next `verify_run`. Verification always reports its exact revision, scope,
 environment, writes, and coverage.
+
+## File lifecycle and Git
+
+`edit_apply` moves, copies and deletes files (`move_file`, `copy_file`, `delete_file`) and
+overwrites one with `create_file` plus `replace: true`, each guarded by the file's
+revision or content hash and journaled like every native write. A moved or copied file
+keeps the source's exact bytes and mode and is never reformatted, so Git recognises the
+rename by content. Huyang never writes the Git index: the reply names each path's tracked
+state and the `git add` command that stages the change. A copy may read an absolute path
+outside the workspace; the reply records its hash and size. Transfers are bounded at
+4 MiB (`MaxTransferBytes`).
 
 ## Recovery
 

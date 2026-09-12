@@ -1145,3 +1145,98 @@ compaction of a default result, or a new stable code. No mutation precondition w
   vet, go test), a Python project file (compileall, ruff when installed, pytest when
   installed else unittest) and a `package.json` test script (npm test). Execution still
   requires the root to be trusted.
+
+## v1alpha1 amendment 2 (S20c, 2026-09-12)
+
+Stage S20c (`huyang-s20c-file-lifecycle-and-onboarding.md`) and the two friction passes
+before it changed the surface additively. This amendment records what the friction passes
+left undocumented in the contract body and what S20c added; the freeze moves to the end of
+S20c (see S20b decision 11 as amended).
+
+### The operations list is a sequence, not a second plan API
+
+The contract body says `edit_apply` "must not grow an operations array and become a second
+plan API". `edit_apply.operations` exists since the second friction pass, and this is what
+keeps it from being a plan API: the list applies in order against canonical bytes, each
+operation located against the bytes the previous ones left; a refusal stops the list and
+the earlier operations stay applied (the reply names `failed_operation` and
+`applied_operations`); nothing is prepared in a sandbox and no pipeline stage runs. A
+change that must land atomically, or be verified before it lands, is a `change_plan`. The
+descriptor states this.
+
+### Input additions
+
+- `edit_apply.operation.kind` gains `move_file` (`from`, `to`, optional `revision_id` of
+  the source, optional `destination_revision_id`), `copy_file` (`from`, which may be an
+  absolute path outside the workspace, `to`, optional `expected_sha256`, optional
+  `destination_revision_id`) and `delete_file` (`path`, and `revision_id` or
+  `expected_sha256`, one of which is required). `create_file` gains `replace` (boolean),
+  which requires `revision_id` of the existing file. The `operations` list accepts every
+  kind but `replace_range`. Without a workspace, `move_file` names `from` and `to` by
+  absolute path and `copy_file` and `delete_file` name `to` or `path`, opening a documents
+  workspace implicitly as `create_file` does.
+- `change_plan` operations gain `copy_file` with the same fields; `expected_sha256` is
+  bound at creation when omitted and rechecked at preview and apply. The shared operation
+  union therefore lists thirteen kinds.
+- `read.max_lines` (integer, per call and per `targets` item) caps a source delivery.
+
+### Output changes
+
+- A file-lifecycle `edit_apply` reply lists both ends of a move or copy in
+  `changed_paths`, carries `git` (`{path: tracked|untracked|ignored|not_a_repository}`
+  from a read-only `git ls-files` and `check-ignore`), `source` (`{path, sha256, bytes,
+  outside_workspace}`) for a copy, and, when the source was tracked, a `next` entry of a
+  new shape: `{tool: shell, action, command}` naming the `git add` the agent runs. Huyang
+  writes no index entry; the Git boundary is unchanged.
+- Moved, copied and deleted files are never formatted; `format` never lists them.
+- A capped `read` reply carries `truncated: true`, `delivered_end_line` and `next`
+  entries for the outline and the continuation window; a multi-target reply carries
+  `entries` (`{path, lines, bytes, truncated, name_path}` per target) ahead of `files`.
+- `workspace_open.commands` and `workspace_inspect.pipeline_policy.detected` may name
+  `Makefile`, `.venv`, `venv`, `env`, `uv.lock` and `poetry.lock` among the markers
+  detection used; detected Python commands run through the project's interpreter.
+- The `verify_run` untrusted summary names `huyang trust <root>`.
+- A provisional edit summary names the reason: no server configured, the server not
+  installed, still starting, or none attached within the wait; the outcome stays
+  `provisional`. `language_server_status` reports `starting_languages` and per-language
+  `attach` (`attached|starting|not_started|unconfigured`), `interpreter` and
+  `enabled_from_system`, and answers `language_server_starting` (outcome `provisional`
+  or `partial`) while a server is on its way.
+- An edit reply may carry `late_evidence_batches`: findings a server published after an
+  earlier verdict answered unavailable, recorded into the ledger before this edit's
+  refresh and attributed to the earlier transaction only when the published version
+  equals the version that transaction left. They reach the agent through
+  `diagnostic_updates` like any other finding.
+
+### Codes added
+
+`move_source_missing`, `move_target_exists`, `copy_source_missing`,
+`copy_source_too_large` (the transfer bound is 4 MiB), `copy_source_changed`,
+`transfer_source_unsupported` (a symlink or directory; use `change_plan`),
+`delete_guard_required` (with `data.revision_id`, `sha256`, `bytes`),
+`delete_target_changed`, `delete_target_missing`, `replace_revision_required`, all
+`conflict` outcomes that changed nothing; the kernel's `lsp_starting` reason; and
+`language_server_starting` on `language_server_status`.
+
+### Behaviour changes
+
+- `workspace_open` on a project starts the enabled language servers in the background,
+  once per provider generation, with a short attach wait it does not itself await. A
+  server installed on the machine but not enabled (gopls on PATH, a distribution's
+  pyright) is enabled the way `language_server_setup` would enable it.
+- pyright and basedpyright are pointed at the project's `.venv`, `venv` or `env`
+  interpreter (else `VIRTUAL_ENV`) before they start; `ts_ls` prefers the project's own
+  `node_modules/typescript`.
+- Command detection reads the project: Makefile targets first, then `go.mod`, then a
+  Python project's declared pytest (`[tool.pytest]`, `pytest.ini`, `setup.cfg`,
+  `tox.ini` or a pytest dependency) and configured ruff, run through `.venv/bin`, `uv run
+  --no-sync` or `poetry run`; a Makefile `test` target replaces the language test
+  command and `lint` or `check` replaces optional linters. Required build and syntax
+  checks stay.
+- The `huyang trust` CLI (`<root>`, `--list`, `--remove <root>`, `--config PATH`) edits
+  `[trust].roots` in the user policy. Administration stays a CLI, not a tool.
+
+### Re-freeze
+
+The contract as amended here is frozen from the end of S20c. The S21 baseline and the
+semantic-evidence plan apply to this amended surface.

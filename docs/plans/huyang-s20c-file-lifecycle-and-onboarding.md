@@ -1,6 +1,8 @@
 # S20c — File lifecycle in `edit_apply`, honest Python verdicts, zero-config onboarding
 
-Status: proposed; not approved to implement
+Status: approved 2026-09-12; waves 0 to 4 implemented on `feature/huyang` (see the
+implementation notes at the end); the live proof on the deployed service and the E7/E8
+bench measurement remain
 Prepared: 2026-09-12
 Predecessor: second friction pass at `f78e444` (`bench/agent-efficiency/RESULTS.md`)
 Source: field report from a Claude session that implemented about 1,500 lines across
@@ -411,6 +413,32 @@ session's three shell fallbacks are reproduced through Huyang on the live servic
 `CLAUDE.md` copy into `omarchy-setup`, `verify_run` on `dev-fleet` running pytest and
 ruff through uv, and `verify_run` on `t3-steward` after `huyang trust`. Deploy per the
 recorded procedure only after that proof.
+
+## Implementation notes (2026-09-12)
+
+What landed differs from the text above in these places:
+
+- Wave 0: `ApplyMove` writes the destination and removes the source through two
+  native journals rather than one; a crash between them leaves a complete copy at both
+  paths and never loses content. Symlinks and binary files: binary files move and copy
+  natively (the journal comparators accept them now), symlinks and directories are
+  refused with `transfer_source_unsupported` and stay with `change_plan`. The
+  `delete_target_missing` code was added. Bench scenarios E7 and E8 are described in the
+  agent guide but not yet added to the protocol harness.
+- Wave 2b: the late-attach batch is captured in the kernel's publish handler and handed
+  to Go through a new `huyang_late_evidence` operation, which the next edit and the
+  `diagnostics` tool call; the reply field is `late_evidence_batches`. The kernel keeps at
+  most 64 pending batches. Servers are warmed by the same `workspace_support` probe
+  `language_server_status` uses, with a 250 ms attach wait, in a goroutine keyed by
+  workspace and provider epoch. The per-server start deadline is not separately
+  configurable; `lsp_starting` is reported whenever a client for a configured server
+  exists but has not initialized.
+- Wave 2c: gopls needs no change, because the provider inherits the service's
+  environment (`GOFLAGS`, `GOWORK` included); the plan's `cmd_env` note was wrong.
+- Wave 3: a Makefile `gate` target is not used, since it is a superset that usually
+  includes `test`; `make test` covers `**`. The Python syntax check skips `.venv`, `venv`
+  and `node_modules`. Detection of `[tool.ruff]` requires the tool to be reachable in the
+  project's environment; a `[tool.ruff]` without ruff installed adds nothing.
 
 ## Out of scope
 

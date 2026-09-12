@@ -28,6 +28,14 @@ every mutating call; pass one only when you intend to retry the same call.
 | Coordinated edits in three files, then build and test | 5 x `replace_literal` + `verify_run {stages:[check, tests], revision_or_transaction: current}` | 6 | 691 | 2248 | Edit x5 + Bash: 6 calls, 454 / 928 |
 | Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, `verify_run check` | 12 | 1047 | 4774 | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
 | Run the test suite | `verify_run {stages:[tests], revision_or_transaction: current}` | 1 | 61 | 258 | Bash: 1 call, 14 / 13 (passing) |
+| Copy a file (15 KB, from anywhere) | `edit_apply {operation:{kind: copy_file, from, to}}` | 1 | about 60 | about 350 | Bash `cp`: 1 call, or Read + Write with the content in your context twice |
+| Move a file and stage the rename | `edit_apply {operation:{kind: move_file, from, to}}`, then the `git add` the reply names | 2 | about 60 | about 400 | Bash `git mv`: 1 call |
+| Delete a file you have read | `edit_apply {operation:{kind: delete_file, path, revision_id}}` | 1 | about 50 | about 300 | Bash `rm`: 1 call |
+| Overwrite a file you have read | `edit_apply {operation:{kind: create_file, path, content, replace: true, revision_id}}` | 1 | content + 40 | about 350 | Write: 1 call |
+| Read a big file without a blind dump | `read {target:{path}, max_lines: 200}` then `view: outline` or a window | 1 or 2 | 40 | capped | Read: 1 call, whole file |
+
+The file-lifecycle rows are not yet measured by the protocol harness; the costs are the
+reply shapes described below, which carry no content.
 
 What the table says:
 
@@ -68,6 +76,10 @@ existing workspace, because its handle comes from one.
   cap) or a `symbol_locator` (Go and Python resolve without a language server). Several
   files: `targets`. `numbered: true` prefixes each line with its number when you need to
   cite or window lines afterwards.
+- A file over about 500 lines: `view: outline` first, then windows, or `max_lines` on
+  the read (per call or per target). A capped reply says `truncated`, carries the total
+  line count and the line to continue from, and a multi-target reply lists every
+  target's lines and bytes under `entries` ahead of the bodies.
 - Need locations: `search` (literal by default; multi-line queries must match whitespace
   exactly). `paths: ["*.go", "internal/"]` scopes the hits and `context_lines: 2` adds the
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that
@@ -84,14 +96,34 @@ existing workspace, because its handle comes from one.
   no language server answers, `search` falls back to literal matches and says so.
 - Search hits are path, line and text. Add `include_handles: true` only when you will edit
   a hit with `replace_range`.
-- New file: `create_file`. Several files that must change atomically or not at all:
-  `change_plan` (prepare, then apply), which also runs the pipeline in a sandbox first.
+- New file: `create_file`; it refuses an existing path and names that file's
+  `revision_id`, and `replace: true` with that revision overwrites the file in one call.
+  Several files that must change atomically or not at all: `change_plan` (prepare, then
+  apply), which also runs the pipeline in a sandbox first. The `operations` list is a
+  sequence, not a transaction: a refusal stops it and the earlier operations stay.
+- Move, copy or delete a file: `move_file {from, to}`, `copy_file {from, to}` (`from` may
+  be an absolute path outside the workspace; the reply records its hash and size) and
+  `delete_file {path, revision_id}` (or `expected_sha256`; without either the reply
+  hands both back so the retry is one call). The bytes never pass through you and are
+  never reformatted, so a moved file keeps the exact content Git needs to see a rename.
+  Huyang does not write the Git index: the reply's `git` block gives each path's tracked
+  state and, when the source was tracked, `next` names the one command to run
+  (`git add -A -- old new`); after it `git diff --cached -M` reports the move as a
+  rename. Symlinks and directories go through `change_plan`.
 - Go files are gofmt-formatted after every edit; the response says so under `format`.
   Pass `format: false` to keep bytes exactly.
 - Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:
   affected` runs only the tests whose `covers` patterns match the edited files. The reply
   is one line per stage (verdict, exit, duration, the files covered, counts) plus the
   output of any stage that did not pass; `verbose: true` restores the full record.
+  Without a `.huyang.toml` the commands come from the project: a Makefile's `test`,
+  `lint` and `check` targets, `go.mod`, or a Python project's own pytest and ruff run
+  through its `.venv`, `uv run` or `poetry run`. An untrusted root runs nothing and the
+  reply says so; `huyang trust <root>` on the machine grants it.
+- A provisional edit verdict names what is missing: no server configured, the server
+  not installed, still starting (its findings arrive with the next reply, attributed to
+  this edit), or none attached within the wait. Servers start in the background when a
+  project is opened, so this is rare after the first call.
 - `verbose: true` on `edit_apply` restores the full change record and handle resolution;
   nothing else needs it.
 - A whole-file rewrite through `edit_apply` is bounded (the patch in the response is cut at
