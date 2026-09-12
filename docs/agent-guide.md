@@ -15,6 +15,10 @@ only when you want its answer: the top-level overview, the verification commands
 whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
 every mutating call; pass one only when you intend to retry the same call.
 
+The first reply for a workspace carries a `guide` array: the handful of rules from this
+page that decide what a session costs. It is sent once, on whatever call opened the
+workspace, and never repeated for it.
+
 | Operation | Call | Calls | Request tokens | Response tokens | Built-in (modelled) |
 |---|---|---|---|---|---|
 | Read a whole file (150 lines) | `read {target:{path}}` | 1 | 35 | 1375 | Read: 1 call, 13 / 1584 |
@@ -79,7 +83,13 @@ existing workspace, because its handle comes from one.
 - A file over about 500 lines: `view: outline` first, then windows, or `max_lines` on
   the read (per call or per target). A capped reply says `truncated`, carries the total
   line count and the line to continue from, and a multi-target reply lists every
-  target's lines and bytes under `entries` ahead of the bodies.
+  target's lines and bytes under `entries` ahead of the bodies. Every option of a
+  single-target read works per target as well, so one call can outline one file and
+  window another (`targets: [{path, view: outline}, {path, start_line, end_line}]`).
+- `view: outline` works in every language, not only the two the native parser reads:
+  Go and Python are sectioned natively, and any other file is outlined from the language
+  server's declarations, each of them a handle a `symbol_locator` read can then name. A
+  file neither can section answers a handle to the whole document and says `text_only`.
 - Need locations: `search` (literal by default; multi-line queries must match whitespace
   exactly). `paths: ["*.go", "internal/"]` scopes the hits and `context_lines: 2` adds the
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that
@@ -89,6 +99,8 @@ existing workspace, because its handle comes from one.
   {kind: create_file, ...}]`. They apply in order, each located against the bytes the
   previous ones left, with one formatter pass, one receipt and one diagnostics refresh. A
   refusal stops the list; the reply names the failed operation and how many were applied.
+  An `operations` list outside any repository needs no workspace either: give absolute
+  paths and one document workspace is opened over all of them.
 - Find references, the definition, implementations or callers of a symbol: `search
   {query: Name, mode: references}` or `navigate {relation, symbol: Name}`. The name is
   resolved to its declaration first (Go and Python natively, other languages through the
@@ -115,7 +127,9 @@ existing workspace, because its handle comes from one.
 - Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:
   affected` runs only the tests whose `covers` patterns match the edited files. The reply
   is one line per stage (verdict, exit, duration, the files covered, counts) plus the
-  output of any stage that did not pass; `verbose: true` restores the full record.
+  output of any stage that did not pass; a stage that passed carries the last few lines
+  of its output under `output_tail`, which is where a command says what it did, so there
+  is never a reason to run it again in a shell. `verbose: true` restores the full record.
   Without a `.huyang.toml` the commands come from the project: a Makefile's `test`,
   `lint` and `check` targets, `go.mod`, or a Python project's own pytest and ruff run
   through its `.venv`, `uv run` or `poetry run`. An untrusted root runs nothing and the

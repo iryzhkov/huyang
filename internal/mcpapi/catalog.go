@@ -280,9 +280,11 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 		}, "relation")},
 		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
-			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional start_line/end_line/max_lines, or a symbol_locator.", "items": schemaObject(map[string]any{
+			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.", "items": schemaObject(map[string]any{
 				"path": stringSchema("Workspace-relative file path."), "start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 				"max_lines":      map[string]any{"type": "integer", "minimum": 1, "description": "Cap for this target; overrides the call-level max_lines."},
+				"view":           enumSchema("source", "outline"),
+				"numbered":       map[string]any{"type": "boolean", "description": "Prefix each line with its number; overrides the call-level numbered."},
 				"symbol_locator": schemaObject(map[string]any{"path": stringSchema("File path."), "name_path": stringSchema("Declaration name path.")}, "path", "name_path"),
 			})},
 			"start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
@@ -375,6 +377,7 @@ func OutputEnvelopeSchema() map[string]any {
 			"attribution": map[string]any{"type": "object"},
 		}, "id", "kind")},
 		"diagnostic_updates_truncated": map[string]any{"type": "boolean"},
+		"guide":                        map[string]any{"type": "array", "items": stringSchema("One rule for calling this server at its cheapest, sent once when a workspace is first opened.")},
 		"idempotency":                  enumSchema("created", "replayed"),
 		"idempotency_persisted":        map[string]any{"type": "boolean"},
 	}, "api_version", "request_id", "outcome", "summary", "data", "warnings", "next")

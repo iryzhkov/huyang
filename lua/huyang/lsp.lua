@@ -31,6 +31,7 @@ local index = require("huyang.index")
 local symbol_kind = index.symbol_kind
 local annotate_locations = index.annotate_locations
 local document_symbols = index.document_symbols
+local file_symbols = index.file_symbols
 local workspace_tree = index.workspace_tree
 local workspace_symbols, find_symbol = index.workspace_symbols, index.find_symbol
 
@@ -518,6 +519,7 @@ local dispatch_table = {
     end,
     hover = hover,
     document_symbols = document_symbols,
+    file_symbols = file_symbols,
     workspace_symbols = workspace_symbols,
     diagnostics = diagnostics,
     huyang_diagnostic_evidence = function(args)

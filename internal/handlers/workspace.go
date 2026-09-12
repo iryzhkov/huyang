@@ -78,7 +78,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	if mode, _ := arguments["overview"].(string); mode == "full" {
 		overview = orientation
 	}
-	return mcpapi.Envelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
+	result := mcpapi.Envelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
 		"revision":          fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
 		"capabilities":      compactCapabilities(capabilities),
 		"semantic_provider": compactProviderStatus(semanticProvider),
@@ -88,6 +88,32 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"commands":          commands,
 		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
+	if created {
+		result["guide"] = cheapestCallRules
+	}
+	return result
+}
+
+// cheapestCallRules are the rules that change what a session costs, in the
+// order they come up. They are measured, not advisory: each one was a habit
+// the benchmark and the friction spool showed agents falling into, and each
+// costs calls or tokens every time. The tool descriptions carry everything
+// else; this stays a handful of lines.
+var cheapestCallRules = []string{
+	"Name the repository with root on any call; workspace_open is for this overview only.",
+	"Change text you know with edit_apply replace_literal: one call, no search first.",
+	"Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+	"Move, copy and delete files with edit_apply, then run the git command under next.",
+	"A file over 500 lines: read view=outline or max_lines before the whole file.",
+}
+
+// guideFor carries the rules onto the reply of whatever call opened the
+// workspace, which is often not workspace_open at all: naming the root on an
+// ordinary call is the cheaper way in, and an agent that takes it would
+// otherwise never see them.
+func guideFor(opened map[string]any) []string {
+	guide, _ := opened["guide"].([]string)
+	return guide
 }
 
 // warmAttachWait is the per-language attach wait the background probe

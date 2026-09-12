@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -488,8 +489,13 @@ func compactVerificationStage(stage workspacecore.VerificationStage, verbose boo
 		if stage.Status != workspacecore.VerificationPassed {
 			record["output"], record["output_truncated"] = output, outputTruncated
 		} else if len(stage.Output) > 0 {
-			// A passing stage's output is not shown; its size says it exists
-			// and verbose or evidence_get bring it back.
+			// A passing stage shows the end of its output, which is where a
+			// command says what it did ("ok example.com/ledger 0.01s", "5
+			// passed in 0.3s"). Without it a caller has a verdict and no
+			// evidence, and agents were observed running the same command
+			// again in a shell to see it. The rest stays behind verbose and
+			// evidence_get.
+			record["output_tail"] = outputTail(stage.Output)
 			record["output_bytes"], record["output_truncated"] = len(stage.Output), true
 			outputTruncated = true
 		}
@@ -517,6 +523,43 @@ func compactVerificationStage(stage workspacecore.VerificationStage, verbose boo
 		"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
 		"executed_tests_truncated": executedTruncated,
 	}), truncated
+}
+
+// VerificationTailLines and VerificationTailBytes bound the evidence a
+// passing stage shows: enough for a command's closing summary, never enough
+// to be the output itself.
+const (
+	VerificationTailLines = 3
+	VerificationTailBytes = 240
+	// tailMarker opens a tail that had to be cut, and counts against the
+	// byte bound so the field never exceeds it.
+	tailMarker = "..."
+)
+
+// outputTail is the last few non-empty lines of a command's output, oldest
+// first, bounded in lines and bytes.
+func outputTail(output string) string {
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if trimmed := strings.TrimRight(line, "\r \t"); strings.TrimSpace(trimmed) != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	if len(lines) > VerificationTailLines {
+		lines = lines[len(lines)-VerificationTailLines:]
+	}
+	tail := strings.Join(lines, "\n")
+	if len(tail) > VerificationTailBytes {
+		// Keep the end, marker included in the bound: the last line is the
+		// one that summarises. The cut moves forward to a rune boundary so
+		// the reply stays valid UTF-8.
+		cut := len(tail) - VerificationTailBytes + len(tailMarker)
+		for cut < len(tail) && !utf8.RuneStart(tail[cut]) {
+			cut++
+		}
+		tail = tailMarker + tail[cut:]
+	}
+	return tail
 }
 
 // pruneEmpty drops the keys of a compact record whose values carry no

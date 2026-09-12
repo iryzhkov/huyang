@@ -240,7 +240,7 @@ is a named constant in the code:
 | `receipts/<workspace>.json` | Idempotency receipts, file version 1. A receipt keeps its full result for 15 minutes (`PayloadWindow`), then is trimmed to provenance fields. | 256 receipts per workspace (`PerWorkspace`), 32 MiB in total (`TotalBytes`), 4096 tombstones per workspace (`Tombstones`); an evicted receipt leaves a tombstone so a late retry is refused with `idempotency_receipt_evicted` rather than re-executed |
 | `plans/<workspace>/<plan>.json` | One plan record per file, format version 2 (`planRecordVersion`). The version 1 layout, one file per workspace holding every plan, is read on open, split into per-plan files, and removed. | terminal plans: newest 200 kept (`planRetainCount`), dropped after 30 days (`planRetainAge`), bulky payloads stripped after 1 hour (`planCompactAge`); events per plan: first 8 and last 56 (`planEventsHead`, `planEventsTail`) |
 | `commit-journals/<workspace>/` | Commit journals, format version 1 (`commitJournalVersion`). Prepared, applying, and recovery-required journals are never collected. | completed journals dropped after 7 days (`commitJournalRetention`), newest 64 kept beyond that (`commitJournalRetainCount`) |
-| `diagnostics/<workspace>.json` | Diagnostic ledger, format version 1 (`diagnosticStateVersion`). Findings whose document changed are marked `stale`. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
+| `diagnostics/<workspace>.json` | Diagnostic ledger, format version 1 (`diagnosticStateVersion`). Findings whose document changed are marked `stale`. A finding is identified by what it says (producer, document, severity, code, source, message, and its occurrence among identical ones in that document) rather than by where it sits, so an edit above an untouched warning moves it without retiring it and announcing an identical one; the reported range follows the latest observation. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
 | `test-history/<workspace>.json` | Revision-keyed test history, format version 1 (`testHistoryVersion`). | last 1000 entries |
 | `sandboxes/sandbox-*/` | Isolated preparation trees, each with an `owner.json` marker (version 1). Sandboxes whose plan is no longer referenced are removed on service start. | one per prepared plan |
 | `command-cache/` | The toolchain caches every verification command shares, so a repeated `verify_run` neither recompiles nor re-downloads: `xdg/` is the cache home for everything that follows the XDG specification, and `go-build/`, `golangci-lint/`, `ccache/`, `sccache/`, `zig/`, `npm/`, `yarn/`, `pip/`, `uv/`, `deno/` and `composer/` cover the toolchains that keep a cache elsewhere. HOME stays throwaway per run, and package or registry homes still come from the user. | removed whole when it passes 4 GiB (`commandCacheMaxBytes`) or when nothing has used it for 30 days (`commandCacheMaxAge`), checked at most daily (`commandCachePruneInterval`) at service start; every entry is reproducible, so deleting the directory only costs a cold build. `HUYANG_COMMAND_CACHE=off` gives each run a throwaway cache instead |
@@ -262,6 +262,13 @@ not cross the adapter/service boundary and therefore cannot relocate the daemon'
 
 Each line records the tool, the argument key names, the outcome, and the duration; never
 argument values or replies.
+
+The session a line belongs to is the one the adapter announces when it connects, taken
+from `HUYANG_SESSION_ID` or `CLAUDE_CODE_SESSION_ID` in the adapter's environment and
+reduced to the characters an identifier is made of. The daemon serves many agents and its
+own environment names none of them, so without that announcement every call would be
+spooled under one anonymous process and a report could not tell two sessions apart. A
+client that announces nothing is still spooled under the servicing process.
 
 ## Trust and repository commands
 

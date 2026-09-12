@@ -116,7 +116,7 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 			StartedRevision: "wsrev_9",
 			Exit:            0,
 			Writes:          paths,
-			Output:          strings.Repeat("o", mcpapi.VerificationOutputLimit) + "RAW_OUTPUT_TAIL",
+			Output:          "RAW_OUTPUT_BODY" + strings.Repeat("o", mcpapi.VerificationOutputLimit) + "\nok example.com/ledger\t0.01s\n",
 			Status:          workspacecore.VerificationPassed,
 			EvidenceIDs:     []string{"ev_tests", "ev_impact"},
 			TestScope:       "affected",
@@ -143,7 +143,7 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 	if len(encoded) > 18<<10 {
 		t.Fatalf("compacted verify envelope = %d bytes, want <= %d", len(encoded), 18<<10)
 	}
-	for _, omitted := range []string{"RAW_OUTPUT_TAIL", "RAW_RISK_DETAIL_", "RAW_BEFORE_", "RAW_AFTER_"} {
+	for _, omitted := range []string{"RAW_OUTPUT_BODY", "RAW_RISK_DETAIL_", "RAW_BEFORE_", "RAW_AFTER_"} {
 		if bytes.Contains(encoded, []byte(omitted)) {
 			t.Fatalf("compacted verify envelope retained omitted payload %q", omitted)
 		}
@@ -171,6 +171,12 @@ func TestModernVerificationEnvelopeBoundsRepeatedDetails(t *testing.T) {
 	stage := verification["stages"].([]any)[0].(map[string]any)
 	if stage["status"] != workspacecore.VerificationPassed || stage["output_truncated"] != true {
 		t.Fatalf("stage summary = %#v", stage)
+	}
+	// The passing stage keeps the closing line of its output as evidence,
+	// bounded, and nothing else.
+	tail, _ := stage["output_tail"].(string)
+	if !strings.HasSuffix(tail, "ok example.com/ledger\t0.01s") || len(tail) > mcpapi.VerificationTailBytes {
+		t.Fatalf("stage output tail = %q (%d bytes)", tail, len(tail))
 	}
 	evidence := envelope["evidence"].(map[string]any)
 	next := envelope["next"].([]any)

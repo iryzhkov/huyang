@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 // One read call can carry several targets; each answers with its own
@@ -80,6 +82,32 @@ func TestReadMaxLinesTruncatesAndListsEntries(t *testing.T) {
 	}
 	if !strings.Contains(many["summary"].(string), "2 truncated") {
 		t.Fatalf("multi summary = %q", many["summary"])
+	}
+}
+
+// Every option of a single-target read applies per target, so one call can
+// outline one file while windowing another.
+func TestReadTargetsAcceptPerTargetViewAndNumbering(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{
+		"a.go": "package p\n\nfunc A() {}\n\nfunc B() {}\n", "notes.txt": "one\ntwo\nthree\n",
+	})
+	result := handlers.Execute(context.Background(), "req_views", "read", map[string]any{
+		"workspace_id": workspaceID,
+		"targets": []any{
+			map[string]any{"path": "a.go", "view": "outline"},
+			map[string]any{"path": "notes.txt", "start_line": 1, "end_line": 2, "numbered": true},
+		},
+	})
+	if result["outcome"] != "ok" {
+		t.Fatalf("mixed views = %#v", result)
+	}
+	files := result["data"].(map[string]any)["files"].([]map[string]any)
+	sections, ok := files[0]["sections"].([]workspacecore.Section)
+	if !ok || len(sections) != 2 {
+		t.Fatalf("outline target = %#v", files[0])
+	}
+	if files[1]["content"] != "1\tone\n2\ttwo\n" {
+		t.Fatalf("numbered window = %#v", files[1])
 	}
 }
 

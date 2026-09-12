@@ -1093,6 +1093,11 @@ compaction of a default result, or a new stable code. No mutation precondition w
   a time.
 - The envelope omits `evidence` when it has no IDs and `idempotency_persisted` when true;
   `evidence` is no longer a required output property.
+- The envelope carries `guide`, an array of one-line rules for calling the server at its
+  cheapest, on the first reply for a workspace and never again for it. It rides on
+  whatever call opened the workspace, which is usually not `workspace_open`: naming
+  `root` on an ordinary call is the cheaper way in, and an agent that takes it would
+  otherwise never be told the rules.
 - `verify_run` whose stages all skipped says why in `summary` (untrusted root and the
   config file that grants trust, or no command declared).
 - `workspace_open` `capabilities` is `{semantic, not_available: {name: state}, failures}`:

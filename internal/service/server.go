@@ -13,18 +13,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces) *mcp.Server {
+// newSDKServer serves one client connection. session is the agent session
+// that connection announced, which every call it makes is spooled under.
+func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces, session string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name: "huyang", Title: "Huyang", Version: mcpapi.ServerVersion,
 		Description: "Transactional semantic workspace for coding agents.",
 	}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{}})
 	for _, descriptor := range mcpapi.Catalog(profile) {
-		registerModernTool(server, descriptor, direct)
+		registerModernTool(server, descriptor, direct, session)
 	}
 	return server
 }
 
-func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, direct *directWorkspaces) {
+func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, direct *directWorkspaces, session string) {
 	server.AddTool(&mcp.Tool{
 		Name: descriptor.Name, Description: descriptor.Description,
 		// The output envelope schema is the same for every tool and is not
@@ -40,28 +42,28 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 		started := time.Now()
 		client := modernClientName(request)
 		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
-			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
+			logModernValidationFriction(session, descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
 		arguments, err := mcpapi.DecodeArguments(request.Params.Arguments)
 		if err != nil {
-			logModernValidationFriction(descriptor.Name, "", map[string]any{}, err, client, started)
+			logModernValidationFriction(session, descriptor.Name, "", map[string]any{}, err, client, started)
 			return nil, err
 		}
 		// Decode before validating: a client whose cached schema predates
 		// the server sends new arguments as text.
 		arguments = mcpapi.NormalizeArguments(arguments)
 		if err := mcpapi.ValidateToolArguments(descriptor.InputSchema, arguments); err != nil {
-			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
+			logModernValidationFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
 		if err := mcpapi.ValidateDebugArguments(descriptor.Name, arguments); err != nil {
-			logModernValidationFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
+			logModernValidationFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
 			return nil, err
 		}
 		envelope := direct.call(handlers.WithClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
-		logFriction(descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
+		logFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
 			map[string]any{
 				"isError": isError,
 				"outcome": fmt.Sprint(envelope["outcome"]),
@@ -119,8 +121,8 @@ func modernClientName(request *mcp.CallToolRequest) string {
 	return info.Name
 }
 
-func logModernValidationFriction(name, root string, arguments map[string]any, err error, client string, started time.Time) {
-	logFriction(name, root, arguments, map[string]any{
+func logModernValidationFriction(session, name, root string, arguments map[string]any, err error, client string, started time.Time) {
+	logFriction(session, name, root, arguments, map[string]any{
 		"isError": true, "outcome": "failed", "client": client,
 		"content": []map[string]any{{"type": "text", "text": err.Error()}},
 	}, started)

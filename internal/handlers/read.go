@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
@@ -79,13 +81,13 @@ func (h *Handlers) readOne(ctx context.Context, requestID string, workspace *wor
 	}
 	switch {
 	case request.Handle != "":
-		return readHandle(requestID, workspace, request)
+		return h.readHandle(ctx, requestID, workspace, request)
 	case request.HasPath:
-		return readPath(requestID, workspace, request)
+		return h.readPath(ctx, requestID, workspace, request)
 	case request.Symbol != nil:
 		return h.readSymbol(ctx, requestID, workspace, request)
 	case request.HasRange:
-		return readPath(requestID, workspace, request)
+		return h.readPath(ctx, requestID, workspace, request)
 	default:
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
 	}
@@ -105,6 +107,14 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
 			Limit: request.Limit, Numbered: request.Numbered, MaxLines: argInt(target, "max_lines", request.MaxLines),
 		}
+		// Every option of a single-target read applies per target, so one
+		// call can outline one file and window another.
+		if view, ok := target["view"].(string); ok && view != "" {
+			single.View = view
+		}
+		if numbered, ok := target["numbered"].(bool); ok {
+			single.Numbered = numbered
+		}
 		decodeReadTarget(&single, target)
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
@@ -113,7 +123,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
 			continue
 		}
-		data, _ := result["data"].(map[string]any)
+		data := readTargetData(result["data"], readTargetLabel(single))
 		files = append(files, data)
 		entry := readEntry(data)
 		if entry["truncated"] == true {
@@ -131,10 +141,36 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
 }
 
+// readTargetData normalises one target's payload into the map a multi-target
+// reply carries. A source read already answers a map; the outline view
+// answers its own record, which is flattened here so every file in the reply
+// is one object with a path and its content or its sections.
+func readTargetData(payload any, label string) map[string]any {
+	switch data := payload.(type) {
+	case map[string]any:
+		return data
+	case workspacecore.Outline:
+		record := map[string]any{"path": data.Path, "coverage": data.Coverage}
+		if len(data.Sections) > 0 {
+			record["sections"], record["handles"] = data.Sections, data.Handles
+		}
+		if data.Fallback != nil {
+			record["fallback_range"], record["fallback_handle"] = data.Fallback, data.FallbackHandle
+		}
+		return record
+	default:
+		return map[string]any{"path": label, "result": payload}
+	}
+}
+
 // readEntry is the size line of one delivered target: its path, the total
 // lines of the document or declaration, the bytes delivered, and whether
-// the delivery stopped at max_lines.
+// the delivery stopped at max_lines. An outline target has no bytes of its
+// own, so its entry counts the sections instead.
 func readEntry(data map[string]any) map[string]any {
+	if sections, ok := data["sections"].([]workspacecore.Section); ok {
+		return map[string]any{"path": data["path"], "section_count": len(sections)}
+	}
 	content, _ := data["content"].(string)
 	entry := map[string]any{"path": data["path"], "bytes": len(content)}
 	if lines, ok := data["lines"].(int); ok {
@@ -173,7 +209,7 @@ func readCommitChanges(requestID string, workspace *workspacecore.Workspace, req
 // readHandle resolves a revision-bound handle. Without a view or line
 // window it returns the handle's exact bytes; the history view maps the
 // handle to its lines, and any other view falls through to the path read.
-func readHandle(requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
+func (h *Handlers) readHandle(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	resolution, err := workspace.ResolveHandle(workspacecore.HandleID(request.Handle))
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
@@ -206,7 +242,7 @@ func readHandle(requestID string, workspace *workspacecore.Workspace, request re
 		}
 		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), data)
 	}
-	return readPath(requestID, workspace, request)
+	return h.readPath(ctx, requestID, workspace, request)
 }
 
 // readSymbol reads the declaration a symbol locator names: natively when
@@ -271,7 +307,7 @@ func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, covera
 }
 
 // readPath answers the history, outline or source view of one path.
-func readPath(requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
+func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	switch request.View {
 	case "history":
 		history, err := workspace.FileHistory(workspacecore.HistoryRequest{
@@ -282,11 +318,7 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 		}
 		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d provenance spans", len(history.Spans)), history)
 	case "outline":
-		outline, err := workspace.Outline(request.Path)
-		if err != nil {
-			return mcpapi.Failure(requestID, workspace, "read_failed", err)
-		}
-		return mcpapi.Envelope(requestID, workspace, "ok", "", "Outline read", outline)
+		return h.readOutline(ctx, requestID, workspace, request.Path)
 	}
 	read, err := workspace.Read(request.Path)
 	if err != nil {
@@ -339,6 +371,63 @@ func numberLines(content []byte, first int) []byte {
 		fmt.Fprintf(&out, "%d\t%s\n", first+index, line)
 	}
 	return out.Bytes()
+}
+
+// readOutline answers the outline of one path. The native sectioner covers
+// Go and Python; for every other language the semantic provider is asked for
+// the file's declarations, the same way a symbol locator resolves through it,
+// so an outline is useful wherever a parser or a language server is. A file
+// neither can section still answers its whole-document fallback handle.
+func (h *Handlers) readOutline(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path string) map[string]any {
+	outline, err := workspace.Outline(path)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+	}
+	if len(outline.Sections) == 0 {
+		if sections, handles, ok := h.outlineViaProvider(ctx, requestID, workspace, outline.Path); ok {
+			outline.Sections, outline.Handles = sections, handles
+			outline.Fallback, outline.FallbackHandle = nil, nil
+			outline.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+		}
+	}
+	summary := "Outline read: whole document, no declarations found"
+	if count := len(outline.Sections); count > 0 {
+		summary = fmt.Sprintf("Outline read: %d declarations", count)
+	}
+	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, outline)
+}
+
+// outlineViaProvider asks the semantic provider for every declaration in one
+// file and registers each as a durable symbol handle, so the sections it
+// returns can be read and edited by locator like the native ones.
+func (h *Handlers) outlineViaProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path string) ([]workspacecore.Section, []workspacecore.HandleRecord, bool) {
+	if workspace.Identity().Kind != workspacecore.KindProject {
+		return nil, nil, false
+	}
+	backend, err := h.pool.Canonical(ctx, workspace)
+	if err != nil {
+		return nil, nil, false
+	}
+	value, err := providerpool.CallCanonical(ctx, requestID+"_outline", workspace, backend, "file_symbols", map[string]any{
+		"root": workspace.Identity().Root, "file": path,
+	})
+	if err != nil {
+		return nil, nil, false
+	}
+	payload, _ := value.(map[string]any)
+	records, _ := registerProviderMatches(workspace, mcpapi.AnySlice(payload["matches"]))
+	if len(records) == 0 {
+		return nil, nil, false
+	}
+	sections := make([]workspacecore.Section, 0, len(records))
+	for _, record := range records {
+		sections = append(sections, workspacecore.Section{
+			Name: record.Locator.NamePath, Kind: record.Locator.Kind,
+			ByteStart: record.Locator.ByteStart, ByteEnd: record.Locator.ByteEnd,
+		})
+	}
+	sort.Slice(sections, func(i, j int) bool { return sections[i].ByteStart < sections[j].ByteStart })
+	return sections, records, true
 }
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the

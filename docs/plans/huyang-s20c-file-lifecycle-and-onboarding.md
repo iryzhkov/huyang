@@ -440,6 +440,41 @@ What landed differs from the text above in these places:
   and `node_modules`. Detection of `[tool.ruff]` requires the tool to be reachable in the
   project's environment; a `[tool.ruff]` without ruff installed adds nothing.
 
+## Follow-up: what using the tool for this stage showed (2026-09-12)
+
+The stage was implemented through Huyang itself, about two hundred calls. Six things cost
+calls or misled, and each was fixed in the same branch:
+
+1. A passing `verify_run` stage reported a verdict and no evidence, so the same command
+   was run again in a shell to see what it said. A passing stage now carries
+   `output_tail`, the last three non-empty lines bounded at 240 bytes
+   (`VerificationTailLines`, `VerificationTailBytes`), which is where a command states
+   what it did.
+2. A multi-target `read` rejected `view` and `numbered` per target, so outlining one file
+   and windowing another took two calls. Every option of a single-target read now applies
+   per target.
+3. An `edit_apply` `operations` list outside any repository was refused for want of a
+   workspace, which forced one call per file. It now opens one documents workspace over
+   every absolute path the list names.
+4. `view: outline` covered Go and Python only: a 4,600-line Lua file answered a
+   whole-document handle, honestly labelled `text_only`, with `lua_ls` attached. The
+   outline now falls back to the semantic provider through a new kernel operation,
+   `file_symbols`, which answers the structural index of one file in the shape
+   `find_symbol` already uses, so the same durable handles are registered and a
+   `symbol_locator` read can name what the outline listed.
+5. The friction spool filed 998 calls under 13 anonymous ids, because the daemon reads
+   the session from its own environment. The adapter now announces its session in the
+   control hello and every call on that connection is spooled under it.
+6. A diagnostic's identity included its range, so an edit above an untouched warning
+   retired it and announced an identical one: every edit reported diagnostics it had not
+   caused. Identity is now what the finding says plus its occurrence among identical ones
+   in the document, and the stored range follows the latest observation.
+
+And one thing the agent could not have known without being told: the guide to the
+cheapest correct call lives in `docs/agent-guide.md`, which an agent working in another
+repository never sees. The first reply for a workspace now carries a `guide` array of
+five one-line rules, sent once, on whatever call opened the workspace.
+
 ## Out of scope
 
 No index or ref writes unless decision 1 chooses the alternative. No directory move or

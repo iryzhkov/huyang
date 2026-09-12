@@ -22,9 +22,15 @@ import (
 )
 
 func connectOfficialClient(t *testing.T, profile mcpapi.Profile, direct *directWorkspaces) (*mcp.ClientSession, func()) {
+	return connectOfficialClientAs(t, profile, direct, "")
+}
+
+// connectOfficialClientAs connects a client that announces the named agent
+// session, the way an adapter does in its hello.
+func connectOfficialClientAs(t *testing.T, profile mcpapi.Profile, direct *directWorkspaces, session string) (*mcp.ClientSession, func()) {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	server := newSDKServer(profile, direct)
+	server := newSDKServer(profile, direct, session)
 	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)

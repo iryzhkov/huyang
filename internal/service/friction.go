@@ -131,7 +131,7 @@ func frictionDir() string {
 // keeps one process's calls together.
 func frictionIdent() {
 	frictionOnce.Do(func() {
-		frictionSess = os.Getenv("CLAUDE_CODE_SESSION_ID")
+		frictionSess = clientSessionID()
 		if frictionSess == "" {
 			frictionSess = "anon-" + randomID()
 		}
@@ -145,6 +145,51 @@ func frictionIdent() {
 			frictionHost = frictionHost[:i]
 		}
 	})
+}
+
+// frictionSessionLimit bounds a session id that crossed a process boundary,
+// because it is written into every line of the spool.
+const frictionSessionLimit = 128
+
+// clientSessionID is the agent session this process belongs to, as the client
+// exported it. HUYANG_SESSION_ID names it for any client that has one under
+// another name.
+func clientSessionID() string {
+	for _, name := range []string{"HUYANG_SESSION_ID", "CLAUDE_CODE_SESSION_ID"} {
+		if value := sanitizeSessionID(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// sanitizeSessionID keeps a session id to the characters an id is made of, so
+// a spool line stays one line whatever an environment held.
+func sanitizeSessionID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > frictionSessionLimit {
+		value = value[:frictionSessionLimit]
+	}
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			return r
+		default:
+			return -1
+		}
+	}, value)
+	return clean
+}
+
+// frictionSessionOr prefers the session the adapter announced when it
+// connected. The service outlives any one agent session and its own
+// environment names none, so without this every call in the spool belongs to
+// the same anonymous process and a report cannot tell two agents apart.
+func frictionSessionOr(session string) string {
+	if session = sanitizeSessionID(session); session != "" {
+		return session
+	}
+	return frictionSess
 }
 
 func randomID() string {
@@ -285,9 +330,10 @@ func gitRev(root string) string {
 	return rev
 }
 
-// logFriction appends one event for a finished call. root is the workspace
-// that answered, empty when the call never got that far.
-func logFriction(name, root string, args, res map[string]any, started time.Time) {
+// logFriction appends one event for a finished call. session is the agent
+// session the connection announced, empty for a caller that announced none;
+// root is the workspace that answered, empty when the call never got that far.
+func logFriction(session, name, root string, args, res map[string]any, started time.Time) {
 	if !frictionEnabled() {
 		return
 	}
@@ -301,7 +347,7 @@ func logFriction(name, root string, args, res map[string]any, started time.Time)
 	ev := frictionEvent{
 		TS:      time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		Host:    frictionHost,
-		Session: frictionSess,
+		Session: frictionSessionOr(session),
 		Proc:    frictionProc,
 		Client:  client,
 		Ver:     frictionVer,

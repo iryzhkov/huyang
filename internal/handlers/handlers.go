@@ -122,12 +122,24 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		return h.open(ctx, requestID, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
+	var guide []string
 	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
-		if failure := h.adoptImplicitProject(ctx, requestID, root, arguments); failure != nil {
+		opened := h.open(ctx, requestID, map[string]any{"kind": "project", "root": root})
+		if failure := adoptOpenedProject(requestID, opened, arguments); failure != nil {
 			return failure
 		}
+		guide = guideFor(opened)
 		workspaceID, _ = arguments["workspace_id"].(string)
 	}
+	result := h.route(ctx, requestID, name, workspaceID, arguments)
+	if len(guide) > 0 {
+		result["guide"] = guide
+	}
+	return result
+}
+
+// route dispatches one call against the workspace it now names.
+func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID string, arguments map[string]any) map[string]any {
 	if name == "read" && strings.TrimSpace(workspaceID) == "" {
 		return h.readImplicitDocument(ctx, requestID, arguments)
 	}
@@ -207,7 +219,12 @@ func (h *Handlers) AdoptProjectRoot(ctx context.Context, requestID string, argum
 // proceeds as if workspace_open had been called first. This saves the
 // separate open call on every task that starts in a known repository.
 func (h *Handlers) adoptImplicitProject(ctx context.Context, requestID, root string, arguments map[string]any) map[string]any {
-	opened := h.open(ctx, requestID, map[string]any{"kind": "project", "root": root})
+	return adoptOpenedProject(requestID, h.open(ctx, requestID, map[string]any{"kind": "project", "root": root}), arguments)
+}
+
+// adoptOpenedProject writes the opened workspace's ID into the arguments, or
+// returns the reply that says why it could not be opened.
+func adoptOpenedProject(requestID string, opened map[string]any, arguments map[string]any) map[string]any {
 	if opened["outcome"] != "ok" {
 		return opened
 	}

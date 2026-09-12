@@ -2589,6 +2589,44 @@ local function find_symbol(args)
     return result
 end
 
+-- An outline of a large file is a map, not a listing; a file that declares
+-- more than this has to be narrowed with find_symbol or a line window.
+local MAX_FILE_SYMBOLS = 300
+
+-- Every declaration one file contains, each with its exact line range, as
+-- structured data rather than the printed outline document_symbols answers.
+-- This is what an outline read asks for in a language the native sectioner
+-- does not parse: the reply has the same shape as find_symbol, so both sides
+-- register the same durable symbol handles.
+local function file_symbols(args)
+    local file = args.file
+    if type(file) ~= "string" or file == "" then
+        err("missing required argument: file")
+    end
+    local bufnr = load_buf(file)
+    local entries, complete = symbol_index(bufnr)
+    entries = entries or {}
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    local matches = {}
+    for _, entry in ipairs(entries) do
+        if #matches >= MAX_FILE_SYMBOLS then break end
+        if entry.first and entry.last then
+            matches[#matches + 1] = {
+                name_path = entry.path or entry.name,
+                kind = entry.kind,
+                file = path,
+                lines = ("%d-%d"):format(entry.first, entry.last),
+            }
+        end
+    end
+    local result = { count = #matches, matches = matches, complete = complete == true }
+    if #entries > #matches then
+        result.note = ("the file declares %d symbols; the first %d are listed - "
+            .. "find_symbol or a line window reach the rest"):format(#entries, #matches)
+    end
+    return result
+end
+
 local MAX_NEAR_NAMES = 6
 
 -- The names worth showing someone who asked for one this file does not
@@ -3016,6 +3054,7 @@ M.skim = skim
 M.workspace_map = workspace_map
 M.workspace_tree = workspace_tree
 M.document_symbols = document_symbols
+M.file_symbols = file_symbols
 M.symbol_match_rank = symbol_match_rank
 M.warm_up_project = warm_up_project
 M.workspace_symbols = workspace_symbols

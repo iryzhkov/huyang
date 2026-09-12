@@ -60,6 +60,56 @@ func TestDiagnosticEvidenceNormalizesDeduplicatesAndRetainsProviderConflicts(t *
 	}
 }
 
+// An edit above an untouched warning moves it. The warning is the same one,
+// so it is neither resolved nor announced again: an agent reads the delta of
+// an edit as what that edit caused.
+func TestDiagnosticFindingThatOnlyMovedIsNotAnnouncedAgain(t *testing.T) {
+	workspace, _ := evidenceWorkspace(t)
+	version := int64(1)
+	same := func(line int) DiagnosticFinding {
+		return DiagnosticFinding{Range: DiagnosticRange{StartLine: line, StartCharacter: 2, EndLine: line, EndCharacter: 5},
+			Severity: 2, Code: "unusedvariable", Source: "gopls", Message: "declared and not used: total"}
+	}
+	base := DiagnosticBatch{Kind: EvidencePush, ProviderID: "gopls#1", Producer: "gopls", ProducerVersion: "v1",
+		Document: "main.go", DocumentRevision: "rev_a", DocumentVersion: &version, ExpectedVersion: &version,
+		Complete: true, Selected: true, Findings: []DiagnosticFinding{same(40), same(120)}}
+	first, err := workspace.RecordDiagnosticEvidence(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same message twice in one file is two findings, not one.
+	if len(first.New) != 2 {
+		t.Fatalf("first report = %#v", first)
+	}
+
+	shifted := base
+	shifted.DocumentRevision = "rev_b"
+	shifted.Findings = []DiagnosticFinding{same(47), same(127)}
+	second, err := workspace.RecordDiagnosticEvidence(shifted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.New) != 0 || len(second.Resolved) != 0 || second.CurrentCount != 2 {
+		t.Fatalf("a shifted finding flapped: new=%#v resolved=%#v", second.New, second.Resolved)
+	}
+	// The reported range is the current one, not the one first seen.
+	if second.Current[0].Finding.Range.StartLine != 47 {
+		t.Fatalf("stale range reported: %#v", second.Current[0].Finding.Range)
+	}
+
+	// One of the two being fixed resolves exactly one item.
+	fixed := shifted
+	fixed.DocumentRevision = "rev_c"
+	fixed.Findings = []DiagnosticFinding{same(47)}
+	third, err := workspace.RecordDiagnosticEvidence(fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third.New) != 0 || len(third.Resolved) != 1 || third.CurrentCount != 1 {
+		t.Fatalf("fixing one of two = new %#v resolved %#v", third.New, third.Resolved)
+	}
+}
+
 func TestDiagnosticEvidenceRejectsUnselectedProviders(t *testing.T) {
 	workspace, _ := evidenceWorkspace(t)
 	_, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{

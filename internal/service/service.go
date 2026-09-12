@@ -35,8 +35,13 @@ type serviceConfig struct {
 	ExternalJobQuota int
 }
 
+// controlHello is what an adapter says when it connects. The session is the
+// agent session the adapter belongs to: the service is long-lived and shared,
+// so the identity of the agent making a call can only come from the process
+// the client started.
 type controlHello struct {
 	Profile string
+	Session string `json:",omitempty"`
 }
 
 type proxyLineEvent struct {
@@ -272,7 +277,7 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 		Reader: structReadCloser{Reader: reader, Closer: connection},
 		Writer: connection,
 	}
-	_ = newSDKServer(profile, s.direct).Run(ctx, transport)
+	_ = newSDKServer(profile, s.direct, hello.Session).Run(ctx, transport)
 }
 
 // proxyMessage is the part of a JSON-RPC frame the proxy inspects.
@@ -433,7 +438,7 @@ func (p *mcpProxy) dial(restarting bool) error {
 		_ = candidate.Close()
 		return err
 	}
-	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile)}); err != nil {
+	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile), Session: clientSessionID()}); err != nil {
 		return fail(fmt.Errorf("identify service connection: %w", err))
 	}
 	reader := bufio.NewReader(candidate)
@@ -532,7 +537,9 @@ func (s *huyangService) prepareHTTP() error {
 		"/mcp/edit": mcpapi.ProfileEdit, "/mcp/debug": mcpapi.ProfileDebug,
 	}
 	for route, profile := range profiles {
-		server := newSDKServer(profile, s.direct)
+		// An HTTP client announces no session; its calls are spooled under
+		// the service process the way they always were.
+		server := newSDKServer(profile, s.direct, "")
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true})
 		mux.Handle(route, requireBearer(token, handler))
 	}

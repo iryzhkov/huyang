@@ -107,7 +107,7 @@ func TestLogFrictionWritesOneEvent(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-under-test")
 
 	failed := textResult("Error: no files to search: pass file, files, or glob", true)
-	logFriction("grep", "/home/igor/src/agent99", map[string]any{"pattern": "TODO"}, failed,
+	logFriction("", "grep", "/home/igor/src/agent99", map[string]any{"pattern": "TODO"}, failed,
 		time.Now().Add(-15*time.Millisecond))
 
 	spool := filepath.Join(dir, frictionSource)
@@ -156,7 +156,7 @@ func TestLogFrictionRecordsModernOutcomeAndPerCallClient(t *testing.T) {
 	result := textResult("Semantic provider unavailable", false)
 	result["outcome"] = "unavailable"
 	result["client"] = "codex-mcp-client/1"
-	logFriction("navigate", "", map[string]any{"relation": "definition"}, result, time.Now())
+	logFriction("", "navigate", "", map[string]any{"relation": "definition"}, result, time.Now())
 
 	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
 	if err != nil || len(entries) != 1 {
@@ -186,7 +186,7 @@ func TestFrictionCanBeTurnedOff(t *testing.T) {
 	t.Setenv("HUYANG_FRICTION_DIR", dir)
 	t.Setenv("HUYANG_FRICTION", "0")
 
-	logFriction("grep", "", map[string]any{}, textResult("ok", false), time.Now())
+	logFriction("", "grep", "", map[string]any{}, textResult("ok", false), time.Now())
 
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
@@ -203,7 +203,7 @@ func TestFrictionIsOffUntilAskedFor(t *testing.T) {
 	if frictionEnabled() {
 		t.Fatal("spooling must be off for anyone who did not ask for it")
 	}
-	logFriction("grep", "", map[string]any{}, textResult("ok", false), time.Now())
+	logFriction("", "grep", "", map[string]any{}, textResult("ok", false), time.Now())
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("wrote %v without being enabled", entries)
 	}
@@ -215,9 +215,42 @@ func TestFrictionIsOffUntilAskedFor(t *testing.T) {
 	if !frictionEnabled() {
 		t.Error("the marker file did not enable spooling")
 	}
-	logFriction("grep", "", map[string]any{}, textResult("ok", false), time.Now())
+	logFriction("", "grep", "", map[string]any{}, textResult("ok", false), time.Now())
 	if entries, _ := os.ReadDir(filepath.Join(dir, frictionSource)); len(entries) != 1 {
 		t.Errorf("expected one spool file once enabled, got %d", len(entries))
+	}
+}
+
+// The service is long-lived and shared, so the session a call belongs to is
+// the one its adapter announced when it connected, not anything in the
+// service's own environment.
+func TestFrictionEventsCarryTheConnectionSession(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HUYANG_FRICTION_DIR", dir)
+	t.Setenv("HUYANG_FRICTION", "1")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	session, cleanup := connectOfficialClientAs(t, mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()), "agent-7f3a\nnot-a-second-line")
+	defer cleanup()
+	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+
+	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, frictionSource, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event frictionEvent
+	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
+		t.Fatalf("spool line is not JSON: %v", err)
+	}
+	// The id crossed a process boundary, so it is reduced to the characters
+	// an id is made of; a newline in it must not split the spool line.
+	if event.Session != "agent-7f3anot-a-second-line" {
+		t.Fatalf("spooled session = %q", event.Session)
 	}
 }
 

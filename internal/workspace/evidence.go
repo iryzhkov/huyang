@@ -282,10 +282,25 @@ func normalizeFinding(f DiagnosticFinding) DiagnosticFinding {
 	return f
 }
 
-func diagnosticFingerprint(providerID, document string, finding DiagnosticFinding) string {
-	encoded, _ := json.Marshal([]any{providerID, filepath.ToSlash(filepath.Clean(document)), finding})
+// diagnosticFingerprint identifies a finding by what it says rather than by
+// where it currently sits. The range is deliberately left out: an edit above
+// an untouched warning moves it, and a fingerprint that included the line
+// would retire that warning and announce an identical one, so every edit
+// reported diagnostics it had not caused. occurrence separates findings that
+// are otherwise identical within one document, so two of the same message
+// stay two items.
+func diagnosticFingerprint(providerID, document string, finding DiagnosticFinding, occurrence int) string {
+	encoded, _ := json.Marshal([]any{
+		providerID, filepath.ToSlash(filepath.Clean(document)),
+		finding.Severity, finding.Code, finding.Source, finding.Message, occurrence,
+	})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:16])
+}
+
+// findingIdentity is the part of a finding its fingerprint is taken over.
+func findingIdentity(finding DiagnosticFinding) string {
+	return fmt.Sprintf("%d\x00%s\x00%s\x00%s", finding.Severity, finding.Code, finding.Source, finding.Message)
 }
 
 func evidenceID(batch DiagnosticBatch, sequence uint64) string {
@@ -475,9 +490,19 @@ func (s *diagnosticStore) aggregateDimensionLocked(dimension string) DiagnosticD
 // the current items, the ones that were announced as new, and the set of IDs reported.
 func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID string) (current, added []DiagnosticItem, seen map[string]bool) {
 	seen = map[string]bool{}
+	occurrences, placements := map[string]int{}, map[string]bool{}
 	for _, finding := range batch.Findings {
 		finding = normalizeFinding(finding)
-		id := "diag_" + diagnosticFingerprint(batch.ProviderID, batch.Document, finding)
+		identity := findingIdentity(finding)
+		// The same finding at the same place, twice in one batch, is one
+		// finding published twice; at another place it is a second one.
+		placement := fmt.Sprintf("%s\x00%v", identity, finding.Range)
+		if placements[placement] {
+			continue
+		}
+		placements[placement] = true
+		id := "diag_" + diagnosticFingerprint(batch.ProviderID, batch.Document, finding, occurrences[identity])
+		occurrences[identity]++
 		if seen[id] {
 			continue
 		}
@@ -494,7 +519,10 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		item.Status = DiagnosticStatusCurrent
 		item.StaleReason, item.StaleRevision, item.ResolvedAt = "", "", time.Time{}
 		// The provenance follows the latest observation so a re-published
-		// finding is attributed to the content it was verified against.
+		// finding is attributed to the content it was verified against, and
+		// the range follows it too: the same warning is reported at whatever
+		// line the edits since have left it on.
+		item.Finding = finding
 		item.DocumentRevision = batch.DocumentRevision
 		item.DocumentVersion = batch.DocumentVersion
 		item.TransactionID = batch.TransactionID
