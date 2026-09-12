@@ -427,6 +427,11 @@ by rerunning the protocol benchmark on the Go fixture, total `verify_run` time f
 from 10.4 s to 0.47 s, and E5, which edits five files and runs first, from 22.7 s to
 16.3 s. The first verification of a session still pays a cold build.
 
+On this repository, which is a much larger package set than the fixture, the deployed
+service shows the same shape: the first `verify_run` with the check stage took 18,449 ms
+against a cold cache, and 3,496 ms at the next revision with the cache warm, with only a
+documentation edit between them so the Go inputs were unchanged.
+
 Two caveats on these numbers. The batch ran two and later four tasks at a time on one
 machine, so a run overlapped 0.74 other runs on average for Huyang against 0.62 and 0.54
 for the built-in and Bash families; longer runs overlap more by construction, which
