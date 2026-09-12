@@ -73,12 +73,25 @@ existing workspace, because its handle comes from one.
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that
   usually follows it. Hits carry handles that `edit_apply replace_range` accepts, for the
   rare edit whose target you cannot name by content.
+- Several edits at once: `edit_apply` with `operations: [{kind: replace_literal, ...},
+  {kind: create_file, ...}]`. They apply in order, each located against the bytes the
+  previous ones left, with one formatter pass, one receipt and one diagnostics refresh. A
+  refusal stops the list; the reply names the failed operation and how many were applied.
+- Find references, the definition, implementations or callers of a symbol: `search
+  {query: Name, mode: references}` or `navigate {relation, symbol: Name}`. The name is
+  resolved to its declaration first (Go and Python natively, other languages through the
+  language server), so no path is needed; an ambiguous name lists the declarations. When
+  no language server answers, `search` falls back to literal matches and says so.
+- Search hits are path, line and text. Add `include_handles: true` only when you will edit
+  a hit with `replace_range`.
 - New file: `create_file`. Several files that must change atomically or not at all:
   `change_plan` (prepare, then apply), which also runs the pipeline in a sandbox first.
 - Go files are gofmt-formatted after every edit; the response says so under `format`.
   Pass `format: false` to keep bytes exactly.
 - Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:
-  affected` runs only the tests whose `covers` patterns match the edited files.
+  affected` runs only the tests whose `covers` patterns match the edited files. The reply
+  is one line per stage (verdict, exit, duration, the files covered, counts) plus the
+  output of any stage that did not pass; `verbose: true` restores the full record.
 - `verbose: true` on `edit_apply` restores the full change record and handle resolution;
   nothing else needs it.
 - A whole-file rewrite through `edit_apply` is bounded (the patch in the response is cut at

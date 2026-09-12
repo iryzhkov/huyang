@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -180,8 +181,8 @@ func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
 	if result["code"] != "revision_changed" {
 		t.Fatalf("cross-workspace verify = %#v", result)
 	}
-	if identity, _ := result["workspace"].(workspacecore.Identity); string(identity.ID) != workspaceB {
-		t.Fatalf("verify was labelled with %q, want %q", identity.ID, workspaceB)
+	if labelled, _ := result["workspace"].(map[string]any); fmt.Sprint(labelled["id"]) != workspaceB {
+		t.Fatalf("verify was labelled with %v, want %q", result["workspace"], workspaceB)
 	}
 }
 

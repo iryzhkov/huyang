@@ -115,6 +115,27 @@ Request tokens and call counts are unchanged; reads moved by a few tokens. The f
 harness still opens the workspace explicitly (W0) so the open stays measured; an agent
 using `root` skips that call entirely.
 
+### Second friction pass (`runs/protocol-after-g.json`, 2026-09-12)
+
+`edit_apply` takes an `operations` list; `search` answers semantic modes (references,
+definition, implementations, callers) through the language server with a literal
+fallback; `navigate` takes a bare `symbol`; search hits carry handles only on request;
+`verify_run` reports one line per stage plus the output of stages that did not pass;
+every reply names the workspace as `{id, revision}`. Response tokens, Huyang family,
+after-f to after-g:
+
+| Scenario | Go | Python |
+|---|---|---|
+| R3 find call sites | 626 -> 283 | 662 -> 302 |
+| E1 one-line edit | 360 -> 346 | 383 -> 362 |
+| E5 three files + tests | 2248 -> 1969 | 2166 -> 1954 |
+| E6 signature change | 4774 -> 4084 | 4734 -> 4184 |
+| V1 tests | 258 -> 175 | 261 -> 176 |
+
+The protocol harness still edits one literal per call (it measures that shape); an agent
+folding E5's five edits into one `operations` call saves four replies of envelope and
+four diagnostics refreshes.
+
 ### Friction met while doing this work through Huyang (the pre-change build)
 
 - `change_plan prepare` failed twice with `sandbox_source_changed` in this repository:

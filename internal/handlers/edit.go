@@ -78,6 +78,9 @@ type appliedEdit struct {
 }
 
 func (h *Handlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if _, listed := arguments["operations"]; listed {
+		return h.editOperations(ctx, requestID, workspace, arguments)
+	}
 	request, err := decodeEditRequest(arguments)
 	if err != nil {
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "operation_unavailable", err.Error(), map[string]any{})

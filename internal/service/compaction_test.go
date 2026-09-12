@@ -150,7 +150,9 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 			t.Fatalf("compact hit carries %s: %#v", key, hit)
 		}
 	}
-	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != "needle" || hit["handle"] == nil {
+	// The default hit is path, line and text; the editable handle and the
+	// column come with include_handles or include_ranges.
+	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != "needle" || hit["handle"] != nil || hit["column"] != nil {
 		t.Fatalf("compact hit = %#v", hit)
 	}
 	anchored := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "needle", "include_ranges": true})

@@ -96,6 +96,73 @@ func TestSearchPathsAndContextLines(t *testing.T) {
 	}
 }
 
+// An operations list applies several literal edits and a new file in one
+// call, each located against the bytes the previous ones left; a refusal
+// in the middle reports how many operations were applied and stops.
+func TestEditOperationsApplyInOrderAndReportARefusal(t *testing.T) {
+	handlers, workspaceID, root := literalFixture(t, map[string]string{"main.go": "package main\n\nconst A = 1\nconst B = 2\n"})
+	result := handlers.Execute(context.Background(), "req_ops", "edit_apply", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "ops-1",
+		"operations": []any{
+			map[string]any{"kind": "replace_literal", "path": "main.go", "old": "A = 1", "new": "A = 10"},
+			map[string]any{"kind": "replace_literal", "path": "main.go", "old": "A = 10\nconst B = 2", "new": "A = 10\nconst B = 20"},
+			map[string]any{"kind": "create_file", "path": "extra.go", "content": "package main\n"},
+		},
+	})
+	if result["outcome"] != "ok" && result["outcome"] != "provisional" {
+		t.Fatalf("operations = %#v", result)
+	}
+	data := result["data"].(map[string]any)
+	if paths := data["changed_paths"].([]string); len(paths) != 2 || data["replacements"] != 2 || len(data["locations"].([]string)) != 2 {
+		t.Fatalf("operations data = %#v", data)
+	}
+	content, _ := os.ReadFile(filepath.Join(root, "main.go"))
+	if string(content) != "package main\n\nconst A = 10\nconst B = 20\n" {
+		t.Fatalf("file after operations = %q", content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "extra.go")); err != nil {
+		t.Fatalf("created file missing: %v", err)
+	}
+	refused := handlers.Execute(context.Background(), "req_ops2", "edit_apply", map[string]any{
+		"workspace_id": workspaceID, "idempotency_key": "ops-2",
+		"operations": []any{
+			map[string]any{"kind": "replace_literal", "path": "main.go", "old": "B = 20", "new": "B = 30"},
+			map[string]any{"kind": "replace_literal", "path": "main.go", "old": "missing", "new": "x"},
+		},
+	})
+	refusedData := refused["data"].(map[string]any)
+	if refused["code"] != "literal_not_found" || refusedData["failed_operation"] != 1 || refusedData["applied_operations"] != 1 || !strings.HasPrefix(refused["summary"].(string), "operation 1:") {
+		t.Fatalf("refusal = %#v", refused)
+	}
+	content, _ = os.ReadFile(filepath.Join(root, "main.go"))
+	if !strings.Contains(string(content), "B = 30") {
+		t.Fatalf("first operation was not kept: %q", content)
+	}
+}
+
+// A semantic search mode resolves the query as a declaration name before
+// asking the language server; an unknown name is a conflict that points at
+// the literal search. Literal hits carry a handle only on request.
+func TestSemanticSearchResolvesTheSymbolFirst(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"main.go": "package main\n\nfunc Target() {}\n\nvar _ = Target\n"})
+	unknown := handlers.Execute(context.Background(), "req_sem", "search", map[string]any{"workspace_id": workspaceID, "query": "Nope", "mode": "references"})
+	if unknown["code"] != "symbol_not_found" || len(unknown["next"].([]any)) != 1 {
+		t.Fatalf("unknown symbol = %#v", unknown)
+	}
+	literal := handlers.Execute(context.Background(), "req_lit", "search", map[string]any{"workspace_id": workspaceID, "query": "Target"})
+	hits := literal["data"].(map[string]any)["hits"].([]map[string]any)
+	if len(hits) != 2 {
+		t.Fatalf("literal hits = %#v", hits)
+	}
+	if _, present := hits[0]["handle"]; present {
+		t.Fatalf("hit carries a handle without include_handles: %#v", hits[0])
+	}
+	withHandles := handlers.Execute(context.Background(), "req_lit2", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "include_handles": true})
+	if hit := withHandles["data"].(map[string]any)["hits"].([]map[string]any)[0]; hit["handle"] == nil || hit["column"] == nil {
+		t.Fatalf("hit lacks its handle on request: %#v", hit)
+	}
+}
+
 // An edit to a file that no language server or parser can diagnose is
 // plainly ok: no provisional verdict, no diagnostic recovery hints.
 func TestEditOfProseFileIsPlainlyOK(t *testing.T) {

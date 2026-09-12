@@ -303,6 +303,13 @@ func installOutcome(requestID string, workspace *workspacecore.Workspace, langua
 func (h *Handlers) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	relation, _ := arguments["relation"].(string)
 	target, _ := arguments["target"].(map[string]any)
+	if symbol, _ := arguments["symbol"].(string); symbol != "" && target == nil {
+		locator, failure := h.locatorForSymbol(ctx, requestID, workspace, symbol)
+		if failure != nil {
+			return failure
+		}
+		target = map[string]any{"symbol_locator": locator}
+	}
 	providerArguments, err := modernProviderTarget(workspace, target)
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
@@ -317,23 +324,58 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
 		return result
 	}
+	// The reply is the navigation itself; the provider's process detail is
+	// behind language_server_status and only a degraded state names it here.
+	data := map[string]any{"navigation": value}
+	if status := providerpool.Status(ctx, backend); fmt.Sprint(status["state"]) != "healthy" {
+		data["provider"] = compactProviderStatus(status)
+	}
 	navigation, _ := value.(map[string]any)
 	if count, present := navigation["count"]; present && fmt.Sprint(count) == "0" {
 		result := mcpapi.Envelope(requestID, workspace, "partial", "navigation_not_found",
-			fmt.Sprintf("The workspace language server returned no %s location", relation), map[string]any{
-				"navigation": value, "provider": providerpool.Status(ctx, backend),
-				"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
-			})
+			fmt.Sprintf("The workspace language server returned no %s location", relation), data)
 		result["next"] = []any{
 			map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
 			map[string]any{"tool": "symbol_find", "query": fmt.Sprint(providerArguments["symbol"])},
 		}
 		return result
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the workspace language server", relation), map[string]any{
-		"navigation": value, "provider": providerpool.Status(ctx, backend),
-		"coverage": workspacecore.Coverage{Complete: true, Semantic: "lsp"},
-	})
+	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%s resolved through the language server", relation), data)
+}
+
+// locatorForSymbol turns a bare symbol name into the symbol_locator of its
+// one declaration, natively for Go and Python and through the provider
+// otherwise, so navigate and semantic search need no path from the caller.
+func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, symbol string) (map[string]any, map[string]any) {
+	name := canonicalNamePath(symbol)
+	found := h.symbolFind(ctx, requestID+"_symbol", workspace, map[string]any{"query": name})
+	data, _ := found["data"].(map[string]any)
+	items, _ := data["ranked_handles"].([]map[string]any)
+	var exact []workspacecore.HandleRecord
+	for _, item := range items {
+		record, _ := item["handle"].(workspacecore.HandleRecord)
+		leaf := record.Locator.NamePath
+		if slash := strings.LastIndex(leaf, "/"); slash >= 0 {
+			leaf = leaf[slash+1:]
+		}
+		if record.Locator.NamePath == name || leaf == name {
+			exact = append(exact, record)
+		}
+	}
+	switch len(exact) {
+	case 1:
+		return map[string]any{"path": exact[0].Locator.Path, "name_path": exact[0].Locator.NamePath}, nil
+	case 0:
+		result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_not_found", fmt.Sprintf("no declaration named %q; name the file with target.symbol_locator or search literally", symbol), map[string]any{"symbol": symbol})
+		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": symbol, "mode": "literal"}}
+		return nil, result
+	}
+	locations := make([]string, 0, len(exact))
+	for _, record := range exact {
+		locations = append(locations, record.Locator.Path+"#"+record.Locator.NamePath)
+	}
+	result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; pick one with target.symbol_locator", len(exact), symbol), map[string]any{"symbol": symbol, "declarations": locations})
+	return nil, result
 }
 
 func (h *Handlers) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {

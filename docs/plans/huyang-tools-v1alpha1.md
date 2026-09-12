@@ -1099,6 +1099,23 @@ compaction of a default result, or a new stable code. No mutation precondition w
   native facilities and available optional ones are not listed. `overview.top_level`
   entries drop `bytes`; `recent_commits.coverage` appears only when history is unavailable.
 - `tools/list` no longer attaches the output envelope schema to every tool.
+- Second friction pass (2026-09-12): `edit_apply.operations` (array of `replace_literal`
+  or `create_file` operations, 1 to 64) applies them in order in one call; the reply is
+  the merged edit record (`changed_paths`, `locations`, `replacements`, `diffs`) and a
+  refusal carries `failed_operation`, `applied_operations` and the paths already changed.
+  `navigate.symbol` names a declaration instead of `target` (resolved natively or through
+  the provider; `symbol_not_found` and `symbol_ambiguous` are conflicts that list the
+  choices). `search.mode` accepts `references`, `definition`, `implementation`,
+  `type_definition`, `incoming_calls` and `outgoing_calls`, answered through navigate
+  with `query` as the symbol; without a language server the reply is the literal search
+  with a warning. `search.include_handles` (boolean) adds `handle` and `column` to hits,
+  which are otherwise `{path, line, match}`; `result_set` drops `expires_at`.
+  `verify_run.verbose` restores the full stage record; the default stage is `{stage,
+  status, exit, duration_ms}` plus `output` when the stage did not pass (`output_bytes`
+  and `output_truncated` when it passed with output), `skipped` reasons, `scope`, test
+  scope and verdict, and executed/selected test counts. `navigate` data is `{navigation}`
+  plus `provider` only when degraded. Every reply except `workspace_open` names the
+  workspace as `{id, revision}`.
 - `workspace_open` data adds `commands` (`source`, `detected_from`, `format_gate`, `check`,
   `tests`, `state`, `trusted`, and one of `run`, `enable`, `override`, `hint`) and reports
   compact `capabilities` (`native`, `optional`, `semantic`, `failures`) and

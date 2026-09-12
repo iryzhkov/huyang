@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -64,6 +65,11 @@ func FinalizeEnvelope(tool string, result map[string]any) map[string]any {
 	}
 	if result["idempotency_persisted"] == true {
 		delete(result, "idempotency_persisted")
+	}
+	// Only workspace_open reports the full identity; every other reply
+	// names the workspace by its ID and current revision.
+	if identity, ok := result["workspace"].(workspacecore.Identity); ok && tool != "workspace_open" {
+		result["workspace"] = map[string]any{"id": identity.ID, "revision": fmt.Sprintf("wsrev_%d", identity.StateSeq)}
 	}
 	if _, ok := result["data"]; !ok || result["data"] == nil {
 		result["data"] = map[string]any{}

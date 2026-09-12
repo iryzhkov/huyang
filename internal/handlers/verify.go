@@ -51,7 +51,13 @@ func fullVerificationFallback(result workspacecore.VerificationResult) map[strin
 }
 
 func modernVerificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult) map[string]any {
-	compacted, evidenceIDs := mcpapi.CompactVerificationResult(result)
+	return verificationEnvelope(requestID, workspace, outcome, code, summary, cache, result, false)
+}
+
+// verificationEnvelope shapes the verify_run reply; verbose restores the
+// full per-stage record (mode, revision, coverage, scopes, test lists).
+func verificationEnvelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary, cache string, result workspacecore.VerificationResult, verbose bool) map[string]any {
+	compacted, evidenceIDs := mcpapi.CompactVerificationResult(result, verbose)
 	envelope := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"verification": compacted, "cache": cache,
 	})
@@ -83,6 +89,7 @@ type VerifyJob struct {
 	cacheKey  string
 	identity  workspacecore.Identity
 	stager    *providerpool.SandboxStager
+	verbose   bool
 }
 
 // verify runs both phases back to back for callers that already hold the
@@ -151,6 +158,7 @@ func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspac
 	}
 	identity := workspace.Identity()
 	job := &VerifyJob{
+		verbose: arguments["verbose"] == true,
 		request: workspacecore.VerificationRequest{
 			Stages: request.stages, Revision: request.revision, TestScope: request.testScope,
 			TestHistoryPath: filepath.Join(h.stateDir, "test-history", string(identity.ID)+".json"),
@@ -220,7 +228,7 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 		}
 	}
 	if err != nil {
-		resultEnvelope := modernVerificationEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), "", result)
+		resultEnvelope := verificationEnvelope(requestID, workspace, "failed", "verification_failed", err.Error(), "", result, job.verbose)
 		if timeoutCode, timeoutSummary, recovery, ok := verificationTimeoutRecovery(job.revision, job.stages, job.testScope, result); ok {
 			resultEnvelope["code"] = timeoutCode
 			resultEnvelope["summary"] = timeoutSummary
@@ -231,7 +239,7 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 	}
 	outcome, summary := verificationOutcome(result)
 	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
-	return modernVerificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result)
+	return verificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result, job.verbose)
 }
 
 // verificationOutcome reduces the stages to the envelope outcome and a

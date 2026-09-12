@@ -144,7 +144,7 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 	case "workspace_inspect":
 		return h.inspect(ctx, requestID, workspace, arguments)
 	case "search":
-		return h.search(requestID, workspace, arguments)
+		return h.search(ctx, requestID, workspace, arguments)
 	case "symbol_find":
 		return h.symbolFind(ctx, requestID, workspace, arguments)
 	case "read":

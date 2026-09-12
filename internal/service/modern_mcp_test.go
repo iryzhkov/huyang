@@ -460,7 +460,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	resultSet := searchData["result_set"].(map[string]any)
 	// The compact set carries the handle and counts; flags at their normal
 	// value (complete, all matches eligible) are omitted.
-	if resultSet["handle"] == nil || resultSet["match_count"] != float64(2) ||
+	if resultSet["handle"] == nil || resultSet["match_count"] != float64(2) || resultSet["expires_at"] != nil ||
 		resultSet["all_matches_eligible"] != nil || resultSet["kind"] != nil {
 		t.Fatalf("search result set = %#v", resultSet)
 	}

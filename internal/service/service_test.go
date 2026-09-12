@@ -135,8 +135,10 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		"workspace_id": workspaceID,
 		"target":       displayRangeTarget(document),
 	})
+	// A read names the workspace by ID and revision only; the epoch is
+	// visible through workspace_open and workspace_inspect.
 	identity := restartedRead["workspace"].(map[string]any)
-	if identity["epoch"] != float64(3) || identity["state_seq"] != float64(3) {
+	if identity["id"] != workspaceID || identity["revision"] != "wsrev_3" {
 		t.Fatalf("restored identity = %#v", identity)
 	}
 	if content := restartedRead["data"].(map[string]any)["content"]; content != "alpha gamma\n" {

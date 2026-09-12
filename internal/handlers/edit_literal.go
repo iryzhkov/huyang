@@ -13,15 +13,26 @@ import (
 // preceding search. The number of occurrences must equal expected_count
 // (default one) or nothing changes.
 func (h *Handlers) editLiteral(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest) map[string]any {
+	applied, failure := applyLiteral(requestID, workspace, request)
+	if failure != nil {
+		return failure
+	}
+	return h.finishEdit(ctx, requestID, workspace, request, applied)
+}
+
+// applyLiteral locates and replaces the literal; the failure envelope is
+// non-nil when nothing changed. It is shared by the single-operation call
+// and the operations list.
+func applyLiteral(requestID string, workspace *workspacecore.Workspace, request editRequest) (appliedEdit, map[string]any) {
 	if request.Old == "" {
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "replace_literal requires old, the exact text to replace", map[string]any{})
+		return appliedEdit{}, mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "replace_literal requires old, the exact text to replace", map[string]any{})
 	}
 	match, err := workspace.LocateLiteral(request.Path, request.Old)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "literal_locate_failed", err)
+		return appliedEdit{}, mcpapi.Failure(requestID, workspace, "literal_locate_failed", err)
 	}
 	if refusal := literalRefusal(requestID, workspace, request, match); refusal != nil {
-		return refusal
+		return appliedEdit{}, refusal
 	}
 	replacement := request.New
 	var warnings []string
@@ -32,14 +43,13 @@ func (h *Handlers) editLiteral(ctx context.Context, requestID string, workspace 
 	fromStateSeq := workspace.Identity().StateSeq
 	change, err := workspace.ReplaceLiteral(workspace.Identity().ID, match.Hits, []byte(replacement), request.Preview)
 	if err != nil {
-		return editFailure(requestID, workspace, workspacecore.RangeHandle{Path: match.Hits[0].Path}, err)
+		return appliedEdit{}, editFailure(requestID, workspace, workspacecore.RangeHandle{Path: match.Hits[0].Path}, err)
 	}
-	applied := appliedEdit{
+	return appliedEdit{
 		files: change.Files, patches: change.Patches, revisions: change.Revisions,
 		fromStateSeq: fromStateSeq, replacements: change.Replacements, warnings: warnings,
 		summary: literalSummary(change, request.Preview), locations: literalLocations(match.Hits),
-	}
-	return h.finishEdit(ctx, requestID, workspace, request, applied)
+	}, nil
 }
 
 // literalRefusal answers a literal that was not found, matches only with
@@ -105,18 +115,28 @@ func literalSummary(change workspacecore.LiteralChange, preview bool) string {
 // editCreateFile is edit_apply with kind create_file: one new file, refused
 // when the path already exists.
 func (h *Handlers) editCreateFile(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest) map[string]any {
+	applied, failure := applyCreateFile(requestID, workspace, request)
+	if failure != nil {
+		return failure
+	}
+	return h.finishEdit(ctx, requestID, workspace, request, applied)
+}
+
+// applyCreateFile writes the new file; the failure envelope is non-nil when
+// nothing changed. Shared by the single-operation call and the list.
+func applyCreateFile(requestID string, workspace *workspacecore.Workspace, request editRequest) (appliedEdit, map[string]any) {
 	if request.Path == "" {
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "create_file requires path", map[string]any{})
+		return appliedEdit{}, mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "create_file requires path", map[string]any{})
 	}
 	snapshot, err := workspace.Snapshot(request.Path, workspacecore.ProviderLayer{})
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "create_failed", err)
+		return appliedEdit{}, mcpapi.Failure(requestID, workspace, "create_failed", err)
 	}
 	if snapshot.Disk.Kind != workspacecore.ObjectMissing {
 		result := mcpapi.Envelope(requestID, workspace, "conflict", "create_target_exists",
 			fmt.Sprintf("%s already exists; nothing changed", request.Path), map[string]any{"path": request.Path})
 		result["next"] = []any{map[string]any{"tool": "edit_apply", "action": "replace_literal_inside_the_existing_file", "path": request.Path}}
-		return result
+		return appliedEdit{}, result
 	}
 	fromStateSeq := workspace.Identity().StateSeq
 	content := []byte(request.Content)
@@ -128,13 +148,13 @@ func (h *Handlers) editCreateFile(ctx context.Context, requestID string, workspa
 	}
 	if request.Preview {
 		applied.summary = "Preview of creating " + request.Path + "; canonical bytes unchanged"
-		return h.finishEdit(ctx, requestID, workspace, request, applied)
+		return applied, nil
 	}
 	diff, after, err := workspace.ApplyFile(workspace.Identity().ID, request.Path, snapshot.Revision, workspacecore.FileCreate, content)
 	if err != nil {
-		return editFailure(requestID, workspace, workspacecore.RangeHandle{Path: request.Path}, err)
+		return appliedEdit{}, editFailure(requestID, workspace, workspacecore.RangeHandle{Path: request.Path}, err)
 	}
 	applied.files[0].Path = diff.Path
 	applied.revisions = map[string]workspacecore.RevisionID{diff.Path: after.Revision}
-	return h.finishEdit(ctx, requestID, workspace, request, applied)
+	return applied, nil
 }

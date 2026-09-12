@@ -15,9 +15,12 @@ import (
 
 // search dispatches on the request shape: a bounded Git history search, a
 // refinement of a frozen result set, or a fresh query over current source.
-func (h *Handlers) search(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) search(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if source, ok := arguments["git_history"].(map[string]any); ok {
 		return searchHistory(requestID, workspace, source)
+	}
+	if mode, _ := arguments["mode"].(string); semanticRelations[mode] {
+		return h.semanticSearch(ctx, requestID, workspace, mode, arguments)
 	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
 		return refineSearch(requestID, workspace, parent, arguments)
@@ -65,7 +68,8 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 	}
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges)
+	includeHandles, _ := arguments["include_handles"].(bool)
+	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges, includeHandles)
 	data := map[string]any{
 		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": mcpapi.CompactResultSet(&result),
 	}
@@ -101,7 +105,8 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	result.Hits = filterHitPaths(result.Hits, argStrings(arguments["paths"]))
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges)
+	includeHandles, _ := arguments["include_handles"].(bool)
+	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges, includeHandles)
 	if context := argInt(arguments, "context_lines", 0); context > 0 {
 		attachSearchContext(workspace, hits, context)
 	}
@@ -127,6 +132,29 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
 	return envelope
+}
+
+// semanticRelations are the search modes answered by the language server
+// through navigate: the query is a symbol name and the hits are semantic.
+var semanticRelations = map[string]bool{
+	"references": true, "definition": true, "implementation": true, "type_definition": true,
+	"incoming_calls": true, "outgoing_calls": true,
+}
+
+// semanticSearch answers search with a semantic mode by resolving the query
+// as a symbol name and asking the language server for the relation. When
+// no server can answer, it falls back to the literal search and says so.
+func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspace *workspacecore.Workspace, relation string, arguments map[string]any) map[string]any {
+	query, _ := arguments["query"].(string)
+	result := h.navigateProvider(ctx, requestID, workspace, map[string]any{"relation": relation, "symbol": query})
+	switch result["code"] {
+	case "language_server_unavailable", "semantic_provider_start_failed", "semantic_provider_unavailable":
+		delete(arguments, "mode")
+		fallback := searchSource(requestID, workspace, arguments)
+		fallback["warnings"] = append(fallback["warnings"].([]string), fmt.Sprintf("no language server answered %s for %q; these are literal matches", relation, query))
+		return fallback
+	}
+	return result
 }
 
 // argStrings reads an array-of-strings argument.

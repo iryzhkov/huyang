@@ -83,7 +83,7 @@ func compactDiagnosticItem(item workspacecore.DiagnosticItem) map[string]any {
 // CompactSearchHits returns the bounded hit list. The default hit carries
 // path, line, column, match and the editable handle; the exact byte anchors
 // are added only with include_ranges.
-func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges bool) ([]map[string]any, bool) {
+func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges, includeHandles bool) ([]map[string]any, bool) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -93,11 +93,14 @@ func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges 
 	}
 	compact := make([]map[string]any, 0, len(returned))
 	for _, hit := range returned {
-		item := map[string]any{
-			"path": hit.Path, "line": hit.Line, "column": hit.Column, "match": hit.Match,
-		}
-		if hit.MatchHandle != nil {
-			item["handle"] = hit.MatchHandle.Handle
+		item := map[string]any{"path": hit.Path, "line": hit.Line, "match": hit.Match}
+		// The column and the editable handle matter only to a caller that
+		// will edit by handle; replace_literal needs neither.
+		if includeHandles || includeRanges {
+			item["column"] = hit.Column
+			if hit.MatchHandle != nil {
+				item["handle"] = hit.MatchHandle.Handle
+			}
 		}
 		if includeRanges {
 			item["byte_start"], item["byte_end"], item["range"] = hit.ByteStart, hit.ByteEnd, hit.Range
@@ -113,9 +116,7 @@ func CompactResultSet(set *workspacecore.ResultSet) map[string]any {
 	if set == nil {
 		return nil
 	}
-	compact := map[string]any{
-		"handle": set.Handle, "match_count": set.MatchCount, "file_count": set.FileCount, "expires_at": set.ExpiresAt,
-	}
+	compact := map[string]any{"handle": set.Handle, "match_count": set.MatchCount, "file_count": set.FileCount}
 	// Flags that hold their normal value are left out; only a deviation
 	// (an incomplete set, hits that cannot all be edited, a refinement)
 	// is worth the tokens.
@@ -429,13 +430,13 @@ func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any
 // CompactVerificationResult bounds every list and output a verification
 // result carries; the second result is the sorted set of evidence IDs
 // across its stages.
-func CompactVerificationResult(result workspacecore.VerificationResult) (map[string]any, []string) {
+func CompactVerificationResult(result workspacecore.VerificationResult, verbose bool) (map[string]any, []string) {
 	compacted := map[string]any{"revision": result.Revision}
 	var evidenceIDs []string
 	detailsTruncated := false
 	stages := make([]any, 0, len(result.Stages))
 	for _, stage := range result.Stages {
-		stageData, truncated := compactVerificationStage(stage)
+		stageData, truncated := compactVerificationStage(stage, verbose)
 		detailsTruncated = detailsTruncated || truncated
 		stages = append(stages, stageData)
 		evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
@@ -467,7 +468,7 @@ func CompactVerificationResult(result workspacecore.VerificationResult) (map[str
 
 // compactVerificationStage bounds one stage's output and lists; the second
 // result reports whether anything was cut.
-func compactVerificationStage(stage workspacecore.VerificationStage) (map[string]any, bool) {
+func compactVerificationStage(stage workspacecore.VerificationStage, verbose bool) (map[string]any, bool) {
 	output := stage.Output
 	outputTruncated := len(output) > VerificationOutputLimit
 	if outputTruncated {
@@ -478,6 +479,31 @@ func compactVerificationStage(stage workspacecore.VerificationStage) (map[string
 	executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
 	selected, selectedTruncated := compactSelectedTests(stage.SelectedTests)
 	truncated := outputTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
+	if !verbose {
+		// The default stage record is what an agent acts on: the verdict,
+		// the output when the stage did not pass, why it was skipped, and
+		// the test counts. Mode, revision, coverage and the per-item lists
+		// are the verbose record.
+		record := map[string]any{"stage": stage.Stage, "status": stage.Status, "exit": stage.Exit, "duration_ms": stage.DurationMS}
+		if stage.Status != workspacecore.VerificationPassed {
+			record["output"], record["output_truncated"] = output, outputTruncated
+		} else if len(stage.Output) > 0 {
+			// A passing stage's output is not shown; its size says it exists
+			// and verbose or evidence_get bring it back.
+			record["output_bytes"], record["output_truncated"] = len(stage.Output), true
+			outputTruncated = true
+		}
+		if !stage.Coverage.Complete && len(stage.Coverage.Skipped) > 0 {
+			record["skipped"] = stage.Coverage.Skipped
+		}
+		record["test_scope"], record["test_verdict"] = stage.TestScope, stage.TestVerdict
+		record["executed_test_count"], record["selected_test_count"] = len(stage.ExecutedTests), len(stage.SelectedTests)
+		record["writes"], record["writes_count"] = writes, len(stage.Writes)
+		// The affected scope says which files the stage covered; it is
+		// short and it is the answer to "did this check my change".
+		record["scope"], record["scope_count"] = scope, len(stage.Scope)
+		return pruneEmpty(record), outputTruncated || scopeTruncated || writesTruncated
+	}
 	return pruneEmpty(map[string]any{
 		"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
 		"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
