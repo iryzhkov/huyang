@@ -1,0 +1,57 @@
+{
+  "families": {
+    "huyang": "Use only the huyang MCP tools (workspace_open, search, read, edit_apply, change_plan, verify_run, navigate, symbol_find, diagnostics) for reading, searching and editing files. Do not use the built-in read, edit, write, grep, glob or list tools and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task, and only if verify_run cannot run it.",
+    "builtin": "Use only the built-in file tools of this harness (read, edit, write, grep, glob, list). Do not call any huyang tool and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task.",
+    "bash": "Use only the bash tool (cat, sed, grep, python3, go and similar). Do not call any huyang tool and do not use the built-in read, edit, write, grep or glob tools."
+  },
+  "languages": {
+    "go": {"dir": "bench/agent-efficiency/fixtures/go", "build": "go build ./...", "test": "go test ./..."},
+    "python": {"dir": "bench/agent-efficiency/fixtures/python", "build": "python3 -m compileall -q ledger", "test": "python3 -m unittest"}
+  },
+  "scenarios": [
+    {"id": "R1", "title": "read one whole file of ~150 lines", "task": {
+      "go": "Read the whole of ledger.go and list its exported functions, methods and types with a one-line description each.",
+      "python": "Read the whole of ledger/ledger.py and list its public functions and classes with a one-line description each."},
+      "done": "The list names every exported (public) declaration in the file."},
+    {"id": "R2", "title": "read a 20-line region of a 900-line file given a function name", "task": {
+      "go": "Read only the body of the function SummarizeQuarter in report.go (about 20 lines) and explain in three sentences what it aggregates. Do not read the whole file.",
+      "python": "Read only the body of the function summarize_quarter in ledger/report.py (about 20 lines) and explain in three sentences what it aggregates. Do not read the whole file."},
+      "done": "The explanation mentions income, expense, per-category totals and the sorted account list."},
+    {"id": "R3", "title": "find every call site of a function across the repository", "task": {
+      "go": "Find every call site of ApplyEntry in the repository (declarations do not count) and list them as path:line.",
+      "python": "Find every call site of apply_entry in the repository (the definition and imports do not count) and list them as path:line."},
+      "done": "Every call site is listed and no declaration or import is listed."},
+    {"id": "R4", "title": "read three related files to understand a change", "task": {
+      "go": "Read ledger.go, store.go and format.go to understand how an entry is validated, persisted and rendered, then describe the data flow in five sentences.",
+      "python": "Read ledger/ledger.py, ledger/store.py and ledger/fmt.py to understand how an entry is validated, persisted and rendered, then describe the data flow in five sentences."},
+      "done": "The description names the validation in apply, the tab-separated store format and the amount formatting."},
+    {"id": "E1", "title": "change one line in a known file", "task": {
+      "go": "In ledger.go change the constant MaxEntries from 10000 to 20000. Nothing else changes.",
+      "python": "In ledger/ledger.py change the constant MAX_ENTRIES from 10000 to 20000. Nothing else changes."},
+      "done": "The constant reads 20000 and the build command passes.", "verify": "build"},
+    {"id": "E2", "title": "replace a 10-line block located only by content", "task": {
+      "go": "Somewhere in report.go there is a validation block that starts with the comment 'Validation rules for a quarterly summary' followed by four if-checks. Reorder that block so the year check comes before the quarter check. Keep every message unchanged. You do not know the line number; find it by its content.",
+      "python": "Somewhere in ledger/report.py there is a validation block that starts with the comment 'Validation rules for a quarterly summary' followed by four if-checks. Reorder that block so the year check comes before the quarter check. Keep every message unchanged. You do not know the line number; find it by its content."},
+      "done": "The year check precedes the quarter check, messages are unchanged and the build command passes.", "verify": "build"},
+    {"id": "E3", "title": "rename a local identifier in one file (five occurrences)", "task": {
+      "go": "In ledger.go rename the local variable total inside the Balance method to sum. It occurs five times in that method. Do not touch any other file or function.",
+      "python": "In ledger/ledger.py rename the local variable total inside the balance function to sum_. It occurs five times in that function. Do not touch any other file or function."},
+      "done": "All five occurrences are renamed, no other occurrence of total in the repository changed, and the build command passes.", "verify": "build"},
+    {"id": "E4", "title": "add a new file of ~40 lines", "task": {
+      "go": "Add a new file audit.go to the package with a function Audit(l *Ledger) []string that returns one line per account whose cached balance disagrees with the balance summed from the entries, plus a small unexported helper it uses. About 40 lines including comments. It must compile.",
+      "python": "Add a new module ledger/audit.py with a function audit(ledger) -> list[str] that returns one line per account whose cached balance disagrees with the balance summed from the entries, plus a small private helper it uses. About 40 lines including docstrings. It must import cleanly."},
+      "done": "The file exists with the described function and the build command passes.", "verify": "build"},
+    {"id": "E5", "title": "coordinated edits in three files, then build and test", "task": {
+      "go": "Add a field Tags []string to Entry in ledger.go. Persist it in store.go as an eighth tab-separated field holding the tags joined by commas (update both Save and Load and the field-count check). Render it in FormatEntry in format.go as a trailing ' [a,b]' suffix when the entry has tags. Then build and run the tests and report the results; one pre-existing test failure is expected and must be named.",
+      "python": "Add a field tags: list[str] (default empty) to Entry in ledger/ledger.py. Persist it in ledger/store.py as an eighth tab-separated field holding the tags joined by commas (update both save and load and the field-count check). Render it in format_entry in ledger/fmt.py as a trailing ' [a,b]' suffix when the entry has tags. Then run the tests and report the results; one pre-existing test failure is expected and must be named."},
+      "done": "All three files are changed consistently, the build passes, the test run is reported and the pre-existing failure is named.", "verify": "test"},
+    {"id": "E6", "title": "an edit that introduces a compile error, and the recovery", "task": {
+      "go": "Change the signature of ApplyEntry in ledger.go to ApplyEntry(l *Ledger, e Entry, strict bool); when strict is true an entry with an empty Category is rejected with an error. Make the first edit to the declaration only, note every diagnostic or build error you observe, then update every caller in the repository (including the tests) so that the package builds again. Report the diagnostics you saw after the first edit and how you found the callers.",
+      "python": "Change the signature of apply_entry in ledger/ledger.py to apply_entry(ledger, entry, strict) with no default value; when strict is true an entry with an empty category is rejected with ValueError. Make the first edit to the definition only, run the test command and note every error you observe, then update every caller in the repository (including the tests) to pass strict explicitly so the tests run again. Report the errors you saw after the first edit and how you found the callers."},
+      "done": "The signature is changed, every caller is updated, the build passes and the diagnostics seen after the first edit are reported.", "verify": "build"},
+    {"id": "V1", "title": "run the test suite and report failures", "task": {
+      "go": "Run the package test suite and report which tests fail and why, quoting the failure message.",
+      "python": "Run the test suite (python3 -m unittest from the fixture directory) and report which tests fail and why, quoting the failure message."},
+      "done": "The failing test is named with its message.", "verify": "test"}
+  ]
+}
