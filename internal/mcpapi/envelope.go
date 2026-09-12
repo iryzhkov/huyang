@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -114,29 +115,63 @@ var structuredArguments = map[string]bool{
 	"args": true, "env": true, "track": true,
 }
 
-// NormalizeArguments decodes structured arguments that arrived as JSON text.
-// Only arguments the schema declares as arrays or objects are considered,
-// so a string value that happens to look like JSON is left alone.
+// booleanArguments and integerArguments are the top-level scalar arguments
+// a stale client sends as text ("true", "12"); keys not listed here keep
+// their string value, so a query of "true" is still a query.
+var booleanArguments = map[string]bool{
+	"numbered": true, "verbose": true, "preview_only": true, "format": true, "include_ranges": true,
+	"include_source": true, "full": true, "accept_provisional": true, "parser": true, "force": true,
+	"stop_on_entry": true, "all_frames": true,
+}
+
+var integerArguments = map[string]bool{
+	"start_line": true, "end_line": true, "limit": true, "context_lines": true, "plan_revision": true,
+	"depth": true, "max": true, "count": true, "line_offset": true, "frame": true, "thread": true,
+	"wait_ms": true, "port": true, "pid": true,
+}
+
+// NormalizeArguments decodes arguments that arrived as text where the
+// schema wants an array, an object, a boolean or an integer. Only the
+// arguments the schema declares with those types are considered, so a
+// string value that happens to look like JSON or a number is left alone.
 func NormalizeArguments(arguments map[string]any) map[string]any {
 	for key, value := range arguments {
 		text, ok := value.(string)
-		if !ok || !structuredArguments[key] {
+		if !ok {
 			continue
 		}
 		trimmed := strings.TrimSpace(text)
-		if len(trimmed) < 2 || (trimmed[0] != '[' && trimmed[0] != '{') {
-			continue
-		}
-		var decoded any
-		if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-			continue
-		}
-		switch decoded.(type) {
-		case []any, map[string]any:
-			arguments[key] = decoded
+		switch {
+		case structuredArguments[key]:
+			if decoded, ok := decodeStructured(trimmed); ok {
+				arguments[key] = decoded
+			}
+		case booleanArguments[key]:
+			if trimmed == "true" || trimmed == "false" {
+				arguments[key] = trimmed == "true"
+			}
+		case integerArguments[key]:
+			if number, err := strconv.Atoi(trimmed); err == nil {
+				arguments[key] = float64(number)
+			}
 		}
 	}
 	return arguments
+}
+
+func decodeStructured(text string) (any, bool) {
+	if len(text) < 2 || (text[0] != '[' && text[0] != '{') {
+		return nil, false
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+		return nil, false
+	}
+	switch decoded.(type) {
+	case []any, map[string]any:
+		return decoded, true
+	}
+	return nil, false
 }
 
 func CloneEnvelope(source map[string]any) map[string]any {

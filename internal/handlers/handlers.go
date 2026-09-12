@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -208,6 +209,11 @@ func (h *Handlers) readImplicitDocument(ctx context.Context, requestID string, a
 	path, _ := target["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_required", "workspace_id is required for handle, range, symbol, history, and changes reads", map[string]any{})
+	}
+	if !filepath.IsAbs(path) {
+		// The service's working directory is not the agent's, so a relative
+		// path without a workspace names nothing useful.
+		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
 	}
 	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}})
 	if opened["outcome"] != "ok" {

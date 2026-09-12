@@ -10,7 +10,13 @@ func TestNormalizeArgumentsDecodesStructuredText(t *testing.T) {
 		"operation": `{"kind": "replace_literal", "old": "{", "new": "}"}`,
 		"query":     `{"not": "decoded"}`,
 		"stages":    "not json",
+		"numbered":  "true",
+		"end_line":  "12",
+		"old":       "42",
 	})
+	if arguments["numbered"] != true || arguments["end_line"] != float64(12) || arguments["old"] != "42" {
+		t.Fatalf("scalar text = %#v", arguments)
+	}
 	if targets, ok := arguments["targets"].([]any); !ok || len(targets) != 1 {
 		t.Fatalf("targets = %#v", arguments["targets"])
 	}

@@ -110,7 +110,8 @@ scenarios, Huyang family, response tokens before (`protocol-after.json`) and aft
 | E6 signature change | 5636 -> 4774 | 5654 -> 4559 |
 | V1 tests | 273 -> 258 | 277 -> 258 |
 
-Request tokens and call counts are unchanged; reads moved by a few tokens. The protocol
+Request tokens and call counts are unchanged; reads moved by a few tokens. The full-profile
+`tools/list` went from 18,699 to 8,526 cl100k tokens, paid once per session. The protocol
 harness still opens the workspace explicitly (W0) so the open stays measured; an agent
 using `root` skips that call entirely.
 

@@ -23,10 +23,12 @@ func (h *Handlers) editImplicitDocument(ctx context.Context, requestID string, a
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_required",
 			"workspace_id is required unless operation.path names the file (replace_literal or create_file)", map[string]any{})
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", err.Error(), map[string]any{})
+	if !filepath.IsAbs(path) {
+		// The service's working directory is not the agent's, so a relative
+		// path without a workspace names nothing useful.
+		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
 	}
+	absolute := filepath.Clean(path)
 	if operation["kind"] == "create_file" {
 		if _, statErr := os.Stat(absolute); statErr == nil {
 			return mcpapi.Envelope(requestID, nil, "conflict", "create_target_exists", absolute+" already exists; nothing changed", map[string]any{"path": absolute})
