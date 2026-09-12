@@ -1044,6 +1044,10 @@ compaction of a default result, or a new stable code. No mutation precondition w
 - `read.targets` (array of `{path, start_line, end_line}` or `{symbol_locator}`): several
   reads in one call; `read.limit` no longer has a maximum.
 - `verify_run.revision_or_transaction` accepts `current`.
+- `edit_apply.workspace_id` is optional for `replace_literal` and `create_file` when
+  `operation.path` is absolute: an exact one-document workspace is opened implicitly, as
+  `read` already does, and the response carries `data.implicit_workspace: true` and the
+  workspace identity. `replace_range` without a workspace answers `workspace_required`.
 
 ### Output changes
 

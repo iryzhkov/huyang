@@ -41,6 +41,15 @@ What the table says:
   and the root is trusted. Its response is bigger than raw command output because it is
   structured per stage; when the tests fail the output is the same text a shell shows.
 
+## Files outside a repository
+
+A config file, a shell script, a note or a lone source file needs no `workspace_open`:
+`read {target:{path}}` and `edit_apply` (`replace_literal` or `create_file`) with an
+absolute `path` and no `workspace_id` open an exact one-document workspace on the spot,
+run the same guards and diagnostics, and return the workspace id for further edits of that
+file. `create_file` creates missing parent directories. Only `replace_range` needs an
+existing workspace, because its handle comes from one.
+
 ## Rules of thumb
 
 - Know the text you are changing: `replace_literal`. Do not search first. If the text

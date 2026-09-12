@@ -119,6 +119,9 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 	if name == "read" && strings.TrimSpace(workspaceID) == "" {
 		return h.readImplicitDocument(ctx, requestID, arguments)
 	}
+	if name == "edit_apply" && strings.TrimSpace(workspaceID) == "" {
+		return h.editImplicitDocument(ctx, requestID, arguments)
+	}
 	workspace := h.registry.Lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
