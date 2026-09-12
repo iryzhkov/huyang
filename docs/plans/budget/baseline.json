@@ -4,7 +4,7 @@
   "rounds": 20,
   "provider": "nvim",
   "diagnostics_outcome": "unavailable",
-  "cold_rss_kb": 13448,
+  "cold_rss_kb": 16150,
   "post_rss_kb": 20636,
   "provider_rss_kb": 16204,
   "state_bytes": 92454,

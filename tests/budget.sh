@@ -97,7 +97,26 @@ require_ok() {   # $1 label, $2 result; accepts ok or provisional
   case "$outcome" in ok|provisional) ;; *) echo "budget: $1 outcome=$outcome: $2" >&2; exit 1;; esac
 }
 
-COLD_RSS="$(rss_kb "$SERVE_PID")"
+# Cold RSS is the median of three starts rather than one sample: a single
+# reading of a two-second-old process varies by a quarter with whatever else
+# the machine is doing, which failed this gate on a busy desktop while the
+# same binary passed on a quiet one. The scenario below still runs against
+# the server started above; these extra starts only measure.
+cold_rss_sample() {
+  local dir socket pid rss
+  dir="$(mktemp -d)"
+  socket="$dir/control.sock"
+  bin/huyang serve --socket "$socket" --state-dir "$dir/state" >/dev/null 2>&1 &
+  pid=$!
+  for _ in $(seq 1 100); do [ -S "$socket" ] && break; sleep 0.1; done
+  sleep 2
+  rss="$(rss_kb "$pid")"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -rf "$dir"
+  echo "$rss"
+}
+COLD_RSS="$(printf '%s\n%s\n%s\n' "$(rss_kb "$SERVE_PID")" "$(cold_rss_sample)" "$(cold_rss_sample)" | sort -n | sed -n 2p)"
 RUN_TAG="$(date +%s)"
 
 # --- scenario -----------------------------------------------------------------
