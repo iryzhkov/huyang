@@ -48,7 +48,7 @@ func connectUnixOfficialClient(t *testing.T, socketPath string, profile mcpapi.P
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile)}); err != nil {
+	if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile), Session: clientSessionID()}); err != nil {
 		connection.Close()
 		t.Fatal(err)
 	}

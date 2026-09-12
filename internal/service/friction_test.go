@@ -254,6 +254,48 @@ func TestFrictionEventsCarryTheConnectionSession(t *testing.T) {
 	}
 }
 
+// End to end over the control socket: the adapter reads the session from
+// its own environment, announces it in the hello, and the service spools
+// every call on that connection under it.
+func TestAdapterSessionReachesTheSpoolOverTheControlSocket(t *testing.T) {
+	spool, base := t.TempDir(), t.TempDir()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HUYANG_FRICTION_DIR", spool)
+	t.Setenv("HUYANG_FRICTION", "1")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "adapter-session-1")
+	// Fix the servicing process's own identity to something the adapter
+	// never announces, so a line spooled under the announced session can
+	// only have got there through the hello.
+	frictionIdent()
+	frictionSess = "process-fallback"
+
+	socketPath := filepath.Join(base, "control.sock")
+	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
+	defer stop()
+	session, cleanup := connectUnixOfficialClient(t, socketPath, mcpapi.ProfileOrient)
+	defer cleanup()
+	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+
+	entries, err := os.ReadDir(filepath.Join(spool, frictionSource))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	}
+	data, err := os.ReadFile(filepath.Join(spool, frictionSource, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event frictionEvent
+	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
+		t.Fatalf("spool line is not JSON: %v", err)
+	}
+	if event.Session != "adapter-session-1" {
+		t.Fatalf("spooled session = %q, want the one the adapter announced", event.Session)
+	}
+}
+
 func TestModernToolCallsWriteFrictionEvents(t *testing.T) {
 	dir := t.TempDir()
 	root := t.TempDir()
