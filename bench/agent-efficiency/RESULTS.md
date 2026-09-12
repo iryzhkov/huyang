@@ -134,7 +134,7 @@ after-f to after-g:
 
 The protocol harness still edits one literal per call (it measures that shape); an agent
 folding E5's five edits into one `operations` call saves four replies of envelope and
-four diagnostics refreshes.
+four diagnostics refreshes. This paragraph and the next were written with one such call.
 
 ### Friction met while doing this work through Huyang (the pre-change build)
 
@@ -189,7 +189,7 @@ four diagnostics refreshes.
   properties three times under `oneOf`. Fixed: neither is attached any more.
 - Several literal replacements in one file still need one call each (four calls on
   `score.py`; the three test assertions at the end of this pass went through a shell
-  script for that reason). Not fixed: `edit_apply` should accept an `operations` list.
+  script for that reason). Fixed in the second pass: `edit_apply` accepts `operations`.
 - `verify_run` on an untrusted root returned two identical skipped stages under the summary
   `Verification completed`, and the Muse agents fell back to bash every time. The summary now
   names the cause and the config file to edit.
