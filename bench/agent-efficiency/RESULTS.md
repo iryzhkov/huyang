@@ -203,6 +203,11 @@ record.
   now says why nothing ran and where to grant trust.
 - OpenCode records no context-window events, so provider token columns are 0 for this
   batch; the tool-call columns (cl100k) are the measurement.
+- By 01:00 PDT 75 runs had succeeded and 22 had failed with `final summary has no done
+  marker` (the Muse agent ended without the steward's completion marker): 12 bash, 8
+  builtin, 3 huyang (all R1). Retried once. Runs after 00:47 PDT ran against the friction
+  pass build (commit 2ea1453 and later), which changes the Huyang family's response sizes
+  mid-batch; `score.py` output should be read with the thread's start time in mind.
 
 Preliminary scores, 22 of 99 runs (before the trust change; `score.py --batch after`):
 
