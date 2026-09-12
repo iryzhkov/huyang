@@ -263,6 +263,14 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		return d.handlers.Execute(ctx, requestID, name, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
+	// A root instead of a workspace_id is resolved here, before the
+	// scheduler lane and the verify phases need the ID.
+	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
+		if failure := d.handlers.AdoptProjectRoot(ctx, requestID, arguments); failure != nil {
+			return failure
+		}
+		workspaceID, _ = arguments["workspace_id"].(string)
+	}
 	var result map[string]any
 	if name == "verify_run" {
 		result = d.executeVerify(ctx, requestID, workspaceID, arguments)

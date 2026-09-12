@@ -183,6 +183,13 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 	}
 }
 
+// AdoptProjectRoot lets the service resolve a root before it schedules the
+// call; see adoptImplicitProject.
+func (h *Handlers) AdoptProjectRoot(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+	root, _ := arguments["root"].(string)
+	return h.adoptImplicitProject(ctx, requestID, root, arguments)
+}
+
 // adoptImplicitProject serves any call that names a project root instead of
 // a workspace_id: the project workspace is opened, or reused when it is
 // already open, and its ID is written into the arguments so the call
