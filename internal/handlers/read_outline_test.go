@@ -51,15 +51,20 @@ func TestOutlineOfUnparsedLanguageUsesProvider(t *testing.T) {
 	if result["outcome"] != "ok" {
 		t.Fatalf("outline = %#v", result)
 	}
-	outline := result["data"].(workspacecore.Outline)
+	outline := result["data"].(map[string]any)
+	sections := outline["sections"].([]map[string]any)
 	// Sections come back in file order, whatever order the provider listed
-	// them in, and the whole-document fallback is gone because there are
-	// declarations to address instead.
-	if len(outline.Sections) != 2 || outline.Sections[0].Name != "M" || outline.Sections[1].Name != "M/setup" {
-		t.Fatalf("outline sections = %#v", outline.Sections)
+	// them in, each with the lines it spans and the handle that addresses
+	// it; the whole-document fallback is gone because there are declarations
+	// to address instead.
+	if len(sections) != 2 || sections[0]["name"] != "M" || sections[1]["name"] != "M/setup" {
+		t.Fatalf("outline sections = %#v", sections)
 	}
-	if outline.Fallback != nil || outline.Coverage.Semantic != "embedded_nvim" {
-		t.Fatalf("outline coverage = %#v fallback = %#v", outline.Coverage, outline.Fallback)
+	if sections[1]["start_line"] != 5 || sections[1]["end_line"] != 7 || sections[1]["handle"] == nil {
+		t.Fatalf("outline section detail = %#v", sections[1])
+	}
+	if _, fallback := outline["fallback_handle"]; fallback || outline["coverage"].(workspacecore.Coverage).Semantic != "embedded_nvim" {
+		t.Fatalf("outline coverage = %#v", outline)
 	}
 	if len(backend.asked) != 1 {
 		t.Fatalf("provider calls = %#v", backend.asked)
@@ -91,8 +96,8 @@ func TestOutlineOfGoFileStaysNative(t *testing.T) {
 		"workspace_id": string(opened["workspace"].(workspacecore.Identity).ID),
 		"view":         "outline", "target": map[string]any{"path": "ledger.go"},
 	})
-	outline := result["data"].(workspacecore.Outline)
-	if len(outline.Sections) != 1 || outline.Sections[0].Name != "Balance" || len(backend.asked) != 0 {
-		t.Fatalf("native outline = %#v, provider calls = %#v", outline, backend.asked)
+	sections := result["data"].(map[string]any)["sections"].([]map[string]any)
+	if len(sections) != 1 || sections[0]["name"] != "Balance" || len(backend.asked) != 0 {
+		t.Fatalf("native outline = %#v, provider calls = %#v", sections, backend.asked)
 	}
 }

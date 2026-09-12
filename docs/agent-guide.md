@@ -88,8 +88,11 @@ existing workspace, because its handle comes from one.
   window another (`targets: [{path, view: outline}, {path, start_line, end_line}]`).
 - `view: outline` works in every language, not only the two the native parser reads:
   Go and Python are sectioned natively, and any other file is outlined from the language
-  server's declarations, each of them a handle a `symbol_locator` read can then name. A
-  file neither can section answers a handle to the whole document and says `text_only`.
+  server's declarations. The reply is one entry per declaration with its name, kind,
+  line range and a handle, which `read {target:{handle}}` and `edit_apply replace_range`
+  accept; a declaration can also be read by `symbol_locator` with the name the outline
+  gave. A file neither can section answers a handle to the whole document and says
+  `text_only`.
 - Need locations: `search` (literal by default; multi-line queries must match whitespace
   exactly). `paths: ["*.go", "internal/"]` scopes the hits and `context_lines: 2` adds the
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that

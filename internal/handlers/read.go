@@ -142,22 +142,13 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 }
 
 // readTargetData normalises one target's payload into the map a multi-target
-// reply carries. A source read already answers a map; the outline view
-// answers its own record, which is flattened here so every file in the reply
-// is one object with a path and its content or its sections.
+// reply carries. The source and outline views already answer a map; anything
+// else is carried as it is under the target's label, so one odd view never
+// costs the other targets their shape.
 func readTargetData(payload any, label string) map[string]any {
 	switch data := payload.(type) {
 	case map[string]any:
 		return data
-	case workspacecore.Outline:
-		record := map[string]any{"path": data.Path, "coverage": data.Coverage}
-		if len(data.Sections) > 0 {
-			record["sections"], record["handles"] = data.Sections, data.Handles
-		}
-		if data.Fallback != nil {
-			record["fallback_range"], record["fallback_handle"] = data.Fallback, data.FallbackHandle
-		}
-		return record
 	default:
 		return map[string]any{"path": label, "result": payload}
 	}
@@ -168,7 +159,7 @@ func readTargetData(payload any, label string) map[string]any {
 // the delivery stopped at max_lines. An outline target has no bytes of its
 // own, so its entry counts the sections instead.
 func readEntry(data map[string]any) map[string]any {
-	if sections, ok := data["sections"].([]workspacecore.Section); ok {
+	if sections, ok := data["sections"].([]map[string]any); ok {
 		return map[string]any{"path": data["path"], "section_count": len(sections)}
 	}
 	content, _ := data["content"].(string)
@@ -394,7 +385,11 @@ func (h *Handlers) readOutline(ctx context.Context, requestID string, workspace 
 	if count := len(outline.Sections); count > 0 {
 		summary = fmt.Sprintf("Outline read: %d declarations", count)
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, outline)
+	var content []byte
+	if read, readErr := workspace.Read(outline.Path); readErr == nil {
+		content = read.Content
+	}
+	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, mcpapi.CompactOutline(outline, content))
 }
 
 // outlineViaProvider asks the semantic provider for every declaration in one
@@ -419,6 +414,9 @@ func (h *Handlers) outlineViaProvider(ctx context.Context, requestID string, wor
 	if len(records) == 0 {
 		return nil, nil, false
 	}
+	// File order, whatever order the provider listed them in, and the
+	// sections stay aligned with the handles that address them.
+	sort.Slice(records, func(i, j int) bool { return records[i].Locator.ByteStart < records[j].Locator.ByteStart })
 	sections := make([]workspacecore.Section, 0, len(records))
 	for _, record := range records {
 		sections = append(sections, workspacecore.Section{
@@ -426,7 +424,6 @@ func (h *Handlers) outlineViaProvider(ctx context.Context, requestID string, wor
 			ByteStart: record.Locator.ByteStart, ByteEnd: record.Locator.ByteEnd,
 		})
 	}
-	sort.Slice(sections, func(i, j int) bool { return sections[i].ByteStart < sections[j].ByteStart })
 	return sections, records, true
 }
 

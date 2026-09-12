@@ -562,6 +562,58 @@ func outputTail(output string) string {
 	return tail
 }
 
+// CompactOutline is the outline an agent acts on: one entry per declaration
+// with its name, kind, line range and the handle that addresses it. The full
+// handle records - hashes, anchors, revisions, one per declaration - stay
+// behind their ids, which read and edit_apply accept on their own. Listing
+// them made the outline of a fifty-declaration file larger than the file.
+func CompactOutline(outline workspacecore.Outline, content []byte) map[string]any {
+	sections := make([]map[string]any, 0, len(outline.Sections))
+	for index, section := range outline.Sections {
+		entry := map[string]any{
+			"name": section.Name, "kind": section.Kind,
+			"start_line": lineOfByte(content, section.ByteStart),
+			"end_line":   endLineOfByte(content, section.ByteEnd),
+		}
+		if index < len(outline.Handles) {
+			entry["handle"] = outline.Handles[index].Handle
+		}
+		sections = append(sections, entry)
+	}
+	compact := map[string]any{
+		"path": outline.Path, "sections": sections,
+		"declaration_count": len(sections), "coverage": outline.Coverage,
+	}
+	// A document nothing could section answers a handle to the whole of it,
+	// which is the only way to address it.
+	if outline.FallbackHandle != nil {
+		compact["fallback_handle"] = outline.FallbackHandle.Handle
+		compact["fallback_range"] = outline.Fallback
+	}
+	return compact
+}
+
+// endLineOfByte is the last line a declaration occupies. A declaration that
+// ends at a line boundary ends on the line before it, not on the empty start
+// of the next one.
+func endLineOfByte(content []byte, offset int) int {
+	if offset > 0 && offset <= len(content) && content[offset-1] == '\n' {
+		offset--
+	}
+	return lineOfByte(content, offset)
+}
+
+// lineOfByte is the 1-based line a byte offset falls on.
+func lineOfByte(content []byte, offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	if offset > len(content) {
+		offset = len(content)
+	}
+	return 1 + strings.Count(string(content[:offset]), "\n")
+}
+
 // pruneEmpty drops the keys of a compact record whose values carry no
 // information: empty strings and lists, false flags and zero counts. The
 // stage name, status, exit code and duration always stay.

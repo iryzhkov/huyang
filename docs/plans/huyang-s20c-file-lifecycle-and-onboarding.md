@@ -461,7 +461,11 @@ calls or misled, and each was fixed in the same branch:
    outline now falls back to the semantic provider through a new kernel operation,
    `file_symbols`, which answers the structural index of one file in the shape
    `find_symbol` already uses, so the same durable handles are registered and a
-   `symbol_locator` read can name what the outline listed.
+   `symbol_locator` read can name what the outline listed. The outline reply is
+   compacted at the same time: it listed a full handle record per declaration, hashes
+   and anchors included, which made the outline of a fifty-declaration file larger than
+   the file. It is now one entry per declaration with its name, kind, line range and
+   handle id.
 5. The friction spool filed 998 calls under 13 anonymous ids, because the daemon reads
    the session from its own environment. The adapter now announces its session in the
    control hello and every call on that connection is spooled under it.

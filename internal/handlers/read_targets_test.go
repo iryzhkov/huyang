@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 // One read call can carry several targets; each answers with its own
@@ -102,8 +100,8 @@ func TestReadTargetsAcceptPerTargetViewAndNumbering(t *testing.T) {
 		t.Fatalf("mixed views = %#v", result)
 	}
 	files := result["data"].(map[string]any)["files"].([]map[string]any)
-	sections, ok := files[0]["sections"].([]workspacecore.Section)
-	if !ok || len(sections) != 2 {
+	sections, ok := files[0]["sections"].([]map[string]any)
+	if !ok || len(sections) != 2 || sections[0]["name"] != "A" {
 		t.Fatalf("outline target = %#v", files[0])
 	}
 	if files[1]["content"] != "1\tone\n2\ttwo\n" {
