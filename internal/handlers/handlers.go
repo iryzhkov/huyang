@@ -116,6 +116,12 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		return h.open(ctx, requestID, arguments)
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
+	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
+		if failure := h.adoptImplicitProject(ctx, requestID, root, arguments); failure != nil {
+			return failure
+		}
+		workspaceID, _ = arguments["workspace_id"].(string)
+	}
 	if name == "read" && strings.TrimSpace(workspaceID) == "" {
 		return h.readImplicitDocument(ctx, requestID, arguments)
 	}
@@ -174,6 +180,25 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		}
 		return result
 	}
+}
+
+// adoptImplicitProject serves any call that names a project root instead of
+// a workspace_id: the project workspace is opened, or reused when it is
+// already open, and its ID is written into the arguments so the call
+// proceeds as if workspace_open had been called first. This saves the
+// separate open call on every task that starts in a known repository.
+func (h *Handlers) adoptImplicitProject(ctx context.Context, requestID, root string, arguments map[string]any) map[string]any {
+	opened := h.open(ctx, requestID, map[string]any{"kind": "project", "root": root})
+	if opened["outcome"] != "ok" {
+		return opened
+	}
+	identity, _ := opened["workspace"].(workspacecore.Identity)
+	if strings.TrimSpace(string(identity.ID)) == "" {
+		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", "implicit project workspace did not return an ID", map[string]any{})
+	}
+	arguments["workspace_id"] = string(identity.ID)
+	delete(arguments, "root")
+	return nil
 }
 
 // readImplicitDocument serves a read that names a path but no workspace by

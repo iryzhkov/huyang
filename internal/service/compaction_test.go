@@ -46,38 +46,38 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 		return direct.call(ctx, "workspace_inspect", map[string]any{"workspace_id": workspaceID, "view": "status"})
 	}
 	// Each recorded finding supersedes the previous one for the same
-	// document, so 25 findings leave 25 new and 24 resolved notices.
-	total := 2*(handlers.MaxDiagnosticUpdates+5) - 1
+	// document: ten findings leave one current and nine resolved. One
+	// reply carries the newest MaxDiagnosticUpdates of them, collapsed to
+	// one entry per finding and marked truncated; the client's cursor
+	// still advances past everything, so the next reply is quiet instead
+	// of replaying the backlog.
+	first := inspect(clientA)
+	updates, present := first["diagnostic_updates"].([]handlers.DiagnosticUpdate)
+	if !present || len(updates) != handlers.MaxDiagnosticUpdates || first["diagnostic_updates_truncated"] != true {
+		t.Fatalf("first delivery = %#v", first["diagnostic_updates"])
+	}
 	seen := map[string]bool{}
-	deliveries := 0
-	for {
-		reply := inspect(clientA)
-		updates, present := reply["diagnostic_updates"].([]workspacecore.DiagnosticNotice)
-		if !present {
-			break
+	for _, update := range updates {
+		if seen[update.ID] {
+			t.Fatalf("finding %s was delivered twice in one reply", update.ID)
 		}
-		deliveries++
-		if len(updates) > handlers.MaxDiagnosticUpdates {
-			t.Fatalf("delivery %d carried %d notices", deliveries, len(updates))
-		}
-		for _, notice := range updates {
-			if seen[notice.Cursor] {
-				t.Fatalf("notice %s was delivered twice", notice.Cursor)
-			}
-			seen[notice.Cursor] = true
-		}
-		if truncated := reply["diagnostic_updates_truncated"] == true; truncated != (len(seen) < total) {
-			t.Fatalf("delivery %d truncated=%v with %d of %d seen", deliveries, truncated, len(seen), total)
-		}
-		if deliveries > 10 {
-			t.Fatal("delivery never drained")
+		seen[update.ID] = true
+		if update.Path != "main.go" || update.Attribution != nil {
+			t.Fatalf("update is not compact: %#v", update)
 		}
 	}
-	if len(seen) != total || deliveries != 3 {
-		t.Fatalf("delivered %d notices in %d replies, want %d in 3", len(seen), deliveries, total)
+	kinds := map[string]int{}
+	for _, update := range updates {
+		kinds[update.Kind]++
+	}
+	if kinds["new"] != 1 || kinds["resolved"] != handlers.MaxDiagnosticUpdates-1 {
+		t.Fatalf("collapsed kinds = %#v, want the current finding and the newest resolved ones", kinds)
+	}
+	if second := inspect(clientA); second["diagnostic_updates"] != nil {
+		t.Fatalf("second reply replayed the backlog: %#v", second["diagnostic_updates"])
 	}
 	other := inspect(handlers.WithClientIdentity(context.Background(), "client-b"))
-	updates, _ := other["diagnostic_updates"].([]workspacecore.DiagnosticNotice)
+	updates, _ = other["diagnostic_updates"].([]handlers.DiagnosticUpdate)
 	if len(updates) != handlers.MaxDiagnosticUpdates || other["diagnostic_updates_truncated"] != true {
 		t.Fatalf("another client saw %d notices", len(updates))
 	}

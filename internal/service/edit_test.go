@@ -60,9 +60,10 @@ func TestEditApplyCapturesAuthoritativeDiagnosticsFromHealthyProvider(t *testing
 	if applied["outcome"] != "ok" {
 		t.Fatalf("healthy provider edit remained provisional: %#v", applied)
 	}
-	verification := applied["data"].(map[string]any)["verification"].(map[string]any)
-	if verification["confidence"] != "authoritative" || backend.lastOperation != "huyang_diagnostic_evidence" {
-		t.Fatalf("edit omitted current provider diagnostics: %#v", applied)
+	// An authoritative verdict is stated by the ok outcome alone; the
+	// verification block only appears when the evidence is incomplete.
+	if _, present := applied["data"].(map[string]any)["verification"]; present || backend.lastOperation != "huyang_diagnostic_evidence" {
+		t.Fatalf("edit omitted current provider diagnostics or repeated the verdict: %#v", applied)
 	}
 	if len(applied["evidence"].(map[string]any)["ids"].([]any)) == 0 {
 		t.Fatalf("edit omitted diagnostic evidence: %#v", applied)

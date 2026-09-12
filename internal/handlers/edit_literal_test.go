@@ -61,9 +61,14 @@ func TestReplaceLiteralIsOneCallWithCompactResponse(t *testing.T) {
 			t.Fatalf("compact response carries %s: %#v", absent, data)
 		}
 	}
+	// The compact reply names where the text changed and the hashes that
+	// revision_diff needs; the patch would only echo what the caller sent.
 	diffs := data["diffs"].([]map[string]any)
-	if len(diffs) != 1 || diffs[0]["path"] != "ledger.go" || !strings.Contains(diffs[0]["patch"].(string), "20000") {
+	if len(diffs) != 1 || diffs[0]["path"] != "ledger.go" || diffs[0]["patch"] != nil || diffs[0]["after_sha256"] == nil {
 		t.Fatalf("diffs = %#v", diffs)
+	}
+	if locations := data["locations"].([]string); len(locations) != 1 || locations[0] != "ledger.go:3:1" {
+		t.Fatalf("locations = %#v", data["locations"])
 	}
 	if data["document_revision"] == nil || data["revision"] == data["from_revision"] {
 		t.Fatalf("revisions = %#v", data)
@@ -76,8 +81,12 @@ func TestReplaceLiteralIsOneCallWithCompactResponse(t *testing.T) {
 	verbose := editLiteral(t, handlers, workspaceID, "e1v", map[string]any{
 		"path": "ledger.go", "old": "20000", "new": "30000",
 	}, map[string]any{"verbose": true})
-	if _, present := verbose["data"].(map[string]any)["tool_delta"]; !present {
+	verboseData := verbose["data"].(map[string]any)
+	if _, present := verboseData["tool_delta"]; !present {
 		t.Fatalf("verbose response lacks the full detail: %#v", verbose)
+	}
+	if patch, _ := verboseData["diffs"].([]map[string]any)[0]["patch"].(string); !strings.Contains(patch, "30000") {
+		t.Fatalf("verbose response lacks the patch: %#v", verboseData["diffs"])
 	}
 }
 

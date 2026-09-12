@@ -114,12 +114,19 @@ func CompactResultSet(set *workspacecore.ResultSet) map[string]any {
 		return nil
 	}
 	compact := map[string]any{
-		"handle": set.Handle, "kind": set.Kind, "match_count": set.MatchCount, "file_count": set.FileCount,
-		"complete": set.Complete, "all_matches_eligible": set.AllMatchesEligible,
-		"retained": set.Retained, "eliminated": set.Eliminated, "expires_at": set.ExpiresAt,
+		"handle": set.Handle, "match_count": set.MatchCount, "file_count": set.FileCount, "expires_at": set.ExpiresAt,
+	}
+	// Flags that hold their normal value are left out; only a deviation
+	// (an incomplete set, hits that cannot all be edited, a refinement)
+	// is worth the tokens.
+	if !set.Complete {
+		compact["complete"] = false
+	}
+	if !set.AllMatchesEligible {
+		compact["all_matches_eligible"] = false
 	}
 	if set.Parent != "" {
-		compact["parent"] = set.Parent
+		compact["parent"], compact["retained"], compact["eliminated"] = set.Parent, set.Retained, set.Eliminated
 	}
 	return compact
 }
@@ -160,7 +167,7 @@ func CompactOrientation(orientation workspacecore.Orientation) map[string]any {
 	topLevel := make([]map[string]any, 0, len(order))
 	for _, name := range order {
 		item := byName[name]
-		record := map[string]any{"path": item.path, "kind": item.kind, "bytes": item.bytes}
+		record := map[string]any{"path": item.path, "kind": item.kind}
 		if item.kind == "directory" {
 			record["files"] = item.files
 		}
@@ -182,7 +189,11 @@ func CompactRecentCommits(list workspacecore.CommitList, limit int) map[string]a
 			"handle": commit.Handle, "abbreviated_id": commit.AbbreviatedID, "subject": commit.Subject,
 		})
 	}
-	return map[string]any{"commits": commits, "coverage": list.Coverage}
+	compact := map[string]any{"commits": commits}
+	if !list.Coverage.Complete && len(list.Coverage.Unavailable) > 0 {
+		compact["coverage"] = list.Coverage
+	}
+	return compact
 }
 
 // CompactLanguageSupport removes the per-language install option lists from

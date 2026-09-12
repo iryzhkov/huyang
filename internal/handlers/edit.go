@@ -67,6 +67,9 @@ type appliedEdit struct {
 	replacements int
 	summary      string
 	warnings     []string
+	// locations are the path:line:column of each literal replacement, the
+	// cheap substitute for a patch the agent already knows the content of
+	locations []string
 	// format is what the language formatter did after the edit, when it ran
 	format map[string]any
 	// verbose detail, only reported on request
@@ -187,15 +190,39 @@ func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *
 	if failure := h.checkpointEdit(ctx, requestID, workspace, data); failure != nil {
 		return failure
 	}
-	outcome, detail, evidenceIDs := h.refreshEditDiagnostics(ctx, requestID, workspace, applied.files, data)
+	outcome, summary := "ok", applied.summary
+	var evidenceIDs []string
+	if semanticEditTargets(workspace, applied.files) {
+		var detail string
+		outcome, detail, evidenceIDs = h.refreshEditDiagnostics(ctx, requestID, workspace, applied.files, data)
+		summary += "; " + detail
+	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
-	result := mcpapi.Envelope(requestID, workspace, outcome, "", applied.summary+"; "+detail, data)
+	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, data)
 	result["warnings"] = mcpapi.NonNilStrings(applied.warnings)
-	result["evidence"] = map[string]any{"ids": mcpapi.NonNilStrings(evidenceIDs), "truncated": false}
+	if len(evidenceIDs) > 0 {
+		result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
+	}
 	if outcome != "ok" {
 		result["next"] = editDiagnosticRecovery(data["revision"])
 	}
 	return result
+}
+
+// semanticEditTargets reports whether the edited files can have semantic
+// diagnostics at all: a project workspace and at least one source file. A
+// note, a config file or a lone document outside a repository gets a plain
+// ok instead of a provisional verdict about diagnostics that cannot exist.
+func semanticEditTargets(workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile) bool {
+	if workspace.Identity().Kind != workspacecore.KindProject {
+		return false
+	}
+	for _, file := range files {
+		if workspacecore.IsSemanticSource(file.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 // compactEditData is the default edit response: what changed, the new
@@ -208,12 +235,15 @@ func compactEditData(workspace *workspacecore.Workspace, request editRequest, ap
 	}
 	data := map[string]any{
 		"changed_paths": changed, "canonical_changed": !request.Preview,
-		"diffs":         editDiffs(applied),
+		"diffs":         editDiffs(applied, request.Verbose || request.Preview),
 		"from_revision": fmt.Sprintf("wsrev_%d", applied.fromStateSeq),
 		"revision":      fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
 	}
 	if applied.replacements != 1 {
 		data["replacements"] = applied.replacements
+	}
+	if len(applied.locations) > 0 {
+		data["locations"] = applied.locations
 	}
 	if applied.format != nil {
 		data["format"] = applied.format
@@ -278,13 +308,18 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 		data["verification"] = map[string]any{"confidence": "unavailable", "reasons": []string{err.Error()}}
 		return "provisional", "semantic diagnostic refresh failed", nil
 	}
-	data["diagnostic_delta"] = compactDiagnosticDelta(workspace, report)
+	delta := compactDiagnosticDelta(workspace, report)
+	if len(delta["new"].([]map[string]any)) > 0 || len(delta["resolved"].([]string)) > 0 {
+		data["diagnostic_delta"] = delta
+	}
+	if report.Confidence == workspacecore.ConfidenceAuthoritative || report.Confidence == workspacecore.ConfidenceCorroborated {
+		// The verdict is authoritative: the summary says so and the
+		// verification block would only repeat it.
+		return "ok", diagnosticSummary(report), report.EvidenceIDs
+	}
 	data["verification"] = map[string]any{
 		"confidence": report.Confidence,
 		"reasons":    mcpapi.NonNilStrings(report.ProvisionalReasons),
-	}
-	if report.Confidence == workspacecore.ConfidenceAuthoritative || report.Confidence == workspacecore.ConfidenceCorroborated {
-		return "ok", diagnosticSummary(report), report.EvidenceIDs
 	}
 	return "provisional", "semantic diagnostics remain incomplete", report.EvidenceIDs
 }

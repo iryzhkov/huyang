@@ -27,7 +27,9 @@ func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces) *mcp.Server 
 func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, direct *directWorkspaces) {
 	server.AddTool(&mcp.Tool{
 		Name: descriptor.Name, Description: descriptor.Description,
-		InputSchema: descriptor.InputSchema, OutputSchema: mcpapi.OutputEnvelopeSchema(),
+		// The output envelope schema is the same for every tool and is not
+		// attached: it was a quarter of the catalog every session loads.
+		InputSchema: descriptor.InputSchema,
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    descriptor.ReadOnly,
 			DestructiveHint: boolPointer(descriptor.Destructive),

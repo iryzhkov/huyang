@@ -91,6 +91,29 @@ to 100 times the built-in cost, which is why an agent reached for `sed`.
    preference and the `.git`-free sandbox (`runs/protocol-after-d.json`): the verification
    steps of E5, E6 and V1 run through `verify_run` instead of a shell fallback.
 
+### Friction pass (`runs/protocol-after-f.json`, 2026-09-12)
+
+A second pass on what the live session showed: replies no longer echo the caller's text,
+diagnostic notices collapse and stay off reads, the envelope drops its normal-case fields,
+`root` replaces the separate open, `search` gained `paths` and `context_lines`, `read`
+gained `numbered`, and `tools/list` lost the per-tool output schema. Same fixtures and
+scenarios, Huyang family, response tokens before (`protocol-after.json`) and after:
+
+| Scenario | Go | Python |
+|---|---|---|
+| W0 open | 603 -> 531 | 622 -> 566 |
+| E1 one-line edit | 421 -> 360 | 432 -> 381 |
+| E2 swap a block | 671 -> 375 | 631 -> 375 |
+| E3 rename x5 | 526 -> 400 | 564 -> 419 |
+| E4 new file | 398 -> 354 | 399 -> 348 |
+| E5 three files + tests | 2832 -> 2248 | 2729 -> 1857 |
+| E6 signature change | 5636 -> 4774 | 5654 -> 4559 |
+| V1 tests | 273 -> 258 | 277 -> 258 |
+
+Request tokens and call counts are unchanged; reads moved by a few tokens. The protocol
+harness still opens the workspace explicitly (W0) so the open stays measured; an agent
+using `root` skips that call entirely.
+
 ### Friction met while doing this work through Huyang (the pre-change build)
 
 - `change_plan prepare` failed twice with `sandbox_source_changed` in this repository:
@@ -117,11 +140,34 @@ to 100 times the built-in cost, which is why an agent reached for `sed`.
   gopls churned during edits: about 800 response tokens per call of `new`/`stale`/`resolved`
   notices for the same ids, each with an `attribution: {rank: unattributed}` object. A
   5-line edit therefore cost about 1,300 tokens here against 422 in the protocol
-  measurement on a quiet fixture. Not fixed yet; the delta should collapse to one line per
-  id and drop the empty attribution.
+  measurement on a quiet fixture. Fixed: notices collapse to one line per finding, stale
+  ones are dropped, the cap is five, reads never carry them, and the client's cursor jumps
+  to the newest notice so a backlog is never replayed twenty at a time (it was: the
+  delivered cursor lagged 400 notices behind in this session).
 - `edit_apply` on a file outside any repository answered `semantic diagnostic refresh
   failed` in its summary although nothing failed; a documents workspace has no provider.
-  Cosmetic, not fixed yet.
+  Fixed: an edit to a file no language server covers, or in a documents workspace, skips
+  the refresh and is plainly ok.
+- The edit reply echoed the caller's own text as a JSON-escaped byte-range patch (a
+  40-line `score.py` edit answered about 1,500 tokens). Fixed: the patch appears only with
+  `verbose` or in a preview; `locations` names the changed lines instead.
+- The reply envelope carried `evidence: {ids: [], truncated: false}`,
+  `idempotency_persisted: true` and a required `idempotency_key` on every mutation. Fixed:
+  both fields are omitted in the normal case and the key is generated when absent.
+- `read` with `targets` failed with `arguments.targets must be an array` when the harness
+  sent the array as JSON text (its cached tool schema predated the server). Fixed:
+  structured arguments that arrive as JSON text are decoded.
+- `workspace_open` was a mandatory first call (about 840 tokens live). Fixed: every tool
+  accepts `root` instead of `workspace_id` and opens or reuses the workspace itself.
+- `search` lost to `grep -rn -C` because it had no context lines and no path filter; this
+  session fell back to the shell for those. Fixed: `paths` and `context_lines`.
+- `read` content had no line numbers, so citing a line meant counting. Fixed: `numbered`.
+- `tools/list` was 18,699 tokens for the full profile, loaded into every session; the
+  output envelope schema was attached to all 19 tools and the search schema repeated its
+  properties three times under `oneOf`. Fixed: neither is attached any more.
+- Several literal replacements in one file still need one call each (four calls on
+  `score.py`; the three test assertions at the end of this pass went through a shell
+  script for that reason). Not fixed: `edit_apply` should accept an `operations` list.
 - `verify_run` on an untrusted root returned two identical skipped stages under the summary
   `Verification completed`, and the Muse agents fell back to bash every time. The summary now
   names the cause and the config file to edit.

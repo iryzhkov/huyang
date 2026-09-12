@@ -13,9 +13,10 @@ func (s *session) runHuyang(spec languageSpec) {
 	root := s.fixtureDir(language)
 	opened := s.call("W0", language, "workspace_open", map[string]any{"kind": "project", "root": root}, "open the fixture once per session")
 	s.workspaces[language] = workspaceID(opened)
-	capabilities, _ := data(opened)["capabilities"].(map[string]any)
-	optional, _ := capabilities["optional"].(map[string]any)
-	s.pipelines[language] = fmt.Sprint(optional["project_commands"]) == "available"
+	// The commands block says whether verify_run may run them; the
+	// capabilities block only lists what is not available.
+	commands, _ := data(opened)["commands"].(map[string]any)
+	s.pipelines[language] = commands["trusted"] == true && (commands["check"] != nil || commands["tests"] != nil)
 	s.readScenarios(spec)
 	s.editScenarios(spec)
 }

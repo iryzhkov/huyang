@@ -92,7 +92,19 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 // optional facilities exist and the semantic coverage label. Limits and
 // environment failures stay behind workspace_inspect.
 func compactCapabilities(inspection workspacecore.Inspection) map[string]any {
-	compact := map[string]any{"native": inspection.Native, "optional": inspection.Optional, "semantic": inspection.Coverage.Semantic}
+	compact := map[string]any{"semantic": inspection.Coverage.Semantic}
+	// The native facilities are always present and every optional one
+	// that is available needs no mention; only what is missing or degraded
+	// changes what the agent does next.
+	missing := map[string]any{}
+	for name, state := range inspection.Optional {
+		if text := fmt.Sprint(state); text != "available" {
+			missing[name] = state
+		}
+	}
+	if len(missing) > 0 {
+		compact["not_available"] = missing
+	}
 	if len(inspection.Failures) > 0 {
 		compact["failures"] = inspection.Failures
 	}

@@ -45,6 +45,14 @@ var otherSourceExtensions = map[string]bool{
 	".scala": true, ".sh": true, ".swift": true, ".ts": true, ".tsx": true, ".zig": true,
 }
 
+// IsSemanticSource reports whether a path is source code that a language
+// server or the native parser can diagnose, as opposed to data or prose,
+// for which an edit expects no semantic verdict.
+func IsSemanticSource(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return (NativeSectioner{}).SupportsExtension(ext) || otherSourceExtensions[ext]
+}
+
 // SupportsExtension reports whether the native sectioner understands ext.
 func (NativeSectioner) SupportsExtension(ext string) bool {
 	switch strings.ToLower(ext) {

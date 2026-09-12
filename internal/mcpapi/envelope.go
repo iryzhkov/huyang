@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"encoding/json"
+	"strings"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -55,8 +56,13 @@ func FinalizeEnvelope(tool string, result map[string]any) map[string]any {
 	if _, ok := result["warnings"].([]string); !ok {
 		result["warnings"] = []string{}
 	}
-	if _, ok := result["evidence"]; !ok {
-		result["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
+	// An empty evidence block and a persisted receipt are the normal case;
+	// both are omitted so a reply only carries what deviates from it.
+	if evidence, ok := result["evidence"].(map[string]any); ok && evidenceEmpty(evidence) {
+		delete(result, "evidence")
+	}
+	if result["idempotency_persisted"] == true {
+		delete(result, "idempotency_persisted")
 	}
 	if _, ok := result["data"]; !ok || result["data"] == nil {
 		result["data"] = map[string]any{}
@@ -82,6 +88,55 @@ func FinalizeEnvelope(tool string, result map[string]any) map[string]any {
 		envelopeAudit(tool, result)
 	}
 	return result
+}
+
+func evidenceEmpty(evidence map[string]any) bool {
+	if evidence["truncated"] == true {
+		return false
+	}
+	switch ids := evidence["ids"].(type) {
+	case []string:
+		return len(ids) == 0
+	case []any:
+		return len(ids) == 0
+	case nil:
+		return true
+	}
+	return false
+}
+
+// structuredArguments are the top-level arguments whose schema wants an
+// array or an object. A client whose cached tool schema predates the server
+// sometimes sends them as JSON text; NormalizeArguments decodes those.
+var structuredArguments = map[string]bool{
+	"target": true, "targets": true, "operation": true, "operations": true, "files": true, "stages": true,
+	"paths": true, "refine": true, "git_history": true, "edit": true, "initial_breakpoints": true,
+	"args": true, "env": true, "track": true,
+}
+
+// NormalizeArguments decodes structured arguments that arrived as JSON text.
+// Only arguments the schema declares as arrays or objects are considered,
+// so a string value that happens to look like JSON is left alone.
+func NormalizeArguments(arguments map[string]any) map[string]any {
+	for key, value := range arguments {
+		text, ok := value.(string)
+		if !ok || !structuredArguments[key] {
+			continue
+		}
+		trimmed := strings.TrimSpace(text)
+		if len(trimmed) < 2 || (trimmed[0] != '[' && trimmed[0] != '{') {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+			continue
+		}
+		switch decoded.(type) {
+		case []any, map[string]any:
+			arguments[key] = decoded
+		}
+	}
+	return arguments
 }
 
 func CloneEnvelope(source map[string]any) map[string]any {

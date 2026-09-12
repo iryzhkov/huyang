@@ -102,7 +102,9 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		},
 	}
 	applied := callModern(t, firstSession, "edit_apply", applyArguments)
-	if applied["outcome"] != "provisional" || applied["idempotency_persisted"] != true {
+	// A persisted receipt is the normal case and is not announced; a text
+	// document has no semantic diagnostics, so the edit is plainly ok.
+	if applied["outcome"] != "ok" || applied["idempotency_persisted"] != nil {
 		t.Fatalf("apply = %#v", applied)
 	}
 	closeFirst()
@@ -126,7 +128,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	secondSession, closeSecond := connectUnixOfficialClient(t, socketPath, mcpapi.ProfileEdit)
 	defer closeSecond()
 	replayed := callModern(t, secondSession, "edit_apply", applyArguments)
-	if replayed["outcome"] != "provisional" || replayed["idempotency"] != "replayed" {
+	if replayed["outcome"] != "ok" || replayed["idempotency"] != "replayed" {
 		t.Fatalf("restart replay = %#v", replayed)
 	}
 	restartedRead := callModern(t, secondSession, "read", map[string]any{
@@ -180,7 +182,9 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "note.txt")
+	// A source file: only source files go through the post-mutation
+	// diagnostics this test holds open.
+	path := filepath.Join(root, "note.go")
 	if err := os.WriteFile(path, []byte("alpha beta\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

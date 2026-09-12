@@ -51,6 +51,13 @@ func (r *memoryRegistry) Adopt(opened *workspacecore.Workspace, _ []string) (*wo
 	if r.items == nil {
 		r.items = make(map[workspacecore.ID]*workspacecore.Workspace)
 	}
+	// Like the service registry, an open of a root that is already open
+	// hands back the existing workspace instead of a second identity.
+	for _, existing := range r.items {
+		if existing.Identity().Kind == opened.Identity().Kind && existing.Identity().Root == opened.Identity().Root {
+			return existing, false, nil
+		}
+	}
 	r.items[opened.Identity().ID] = opened
 	return opened, true, nil
 }

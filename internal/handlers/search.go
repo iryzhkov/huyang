@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
@@ -95,9 +98,13 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		}
 		return failure
 	}
+	result.Hits = filterHitPaths(result.Hits, argStrings(arguments["paths"]))
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges)
+	if context := argInt(arguments, "context_lines", 0); context > 0 {
+		attachSearchContext(workspace, hits, context)
+	}
 	summary := fmt.Sprintf("%d matches", len(result.Hits))
 	if len(result.Hits) == 1 {
 		summary = "1 match"
@@ -120,6 +127,75 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
 	return envelope
+}
+
+// argStrings reads an array-of-strings argument.
+func argStrings(value any) []string {
+	var out []string
+	for _, raw := range mcpapi.AnySlice(value) {
+		if text, ok := raw.(string); ok && text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// filterHitPaths keeps the hits whose path contains one of the patterns or
+// matches it as a glob (against the whole path or its base name), so one
+// search can be scoped to a directory or an extension without a refine call.
+func filterHitPaths(hits []workspacecore.SearchHit, patterns []string) []workspacecore.SearchHit {
+	if len(patterns) == 0 {
+		return hits
+	}
+	kept := hits[:0:0]
+	for _, hit := range hits {
+		for _, pattern := range patterns {
+			if strings.Contains(hit.Path, pattern) {
+				kept = append(kept, hit)
+				break
+			}
+			if ok, _ := filepath.Match(pattern, hit.Path); ok {
+				kept = append(kept, hit)
+				break
+			}
+			if ok, _ := filepath.Match(pattern, filepath.Base(hit.Path)); ok {
+				kept = append(kept, hit)
+				break
+			}
+		}
+	}
+	return kept
+}
+
+// attachSearchContext adds the numbered lines around each hit, the way
+// grep -C does, so the agent sees what it found without a read call.
+func attachSearchContext(workspace *workspacecore.Workspace, hits []map[string]any, around int) {
+	cache := map[string][][]byte{}
+	for _, hit := range hits {
+		path, _ := hit["path"].(string)
+		line, _ := hit["line"].(int)
+		lines, known := cache[path]
+		if !known {
+			read, err := workspace.Read(path)
+			if err != nil {
+				continue
+			}
+			lines = bytes.Split(read.Content, []byte("\n"))
+			if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+				lines = lines[:len(lines)-1]
+			}
+			cache[path] = lines
+		}
+		start, end := max(line-around, 1), min(line+around, len(lines))
+		if start > end {
+			continue
+		}
+		var out strings.Builder
+		for number := start; number <= end; number++ {
+			fmt.Fprintf(&out, "%d\t%s\n", number, lines[number-1])
+		}
+		hit["context"] = out.String()
+	}
 }
 
 // symbolFind answers from the native text core when it has parser coverage

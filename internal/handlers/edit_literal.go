@@ -37,7 +37,7 @@ func (h *Handlers) editLiteral(ctx context.Context, requestID string, workspace 
 	applied := appliedEdit{
 		files: change.Files, patches: change.Patches, revisions: change.Revisions,
 		fromStateSeq: fromStateSeq, replacements: change.Replacements, warnings: warnings,
-		summary: literalSummary(change, request.Preview),
+		summary: literalSummary(change, request.Preview), locations: literalLocations(match.Hits),
 	}
 	return h.finishEdit(ctx, requestID, workspace, request, applied)
 }

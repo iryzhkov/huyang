@@ -104,6 +104,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	ctx, cancel := context.WithTimeoutCause(ctx, d.toolTimeout, errGlobalToolCallTimeout)
 	defer cancel()
 	requestID := fmt.Sprintf("req_%d", d.requests.Add(1))
+	arguments = mcpapi.NormalizeArguments(arguments)
 	if d.loadErr != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "service_state_unavailable", d.loadErr.Error(), map[string]any{})
 	}
@@ -114,7 +115,11 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	}
 	idempotencyKey, _ := arguments["idempotency_key"].(string)
 	if idempotencyKey == "" {
-		return mcpapi.Envelope(requestID, nil, "failed", "missing_idempotency_key", "Stateful calls require idempotency_key", map[string]any{})
+		// A caller that supplies no key gets a fresh one: the call is not
+		// replay-protected, which is what omitting the key means, and the
+		// key is echoed so a retry can still name it.
+		idempotencyKey = fmt.Sprintf("auto_%d_%s", time.Now().UnixNano(), requestID)
+		arguments["idempotency_key"] = idempotencyKey
 	}
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
@@ -270,7 +275,15 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 		result = d.handlers.Execute(ctx, requestID, name, arguments)
 		release()
 	}
-	if name != "diagnostics" {
+	// A root given instead of a workspace_id opened the workspace inside
+	// Execute; read the ID it settled on.
+	if workspaceID == "" {
+		workspaceID, _ = arguments["workspace_id"].(string)
+	}
+	// Pure reads stay quiet: an agent that only reads should not pay for
+	// the diagnostic churn of a language server behind it. Mutations and
+	// workspace_inspect carry the delta.
+	if isStatefulModernTool(name) || name == "workspace_inspect" {
 		if workspace := d.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
 			d.handlers.AttachDiagnosticUpdates(ctx, workspace, result)
 		}

@@ -22,6 +22,7 @@ type readRequest struct {
 	StartLine int
 	EndLine   int
 	Limit     int
+	Numbered  bool
 	Targets   []map[string]any
 }
 
@@ -30,6 +31,7 @@ func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
 		StartLine: argInt(arguments, "start_line", 0), EndLine: argInt(arguments, "end_line", 0),
 		Limit: argInt(arguments, "limit", 20),
 	}
+	request.Numbered, _ = arguments["numbered"].(bool)
 	request.View, _ = arguments["view"].(string)
 	for _, raw := range mcpapi.AnySlice(arguments["targets"]) {
 		if target, ok := raw.(map[string]any); ok {
@@ -92,7 +94,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	files := make([]map[string]any, 0, len(request.Targets))
 	failed := 0
 	for index, target := range request.Targets {
-		single := readRequest{View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0), Limit: request.Limit}
+		single := readRequest{View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0), Limit: request.Limit, Numbered: request.Numbered}
 		decodeReadTarget(&single, target)
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
@@ -255,6 +257,13 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 	if rangeErr != nil {
 		return mcpapi.Failure(requestID, workspace, "invalid_line_range", rangeErr)
 	}
+	firstLine := actualStart
+	if firstLine == 0 {
+		firstLine = 1
+	}
+	if request.Numbered {
+		content = numberLines(content, firstLine)
+	}
 	data := map[string]any{"path": read.Path, "content": string(content), "revision_id": read.Snapshot.Revision, "lines": lineCount(read.Content)}
 	if request.StartLine != 0 || request.EndLine != 0 {
 		data["start_line"], data["end_line"] = actualStart, actualEnd
@@ -263,6 +272,20 @@ func readPath(requestID string, workspace *workspacecore.Workspace, request read
 		data["coverage"] = read.Coverage
 	}
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", read.Path), data)
+}
+
+// numberLines prefixes every line with its 1-based number and a tab, so an
+// agent can cite or window a line without counting.
+func numberLines(content []byte, first int) []byte {
+	lines := bytes.Split(content, []byte("\n"))
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	var out bytes.Buffer
+	for index, line := range lines {
+		fmt.Fprintf(&out, "%d\t%s\n", first+index, line)
+	}
+	return out.Bytes()
 }
 
 // resolveSymbolLocatorViaProvider asks the semantic provider for the

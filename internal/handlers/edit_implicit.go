@@ -46,7 +46,6 @@ func (h *Handlers) editImplicitDocument(ctx context.Context, requestID string, a
 	arguments["workspace_id"] = string(identity.ID)
 	operation["path"] = absolute
 	result := h.Execute(ctx, requestID, "edit_apply", arguments)
-	result["warnings"] = append(result["warnings"].([]string), "Implicitly opened an exact one-document workspace for "+absolute+"; reuse the returned workspace_id for further edits of this file.")
 	if data, ok := result["data"].(map[string]any); ok {
 		data["implicit_workspace"] = true
 	}

@@ -6,17 +6,21 @@ import (
 	"fmt"
 )
 
-// editDiffs is the per-file diff record of an edit response: the path, the
-// content hashes before and after, and the patch. It is what revision_diff
-// and the replay receipts read back, so it is present in every edit
-// response regardless of verbosity.
-func editDiffs(applied appliedEdit) []map[string]any {
+// editDiffs is the per-file diff record of an edit response: the path and
+// the content hashes before and after, which revision_diff and the replay
+// receipts read back, plus the patch when asked for. The default response
+// omits the patch: for a literal edit or a new file it would only echo what
+// the agent just sent.
+func editDiffs(applied appliedEdit, includePatch bool) []map[string]any {
 	diffs := make([]map[string]any, 0, len(applied.files))
 	for _, file := range applied.files {
-		diffs = append(diffs, map[string]any{
+		diff := map[string]any{
 			"path": file.Path, "before_sha256": contentHash(file.Before), "after_sha256": contentHash(file.After),
-			"patch": boundedPatch(file.Patch),
-		})
+		}
+		if includePatch {
+			diff["patch"] = boundedPatch(file.Patch)
+		}
+		diffs = append(diffs, diff)
 	}
 	return diffs
 }

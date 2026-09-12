@@ -49,8 +49,10 @@ func listedToolNames(t *testing.T, session *mcp.ClientSession) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if descriptor.OutputSchema == nil {
-			t.Fatalf("%s has no output schema", descriptor.Name)
+		// The output envelope schema is shared by every tool and is not
+		// attached to the catalog, which every session loads in full.
+		if descriptor.OutputSchema != nil {
+			t.Fatalf("%s carries an output schema", descriptor.Name)
 		}
 		if descriptor.Annotations == nil {
 			t.Fatalf("%s has no annotations", descriptor.Name)
@@ -243,12 +245,14 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 		"workspace_id": workspaceID, "idempotency_key": "apply-1",
 		"operation": map[string]any{"kind": "replace_range", "target": target, "content": "gamma"},
 	}
+	// A text document has no semantic diagnostics to wait for, so the edit
+	// is plainly ok rather than provisional.
 	applied := callModern(t, session, "edit_apply", applyArguments)
-	if applied["outcome"] != "provisional" || applied["idempotency"] != "created" {
+	if applied["outcome"] != "ok" || applied["idempotency"] != "created" {
 		t.Fatalf("apply = %#v", applied)
 	}
 	replayed := callModern(t, session, "edit_apply", applyArguments)
-	if replayed["outcome"] != "provisional" || replayed["idempotency"] != "replayed" ||
+	if replayed["outcome"] != "ok" || replayed["idempotency"] != "replayed" ||
 		replayed["request_id"] == applied["request_id"] {
 		t.Fatalf("replay = %#v after %#v", replayed, applied)
 	}
@@ -454,8 +458,10 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	})
 	searchData := searched["data"].(map[string]any)
 	resultSet := searchData["result_set"].(map[string]any)
-	if resultSet["kind"] != "current_source" || resultSet["match_count"] != float64(2) ||
-		resultSet["all_matches_eligible"] != true {
+	// The compact set carries the handle and counts; flags at their normal
+	// value (complete, all matches eligible) are omitted.
+	if resultSet["handle"] == nil || resultSet["match_count"] != float64(2) ||
+		resultSet["all_matches_eligible"] != nil || resultSet["kind"] != nil {
 		t.Fatalf("search result set = %#v", resultSet)
 	}
 	refined := callModern(t, session, "search", map[string]any{
@@ -484,7 +490,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 		"workspace_id": workspaceID, "idempotency_key": "opaque-apply",
 		"operation": map[string]any{"kind": "replace_range", "target": map[string]any{"handle": opaque}, "content": "delta"},
 	})
-	if applied["outcome"] != "provisional" {
+	if applied["outcome"] != "ok" {
 		t.Fatalf("handle edit = %#v", applied)
 	}
 	content, err := os.ReadFile(first)
@@ -644,7 +650,8 @@ func TestDirectModeRejectsMalformedAndAcceptsLargeArguments(t *testing.T) {
 		t.Fatal("array arguments were accepted")
 	}
 	searchSchema := mcpapi.Catalog(mcpapi.ProfileOrient)[2].InputSchema
-	if err := mcpapi.ValidateToolArguments(searchSchema, map[string]any{"workspace_id": "ws"}); err == nil {
+	symbolSchema := mcpapi.Catalog(mcpapi.ProfileOrient)[3].InputSchema
+	if err := mcpapi.ValidateToolArguments(symbolSchema, map[string]any{"workspace_id": "ws"}); err == nil {
 		t.Fatal("missing required query was accepted")
 	}
 	if err := mcpapi.ValidateToolArguments(searchSchema, map[string]any{

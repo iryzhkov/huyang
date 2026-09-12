@@ -1048,6 +1048,19 @@ compaction of a default result, or a new stable code. No mutation precondition w
   `operation.path` is absolute: an exact one-document workspace is opened implicitly, as
   `read` already does, and the response carries `data.implicit_workspace: true` and the
   workspace identity. `replace_range` without a workspace answers `workspace_required`.
+- Every workspace-scoped tool accepts `root` in place of `workspace_id`: the project
+  workspace is opened, or reused when already open, inside the call, and the reply's
+  `workspace` block names it. `workspace_id` is no longer a required property anywhere.
+- `idempotency_key` is optional on stateful calls; a missing key is generated per call, so
+  the call is not replay-protected, which is what omitting it means.
+- `read.numbered` (boolean) prefixes each content line with its number and a tab.
+- `search.paths` (array of substrings or globs) keeps only hits under those paths;
+  `search.context_lines` (0 to 20) adds `context`, the numbered lines around each hit.
+  The search schema no longer uses `oneOf`; exactly one of `query`, `result_set_handle`
+  with `refine`, or `git_history` is still expected.
+- Structured arguments (`target`, `targets`, `operation`, `operations`, `files`, `stages`,
+  `paths`, `refine`, `git_history`, `edit`) that arrive as JSON text are decoded, for
+  clients whose cached schema predates the server.
 
 ### Output changes
 
@@ -1063,8 +1076,29 @@ compaction of a default result, or a new stable code. No mutation precondition w
   add `name_path`, `kind`, `handle`, `start_line`, `end_line` and `coverage`. The full
   snapshot is gone. `targets` answers `{files: [...]}` with per-target errors in place.
 - `search` data drops the echoed query, mode, workspace and (when complete) coverage;
-  `result_set` is the compact `{handle, kind, match_count, file_count, complete,
-  all_matches_eligible, retained, eliminated, expires_at, parent}`.
+  `result_set` is the compact `{handle, match_count, file_count, expires_at}` plus
+  `complete: false` or `all_matches_eligible: false` only when so, and `parent`,
+  `retained`, `eliminated` only for a refinement.
+- Friction pass (2026-09-12): `diffs` entries carry `patch` only with `verbose` (or a
+  preview); `locations` (`path:line:column`) names each literal replacement instead.
+  `diagnostic_delta` is omitted when both lists are empty and `verification` when the
+  verdict is authoritative (the `ok` outcome states it). An edit whose files no parser or
+  language server covers, or in a documents workspace, skips the semantic refresh and is
+  `ok` with no recovery hints and no implicit-workspace warning.
+- `diagnostic_updates` is attached only to mutating calls and `workspace_inspect`, never
+  to reads. Its entries are `{id, kind, severity, path}` (`attribution` only when
+  attributed), one per finding with its last state, newest first, findings whose last
+  notice is `stale` dropped, capped at 5 with `diagnostic_updates_truncated`. The client's
+  cursor advances to the newest notice examined, so a backlog is never replayed a page at
+  a time.
+- The envelope omits `evidence` when it has no IDs and `idempotency_persisted` when true;
+  `evidence` is no longer a required output property.
+- `verify_run` whose stages all skipped says why in `summary` (untrusted root and the
+  config file that grants trust, or no command declared).
+- `workspace_open` `capabilities` is `{semantic, not_available: {name: state}, failures}`:
+  native facilities and available optional ones are not listed. `overview.top_level`
+  entries drop `bytes`; `recent_commits.coverage` appears only when history is unavailable.
+- `tools/list` no longer attaches the output envelope schema to every tool.
 - `workspace_open` data adds `commands` (`source`, `detected_from`, `format_gate`, `check`,
   `tests`, `state`, `trusted`, and one of `run`, `enable`, `override`, `hint`) and reports
   compact `capabilities` (`native`, `optional`, `semantic`, `failures`) and
