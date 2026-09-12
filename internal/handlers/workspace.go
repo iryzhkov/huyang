@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
@@ -62,8 +63,10 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		capabilities.Optional["lsp"] = "probe_with_language_server_status"
 		semanticProvider = providerpool.Status(ctx, canonicalBackend)
 	}
+	var commands map[string]any
 	if policy, policyErr := workspacecore.LoadPipelinePolicy(opened.Identity().Root, ""); policyErr == nil {
 		reconcilePipelineCapabilities(&capabilities, policy)
+		commands = describeCommands(policy)
 	}
 	action := "Opened"
 	if !created {
@@ -80,6 +83,7 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"service_limits":    map[string]any{"tool_call_timeout_ms": h.toolTimeout.Milliseconds()},
 		"overview":          overview,
 		"recent_commits":    mcpapi.CompactRecentCommits(recent, 3),
+		"commands":          commands,
 		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
 }
@@ -113,7 +117,7 @@ func reconcilePipelineCapabilities(inspection *workspacecore.Inspection, policy 
 	commandsConfigured := len(policy.Check) > 0 || len(policy.Tests) > 0
 	formatConfigured := len(policy.Format.Gate.Command) > 0 || len(policy.Format.Transform.Command) > 0
 	state := "unavailable"
-	if policy.ProjectConfig != "" {
+	if policy.ProjectConfig != "" || len(policy.Detected) > 0 {
 		state = "configured_untrusted"
 		if policy.Trusted {
 			state = "available"
@@ -193,7 +197,11 @@ func describePipelineState(policy workspacecore.PipelinePolicy) (string, string)
 		return "configured_trusted", "Project commands are configured and this workspace root is trusted."
 	case policy.ProjectConfig != "":
 		return "configured_untrusted", "Project commands are configured but disabled until this workspace root is trusted in the user policy."
+	case len(policy.Detected) > 0 && policy.Trusted:
+		return "detected_trusted", fmt.Sprintf("Commands were detected from %s (no .huyang.toml) and this workspace root is trusted; write .huyang.toml to override them.", strings.Join(policy.Detected, ", "))
+	case len(policy.Detected) > 0:
+		return "detected_untrusted", fmt.Sprintf("Commands were detected from %s (no .huyang.toml) but are disabled until this workspace root is listed under [trust] roots in the user policy.", strings.Join(policy.Detected, ", "))
 	default:
-		return "not_configured", "No project .huyang.toml is present; only built-in parser checks are available."
+		return "not_configured", "No project .huyang.toml is present and no repository layout was recognised; only built-in parser checks are available."
 	}
 }

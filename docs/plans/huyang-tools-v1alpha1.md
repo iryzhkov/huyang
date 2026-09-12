@@ -1026,3 +1026,67 @@ The amended v1alpha1 contract is frozen from the S20b merge commit
 `fe143fe97dc7ac0060489c0d0840086a6c93122d` on `feature/huyang`. A later compatible change
 may add optional inputs, optional result fields or new stable codes; anything else is a new
 API version with a separately named catalog.
+
+## v1alpha1 amendment (agent usability, 2026-09-12)
+
+The agent usability workshop (`bench/agent-efficiency`, `docs/agent-guide.md`) changed the
+surface additively; every change below is an optional input, an optional result field, a
+compaction of a default result, or a new stable code. No mutation precondition was weakened.
+
+### Input additions
+
+- `edit_apply.operation.kind` gains `replace_literal` (fields `old`, `new`, optional `path`,
+  optional `expected_count`, default 1) and `create_file` (`path`, `content`).
+  `replace_range` is unchanged. `target` is required only for `replace_range`.
+- `edit_apply.verbose` (boolean): return the full change record, hashes and handle
+  resolution. `edit_apply.format` (boolean, default true): run the native formatter (gofmt)
+  over edited Go files after the edit and report what it changed.
+- `read.targets` (array of `{path, start_line, end_line}` or `{symbol_locator}`): several
+  reads in one call; `read.limit` no longer has a maximum.
+- `verify_run.revision_or_transaction` accepts `current`.
+
+### Output changes
+
+- Tool results are rendered as compact JSON (no indentation).
+- `edit_apply` data is `changed_paths`, `canonical_changed`, `diffs` (one `{path,
+  before_sha256, after_sha256, patch}` per file, the patch bounded at 4096 bytes),
+  `from_revision`, `revision`, `document_revision` (or `document_revisions` for several
+  files), `replacements` when not one, `relocated` when a stale handle was relocated,
+  `format` when the formatter ran, `diagnostic_delta` with compact findings (`id`,
+  `severity`, `message`, `path`, `line`, `code`, `producer`; resolved findings as IDs) and
+  `verification`. `change`, `resolution` and `tool_delta` appear only with `verbose`.
+- `read` data is `path`, `content`, `revision_id`, `lines` and the line window; symbol reads
+  add `name_path`, `kind`, `handle`, `start_line`, `end_line` and `coverage`. The full
+  snapshot is gone. `targets` answers `{files: [...]}` with per-target errors in place.
+- `search` data drops the echoed query, mode, workspace and (when complete) coverage;
+  `result_set` is the compact `{handle, kind, match_count, file_count, complete,
+  all_matches_eligible, retained, eliminated, expires_at, parent}`.
+- `workspace_open` data adds `commands` (`source`, `detected_from`, `format_gate`, `check`,
+  `tests`, `state`, `trusted`, and one of `run`, `enable`, `override`, `hint`) and reports
+  compact `capabilities` (`native`, `optional`, `semantic`, `failures`) and
+  `semantic_provider` (`backend`, `state`, `failure_code`).
+- `verify_run` stage records omit empty lists, empty strings, false flags and zero counts.
+- `workspace_inspect.pipeline_state.state` may be `detected_trusted` or
+  `detected_untrusted` when commands were detected from the repository layout.
+
+### Codes added
+
+- `literal_not_found`, `literal_whitespace_mismatch` (with `data.actual`, the exact document
+  text, and `data.locations`), `literal_count_mismatch` (with `expected_count`, `found`,
+  `locations`) and `create_target_exists`: all `conflict` outcomes that changed nothing.
+
+### Behaviour changes
+
+- The native sectioner covers Go and Python, so `read` by `symbol_locator`, `symbol_find`
+  and the declaration position `navigate` sends to the language server no longer depend on
+  the provider for those languages. Symbol coverage is incomplete only for other source
+  languages (`parser_unavailable`), not for documentation and data files.
+- A range handle whose bytes and preceding anchor are unchanged at its original offset
+  resolves there even when the bytes after it changed (`format_only_relocation`), so
+  several handles from one search survive being applied in any order.
+- Sandbox materialization skips `.git`, so an IDE polling `git status` no longer makes
+  `change_plan` prepare fail with `sandbox_source_changed`.
+- Without a `.huyang.toml`, commands are detected from `go.mod` (gofmt gate, go build, go
+  vet, go test), a Python project file (compileall, ruff when installed, pytest when
+  installed else unittest) and a `package.json` test script (npm test). Execution still
+  requires the root to be trusted.

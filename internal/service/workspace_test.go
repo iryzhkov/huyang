@@ -17,7 +17,7 @@ import (
 // advances the revision the next inspection reports.
 func TestWorkspaceInspectViewsReportRevisionAndAdvanceAfterEdit(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{
-		"a.go": "package sample\nvar Before = 1\n",
+		"a.go": "package sample\n\nvar Before = 1\n",
 	})
 	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()

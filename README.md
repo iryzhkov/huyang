@@ -23,6 +23,15 @@ The service owns durability, policy, scheduling, sandboxes, and recovery. A smal
 Lua kernel under `lua/huyang` owns Neovim buffer, Tree-sitter, LSP, and DAP operations and
 speaks kernel protocol version 2 to the service.
 
+## Agent guide
+
+[docs/agent-guide.md](docs/agent-guide.md) names the cheapest correct call for each common
+operation (read a file, read a region by name, change a line you know, replace a block
+located by content, rename a local identifier, add a file, coordinate edits and test) with
+the measured token cost of each, from the benchmark under
+[bench/agent-efficiency](bench/agent-efficiency/README.md). Read it before wiring Huyang into
+an agent's instructions.
+
 ## Tools
 
 The `full` profile lists all 19 tools in this order. Each smaller profile is a fixed subset.

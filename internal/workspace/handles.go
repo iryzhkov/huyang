@@ -502,6 +502,16 @@ func (w *Workspace) resolveRange(record HandleRecord) (HandleResolution, error) 
 		current := candidates[0].Locator
 		return HandleResolution{Status: ResolutionRelocated, Code: ConflictFormatOnlyRelocation, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
 	}
+	// Several identical spans: the one still at the original offset with
+	// the same bytes before it is the original occurrence, because nothing
+	// before it moved; only the bytes after it changed (a neighbouring
+	// edit), which is not a reason to refuse.
+	for _, candidate := range candidates {
+		if candidate.Locator.ByteStart == original.ByteStart && candidate.Locator.BeforeSHA256 == original.BeforeSHA256 {
+			current := candidate.Locator
+			return HandleResolution{Status: ResolutionRelocated, Code: ConflictFormatOnlyRelocation, Handle: record.Handle, Original: original, Current: &current, Candidates: candidates}, nil
+		}
+	}
 	code := ConflictDocumentChanged
 	if len(candidates) > 1 {
 		code = ConflictSymbolAmbiguous

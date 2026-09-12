@@ -108,6 +108,11 @@ func decodeVerifyRequest(workspace *workspacecore.Workspace, arguments map[strin
 		revision:  fmt.Sprint(arguments["revision_or_transaction"]),
 		testScope: fmt.Sprint(arguments["test_scope"]),
 	}
+	// "current" names whatever the workspace is at now, so an agent that
+	// only wants to run the tests does not have to carry a revision token.
+	if request.revision == "current" || request.revision == "" || request.revision == "<nil>" {
+		request.revision = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	}
 	for _, value := range mcpapi.AnySlice(arguments["stages"]) {
 		stage, ok := value.(string)
 		if !ok {

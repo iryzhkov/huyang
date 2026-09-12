@@ -467,7 +467,7 @@ func compactVerificationStage(stage workspacecore.VerificationStage) (map[string
 	executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
 	selected, selectedTruncated := compactSelectedTests(stage.SelectedTests)
 	truncated := outputTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
-	return map[string]any{
+	return pruneEmpty(map[string]any{
 		"stage": stage.Stage, "mode": stage.Mode, "started_revision": stage.StartedRevision,
 		"exit": stage.Exit, "status": stage.Status, "duration_ms": stage.DurationMS,
 		"coverage": stage.Coverage, "evidence_ids": NonNilStrings(stage.EvidenceIDs),
@@ -479,7 +479,44 @@ func compactVerificationStage(stage workspacecore.VerificationStage) (map[string
 		"selected_tests_truncated": selectedTruncated,
 		"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
 		"executed_tests_truncated": executedTruncated,
-	}, truncated
+	}), truncated
+}
+
+// pruneEmpty drops the keys of a compact record whose values carry no
+// information: empty strings and lists, false flags and zero counts. The
+// stage name, status, exit code and duration always stay.
+func pruneEmpty(record map[string]any) map[string]any {
+	keep := map[string]bool{"stage": true, "status": true, "exit": true, "duration_ms": true, "mode": true}
+	for key, value := range record {
+		if keep[key] {
+			continue
+		}
+		switch typed := value.(type) {
+		case nil:
+			delete(record, key)
+		case string:
+			if typed == "" {
+				delete(record, key)
+			}
+		case bool:
+			if !typed {
+				delete(record, key)
+			}
+		case int:
+			if typed == 0 {
+				delete(record, key)
+			}
+		case []string:
+			if len(typed) == 0 {
+				delete(record, key)
+			}
+		case []any:
+			if len(typed) == 0 {
+				delete(record, key)
+			}
+		}
+	}
+	return record
 }
 
 // compactSelectedTests keeps the first VerificationListLimit selected

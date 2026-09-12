@@ -227,7 +227,7 @@ func searchSchema() map[string]any {
 // orientationTools are the read-only tools every profile carries.
 func orientationTools(orient []Profile) []ToolDescriptor {
 	return []ToolDescriptor{
-		{Class: ClassProviderRead, Name: "workspace_open", Description: "Open a project or exact document allowlist and return its revision, capabilities, compact overview, bounded local commits, and limits.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassProviderRead, Name: "workspace_open", Description: "Open a project (or an exact list of documents) and get its workspace_id, revision, capabilities, the verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), a top-level overview and recent commits. Call it once per repository root and pass the workspace_id to every other tool. Cheapest calls afterwards: read (path, line window, symbol_locator or several targets), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":     enumSchema("project", "documents"),
 			"root":     stringSchema("Project root; required for kind=project."),
 			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
@@ -236,11 +236,11 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 		{Class: ClassProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
 		}, "workspace_id")},
-		{Class: ClassPureRead, Name: "search", Description: "Search current source, monotonically refine a frozen set, or search bounded local Git history without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema()},
-		{Class: ClassProviderRead, Name: "symbol_find", Description: "Find declarations and return ranked revision-bound handles when a semantic provider is available.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassPureRead, Name: "search", Description: "Find text in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex. Every hit carries path, line, column, the matched text and an editable handle; refine a large result set by path or text instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema()},
+		{Class: ClassProviderRead, Name: "symbol_find", Description: "Find declarations by name (substring match) and return handles that read and edit_apply accept. Go and Python resolve natively without a language server; other languages go through the semantic provider and merge into the native results.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "query": stringSchema("Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name."), "include_source": map[string]any{"type": "boolean"},
 		}, "workspace_id", "query")},
-		{Class: ClassProviderRead, Name: "navigate", Description: "Navigate one semantic relationship from a shared revision-bound target.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassProviderRead, Name: "navigate", Description: "Ask the language server for the definition, references, implementation, type, callers, callees or hover of a declaration. Target it with symbol_locator {path, name_path}: the declaration line is located natively, so a comment that mentions the name above it does not mislead the server. Needs an attached language server (language_server_status); for a plain text search use search.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 		}, "workspace_id", "relation", "target")},
 		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content and the document revision; use view=outline for the declarations of a file.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
@@ -282,6 +282,7 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
 			"verbose":      map[string]any{"type": "boolean", "description": "Add the full change record, hashes and handle resolution to the response."},
+			"format":       map[string]any{"type": "boolean", "description": "Run the language's formatter on the edited files after the edit (gofmt for Go, natively) and report what it changed. Default true; false keeps the bytes exactly as written."},
 			"operation": schemaObject(map[string]any{
 				"kind":           enumSchema("replace_literal", "create_file", "replace_range"),
 				"path":           stringSchema("replace_literal: file to search (omit to search the whole workspace); create_file: the new path."),
@@ -292,11 +293,11 @@ func editTools(edit []Profile) []ToolDescriptor {
 				"content":        stringSchema("replace_range: exact replacement bytes; create_file: the file content."),
 			}, "kind"),
 		}, "workspace_id", "idempotency_key", "operation")},
-		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Create, edit, preview, prepare, inspect, apply, or discard one coherent multi-operation plan.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
-		{Class: ClassExternalJob, Name: "verify_run", Description: "Run selected formatting, parser, diagnostic, check, or test stages against an exact revision.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
+		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
 			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
-			"revision_or_transaction": stringSchema("Canonical revision, prepared revision, or transaction ID."),
+			"revision_or_transaction": stringSchema("Canonical revision (wsrev_N), prepared revision, transaction ID, or \"current\" for whatever the workspace is at now."),
 			"test_scope":              enumSchema("affected", "full"),
 		}, "workspace_id", "idempotency_key", "stages", "revision_or_transaction")},
 		{Class: ClassCanonicalWrite, Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{

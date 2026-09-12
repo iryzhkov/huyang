@@ -24,7 +24,7 @@ func modernProviderTarget(workspace *workspacecore.Workspace, target map[string]
 		if slash := strings.LastIndexAny(leaf, "/."); slash >= 0 {
 			leaf = leaf[slash+1:]
 		}
-		offset := bytes.Index(read.Content, []byte(leaf))
+		offset := declarationOffset(workspace, path, read.Content, canonicalNamePath(name), leaf)
 		if offset < 0 {
 			return nil, fmt.Errorf("symbol %q is not present in %s; refresh the locator", name, path)
 		}

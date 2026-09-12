@@ -28,7 +28,10 @@ type session struct {
 	features   map[string]bool
 	workspaces map[string]string
 	pipelines  map[string]bool
-	version    string
+	// revisions holds the latest workspace revision each language's calls
+	// reported, which verify_run has to name exactly.
+	revisions map[string]string
+	version   string
 	// modelFamily selects which pristine copy the modelled calls mutate.
 	modelFamily string
 }
@@ -47,7 +50,7 @@ func startSession(root string, encoder *tiktoken.Tiktoken) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &session{root: root, work: work, encoder: encoder, features: map[string]bool{}, workspaces: map[string]string{}, pipelines: map[string]bool{}}
+	s := &session{root: root, work: work, encoder: encoder, features: map[string]bool{}, workspaces: map[string]string{}, pipelines: map[string]bool{}, revisions: map[string]string{}}
 	for _, language := range []string{"go", "python"} {
 		source := filepath.Join(root, "bench", "agent-efficiency", "fixtures", language)
 		for _, target := range []string{s.fixtureDir(language), filepath.Join(s.work, "model", language, "builtin"), filepath.Join(s.work, "model", language, "bash")} {
@@ -210,6 +213,9 @@ func (s *session) call(scenario, language, tool string, arguments map[string]any
 			_ = json.Unmarshal(structured, &envelope)
 		}
 		call.Outcome = fmt.Sprint(envelope["outcome"])
+		if revision, ok := data(envelope)["revision"].(string); ok {
+			s.revisions[language] = revision
+		}
 		if result.IsError {
 			s.notes = append(s.notes, fmt.Sprintf("%s/%s %s returned %s: %s", scenario, language, tool, envelope["code"], envelope["summary"]))
 		}

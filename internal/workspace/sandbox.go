@@ -299,6 +299,13 @@ func inventorySandboxTree(ctx context.Context, root string, limits SandboxLimits
 		if path == root {
 			return nil
 		}
+		// The repository database is not source: it changes under any git
+		// command (an IDE polling git status is enough) and would make every
+		// materialization look like a concurrent edit. Commands that run in
+		// the sandbox see a tree without version control.
+		if item.IsDir() && item.Name() == ".git" {
+			return filepath.SkipDir
+		}
 		if limits.MaxEntries > 0 && len(entries)+1 > limits.MaxEntries {
 			return fmt.Errorf("sandbox_quota: entry limit %d exceeded", limits.MaxEntries)
 		}

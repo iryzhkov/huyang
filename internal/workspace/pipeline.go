@@ -67,9 +67,12 @@ type PipelinePolicy struct {
 		MaxChangedFiles  int   `toml:"max_changed_files" json:"max_changed_files"`
 		MaxParallel      int   `toml:"max_parallel" json:"max_parallel"`
 	} `toml:"resource" json:"resource"`
-	Trusted       bool   `toml:"-" json:"trusted"`
-	ProjectConfig string `toml:"-" json:"project_config,omitempty"`
-	UserConfig    string `toml:"-" json:"user_config,omitempty"`
+	Trusted bool `toml:"-" json:"trusted"`
+	// Detected names the repository markers (go.mod, pyproject.toml, ...)
+	// the commands were derived from when no .huyang.toml exists.
+	Detected      []string `toml:"-" json:"detected,omitempty"`
+	ProjectConfig string   `toml:"-" json:"project_config,omitempty"`
+	UserConfig    string   `toml:"-" json:"user_config,omitempty"`
 }
 
 type userPipelinePolicy struct {
@@ -214,6 +217,9 @@ func LoadPipelinePolicyForTrustedRoot(projectRoot, trustedRoot, userConfig strin
 	policy := DefaultPipelinePolicy()
 	if err := loadProjectPolicy(projectRoot, &policy); err != nil {
 		return PipelinePolicy{}, err
+	}
+	if policy.ProjectConfig == "" {
+		detectPipelinePolicy(projectRoot, &policy)
 	}
 	user, err := loadUserPolicy(defaultUserConfigPath(userConfig), &policy)
 	if err != nil {

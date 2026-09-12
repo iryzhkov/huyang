@@ -18,6 +18,7 @@ type editRequest struct {
 	Kind          string
 	Preview       bool
 	Verbose       bool
+	Format        bool
 	Content       string
 	Handle        string
 	Range         map[string]any
@@ -42,6 +43,10 @@ func decodeEditRequest(arguments map[string]any) (editRequest, error) {
 	target, _ := operation["target"].(map[string]any)
 	request.Preview, _ = arguments["preview_only"].(bool)
 	request.Verbose, _ = arguments["verbose"].(bool)
+	request.Format = true
+	if value, ok := arguments["format"].(bool); ok {
+		request.Format = value
+	}
 	request.Content, _ = operation["content"].(string)
 	request.Handle, _ = target["handle"].(string)
 	request.Range, _ = target["file_range"].(map[string]any)
@@ -62,6 +67,8 @@ type appliedEdit struct {
 	replacements int
 	summary      string
 	warnings     []string
+	// format is what the language formatter did after the edit, when it ran
+	format map[string]any
 	// verbose detail, only reported on request
 	change     *workspacecore.TextChange
 	resolution *workspacecore.HandleResolution
@@ -168,6 +175,9 @@ func editFailure(requestID string, workspace *workspacecore.Workspace, handle wo
 // finishEdit shapes the response every edit kind shares: the compact data,
 // the persisted receipt, and the post-edit diagnostics of the changed files.
 func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest, applied appliedEdit) map[string]any {
+	if !request.Preview && request.Format {
+		formatEdited(workspace, &applied)
+	}
 	data := compactEditData(workspace, request, applied)
 	if request.Preview {
 		result := mcpapi.Envelope(requestID, workspace, "ok", "", applied.summary, data)
@@ -204,6 +214,9 @@ func compactEditData(workspace *workspacecore.Workspace, request editRequest, ap
 	}
 	if applied.replacements != 1 {
 		data["replacements"] = applied.replacements
+	}
+	if applied.format != nil {
+		data["format"] = applied.format
 	}
 	switch len(applied.revisions) {
 	case 0:
