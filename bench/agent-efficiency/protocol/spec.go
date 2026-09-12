@@ -25,6 +25,11 @@ type languageSpec struct {
 	E5          []literalEdit
 	E6Signature literalEdit
 	E6Callers   []literalEdit
+	// E7 copies CopyFrom to CopyTo; E8 moves MoveFrom to MoveTo and then
+	// applies E8Importers so the fixture still builds.
+	CopyFrom, CopyTo string
+	MoveFrom, MoveTo string
+	E8Importers      []literalEdit
 }
 
 var goSpec = languageSpec{
@@ -90,6 +95,8 @@ func AuditOK(l *Ledger) bool {
 		{Path: "ledger_test.go", Old: "Amount: 1, Posted: day})", New: "Amount: 1, Posted: day}, false)"},
 		{Path: "ledger_test.go", Old: "Posted: day.Add(24 * time.Hour)})", New: "Posted: day.Add(24 * time.Hour)}, false)"},
 	},
+	CopyFrom: "format.go", CopyTo: "testdata/format.go",
+	MoveFrom: "store.go", MoveTo: "storage.go",
 }
 
 var pythonSpec = languageSpec{
@@ -151,6 +158,11 @@ def audit_ok(ledger: Ledger) -> bool:
 		{Path: "tests/test_ledger.py", Old: "Entry(id=\"e1\", account=\"cash\", amount=1))", New: "Entry(id=\"e1\", account=\"cash\", amount=1), False)"},
 		{Path: "tests/test_ledger.py", Old: "amount=1, posted=day))", New: "amount=1, posted=day), False)"},
 		{Path: "tests/test_ledger.py", Old: "posted=day + timedelta(days=1)))", New: "posted=day + timedelta(days=1)), False)"},
+	},
+	CopyFrom: "ledger/fmt.py", CopyTo: "ledger/fmt_copy.py",
+	MoveFrom: "ledger/store.py", MoveTo: "ledger/storage.py",
+	E8Importers: []literalEdit{
+		{Path: "tests/test_ledger.py", Old: "from ledger.store import load, save", New: "from ledger.storage import load, save"},
 	},
 }
 

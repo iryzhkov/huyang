@@ -28,14 +28,14 @@ every mutating call; pass one only when you intend to retry the same call.
 | Coordinated edits in three files, then build and test | 5 x `replace_literal` + `verify_run {stages:[check, tests], revision_or_transaction: current}` | 6 | 691 | 2248 | Edit x5 + Bash: 6 calls, 454 / 928 |
 | Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, `verify_run check` | 12 | 1047 | 4774 | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
 | Run the test suite | `verify_run {stages:[tests], revision_or_transaction: current}` | 1 | 61 | 258 | Bash: 1 call, 14 / 13 (passing) |
-| Copy a file (15 KB, from anywhere) | `edit_apply {operation:{kind: copy_file, from, to}}` | 1 | about 60 | about 350 | Bash `cp`: 1 call, or Read + Write with the content in your context twice |
-| Move a file and stage the rename | `edit_apply {operation:{kind: move_file, from, to}}`, then the `git add` the reply names | 2 | about 60 | about 400 | Bash `git mv`: 1 call |
+| Copy a file, then build (E7) | `edit_apply {operation:{kind: copy_file, from, to}}` + `verify_run check` | 2 | 126 | 582 | Read + Write + Bash: 3 calls, 414 / 453 (the content crosses the context twice); Bash `cp`: 2 calls, 43 / 0 |
+| Move a file, then test (E8) | `edit_apply {operation:{kind: move_file, from, to}}` + `verify_run tests`; the reply names the `git add` | 2 | 125 | 677 | Read + Write + Bash `rm` + Bash: 4 calls, 649 / 699; Bash `git mv`: 2 calls, 30 / 13 |
 | Delete a file you have read | `edit_apply {operation:{kind: delete_file, path, revision_id}}` | 1 | about 50 | about 300 | Bash `rm`: 1 call |
 | Overwrite a file you have read | `edit_apply {operation:{kind: create_file, path, content, replace: true, revision_id}}` | 1 | content + 40 | about 350 | Write: 1 call |
 | Read a big file without a blind dump | `read {target:{path}, max_lines: 200}` then `view: outline` or a window | 1 or 2 | 40 | capped | Read: 1 call, whole file |
 
-The file-lifecycle rows are not yet measured by the protocol harness; the costs are the
-reply shapes described below, which carry no content.
+E7 and E8 are measured (`runs/protocol-s20c.json`, 2026-09-12); the delete and overwrite
+rows are estimates from the same reply shapes, which carry no content.
 
 What the table says:
 

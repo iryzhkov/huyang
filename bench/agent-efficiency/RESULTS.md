@@ -136,6 +136,36 @@ The protocol harness still edits one literal per call (it measures that shape); 
 folding E5's five edits into one `operations` call saves four replies of envelope and
 four diagnostics refreshes. This paragraph and the next were written with one such call.
 
+### Stage S20c (`runs/protocol-s20c.json`, 2026-09-12)
+
+Two scenarios were added for the file-lifecycle kinds: E7 copies a file (Go: `format.go`
+to `testdata/format.go`; Python: `ledger/fmt.py` to `ledger/fmt_copy.py`) and builds; E8
+moves a file (Go: `store.go` to `storage.go`; Python: `ledger/store.py` to
+`ledger/storage.py` plus the import in the test) and runs the tests. The built-in family is
+modelled as Read plus Write (the content crosses the context twice) plus `rm` for a move;
+the bash family as `cp` and `git mv`. Huyang family, one call plus `verify_run`:
+
+| Scenario | Lang | Family | Calls | Req tokens | Resp tokens |
+|---|---|---|---|---|---|
+| E7 | go | huyang | 2 | 126 | 582 |
+| E7 | go | builtin | 3 | 414 | 453 |
+| E7 | go | bash | 2 | 43 | 0 |
+| E8 | go | huyang | 2 | 125 | 677 |
+| E8 | go | builtin | 4 | 649 | 699 |
+| E8 | go | bash | 2 | 30 | 13 |
+| E7 | python | huyang | 2 | 126 | 556 |
+| E7 | python | builtin | 3 | 404 | 372 |
+| E7 | python | bash | 2 | 50 | 0 |
+| E8 | python | huyang | 3 | 202 | 1043 |
+| E8 | python | builtin | 5 | 500 | 593 |
+| E8 | python | bash | 3 | 130 | 17 |
+
+The Huyang request cost is a third of the built-in tools' because the file content never
+enters the request; the response cost is the `verify_run` stage report plus the lifecycle
+reply (`changed_paths`, `git` state, the staging command). Bash stays cheapest in tokens
+and tells the agent nothing about the tree or Git afterwards. The other scenarios were
+unchanged by the stage within noise.
+
 ### Friction met while doing this work through Huyang (the pre-change build)
 
 - `change_plan prepare` failed twice with `sandbox_source_changed` in this repository:

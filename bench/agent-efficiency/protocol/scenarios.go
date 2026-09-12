@@ -80,7 +80,38 @@ func (s *session) editScenarios(spec languageSpec) {
 		s.literal("E6", spec, edit, "fix one caller")
 	}
 	s.verify("E6", spec, "check")
+	s.fileLifecycle(spec)
 	s.verify("V1", spec, "tests")
+}
+
+// fileLifecycle is E7 (copy a file) and E8 (move a file and fix its
+// importers): one call each when the catalog has the kinds, and otherwise
+// the shell the agent would fall back to.
+func (s *session) fileLifecycle(spec languageSpec) {
+	language, ws := spec.Language, s.workspaces[spec.Language]
+	if spec.CopyFrom != "" {
+		if s.features["edit_apply.copy_file"] {
+			s.call("E7", language, "edit_apply", map[string]any{"workspace_id": ws, "idempotency_key": "E7-" + language,
+				"operation": map[string]any{"kind": "copy_file", "from": spec.CopyFrom, "to": spec.CopyTo}}, "copy in one call")
+		} else {
+			command := fmt.Sprintf("mkdir -p %s && cp %s %s", filepath.Dir(spec.CopyTo), spec.CopyFrom, spec.CopyTo)
+			s.modelledFallback("E7", language, command, shell(s.fixtureDir(language), command))
+		}
+		s.verify("E7", spec, "check")
+	}
+	if spec.MoveFrom != "" {
+		if s.features["edit_apply.move_file"] {
+			s.call("E8", language, "edit_apply", map[string]any{"workspace_id": ws, "idempotency_key": "E8-" + language,
+				"operation": map[string]any{"kind": "move_file", "from": spec.MoveFrom, "to": spec.MoveTo}}, "move in one call; the reply names the git add")
+		} else {
+			command := fmt.Sprintf("mv %s %s", spec.MoveFrom, spec.MoveTo)
+			s.modelledFallback("E8", language, command, shell(s.fixtureDir(language), command))
+		}
+		for _, edit := range spec.E8Importers {
+			s.literal("E8", spec, edit, "fix an importer")
+		}
+		s.verify("E8", spec, "tests")
+	}
 }
 
 // literal applies one content-addressed edit, in one call when the catalog

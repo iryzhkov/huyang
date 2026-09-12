@@ -189,5 +189,44 @@ func (s *session) modelEdits(spec languageSpec, family string) {
 		s.modelLiteral("E6", spec, family, edit, "fix one caller")
 	}
 	s.modelled("E6", language, family, "bash", request("bash", map[string]any{"command": spec.Build}), shell(root, spec.Build), "confirm the build")
+	s.modelFileLifecycle(spec, family)
 	s.modelled("V1", language, family, "bash", request("bash", map[string]any{"command": spec.Test}), shell(root, spec.Test), "run the tests")
+}
+
+// modelFileLifecycle is E7 and E8 for the modelled families. The built-in
+// tools have no copy or move, so that family reads the file and writes it
+// back (the content crosses the context twice) and deletes the source with
+// bash; the bash family uses cp and git mv.
+func (s *session) modelFileLifecycle(spec languageSpec, family string) {
+	language := spec.Language
+	root := s.modelDir(language)
+	if spec.CopyFrom != "" {
+		content := s.modelFile(spec, spec.CopyFrom)
+		_ = os.MkdirAll(filepath.Join(root, filepath.Dir(spec.CopyTo)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, spec.CopyTo), []byte(content), 0o644)
+		if family == "builtin" {
+			s.modelled("E7", language, family, "Read", request("Read", map[string]any{"file_path": spec.CopyFrom}), numbered(content, 1), "read the source")
+			s.modelled("E7", language, family, "Write", request("Write", map[string]any{"file_path": spec.CopyTo, "content": content}), "File created successfully at: "+spec.CopyTo, "write the copy")
+		} else {
+			command := fmt.Sprintf("mkdir -p %s && cp %s %s", filepath.Dir(spec.CopyTo), spec.CopyFrom, spec.CopyTo)
+			s.modelled("E7", language, family, "bash", request("bash", map[string]any{"command": command}), "", "copy")
+		}
+		s.modelled("E7", language, family, "bash", request("bash", map[string]any{"command": spec.Build}), shell(root, spec.Build), "confirm the build")
+	}
+	if spec.MoveFrom != "" {
+		content := s.modelFile(spec, spec.MoveFrom)
+		_ = os.WriteFile(filepath.Join(root, spec.MoveTo), []byte(content), 0o644)
+		_ = os.Remove(filepath.Join(root, spec.MoveFrom))
+		if family == "builtin" {
+			s.modelled("E8", language, family, "Read", request("Read", map[string]any{"file_path": spec.MoveFrom}), numbered(content, 1), "read the source")
+			s.modelled("E8", language, family, "Write", request("Write", map[string]any{"file_path": spec.MoveTo, "content": content}), "File created successfully at: "+spec.MoveTo, "write the destination")
+			s.modelled("E8", language, family, "bash", request("bash", map[string]any{"command": "rm " + spec.MoveFrom}), "", "remove the source")
+		} else {
+			s.modelled("E8", language, family, "bash", request("bash", map[string]any{"command": fmt.Sprintf("git mv %s %s", spec.MoveFrom, spec.MoveTo)}), "", "move")
+		}
+		for _, edit := range spec.E8Importers {
+			s.modelLiteral("E8", spec, family, edit, "fix an importer")
+		}
+		s.modelled("E8", language, family, "bash", request("bash", map[string]any{"command": spec.Test}), shell(root, spec.Test), "run the tests")
+	}
 }

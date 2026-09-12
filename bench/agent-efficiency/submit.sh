@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Queue the agent measurement: one t3-steward backlog task per scenario, language,
-# tool family and repetition, run by the Muse free model through the opencode instance.
+# tool family and repetition, run by the Muse free model through the opencode instance
+# unless --model and --instance name another agent (for example --model
+# claude-haiku-4-5-20251001 --instance claudeAgent).
 #
 # Usage: submit.sh BATCH [--scenarios "R1 E1"] [--languages "go python"]
-#                        [--families "huyang builtin bash"] [--reps 3] [--dry-run]
+#                        [--families "huyang builtin bash"] [--reps 3]
+#                        [--model ID] [--instance ID] [--max-turns N] [--dry-run]
 #
 # Every queued task is recorded in runs/BATCH.tsv (scenario, language, family,
 # repetition, title, task file). The title is what score.py looks up in the T3 database,
@@ -19,10 +22,11 @@ INSTANCE="opencode"
 batch="${1:-}"
 [ -n "$batch" ] || { echo "usage: submit.sh BATCH [options]" >&2; exit 2; }
 shift
-scenarios="R1 R2 R3 R4 E1 E2 E3 E4 E5 E6 V1"
+scenarios="R1 R2 R3 R4 E1 E2 E3 E4 E5 E6 E7 E8 V1"
 languages="go"
 families="huyang builtin bash"
 reps=3
+max_turns=4
 dry_run=false
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -30,6 +34,9 @@ while [ $# -gt 0 ]; do
         --languages) languages="$2"; shift 2 ;;
         --families) families="$2"; shift 2 ;;
         --reps) reps="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        --instance) INSTANCE="$2"; shift 2 ;;
+        --max-turns) max_turns="$2"; shift 2 ;;
         --dry-run) dry_run=true; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -60,7 +67,7 @@ for scenario in $scenarios; do
                     continue
                 fi
                 task_file="$(printf '%s\n' "$prompt" | t3-backlog --project "$PROJECT" --title "$title" --name "$name" \
-                    --instance "$INSTANCE" --model "$MODEL" --max-turns 4 --importance 2 --difficulty 1 --ungated | tail -1)"
+                    --instance "$INSTANCE" --model "$MODEL" --max-turns "$max_turns" --importance 2 --difficulty 1 --ungated | tail -1)"
                 printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$scenario" "$language" "$family" "$rep" "$title" "$task_file" >> "$log"
                 queued=$((queued + 1))
                 echo "queued: $title"
