@@ -640,57 +640,24 @@ func isolatedCommandEnv() ([]string, func(), error) {
 			return nil, nil, fmt.Errorf("create isolated command environment: %w", err)
 		}
 	}
-	if persistent := persistentBuildCache(); persistent != "" {
-		goCache = persistent
+	// HOME stays throwaway; the caches are shared, because recreating them
+	// per run makes every stage compile and download from scratch. See
+	// command_cache.go for why sharing them cannot change an answer.
+	shared, sharedCacheHome := commandCacheEnvironment()
+	if sharedCacheHome != "" {
+		cache = sharedCacheHome
 	}
 	result = append(result,
 		"HOME="+home,
 		"USERPROFILE="+home,
 		"XDG_CACHE_HOME="+cache,
 		"LOCALAPPDATA="+cache,
-		"GOCACHE="+goCache,
 	)
+	if len(shared) == 0 {
+		result = append(result, "GOCACHE="+goCache)
+	}
+	result = append(result, shared...)
 	return result, cleanup, nil
-}
-
-// persistentBuildCache is the compiler build cache every verification stage
-// shares, or an empty string when it cannot be used.
-//
-// HOME and XDG_CACHE_HOME stay throwaway so a repository command can neither
-// read the user's configuration nor leave anything in the user's home. A
-// compiler build cache is different in kind: its entries are addressed by the
-// hash of their inputs, so a reused entry cannot make a later build wrong,
-// which is the same reasoning that forwards GOMODCACHE. Giving every stage a
-// fresh one instead made each of them compile the whole package set from
-// scratch: on the benchmark fixture a cold `go build ./...` takes 7.7 s
-// against 0.06 s warm, and one verify_run pays that twice, once per stage.
-//
-// The cache lives beside the service's own state rather than in the user's
-// cache directory, so it is still Huyang's and not the user's, and the Go
-// toolchain trims it on its own schedule; deleting the directory reclaims it.
-// HUYANG_COMMAND_CACHE=off restores a throwaway cache per run.
-func persistentBuildCache() string {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("HUYANG_COMMAND_CACHE"))) {
-	case "off", "0", "false":
-		return ""
-	}
-	base := strings.TrimSpace(os.Getenv("HUYANG_STATE_DIR"))
-	if base == "" {
-		base = strings.TrimSpace(os.Getenv("XDG_STATE_HOME"))
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil || home == "" {
-				return ""
-			}
-			base = filepath.Join(home, ".local", "state")
-		}
-		base = filepath.Join(base, "huyang")
-	}
-	path := filepath.Join(base, "command-cache", "go-build")
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return ""
-	}
-	return path
 }
 
 func commandStage(ctx context.Context, root, revision, name, mode string, command CommandPolicy, policy PipelinePolicy, mutating bool) (VerificationStage, []ToolDelta, error) {

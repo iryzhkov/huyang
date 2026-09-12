@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,9 @@ func newDirectWorkspaces(stateDir string) *directWorkspaces {
 }
 
 func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
+	// The caches every verification command shares follow this service's
+	// state directory rather than the ambient environment.
+	workspacecore.SetCommandCacheRoot(filepath.Join(stateDir, "command-cache"))
 	registry := newWorkspaceRegistry(stateDir)
 	receipts := newReceiptStore(stateDir, defaultReceiptLimits())
 	scheduler := newWorkspaceScheduler(providerQuota, externalJobQuota)
@@ -61,8 +65,13 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 
 // loadState restores the registry and the receipts, migrating a version 1
 // registry's embedded receipts into per-workspace files, and reaps sandboxes
-// left by an earlier process.
+// left by an earlier process and a command cache that outgrew its bound.
 func (d *directWorkspaces) loadState() error {
+	if removed, err := workspacecore.PruneCommandCache(); err != nil {
+		log.Printf("huyang: command cache: %v", err)
+	} else if removed {
+		log.Printf("huyang: command cache exceeded its bound and was removed")
+	}
 	legacy, migrate, err := d.registry.load()
 	if err != nil {
 		return err

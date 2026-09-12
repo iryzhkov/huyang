@@ -415,13 +415,27 @@ no verification, Huyang averaged 23.9 seconds against the built-in tools' 27.2; 
 nine scenarios that verify, it was slower every time.
 
 **Why `verify_run` was slow, and the fix.** Every command stage was given a throwaway
-HOME *and* a throwaway `GOCACHE`, so each stage compiled the fixture from scratch and one
-`verify_run` paid it twice. On this fixture a cold `go build ./...` takes 7.73 s against
-0.06 s warm, and a cold `go test ./...` 11.52 s against 6.62 s. The build cache is now
-shared across runs under `<state-dir>/command-cache/go-build`, while HOME and
-`XDG_CACHE_HOME` stay throwaway: cache entries are addressed by the hash of their inputs,
-so reuse cannot make a later build wrong, which is the same reasoning that already
-forwarded `GOMODCACHE`. `HUYANG_COMMAND_CACHE=off` restores the old behaviour. Measured
+HOME, and its caches were part of that throwaway home, so each stage compiled the fixture
+from scratch and one `verify_run` paid it twice. On this fixture a cold `go build ./...`
+takes 7.73 s against 0.06 s warm, and a cold `go test ./...` 11.52 s against 6.62 s.
+Nothing about this was particular to Go: the same throwaway home discarded the cache of
+every other toolchain, so a Rust, C, TypeScript, Python or PHP project paid its own cold
+start on every stage.
+
+The caches are now shared across runs under `<state-dir>/command-cache/`, while HOME
+stays throwaway. The cache home (`XDG_CACHE_HOME`) is shared, which covers every tool
+that follows the XDG specification, and the toolchains that keep a cache elsewhere are
+named explicitly so they are shared on macOS and Windows too: `GOCACHE`,
+`GOLANGCI_LINT_CACHE`, `CCACHE_DIR`, `SCCACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR`,
+`npm_config_cache`, `YARN_CACHE_FOLDER`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `DENO_DIR` and
+`COMPOSER_CACHE_DIR`. Sharing is safe because each of these is addressed by the content
+or the exact version of what it holds, so an entry found in one cannot make a later build
+or check answer differently than a cold one would; that is the reasoning that already
+handed a command the user's `GOMODCACHE` and `CARGO_HOME`. An install root, where a wrong
+entry would change what a build links against rather than how fast it gets there, is
+never redirected. The shared cache is bounded: it is removed whole when it passes 4 GiB
+or goes 30 days unused, checked at most daily at service start, and
+`HUYANG_COMMAND_CACHE=off` restores the old behaviour. Measured
 by rerunning the protocol benchmark on the Go fixture, total `verify_run` time fell from
 57.9 s to 18.4 s; per scenario, E6 from 12.5 s to 0.32 s, E7 from 11.8 s to 0.28 s, E8
 from 10.4 s to 0.47 s, and E5, which edits five files and runs first, from 22.7 s to

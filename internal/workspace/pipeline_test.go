@@ -326,51 +326,120 @@ func TestVerificationTimeoutRollsBackTransform(t *testing.T) {
 	}
 }
 
-// The compiler build cache is shared across runs and lives beside the
-// service state, while HOME and XDG_CACHE_HOME stay throwaway; the escape
-// hatch restores a per-run cache.
-func TestCommandEnvironmentSharesTheBuildCacheAndIsolatesTheHome(t *testing.T) {
+// readCommandEnv builds one isolated command environment and returns its
+// variables.
+func readCommandEnv(t *testing.T) map[string]string {
+	t.Helper()
+	environment, cleanup, err := isolatedCommandEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	values := map[string]string{}
+	for _, entry := range environment {
+		if parts := strings.SplitN(entry, "=", 2); len(parts) == 2 {
+			values[parts[0]] = parts[1]
+		}
+	}
+	return values
+}
+
+// Every toolchain cache is shared across runs and lives beside the service
+// state, the cache home included so a tool that follows the XDG base
+// directory specification needs no variable of its own, while HOME stays
+// throwaway; the escape hatch restores per-run caches.
+func TestCommandEnvironmentSharesEveryToolchainCacheAndIsolatesTheHome(t *testing.T) {
 	state := t.TempDir()
-	t.Setenv("HUYANG_STATE_DIR", state)
+	SetCommandCacheRoot(filepath.Join(state, "command-cache"))
+	t.Cleanup(func() { SetCommandCacheRoot("") })
 	t.Setenv("HUYANG_COMMAND_CACHE", "")
-	read := func() map[string]string {
-		environment, cleanup, err := isolatedCommandEnv()
-		if err != nil {
-			t.Fatal(err)
+	first, second := readCommandEnv(t), readCommandEnv(t)
+	root := filepath.Join(state, "command-cache")
+	shared := []string{
+		"XDG_CACHE_HOME", "LOCALAPPDATA", "GOCACHE", "GOLANGCI_LINT_CACHE", "CCACHE_DIR",
+		"SCCACHE_DIR", "ZIG_GLOBAL_CACHE_DIR", "npm_config_cache", "YARN_CACHE_FOLDER",
+		"PIP_CACHE_DIR", "UV_CACHE_DIR", "DENO_DIR", "COMPOSER_CACHE_DIR",
+	}
+	for _, name := range shared {
+		path := first[name]
+		if path == "" || path != second[name] {
+			t.Fatalf("%s = %q then %q, want one shared directory", name, path, second[name])
 		}
-		defer cleanup()
-		values := map[string]string{}
-		for _, entry := range environment {
-			if parts := strings.SplitN(entry, "=", 2); len(parts) == 2 {
-				values[parts[0]] = parts[1]
-			}
+		if !strings.HasPrefix(path, root+string(filepath.Separator)) {
+			t.Fatalf("%s = %q, want it under %q", name, path, root)
 		}
-		return values
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			t.Fatalf("%s path %q is not a directory: %v", name, path, err)
+		}
 	}
-	first, second := read(), read()
-	want := filepath.Join(state, "command-cache", "go-build")
-	if first["GOCACHE"] != want || second["GOCACHE"] != want {
-		t.Fatalf("build cache = %q and %q, want the shared %q", first["GOCACHE"], second["GOCACHE"], want)
+	if first["HOME"] == second["HOME"] {
+		t.Fatalf("the home directory was shared between runs: %q", first["HOME"])
 	}
-	if info, err := os.Stat(want); err != nil || !info.IsDir() {
-		t.Fatalf("shared build cache is not a directory: %v", err)
+	if strings.HasPrefix(first["HOME"], root) {
+		t.Fatalf("isolated home %q is inside the shared cache", first["HOME"])
 	}
-	if first["HOME"] == second["HOME"] || first["XDG_CACHE_HOME"] == second["XDG_CACHE_HOME"] {
-		t.Fatalf("home or cache home was shared between runs: %q %q", first, second)
-	}
-	if strings.HasPrefix(first["HOME"], state) {
-		t.Fatalf("isolated home %q is inside the state directory", first["HOME"])
+	// An install root still comes from the user, so a command can resolve
+	// dependencies the machine already has; it is never redirected here.
+	if strings.HasPrefix(first["GOMODCACHE"], root) || strings.HasPrefix(first["CARGO_HOME"], root) {
+		t.Fatalf("an install root was redirected into the cache: %q %q", first["GOMODCACHE"], first["CARGO_HOME"])
 	}
 	t.Setenv("HUYANG_COMMAND_CACHE", "off")
-	disabled, other := read(), read()
-	if disabled["GOCACHE"] == want || disabled["GOCACHE"] == other["GOCACHE"] {
-		t.Fatalf("disabling the shared cache did not restore a per-run one: %q %q", disabled["GOCACHE"], other["GOCACHE"])
+	disabled, other := readCommandEnv(t), readCommandEnv(t)
+	for _, name := range []string{"GOCACHE", "XDG_CACHE_HOME"} {
+		if disabled[name] == "" || disabled[name] == other[name] || strings.HasPrefix(disabled[name], root) {
+			t.Fatalf("disabling the shared cache did not restore a per-run %s: %q then %q", name, disabled[name], other[name])
+		}
+	}
+}
+
+// The shared cache is bounded: one that outgrew the bound is removed whole,
+// and one checked recently is left alone.
+func TestPruneCommandCacheEnforcesItsBound(t *testing.T) {
+	state := t.TempDir()
+	root := filepath.Join(state, "command-cache")
+	SetCommandCacheRoot(root)
+	t.Cleanup(func() { SetCommandCacheRoot("") })
+	t.Setenv("HUYANG_COMMAND_CACHE", "")
+	readCommandEnv(t)
+	if _, err := os.Stat(filepath.Join(root, commandCacheMarker)); err != nil {
+		t.Fatalf("using the cache left no marker: %v", err)
+	}
+	removed, err := PruneCommandCache()
+	if err != nil || removed {
+		t.Fatalf("a fresh cache was pruned: %v %v", removed, err)
+	}
+	// Over the size bound: the marker is backdated past the check interval so
+	// the walk runs, and the payload exceeds the bound.
+	payload := filepath.Join(root, "go-build", "big")
+	if err := os.WriteFile(payload, make([]byte, 1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * commandCachePruneInterval)
+	if err := os.Chtimes(filepath.Join(root, commandCacheMarker), stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	over, err := directoryExceeds(root, 512)
+	if err != nil || !over {
+		t.Fatalf("directoryExceeds = %v, %v, want true", over, err)
+	}
+	// Past the age bound the whole cache goes, whatever its size.
+	ancient := time.Now().Add(-2 * commandCacheMaxAge)
+	if err := os.Chtimes(filepath.Join(root, commandCacheMarker), ancient, ancient); err != nil {
+		t.Fatal(err)
+	}
+	removed, err = PruneCommandCache()
+	if err != nil || !removed {
+		t.Fatalf("an unused cache was kept: %v %v", removed, err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("the cache directory survived pruning: %v", err)
 	}
 }
 
 func TestCommandStageProvidesIsolatedCacheEnvironment(t *testing.T) {
 	miseData := t.TempDir()
 	t.Setenv("MISE_DATA_DIR", miseData)
+	// Without the shared cache every directory here is a throwaway one.
 	t.Setenv("HUYANG_COMMAND_CACHE", "off")
 	environment, cleanup, err := isolatedCommandEnv()
 	if err != nil {
