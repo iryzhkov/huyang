@@ -30,6 +30,7 @@ const (
 	OperationReplaceRange    OperationKind = "replace_range"
 	OperationCreateFile      OperationKind = "create_file"
 	OperationMoveFile        OperationKind = "move_file"
+	OperationCopyFile        OperationKind = "copy_file"
 	OperationDeleteFile      OperationKind = "delete_file"
 	OperationRenameSymbol    OperationKind = "rename_symbol"
 	OperationMoveSymbols     OperationKind = "move_symbols"
@@ -131,8 +132,12 @@ type PlanOperation struct {
 	To                  string        `json:"to,omitempty"`
 	Revision            RevisionID    `json:"revision_id,omitempty"`
 	DestinationRevision RevisionID    `json:"destination_revision_id,omitempty"`
-	DependsOn           []string      `json:"depends_on,omitempty"`
-	Indentation         string        `json:"indentation,omitempty"`
+	// ExpectedSHA256 pins the source of a copy_file, which may live outside
+	// the workspace and so has no revision; it is bound at normalization
+	// and rechecked at preview and apply.
+	ExpectedSHA256 string   `json:"expected_sha256,omitempty"`
+	DependsOn      []string `json:"depends_on,omitempty"`
+	Indentation    string   `json:"indentation,omitempty"`
 }
 
 type PlanEdit struct {
@@ -761,6 +766,7 @@ var operationNormalizers = map[OperationKind]func(*Workspace, *PlanOperation) er
 	OperationCreateFile:      (*Workspace).normalizeCreateFile,
 	OperationDeleteFile:      (*Workspace).normalizeDeleteFile,
 	OperationMoveFile:        (*Workspace).normalizeMoveFile,
+	OperationCopyFile:        (*Workspace).normalizeCopyFile,
 	OperationRenameSymbol:    normalizeProviderTarget,
 	OperationMoveSymbols:     normalizeProviderTarget,
 	OperationApplyCodeAction: normalizeProviderTarget,
@@ -910,6 +916,27 @@ func (w *Workspace) normalizeMoveFile(operation *PlanOperation) error {
 	return nil
 }
 
+// normalizeCopyFile binds the copy's source hash (a source outside the
+// workspace has no revision) and the missing destination's revision.
+func (w *Workspace) normalizeCopyFile(operation *PlanOperation) error {
+	if operation.From == "" || operation.To == "" {
+		return fmt.Errorf("%s requires from and to", operation.OpID)
+	}
+	source, err := w.TransferSource(operation.From, operation.ExpectedSHA256)
+	if err != nil {
+		return fmt.Errorf("%s: %w", operation.OpID, err)
+	}
+	operation.ExpectedSHA256 = source.SHA256
+	if operation.DestinationRevision == "" {
+		revision, err := w.snapshotRevision(operation.OpID, "copy destination", operation.To, true)
+		if err != nil {
+			return err
+		}
+		operation.DestinationRevision = revision
+	}
+	return nil
+}
+
 func normalizeProviderTarget(_ *Workspace, operation *PlanOperation) error {
 	if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
 		return fmt.Errorf("%s requires target", operation.OpID)
@@ -966,19 +993,8 @@ func orderOperations(operations []PlanOperation) ([]PlanOperation, error) {
 			if i == j {
 				continue
 			}
-			leftPath, leftStart, leftEdit := operationRange(left)
-			rightPath, rightStart, rightEdit := operationRange(right)
-			if leftEdit && rightEdit && leftPath == rightPath && leftStart < rightStart {
-				addEdge(right.OpID, left.OpID)
-			}
-			if left.Kind == OperationCreateFile && left.Path != "" && rightEdit && rightPath == left.Path {
-				addEdge(left.OpID, right.OpID)
-			}
-			if leftEdit && right.Kind == OperationDeleteFile && leftPath == right.Path {
-				addEdge(left.OpID, right.OpID)
-			}
-			if leftEdit && right.Kind == OperationMoveFile && leftPath == right.From {
-				addEdge(left.OpID, right.OpID)
+			if before, after, ok := implicitEdge(left, right); ok {
+				addEdge(before, after)
 			}
 		}
 	}
@@ -1006,6 +1022,29 @@ func orderOperations(operations []PlanOperation) ([]PlanOperation, error) {
 		return nil, errors.New("operation dependency cycle")
 	}
 	return ordered, nil
+}
+
+// implicitEdge is the ordering the operations' paths imply between one
+// pair: range edits of one file apply from its end toward its beginning; a
+// file is created before it is edited and edited before it is deleted or
+// moved; a copy reads its source after any edit of it and lands before any
+// edit of its destination. It returns the op_ids in apply order.
+func implicitEdge(left, right PlanOperation) (string, string, bool) {
+	leftPath, leftStart, leftEdit := operationRange(left)
+	rightPath, rightStart, rightEdit := operationRange(right)
+	switch {
+	case leftEdit && rightEdit && leftPath == rightPath && leftStart < rightStart:
+		return right.OpID, left.OpID, true
+	case left.Kind == OperationCreateFile && left.Path != "" && rightEdit && rightPath == left.Path:
+		return left.OpID, right.OpID, true
+	case leftEdit && right.Kind == OperationDeleteFile && leftPath == right.Path:
+		return left.OpID, right.OpID, true
+	case leftEdit && (right.Kind == OperationMoveFile || right.Kind == OperationCopyFile) && leftPath == right.From:
+		return left.OpID, right.OpID, true
+	case left.Kind == OperationCopyFile && rightEdit && rightPath == left.To:
+		return left.OpID, right.OpID, true
+	}
+	return "", "", false
 }
 
 func operationRange(operation PlanOperation) (string, int, bool) {
@@ -1089,6 +1128,8 @@ func (b *previewBuilder) apply(operation PlanOperation) {
 		b.applyDelete(operation)
 	case OperationMoveFile:
 		b.applyMove(operation)
+	case OperationCopyFile:
+		b.applyCopy(operation)
 	case OperationReplaceMatches:
 		b.applyReplaceMatches(operation)
 	default:
@@ -1269,6 +1310,43 @@ func (b *previewBuilder) applyMove(operation PlanOperation) {
 	_, _, _ = b.load(operation.To)
 	b.set(operation.To, append([]byte(nil), source...), true)
 	b.set(operation.From, nil, false)
+}
+
+// applyCopy previews a copy: the source is the simulated content of a
+// workspace document (so an earlier operation's edit is copied), or the
+// external file's bytes rechecked against the bound hash.
+func (b *previewBuilder) applyCopy(operation PlanOperation) {
+	destination, err := b.w.ValidateMutation(b.w.Identity().ID, operation.To, operation.DestinationRevision, ProviderLayer{})
+	if err != nil {
+		b.conflict(operation, operation.To, operation.DestinationRevision, err)
+		return
+	}
+	if destination.Disk.Kind != ObjectMissing {
+		b.conflict(operation, operation.To, operation.DestinationRevision, errors.New("copy destination exists"))
+		return
+	}
+	var content []byte
+	if _, inside := b.w.confinedPath(operation.From); inside == nil {
+		loaded, loadErr := b.loadPresent(operation.From, "copy source is missing")
+		if loadErr != nil {
+			b.conflict(operation, operation.From, "", loadErr)
+			return
+		}
+		if !b.touched[operation.From] && hashBytes(loaded) != operation.ExpectedSHA256 {
+			b.conflict(operation, operation.From, "", Codedf(CodeCopySourceChanged, "copy source no longer matches its bound hash"))
+			return
+		}
+		content = loaded
+	} else {
+		source, sourceErr := b.w.TransferSource(operation.From, operation.ExpectedSHA256)
+		if sourceErr != nil {
+			b.conflict(operation, operation.From, "", sourceErr)
+			return
+		}
+		content = source.Content
+	}
+	_, _, _ = b.load(operation.To)
+	b.set(operation.To, append([]byte(nil), content...), true)
 }
 
 func (b *previewBuilder) applyReplaceMatches(operation PlanOperation) {

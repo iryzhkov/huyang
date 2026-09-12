@@ -365,3 +365,65 @@ func TestMoveAndDeleteInferRevisionsIncludingMissingDestination(t *testing.T) {
 		t.Fatalf("move/delete preview = %#v", previewed)
 	}
 }
+
+// A plan copies a file from inside the workspace after an earlier edit of
+// it, and from an absolute path outside the workspace with its hash bound
+// at creation; a source that changes afterwards conflicts the preview.
+func TestPlanCopyFileBindsSourceHashAndOrdersAfterEdits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "in.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(external, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := Open(OpenOptions{Kind: KindProject, Root: root, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := opened.Snapshot("in.txt", ProviderLayer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := opened.NewRange("in.txt", 0, len("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := opened.CreatePlan([]PlanOperation{
+		{OpID: "copy-in", Kind: OperationCopyFile, From: "in.txt", To: "in-copy.txt"},
+		{OpID: "edit", Kind: OperationReplaceRange, Target: &PlanTarget{FileRange: &handle}, Content: "after", Revision: in.Revision},
+		{OpID: "copy-out", Kind: OperationCopyFile, From: external, To: "docs/outside.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Operations[0].ExpectedSHA256 != hashBytes([]byte("before\n")) || plan.Operations[2].ExpectedSHA256 != hashBytes([]byte("external\n")) {
+		t.Fatalf("bound hashes = %#v", plan.Operations)
+	}
+	previewed, err := opened.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previewed.Preview.Outcome != "ok" || len(previewed.Preview.Diffs) != 3 {
+		t.Fatalf("copy preview = %#v", previewed.Preview)
+	}
+	for _, diff := range previewed.Preview.Diffs {
+		if diff.Path == "in-copy.txt" && string(diff.After) != "after\n" {
+			t.Fatalf("copy did not follow the edit of its source: %q", diff.After)
+		}
+		if diff.Path == "docs/outside.txt" && string(diff.After) != "external\n" {
+			t.Fatalf("external copy = %q", diff.After)
+		}
+	}
+	if err := os.WriteFile(external, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conflicted, err := opened.PreviewPlan(plan.PlanID, plan.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflicted.Preview.Outcome == "ok" || len(conflicted.Preview.Conflicts) != 1 || conflicted.Preview.Conflicts[0].OpID != "copy-out" {
+		t.Fatalf("changed external source did not conflict: %#v", conflicted.Preview)
+	}
+}

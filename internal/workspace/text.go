@@ -1040,10 +1040,16 @@ func ensureCurrent(path string, expectedExists bool, expected []byte) error {
 		return err
 	}
 	exists := disk.Kind != ObjectMissing
-	if exists != expectedExists || (exists && (disk.Kind != ObjectRegularText || !bytes.Equal(content, expected))) {
+	if exists != expectedExists || (exists && (!regularFile(disk) || !bytes.Equal(content, expected))) {
 		return fmt.Errorf("commit precondition changed for %s", path)
 	}
 	return nil
+}
+
+// regularFile reports whether a snapshot is a regular file whose bytes the
+// native journal can compare: text or binary, never a directory or symlink.
+func regularFile(disk DiskSnapshot) bool {
+	return disk.Kind == ObjectRegularText || disk.Kind == ObjectBinary
 }
 
 func syncDirectory(path string) error {
@@ -1129,7 +1135,7 @@ func stateMatches(path string, exists bool, content []byte) bool {
 	if currentExists != exists {
 		return false
 	}
-	return !exists || (disk.Kind == ObjectRegularText && bytes.Equal(current, content))
+	return !exists || (regularFile(disk) && bytes.Equal(current, content))
 }
 
 func displayPath(root, path string) string {

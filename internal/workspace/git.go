@@ -355,6 +355,61 @@ func (w *Workspace) RecentCommits(limit int) (CommitList, error) {
 	}
 	return r, nil
 }
+
+// Tracked states reported by TrackedState.
+const (
+	TrackedStateTracked       = "tracked"
+	TrackedStateUntracked     = "untracked"
+	TrackedStateIgnored       = "ignored"
+	TrackedStateNotRepository = "not_a_repository"
+)
+
+// TrackedState classifies workspace paths for the Git step that follows a
+// file-lifecycle edit: tracked (in the index, whether or not the file still
+// exists), ignored, or untracked. It is read-only through the sanitized
+// runner; Huyang never stages anything itself. Outside a repository every
+// path is not_a_repository.
+func (w *Workspace) TrackedState(paths []string) map[string]string {
+	states := make(map[string]string, len(paths))
+	g, err := w.gitRepository()
+	if err != nil {
+		for _, path := range paths {
+			states[path] = TrackedStateNotRepository
+		}
+		return states
+	}
+	relative := make(map[string]string, len(paths))
+	args := make([]string, 0, len(paths))
+	for _, path := range paths {
+		states[path] = TrackedStateUntracked
+		if _, rel, err := w.gitPath(g, path); err == nil {
+			relative[rel] = path
+			args = append(args, rel)
+		} else {
+			states[path] = TrackedStateNotRepository
+		}
+	}
+	if len(args) == 0 {
+		return states
+	}
+	if out, _, err := runGitAt(g.root, nil, append([]string{"ls-files", "-z", "--cached", "--"}, args...)...); err == nil {
+		for _, rel := range strings.Split(out, "\x00") {
+			if path, ok := relative[rel]; ok {
+				states[path] = TrackedStateTracked
+			}
+		}
+	}
+	// check-ignore exits 1 when nothing is ignored; its output is authoritative
+	// either way. -z requires --stdin, so the paths go through it.
+	out, _, _ := runGitAt(g.root, []byte(strings.Join(args, "\x00")+"\x00"), "check-ignore", "-z", "--stdin")
+	for _, rel := range strings.Split(out, "\x00") {
+		if path, ok := relative[rel]; ok && states[path] == TrackedStateUntracked {
+			states[path] = TrackedStateIgnored
+		}
+	}
+	return states
+}
+
 func (w *Workspace) gitPath(g *gitState, path string) (string, string, error) {
 	abs, err := w.confinedPath(path)
 	if err != nil {

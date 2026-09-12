@@ -17,7 +17,7 @@ import (
 func (h *Handlers) editOperations(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	operations := mcpapi.AnySlice(arguments["operations"])
 	if len(operations) == 0 {
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations must be a non-empty array of replace_literal or create_file operations", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations must be a non-empty array of replace_literal, create_file, move_file, copy_file or delete_file operations", map[string]any{})
 	}
 	flags := map[string]any{"preview_only": arguments["preview_only"], "verbose": arguments["verbose"], "format": arguments["format"]}
 	merged := appliedEdit{fromStateSeq: workspace.Identity().StateSeq, revisions: map[string]workspacecore.RevisionID{}}
@@ -30,16 +30,20 @@ func (h *Handlers) editOperations(ctx context.Context, requestID string, workspa
 			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", err.Error(), map[string]any{}), index, merged)
 		}
 		if request.Kind == "replace_range" {
-			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations accepts replace_literal and create_file; use a single operation for replace_range", map[string]any{}), index, merged)
+			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations accepts every kind but replace_range; use a single operation for replace_range", map[string]any{}), index, merged)
 		}
 		base = request
 		var applied appliedEdit
 		var failure map[string]any
-		if request.Kind == "create_file" {
+		switch request.Kind {
+		case "create_file":
 			applied, failure = applyCreateFile(requestID, workspace, request)
 			// A new file is a changed path, not a replacement.
 			applied.replacements = 0
-		} else {
+		case "move_file", "copy_file", "delete_file":
+			applied, failure = applyLifecycle(requestID, workspace, request)
+			applied.replacements = 0
+		default:
 			applied, failure = applyLiteral(requestID, workspace, request)
 		}
 		if failure != nil {
@@ -101,6 +105,22 @@ func mergeApplied(merged *appliedEdit, applied appliedEdit) {
 	merged.replacements += applied.replacements
 	merged.warnings = append(merged.warnings, applied.warnings...)
 	merged.locations = append(merged.locations, applied.locations...)
+	merged.next = append(merged.next, applied.next...)
+	for path := range applied.noFormat {
+		if merged.noFormat == nil {
+			merged.noFormat = map[string]bool{}
+		}
+		merged.noFormat[path] = true
+	}
+	for path, state := range applied.git {
+		if merged.git == nil {
+			merged.git = map[string]string{}
+		}
+		merged.git[path] = state
+	}
+	if applied.source != nil {
+		merged.source = applied.source
+	}
 }
 
 func changedPaths(files []workspacecore.PlanStageFile) []string {

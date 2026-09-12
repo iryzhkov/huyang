@@ -19,7 +19,7 @@ func formatEdited(workspace *workspacecore.Workspace, applied *appliedEdit) {
 	var reformatted, skipped []string
 	for index := range applied.files {
 		file := &applied.files[index]
-		if !file.AfterExists || strings.ToLower(filepath.Ext(file.Path)) != ".go" {
+		if !file.AfterExists || applied.noFormat[file.Path] || strings.ToLower(filepath.Ext(file.Path)) != ".go" {
 			continue
 		}
 		formatted, err := format.Source(file.After)

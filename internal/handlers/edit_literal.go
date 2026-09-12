@@ -113,7 +113,8 @@ func literalSummary(change workspacecore.LiteralChange, preview bool) string {
 }
 
 // editCreateFile is edit_apply with kind create_file: one new file, refused
-// when the path already exists.
+// when the path already exists unless replace is set with the existing
+// file's revision_id.
 func (h *Handlers) editCreateFile(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest) map[string]any {
 	applied, failure := applyCreateFile(requestID, workspace, request)
 	if failure != nil {
@@ -128,14 +129,21 @@ func applyCreateFile(requestID string, workspace *workspacecore.Workspace, reque
 	if request.Path == "" {
 		return appliedEdit{}, mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "create_file requires path", map[string]any{})
 	}
+	if request.Replace {
+		return applyReplaceFile(requestID, workspace, request)
+	}
 	snapshot, err := workspace.Snapshot(request.Path, workspacecore.ProviderLayer{})
 	if err != nil {
 		return appliedEdit{}, mcpapi.Failure(requestID, workspace, "create_failed", err)
 	}
 	if snapshot.Disk.Kind != workspacecore.ObjectMissing {
-		result := mcpapi.Envelope(requestID, workspace, "conflict", "create_target_exists",
-			fmt.Sprintf("%s already exists; nothing changed", request.Path), map[string]any{"path": request.Path})
-		result["next"] = []any{map[string]any{"tool": "edit_apply", "action": "replace_literal_inside_the_existing_file", "path": request.Path}}
+		result := mcpapi.Envelope(requestID, workspace, "conflict", workspacecore.CodeCreateTargetExists,
+			fmt.Sprintf("%s already exists; nothing changed. To overwrite it, pass replace: true with its revision_id (%s)", request.Path, snapshot.Revision),
+			map[string]any{"path": request.Path, "revision_id": snapshot.Revision})
+		result["next"] = []any{
+			map[string]any{"tool": "edit_apply", "action": "replace_literal_inside_the_existing_file", "path": request.Path},
+			map[string]any{"tool": "edit_apply", "action": "create_file_with_replace_true_and_this_revision_id", "path": request.Path, "revision_id": snapshot.Revision},
+		}
 		return appliedEdit{}, result
 	}
 	fromStateSeq := workspace.Identity().StateSeq
@@ -157,4 +165,47 @@ func applyCreateFile(requestID string, workspace *workspacecore.Workspace, reque
 	applied.files[0].Path = diff.Path
 	applied.revisions = map[string]workspacecore.RevisionID{diff.Path: after.Revision}
 	return applied, nil
+}
+
+// applyReplaceFile is create_file with replace: a guarded whole-file
+// overwrite of an existing document, pinned to the revision the agent read.
+func applyReplaceFile(requestID string, workspace *workspacecore.Workspace, request editRequest) (appliedEdit, map[string]any) {
+	if request.RevisionID == "" {
+		snapshot, err := workspace.Snapshot(request.Path, workspacecore.ProviderLayer{})
+		if err != nil {
+			return appliedEdit{}, mcpapi.Failure(requestID, workspace, "create_failed", err)
+		}
+		result := mcpapi.Envelope(requestID, workspace, "conflict", workspacecore.CodeReplaceRevisionRequired,
+			"create_file with replace needs the revision_id of the file it overwrites; nothing changed",
+			map[string]any{"path": request.Path, "revision_id": snapshot.Revision})
+		result["next"] = []any{map[string]any{"tool": "edit_apply", "action": "retry_with_this_revision_id", "path": request.Path, "revision_id": snapshot.Revision}}
+		return appliedEdit{}, result
+	}
+	fromStateSeq := workspace.Identity().StateSeq
+	content := []byte(request.Content)
+	if request.Preview {
+		read, err := workspace.Read(request.Path)
+		if err != nil {
+			return appliedEdit{}, mcpapi.Failure(requestID, workspace, "create_failed", err)
+		}
+		return appliedEdit{
+			files:        []workspacecore.PlanStageFile{{Path: read.Path, Before: read.Content, After: content, BeforeExists: true, AfterExists: true, Patch: replacePatch(read.Path, len(read.Content), len(content))}},
+			fromStateSeq: fromStateSeq, replacements: 1, summary: "Preview of replacing " + read.Path + "; canonical bytes unchanged",
+		}, nil
+	}
+	diff, after, err := workspace.ApplyFile(workspace.Identity().ID, request.Path, workspacecore.RevisionID(request.RevisionID), workspacecore.FileReplace, content)
+	if err != nil {
+		return appliedEdit{}, editFailure(requestID, workspace, workspacecore.RangeHandle{Path: request.Path}, err)
+	}
+	patch := replacePatch(diff.Path, len(diff.Before), len(diff.After))
+	return appliedEdit{
+		files:        []workspacecore.PlanStageFile{{Path: diff.Path, Before: diff.Before, After: diff.After, BeforeExists: true, AfterExists: true, Patch: patch}},
+		patches:      []string{patch},
+		fromStateSeq: fromStateSeq, replacements: 1, summary: "Replaced " + diff.Path,
+		revisions: map[string]workspacecore.RevisionID{diff.Path: after.Revision},
+	}, nil
+}
+
+func replacePatch(path string, before, after int) string {
+	return fmt.Sprintf("--- %s\n+++ %s\n@@ replaced, %d bytes before, %d after @@\n", path, path, before, after)
 }

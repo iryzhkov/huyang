@@ -13,7 +13,9 @@ import (
 
 // editRequest is the decoded edit_apply call: one replace_range operation
 // addressed by an opaque handle or an exact file range, one replace_literal
-// operation addressed by the text it replaces, or one create_file.
+// operation addressed by the text it replaces, one create_file (optionally
+// a guarded whole-file replace), or one file-lifecycle operation
+// (move_file, copy_file, delete_file).
 type editRequest struct {
 	Kind          string
 	Preview       bool
@@ -26,6 +28,28 @@ type editRequest struct {
 	Old           string
 	New           string
 	ExpectedCount int
+	// File-lifecycle fields.
+	From                  string
+	To                    string
+	RevisionID            string
+	DestinationRevisionID string
+	ExpectedSHA256        string
+	Replace               bool
+}
+
+// optionalString renders an optional argument that may be a string or a
+// typed string value; nil is the empty string.
+func optionalString(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+// editKinds lists every operation kind edit_apply accepts.
+var editKinds = map[string]bool{
+	"replace_range": true, "replace_literal": true, "create_file": true,
+	"move_file": true, "copy_file": true, "delete_file": true,
 }
 
 func decodeEditRequest(arguments map[string]any) (editRequest, error) {
@@ -35,11 +59,17 @@ func decodeEditRequest(arguments map[string]any) (editRequest, error) {
 	}
 	request := editRequest{}
 	request.Kind, _ = operation["kind"].(string)
-	switch request.Kind {
-	case "replace_range", "replace_literal", "create_file":
-	default:
-		return editRequest{}, fmt.Errorf("edit_apply supports replace_range, replace_literal and create_file, not %q", request.Kind)
+	if !editKinds[request.Kind] {
+		return editRequest{}, fmt.Errorf("edit_apply supports replace_literal, create_file, move_file, copy_file, delete_file and replace_range, not %q", request.Kind)
 	}
+	request.From, _ = operation["from"].(string)
+	request.To, _ = operation["to"].(string)
+	// Revisions arrive as strings over MCP and as RevisionID values from
+	// in-process callers; both print the same.
+	request.RevisionID = optionalString(operation["revision_id"])
+	request.DestinationRevisionID = optionalString(operation["destination_revision_id"])
+	request.ExpectedSHA256 = optionalString(operation["expected_sha256"])
+	request.Replace, _ = operation["replace"].(bool)
 	target, _ := operation["target"].(map[string]any)
 	request.Preview, _ = arguments["preview_only"].(bool)
 	request.Verbose, _ = arguments["verbose"].(bool)
@@ -72,6 +102,15 @@ type appliedEdit struct {
 	locations []string
 	// format is what the language formatter did after the edit, when it ran
 	format map[string]any
+	// noFormat names files the formatter must leave alone: a moved, copied
+	// or deleted file keeps its exact bytes
+	noFormat map[string]bool
+	// git is the tracked state of each lifecycle path, when in a repository
+	git map[string]string
+	// source describes what a copy read, so the receipt records it
+	source map[string]any
+	// next are the steps the agent takes after a successful lifecycle edit
+	next []any
 	// verbose detail, only reported on request
 	change     *workspacecore.TextChange
 	resolution *workspacecore.HandleResolution
@@ -90,8 +129,27 @@ func (h *Handlers) edit(ctx context.Context, requestID string, workspace *worksp
 		return h.editLiteral(ctx, requestID, workspace, request)
 	case "create_file":
 		return h.editCreateFile(ctx, requestID, workspace, request)
+	case "move_file", "copy_file", "delete_file":
+		applied, failure := applyLifecycle(requestID, workspace, request)
+		if failure != nil {
+			return failure
+		}
+		return h.finishEdit(ctx, requestID, workspace, request, applied)
 	}
 	return h.editRange(ctx, requestID, workspace, request)
+}
+
+// applyLifecycle dispatches one file-lifecycle kind; shared by the single
+// call and the operations list.
+func applyLifecycle(requestID string, workspace *workspacecore.Workspace, request editRequest) (appliedEdit, map[string]any) {
+	switch request.Kind {
+	case "move_file":
+		return applyMoveFile(requestID, workspace, request)
+	case "copy_file":
+		return applyCopyFile(requestID, workspace, request)
+	default:
+		return applyDeleteFile(requestID, workspace, request)
+	}
 }
 
 // editRange applies one guarded range replacement.
@@ -208,6 +266,8 @@ func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *
 	}
 	if outcome != "ok" {
 		result["next"] = editDiagnosticRecovery(data["revision"])
+	} else if len(applied.next) > 0 {
+		result["next"] = applied.next
 	}
 	return result
 }
@@ -250,6 +310,12 @@ func compactEditData(workspace *workspacecore.Workspace, request editRequest, ap
 	}
 	if applied.format != nil {
 		data["format"] = applied.format
+	}
+	if len(applied.git) > 0 {
+		data["git"] = applied.git
+	}
+	if applied.source != nil {
+		data["source"] = applied.source
 	}
 	switch len(applied.revisions) {
 	case 0:

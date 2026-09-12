@@ -153,13 +153,42 @@ func planOperationSchema(operationKinds []string) map[string]any {
 			"description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
 		},
 		"path":                    stringSchema("Workspace path for create_file or delete_file."),
-		"from":                    stringSchema("Source path for move_file."),
-		"to":                      stringSchema("Destination path for move_file."),
+		"from":                    stringSchema("Source path for move_file or copy_file."),
+		"to":                      stringSchema("Destination path for move_file or copy_file."),
 		"revision_id":             stringSchema("Expected source/path document revision. Optional for create_file; Huyang binds the current missing-target revision.."),
-		"destination_revision_id": stringSchema("Expected destination document revision for move_file."),
+		"destination_revision_id": stringSchema("Expected destination document revision for move_file and copy_file."),
+		"expected_sha256":         stringSchema("copy_file: hash the source must have; bound at creation when omitted. The source may be an absolute path outside the workspace."),
 		"depends_on":              map[string]any{"type": "array", "items": stringSchema("Predecessor op_id.")},
 		"indentation":             enumSchema("exact", "syntax_anchor", "formatter"),
 	}, "op_id", "kind")
+}
+
+// editOperationSchema is one edit_apply operation. replace_range needs a
+// handle from a workspace that exists, so it is offered only for the
+// single operation, not in the list.
+func editOperationSchema(withRange bool) map[string]any {
+	kinds := []string{"replace_literal", "create_file", "move_file", "copy_file", "delete_file"}
+	if withRange {
+		kinds = append(kinds, "replace_range")
+	}
+	properties := map[string]any{
+		"kind":                    enumSchema(kinds...),
+		"path":                    stringSchema("replace_literal: file to search (omit to search the whole workspace); create_file: the new path; delete_file: the file to remove."),
+		"old":                     stringSchema("replace_literal: exact text to replace, may span lines. If it differs from the file only by a uniform indentation, the edit still applies and the response says so."),
+		"new":                     stringSchema("replace_literal: replacement text."),
+		"expected_count":          map[string]any{"type": "integer", "minimum": 1, "description": "replace_literal: how many occurrences old must have (default 1); any other count changes nothing and the response lists the locations."},
+		"content":                 stringSchema("create_file: the file content; replace_range: exact replacement bytes."),
+		"replace":                 map[string]any{"type": "boolean", "description": "create_file: overwrite an existing file; requires revision_id of the file as it is now."},
+		"from":                    stringSchema("move_file: the workspace file to move; copy_file: the file to copy, a workspace path or an absolute path outside the workspace."),
+		"to":                      stringSchema("move_file, copy_file: the destination, which must not exist; parent directories are created."),
+		"revision_id":             stringSchema("delete_file (required unless expected_sha256), create_file with replace (required), move_file (optional): the revision of the file as read."),
+		"destination_revision_id": stringSchema("move_file, copy_file: optional revision of the missing destination, as a read or search returned it."),
+		"expected_sha256":         stringSchema("delete_file: the content hash of the file to remove (alternative to revision_id); copy_file: optional hash the source must have."),
+	}
+	if withRange {
+		properties["target"] = mutationRangeTargetSchema()
+	}
+	return schemaObject(properties, "kind")
 }
 
 func changePlanSchema(stateful map[string]any, operationKinds []string) map[string]any {
@@ -278,7 +307,7 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 func editTools(edit []Profile) []ToolDescriptor {
 	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "target": targetSchema()}
 	stateful := statefulProperties()
-	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"}
+	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "copy_file", "delete_file", "rename_symbol", "move_symbols", "replace_matches", "apply_code_action"}
 	return []ToolDescriptor{
 		{Class: ClassCanonicalWrite, Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
@@ -287,25 +316,13 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"parser": map[string]any{"type": "boolean"},
 		}, "workspace_id", "idempotency_key", "action")},
 		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
-		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file; kind=replace_range replaces a handle or file_range returned by search. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
 			"verbose":      map[string]any{"type": "boolean", "description": "Add the full change record, hashes and handle resolution to the response."},
-			"format":       map[string]any{"type": "boolean", "description": "Run the language's formatter on the edited files after the edit (gofmt for Go, natively) and report what it changed. Default true; false keeps the bytes exactly as written."},
-			"operation": schemaObject(map[string]any{
-				"kind":           enumSchema("replace_literal", "create_file", "replace_range"),
-				"path":           stringSchema("replace_literal: file to search (omit to search the whole workspace); create_file: the new path."),
-				"old":            stringSchema("replace_literal: exact text to replace, may span lines. If it differs from the file only by a uniform indentation, the edit still applies and the response says so."),
-				"new":            stringSchema("replace_literal: replacement text."),
-				"expected_count": map[string]any{"type": "integer", "minimum": 1, "description": "replace_literal: how many occurrences old must have (default 1); any other count changes nothing and the response lists the locations."},
-				"target":         mutationRangeTargetSchema(),
-				"content":        stringSchema("replace_range: exact replacement bytes; create_file: the file content."),
-			}, "kind"),
-			"operations": map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several replace_literal or create_file operations applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list and the reply says how many were applied.", "items": schemaObject(map[string]any{
-				"kind": enumSchema("replace_literal", "create_file"), "path": stringSchema("File to search, or the new path."),
-				"old": stringSchema("replace_literal: exact text to replace."), "new": stringSchema("replace_literal: replacement text."),
-				"expected_count": map[string]any{"type": "integer", "minimum": 1}, "content": stringSchema("create_file: the file content."),
-			}, "kind")},
+			"format":       map[string]any{"type": "boolean", "description": "Run the language's formatter on the edited files after the edit (gofmt for Go, natively) and report what it changed. Default true; false keeps the bytes exactly as written. Moved, copied and deleted files are never formatted."},
+			"operation":    editOperationSchema(true),
+			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many.", "items": editOperationSchema(false)},
 		})},
 		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
 		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
