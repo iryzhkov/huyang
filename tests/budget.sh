@@ -109,7 +109,8 @@ for round in $(seq 1 "$BUDGET_ROUNDS"); do
   WS="$(printf '%s' "$opened" | jq -r '.workspace.id')"
   require_ok workspace_inspect "$(call workspace_inspect "$(jq -cn --arg ws "$WS" '{workspace_id:$ws,view:"status"}')")"
   if [ $((round % 2)) -eq 1 ]; then needle=8080; content=8081; else needle=8081; content=8080; fi
-  searched="$(call search "$(jq -cn --arg ws "$WS" --arg q "$needle" '{workspace_id:$ws,query:$q,mode:"literal"}')")"
+  # Hits carry an editable handle only on request since the second friction pass.
+  searched="$(call search "$(jq -cn --arg ws "$WS" --arg q "$needle" '{workspace_id:$ws,query:$q,mode:"literal",include_handles:true}')")"
   require_ok search "$searched"
   target="$(printf '%s' "$searched" | jq -c '[.data.hits[] | select(.path == "config.toml")][0] | if . then {handle:.handle} else null end')"
   [ "$target" != "null" ] || { echo "budget: search found no config.toml hit for $needle: $searched" >&2; exit 1; }
