@@ -59,7 +59,14 @@ func startWithLanguageServers(t *testing.T) *live {
 	return launch(t, false)
 }
 
-func launch(t *testing.T, isolateHome bool) *live {
+// startWithEnvironment keeps the developer's home, like
+// startWithLanguageServers, and adds environment entries the daemon and every
+// process it spawns inherit.
+func startWithEnvironment(t *testing.T, entries ...string) *live {
+	return launch(t, false, entries...)
+}
+
+func launch(t *testing.T, isolateHome bool, extra ...string) *live {
 	t.Helper()
 	binary := filepath.Join(repositoryRoot(t), "bin", "huyang")
 	if _, err := os.Stat(binary); err != nil {
@@ -93,6 +100,7 @@ func launch(t *testing.T, isolateHome bool) *live {
 			"XDG_STATE_HOME="+filepath.Join(instance.homeDir, ".local", "state"),
 		)
 	}
+	instance.environment = append(instance.environment, extra...)
 	instance.serve()
 	return instance
 }

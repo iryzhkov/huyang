@@ -632,6 +632,17 @@ func (b *Backend) runBootstrap(g *generation) bootstrapOutcome {
 	if failure := b.connectKernel(g); failure != nil {
 		return bootstrapOutcome{failure: failure}
 	}
+	// Neovim's byte-compile cache names each entry after the full path of the
+	// file it caches, with the separators escaped, so a kernel loaded from a
+	// deep checkout - an unattended worker's run directory is around two
+	// hundred characters - asks the filesystem for a file name past its limit
+	// and the bootstrap dies with ENAMETOOLONG. The cache is enabled by the
+	// user's own configuration, which this embedded instance inherits when it
+	// is not started clean, and nothing here needs it: the kernel is loaded
+	// once per generation.
+	if err := g.nvim.ExecLua(`if vim.loader then pcall(vim.loader.disable) end`, nil); err != nil {
+		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "disabling the Lua byte-compile cache: "+err.Error(), err)}
+	}
 	if b.config.RuntimePath != "" {
 		if err := g.nvim.ExecLua(`vim.opt.runtimepath:prepend(...)`, nil, b.config.RuntimePath); err != nil {
 			return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "prepending shipped runtime: "+err.Error(), err)}
