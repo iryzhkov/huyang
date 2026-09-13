@@ -56,6 +56,29 @@ func TestRevisionDiffCollapsesExactEditRevert(t *testing.T) {
 	}
 }
 
+// An edit that named the repository with root is as visible to revision_diff
+// as one that named the workspace: the receipt is filed under the workspace
+// the root resolved to, not under the empty ID the arguments carried before
+// it was resolved.
+func TestRevisionDiffSeesEditsMadeThroughRoot(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{"note.txt": "alpha beta\n"})
+	defer direct.closeProviders()
+	workspace := direct.get(workspacecore.ID(workspaceID))
+	from := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
+	applied := direct.call(context.Background(), "edit_apply", map[string]any{
+		"root": root, "operation": map[string]any{"kind": "replace_literal", "old": "beta", "new": "gamma"},
+	})
+	if applied["outcome"] != "ok" && applied["outcome"] != "provisional" {
+		t.Fatalf("edit through root failed: %#v", applied)
+	}
+	diffed := direct.call(context.Background(), "revision_diff", map[string]any{
+		"root": root, "from_revision": from, "to_revision_or_current": "current",
+	})
+	if diffed["outcome"] != "ok" {
+		t.Fatalf("revision diff did not cover the edit made through root: %#v", diffed)
+	}
+}
+
 // A range that starts before an external gap still returns the native edit
 // segments it knows, alongside the explicit gap.
 func TestRevisionDiffReturnsKnownSegmentsAcrossExternalGap(t *testing.T) {

@@ -122,6 +122,19 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 		normalizeToolTimeout(ctx, d.toolTimeout, name, result)
 		return result
 	}
+	// A root instead of a workspace_id is resolved before the replay key is
+	// built, not later in executeScheduled: the key starts with the workspace
+	// ID, and a receipt filed under an empty one is invisible to everything
+	// that reads receipts back by workspace - revision_diff answered
+	// diff_evidence_incomplete and verify_run test_scope=affected refused
+	// with changed_file_evidence_incomplete, for edits that had been applied
+	// through the cheapest documented call.
+	namedWorkspace, _ := arguments["workspace_id"].(string)
+	if root, _ := arguments["root"].(string); strings.TrimSpace(namedWorkspace) == "" && strings.TrimSpace(root) != "" {
+		if failure := d.handlers.AdoptProjectRoot(ctx, requestID, arguments); failure != nil {
+			return failure
+		}
+	}
 	idempotencyKey, _ := arguments["idempotency_key"].(string)
 	if idempotencyKey == "" {
 		// A caller that supplies no key gets a fresh one: the call is not
