@@ -168,6 +168,11 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	// handlers deliberately advertise no workspace_busy guard for provider
 	// reads; the only workspace_busy result comes from PreparePlan when the
 	// same plan is already preparing.
+	// A call that names a prepared revision is answered from the sandbox
+	// that holds it, never from canonical source.
+	if selector := decodePreparedSelector(arguments); selector.wantsPrepared(workspace) && preparedCapableTool(name) {
+		return h.routePrepared(ctx, requestID, name, workspace, selector, arguments)
+	}
 	switch name {
 	case "workspace_inspect":
 		return h.inspect(ctx, requestID, workspace, arguments)

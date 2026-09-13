@@ -132,6 +132,42 @@ func (s *SandboxStager) PreparedRequest() (workspacecore.PlanStageRequest, works
 	return request, result, true
 }
 
+// PreparedView is one prepared revision seen as a place to read and analyse:
+// the tree the staged bytes live in, the provider that has read them, and the
+// plan they belong to. Tree never leaves the service; it is what routes a
+// call, not what a reply says.
+type PreparedView struct {
+	PlanID           string
+	PlanRevision     uint64
+	PreparedRevision string
+	Tree             string
+	Provider         provider.Provider
+	// Files are the workspace-relative paths this preparation staged, which
+	// is what "the diagnostics of this proposal" means when no file is named.
+	Files []string
+}
+
+// Prepared describes this stager's prepared revision, or reports that it has
+// none: a plan that was never prepared, or whose sandbox has been applied,
+// rolled back or discarded, is not a place anything can be read from.
+func (s *SandboxStager) Prepared() (PreparedView, bool) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.done || s.sandbox == nil || s.preparedRevision == "" {
+		return PreparedView{}, false
+	}
+	view := PreparedView{
+		PlanID: s.planID, PlanRevision: s.planRevision, PreparedRevision: s.preparedRevision,
+		Tree: s.sandbox.Tree, Provider: s.provider,
+	}
+	for _, file := range s.prepared.Files {
+		if file.AfterExists {
+			view.Files = append(view.Files, file.Path)
+		}
+	}
+	return view, true
+}
+
 func (s *SandboxStager) SetPreparedRevision(revision string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()

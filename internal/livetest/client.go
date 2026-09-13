@@ -71,6 +71,21 @@ func callRefused(t *testing.T, session *mcp.ClientSession, name string, argument
 	return err
 }
 
+// sessionHandle is the client session type, named once so helpers can take
+// it without every test file importing the SDK.
+type sessionHandle = *mcp.ClientSession
+
+// renderJSON is a reply as the client received it, for assertions about what
+// a reply must never contain.
+func renderJSON(t *testing.T, envelope map[string]any) string {
+	t.Helper()
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
 // outcome is the envelope's outcome, or the empty string when there is none.
 func outcome(envelope map[string]any) string {
 	text, _ := envelope["outcome"].(string)

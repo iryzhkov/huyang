@@ -128,6 +128,11 @@ existing workspace, because its handle comes from one.
   state and, when the source was tracked, `next` names the one command to run
   (`git add -A -- old new`); after it `git diff --cached -M` reports the move as a
   rename. Symlinks and directories go through `change_plan`.
+- After preparing a plan, the staged code is somewhere you can look: pass `revision:
+  "prep_..."` (or `plan_id`) to `read`, `navigate`, `diagnostics` or `code_actions` on the
+  experimental profile, and the answer comes from the sandbox and the language server that
+  read it, in the paths you know. Once the plan is discarded, applied or edited, the same
+  call is refused rather than answered about the canonical bytes.
 - Before changing a declaration, ask what it reaches: `change_plan {action: preview,
   plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
   exported, which tests are associated with the files, what generated or configuration

@@ -1178,6 +1178,34 @@ consulted is named even when it found nothing, so "nobody looked" and "looked an
 relation" stay distinguishable, and a contributor that failed appears as a named gap in
 coverage rather than as a thinner graph.
 
+### Prepared revisions as somewhere to look (experimental)
+
+`read`, `navigate`, `diagnostics` and `code_actions` accept a revision selector in the
+experimental catalog: `revision` naming a prepared revision, or `plan_id` with an optional
+`plan_revision`. An empty selector, `current`, or the canonical revision itself all mean the
+workspace as it stands.
+
+A prepared revision is answered from the sandbox that holds it and the language server that
+has read it. Until now a prepared plan could be seen only as a diff and a verdict; an agent
+that wanted to know what the staged code actually means had to apply it first, which is the
+one thing a transaction exists to avoid.
+
+The rules:
+
+- The sandbox path never leaves the service. A reply names the path the agent knows,
+  relative to the workspace, and the revision it read. Every path a language server answers
+  with is rewritten on the way out, and one that cannot be placed inside the prepared tree
+  is dropped rather than returned.
+- A prepared answer is refused once its preparation is gone - edited, discarded, applied,
+  or its provider restarted - with `prepared_revision_unavailable` and what happened. It
+  never falls back to canonical source, because the bytes it described do not exist there.
+- Listing code actions is read-only. Selecting one is an operation added to the plan, which
+  replaces the preparation and needs a fresh prepare; a reviewed prepared revision is never
+  edited in place.
+- Symbol, handle, history and changes reads answer about the canonical workspace only: the
+  symbol index and the Git history describe other bytes, and a prepared revision is read by
+  path.
+
 ### Impact preview (experimental)
 
 `change_plan` accepts `view: "impact"` on `preview` and `inspect` in the experimental

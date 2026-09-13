@@ -305,7 +305,7 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 		{Class: ClassProviderRead, Name: "navigate", Description: "Ask the language server for the definition, references, implementation, type, callers, callees or hover of a declaration. Name it with symbol (one call, resolved to its declaration) or target it with symbol_locator {path, name_path}. Needs an attached language server (language_server_status); for a plain text search use search.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "relation": enumSchema("definition", "type_definition", "implementation", "references", "incoming_calls", "outgoing_calls", "hover"), "target": targetSchema(),
 			"symbol": stringSchema("Declaration name; resolved to its one declaration so no target is needed."),
-		}, "relation")},
+		}, "relation"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
 			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.", "items": schemaObject(map[string]any{
@@ -319,14 +319,14 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 			"max_lines": map[string]any{"type": "integer", "minimum": 1, "description": "Deliver at most this many lines per source target; a capped reply says truncated and reports the total line count."},
 			"numbered":  map[string]any{"type": "boolean", "description": "Prefix each line with its number and a tab."},
 			"limit":     map[string]any{"type": "integer", "minimum": 1, "description": "history and changes views: number of entries."},
-		})},
+		}), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(),
 		}, "workspace_id")},
 		{Class: ClassPureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
 			"full": map[string]any{"type": "boolean", "description": "Return the complete report including finding bodies and per-dimension evidence IDs."},
-		}, "workspace_id")},
+		}, "workspace_id"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassPureRead, Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
 		}, "workspace_id", "evidence_id")},
@@ -345,7 +345,7 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
 			"parser": map[string]any{"type": "boolean"},
 		}, "workspace_id", "idempotency_key", "action")},
-		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target")},
+		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
@@ -412,6 +412,19 @@ func withExperimentalProperties(schema map[string]any, extra map[string]any) map
 	}
 	copied["properties"] = merged
 	return copied
+}
+
+// preparedSelectorProperties name a prepared revision to read or ask about,
+// by its revision or by the plan that holds it. They are experimental because
+// the frozen schemas are a contract, and because a call that answers about
+// staged bytes is a different promise from one that answers about the
+// repository.
+func preparedSelectorProperties() map[string]any {
+	return map[string]any{
+		"revision":      stringSchema("Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace."),
+		"plan_id":       stringSchema("Plan whose prepared revision to answer about, as an alternative to naming the revision."),
+		"plan_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Expected plan revision; a preparation replaced since is refused rather than answered."},
+	}
 }
 
 func OutputEnvelopeSchema() map[string]any {
