@@ -1,0 +1,123 @@
+[
+  {
+    "api_version": "huyang.workspace/v1alpha2",
+    "status": "static_possible",
+    "revision": "content_fixture",
+    "classification": "static",
+    "producers": [
+      {
+        "name": "fixture",
+        "version": "1",
+        "confidence": "exact"
+      }
+    ],
+    "source_handles": [],
+    "evidence_ids": [
+      "ev_fixture"
+    ],
+    "coverage": {
+      "complete": false,
+      "capped": false,
+      "limits": [],
+      "gaps": []
+    }
+  },
+  {
+    "api_version": "huyang.workspace/v1alpha2",
+    "status": "observed",
+    "revision": "content_fixture",
+    "classification": "observed",
+    "trace_id": "trace_fixture",
+    "producers": [
+      {
+        "name": "fixture",
+        "version": "1",
+        "confidence": "exact"
+      }
+    ],
+    "source_handles": [],
+    "evidence_ids": [
+      "ev_fixture"
+    ],
+    "coverage": {
+      "complete": false,
+      "capped": false,
+      "limits": [],
+      "gaps": []
+    }
+  },
+  {
+    "api_version": "huyang.workspace/v1alpha2",
+    "status": "not_observed",
+    "revision": "content_fixture",
+    "classification": "observed",
+    "trace_id": "trace_fixture",
+    "producers": [
+      {
+        "name": "fixture",
+        "version": "1",
+        "confidence": "exact"
+      }
+    ],
+    "source_handles": [],
+    "evidence_ids": [
+      "ev_fixture"
+    ],
+    "coverage": {
+      "complete": false,
+      "capped": false,
+      "limits": [],
+      "gaps": []
+    }
+  },
+  {
+    "api_version": "huyang.workspace/v1alpha2",
+    "status": "statically_unreachable",
+    "revision": "content_fixture",
+    "classification": "static",
+    "producers": [
+      {
+        "name": "fixture",
+        "version": "1",
+        "confidence": "exact"
+      }
+    ],
+    "source_handles": [],
+    "evidence_ids": [
+      "ev_fixture"
+    ],
+    "coverage": {
+      "complete": true,
+      "capped": false,
+      "limits": [],
+      "gaps": []
+    }
+  },
+  {
+    "api_version": "huyang.workspace/v1alpha2",
+    "status": "unknown",
+    "revision": "content_fixture",
+    "classification": "static",
+    "producers": [
+      {
+        "name": "fixture",
+        "version": "1",
+        "confidence": "exact"
+      }
+    ],
+    "source_handles": [],
+    "evidence_ids": [
+      "ev_fixture"
+    ],
+    "coverage": {
+      "complete": false,
+      "capped": true,
+      "limits": [
+        "nodes"
+      ],
+      "gaps": [
+        "node budget reached"
+      ]
+    }
+  }
+]

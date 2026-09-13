@@ -1,0 +1,121 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "status",
+    "revision",
+    "classification",
+    "producers",
+    "source_handles",
+    "evidence_ids",
+    "coverage"
+  ],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "enum": [
+        "huyang.workspace/v1alpha2"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "static_possible",
+        "observed",
+        "not_observed",
+        "statically_unreachable",
+        "unknown"
+      ]
+    },
+    "revision": {
+      "type": "string"
+    },
+    "classification": {
+      "type": "string",
+      "enum": [
+        "static",
+        "observed",
+        "inferred"
+      ]
+    },
+    "trace_id": {
+      "type": "string"
+    },
+    "producers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "confidence"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "semantic",
+              "parser",
+              "heuristic",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "source_handles": {
+      "type": "array",
+      "maxItems": 4000,
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {
+        "type": "string"
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "complete",
+        "capped",
+        "limits",
+        "gaps"
+      ],
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "capped": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
