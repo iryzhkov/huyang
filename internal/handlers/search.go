@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
@@ -93,7 +92,12 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	if requested, _ := arguments["mode"].(string); requested != "" {
 		mode = workspacecore.SearchMode(requested)
 	}
-	result, err := workspace.Search(workspacecore.SearchRequest{Query: query, Mode: mode})
+	// The scope goes into the search rather than over its answer: filtering
+	// hits afterwards spends the match cap on files the caller excluded, and
+	// freezes them into the result set an all-match replacement rewrites.
+	result, err := workspace.Search(workspacecore.SearchRequest{
+		Query: query, Mode: mode, Paths: argStrings(arguments["paths"]),
+	})
 	if err != nil {
 		failure := mcpapi.Failure(requestID, workspace, "search_failed", err)
 		if mode == workspacecore.SearchRegex {
@@ -105,7 +109,6 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		}
 		return failure
 	}
-	result.Hits = filterHitPaths(result.Hits, argStrings(arguments["paths"]))
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
@@ -192,33 +195,6 @@ func argStrings(value any) []string {
 		}
 	}
 	return out
-}
-
-// filterHitPaths keeps the hits whose path contains one of the patterns or
-// matches it as a glob (against the whole path or its base name), so one
-// search can be scoped to a directory or an extension without a refine call.
-func filterHitPaths(hits []workspacecore.SearchHit, patterns []string) []workspacecore.SearchHit {
-	if len(patterns) == 0 {
-		return hits
-	}
-	kept := hits[:0:0]
-	for _, hit := range hits {
-		for _, pattern := range patterns {
-			if strings.Contains(hit.Path, pattern) {
-				kept = append(kept, hit)
-				break
-			}
-			if ok, _ := filepath.Match(pattern, hit.Path); ok {
-				kept = append(kept, hit)
-				break
-			}
-			if ok, _ := filepath.Match(pattern, filepath.Base(hit.Path)); ok {
-				kept = append(kept, hit)
-				break
-			}
-		}
-	}
-	return kept
 }
 
 // attachSearchContext adds the numbered lines around each hit, the way

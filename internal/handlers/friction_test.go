@@ -97,6 +97,44 @@ func TestSearchPathsAndContextLines(t *testing.T) {
 	}
 }
 
+// A scope is what the search looks at, not a filter over what it found.
+// Filtering the answer spends the match cap on files the caller excluded, so
+// a common term scoped to one directory could answer nothing at all while
+// that directory was full of it, and the frozen result set - the one an
+// all-match replacement rewrites - held the excluded files too.
+func TestScopedSearchLooksOnlyAtItsScope(t *testing.T) {
+	var noise strings.Builder
+	noise.WriteString("package a\n")
+	for index := range 4000 {
+		fmt.Fprintf(&noise, "// needle %d\n", index)
+	}
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{
+		"aaa-noise.go":  noise.String(),
+		"wanted/one.go": "package wanted\n\n// needle here\n",
+		"wanted/two.go": "package wanted\n\n// needle there\n",
+	})
+	result := handlers.Execute(context.Background(), "req_scoped", "search", map[string]any{
+		"workspace_id": workspaceID, "query": "needle", "paths": []any{"wanted/"},
+	})
+	data := result["data"].(map[string]any)
+	hits := data["hits"].([]map[string]any)
+	if len(hits) != 2 || data["total"] != 2 {
+		t.Fatalf("a scoped search lost its scope to the match cap: %d hits, total %#v", len(hits), data["total"])
+	}
+	if data["total_is_lower_bound"] == true {
+		t.Fatalf("a scope that fits under the bound was reported as capped: %#v", data)
+	}
+	// The frozen set is what replace_matches rewrites, so it must hold the
+	// scope and nothing else.
+	set := data["result_set"].(map[string]any)
+	if set["match_count"] != 2 || set["file_count"] != 2 {
+		t.Fatalf("the frozen set describes files outside the scope: %#v", set)
+	}
+	if set["complete"] == false || set["all_matches_eligible"] == false {
+		t.Fatalf("a complete scoped set was not eligible for an all-match replacement: %#v", set)
+	}
+}
+
 // A search that stopped at its match bound holds the bound, not the number
 // of matches in the workspace. The count says it is a floor, the bound is
 // named, and the follow-up offers the narrowing that reaches the files the

@@ -107,6 +107,13 @@ const (
 type SearchRequest struct {
 	Query string
 	Mode  SearchMode
+	// Paths scopes the search before it reads anything: a pattern is a path
+	// substring, or a glob against the whole path or the base name. Scoping
+	// has to happen here rather than over the answer, because a filter over
+	// the answer runs after the match cap has already been spent on files
+	// the caller excluded, and leaves those files inside the frozen result
+	// set that an all-match replacement then rewrites.
+	Paths []string
 }
 
 type SearchHit struct {
@@ -138,6 +145,10 @@ type SearchResult struct {
 	// rather than the number of matches in the workspace, and the caller
 	// needs the bound to tell the two apart.
 	MatchLimit int `json:"match_limit"`
+	// Scope is the path scope the search ran under, kept so that a frozen
+	// result set is revalidated against the files it was taken from rather
+	// than against the whole tree.
+	Scope []string `json:"scope,omitempty"`
 }
 
 type RangeHandle struct {
@@ -660,6 +671,7 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	if err != nil {
 		return SearchResult{}, err
 	}
+	files, coverage = w.scopeFiles(files, request.Paths, coverage)
 	coverage.BytesRead = 0
 	revisions := make(map[string]RevisionID)
 	var hits []SearchHit
@@ -682,7 +694,7 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	result := SearchResult{
 		Workspace: w.Identity(), Hits: hits, Coverage: coverage, Query: request.Query, Mode: mode,
 		DocumentRevisions: revisions, SourceFiles: append([]string(nil), files...),
-		MatchLimit: w.limits.MaxMatches,
+		MatchLimit: w.limits.MaxMatches, Scope: append([]string(nil), request.Paths...),
 	}
 	set, err := w.FreezeSearch(result)
 	if err != nil {
@@ -690,6 +702,67 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	}
 	result.ResultSet = &set
 	return result, nil
+}
+
+// scopeFiles keeps the documents a scoped search is about, and narrows its
+// coverage to the same set. A file outside the scope is not a gap: the caller
+// said not to look there, so counting it as considered, or reporting it as
+// skipped, describes a search nobody asked for.
+func (w *Workspace) scopeFiles(files []string, patterns []string, coverage Coverage) ([]string, Coverage) {
+	if len(patterns) == 0 {
+		return files, coverage
+	}
+	kept := w.scopedFiles(files, patterns)
+	scoped := Coverage{Complete: coverage.Complete, FilesConsidered: len(kept), Semantic: coverage.Semantic}
+	for _, skipped := range coverage.Skipped {
+		path, _, found := strings.Cut(skipped, ": ")
+		if found && !MatchesPathScope(path, patterns) {
+			continue
+		}
+		scoped.Skipped = append(scoped.Skipped, skipped)
+		scoped.SkippedCount++
+	}
+	// A cap reached while collecting the tree is still a gap in the scope,
+	// because the files it stopped at were never offered to the scope.
+	scoped.Capped = coverage.Capped
+	if scoped.SkippedCount == 0 && !scoped.Capped {
+		scoped.Complete = true
+	}
+	return kept, scoped
+}
+
+// scopedFiles keeps the paths a scope names, in the order they came in. A
+// frozen result set is revalidated against this same list, so the scope it
+// was taken under has to be applied the same way both times.
+func (w *Workspace) scopedFiles(files []string, patterns []string) []string {
+	if len(patterns) == 0 {
+		return files
+	}
+	kept := make([]string, 0, len(files))
+	for _, name := range files {
+		if MatchesPathScope(displayPath(w.identity.Root, name), patterns) {
+			kept = append(kept, name)
+		}
+	}
+	return kept
+}
+
+// MatchesPathScope reports whether a workspace-relative path is inside a
+// scope: a pattern matches as a path substring, as a glob over the whole
+// path, or as a glob over the base name.
+func MatchesPathScope(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if strings.Contains(path, pattern) {
+			return true
+		}
+		if ok, _ := filepath.Match(pattern, path); ok {
+			return true
+		}
+		if ok, _ := filepath.Match(pattern, filepath.Base(path)); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // searchExpression resolves the search mode and compiles the regular expression for it.

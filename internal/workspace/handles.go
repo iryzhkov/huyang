@@ -92,27 +92,31 @@ type ResultConstraint struct {
 }
 
 type ResultSet struct {
-	Handle             ResultSetID           `json:"handle"`
-	Parent             ResultSetID           `json:"parent,omitempty"`
-	Kind               ResultSetKind         `json:"kind"`
-	WorkspaceID        ID                    `json:"workspace_id"`
-	Epoch              uint64                `json:"epoch"`
-	StateSeq           uint64                `json:"state_seq"`
-	ExpiresAt          time.Time             `json:"expires_at"`
-	Matches            []SearchHit           `json:"-"`
-	MatchCount         int                   `json:"match_count"`
-	FileCount          int                   `json:"file_count"`
-	Complete           bool                  `json:"complete"`
-	NonOverlapping     bool                  `json:"non_overlapping"`
-	AllMatchesEligible bool                  `json:"all_matches_eligible"`
-	Retained           int                   `json:"retained"`
-	Eliminated         int                   `json:"eliminated"`
-	Coverage           Coverage              `json:"coverage"`
-	Query              string                `json:"query,omitempty"`
-	Mode               SearchMode            `json:"mode,omitempty"`
-	Constraints        []ResultConstraint    `json:"constraints,omitempty"`
-	DocumentRevisions  map[string]RevisionID `json:"-"`
-	SourceFiles        []string              `json:"-"`
+	Handle             ResultSetID   `json:"handle"`
+	Parent             ResultSetID   `json:"parent,omitempty"`
+	Kind               ResultSetKind `json:"kind"`
+	WorkspaceID        ID            `json:"workspace_id"`
+	Epoch              uint64        `json:"epoch"`
+	StateSeq           uint64        `json:"state_seq"`
+	ExpiresAt          time.Time     `json:"expires_at"`
+	Matches            []SearchHit   `json:"-"`
+	MatchCount         int           `json:"match_count"`
+	FileCount          int           `json:"file_count"`
+	Complete           bool          `json:"complete"`
+	NonOverlapping     bool          `json:"non_overlapping"`
+	AllMatchesEligible bool          `json:"all_matches_eligible"`
+	Retained           int           `json:"retained"`
+	Eliminated         int           `json:"eliminated"`
+	// Scope is the path scope the search ran under. The set stays valid
+	// while the files inside that scope are unchanged; files the caller
+	// excluded are not part of what it froze.
+	Scope             []string              `json:"scope,omitempty"`
+	Coverage          Coverage              `json:"coverage"`
+	Query             string                `json:"query,omitempty"`
+	Mode              SearchMode            `json:"mode,omitempty"`
+	Constraints       []ResultConstraint    `json:"constraints,omitempty"`
+	DocumentRevisions map[string]RevisionID `json:"-"`
+	SourceFiles       []string              `json:"-"`
 }
 
 type ResultRefinement struct {
@@ -762,6 +766,7 @@ func (w *Workspace) FreezeSearch(result SearchResult) (ResultSet, error) {
 		FileCount: len(files), Complete: result.Coverage.Complete, NonOverlapping: nonOverlapping(result.Hits),
 		Retained: len(result.Hits), Coverage: result.Coverage, Query: result.Query, Mode: result.Mode,
 		DocumentRevisions: revisions, SourceFiles: append([]string(nil), result.SourceFiles...),
+		Scope: append([]string(nil), result.Scope...),
 	}
 	set.AllMatchesEligible = set.Complete && set.NonOverlapping
 	store := w.handleRegistry()
@@ -854,6 +859,9 @@ func (w *Workspace) InspectResultSet(id ResultSetID) (ResultSet, error) {
 	}
 	if set.Kind == ResultSetCurrentSource {
 		files, _, err := w.collectFiles()
+		if err == nil {
+			files = w.scopedFiles(files, set.Scope)
+		}
 		if err != nil || len(files) != len(set.SourceFiles) {
 			return ResultSet{}, &Conflict{Code: ConflictDocumentChanged}
 		}
@@ -939,6 +947,9 @@ func (w *Workspace) RefineResultSet(parentID ResultSetID, refinement ResultRefin
 	child, err := w.FreezeSearch(SearchResult{
 		Workspace: w.Identity(), Hits: hits, Coverage: parent.Coverage, Query: parent.Query, Mode: parent.Mode,
 		DocumentRevisions: parent.DocumentRevisions, SourceFiles: parent.SourceFiles,
+		// A child covers the files its parent covered, so it is revalidated
+		// against the same scope.
+		Scope: parent.Scope,
 	})
 	if err != nil {
 		return ResultSet{}, err
