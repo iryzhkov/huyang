@@ -487,6 +487,51 @@ workspace. It is tracked per client, beside the diagnostic-notice cursor, becaus
 workspace registry outlives a session and "the first time this workspace was opened"
 would have been days ago.
 
+## Follow-up: the refactorings that were advertised and absent (2026-09-12)
+
+Comparing this tool with Serena turned up something worse than a missing feature.
+`rename_symbol`, `move_symbols` and `apply_code_action` were in the tool schema and in the
+v1alpha1 contract, and none of them worked: each fell into the preview builder's default
+branch, so no plan containing one could preview and therefore none could prepare. They had
+no tests. A probe against the live service found it in one call.
+
+The cause was that nothing turned an edit a language server owns into revision-bound
+bytes. Preview is pure and native by design - content is the revision - so those kinds had
+nowhere to execute and were left as a promise.
+
+The seam that fixes it: a new kernel operation, `huyang_workspace_edit`, answers what a
+rename or a code action would change, as byte ranges, and applies nothing. Positions are
+converted against the loaded buffer because the server counts UTF-16 code units and the
+coordinator counts bytes, and each file's edits come back from the end backwards so no
+edit moves the bytes another is bound to. The handlers bind those ranges to the current
+document revisions as `replace_range` operations, chained, each carrying `derived_from`.
+A plan therefore holds only operations it can execute, and a server refactor previews,
+verifies, applies and rolls back exactly like a hand-written edit.
+
+On that seam, `inline_symbol` (selected by the LSP kind `refactor.inline`, not by title)
+and `safe_delete_symbol` (references first, refusing with the call sites, and refusing a
+truncated reference list because a deletion that cannot be proved safe is not safe).
+`move_symbols` is removed rather than left as a promise.
+
+Three defects the live proof caught that the tests had not, each because the stub agreed
+with the code instead of with the kernel:
+
+1. `safe_delete_symbol` read a flat `locations` list; the `references` operation groups its
+   hits by file. The live refusal was right for the wrong reason, and would have read an
+   unparsable answer as "nothing refers to this". An unreadable reply now flattens to
+   nothing and is refused by the count check.
+2. Code actions were requested for a point, then for a range that ran to the end of the
+   line, so gopls offered "Extract function" where the caller had named a call. The range
+   is now exactly the target.
+3. The request passed `only` to the server, so a server that answers a filtered request
+   with nothing left the refusal unable to say what was available. Actions are now
+   requested unfiltered and matched here.
+
+Verified against live gopls on a scratch module: a rename across two files (5 edits,
+applied, compiles), an inline of a call (`Total()` to `7`, applied, compiles), an
+"Extract variable" code action staged as two chained edits, a safe delete refused with its
+three call sites, and the same deletion staged once the symbol was unreferenced.
+
 ## Out of scope
 
 No index or ref writes unless decision 1 chooses the alternative. No directory move or

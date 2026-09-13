@@ -134,6 +134,12 @@ existing workspace, because its handle comes from one.
   sites when anything outside the declaration still refers to it. Each one asks the server
   what it would change and stages that answer as exact ranges, so the plan previews,
   verifies and rolls back like any other; the operations it produced carry `derived_from`.
+  Target `rename_symbol` and `safe_delete_symbol` at the declaration (a `symbol_locator`).
+  Target `inline_symbol` and `apply_code_action` at the exact text the action applies to,
+  which for an inline is the call and not the statement around it: `search {query:
+  "Total()", include_handles: true}` and pass the handle of the call you mean. A target
+  the server offers nothing for is refused with the list of actions it does offer there,
+  so one retry is enough.
 - Go files are gofmt-formatted after every edit; the response says so under `format`.
   Pass `format: false` to keep bytes exactly.
 - Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:
