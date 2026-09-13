@@ -56,9 +56,14 @@ type frictionEvent struct {
 	Rev     string   `json:"rev,omitempty"`
 	Args    []string `json:"args,omitempty"`
 	Outcome string   `json:"outcome,omitempty"`
-	OK      bool     `json:"ok"`
-	Err     string   `json:"err,omitempty"`
-	Ms      int64    `json:"ms"`
+	// Code is the envelope's machine-readable reason for a reply that is
+	// not ok. A spool with outcomes and no codes says that a quarter of
+	// edits were provisional and cannot say why, which is the question a
+	// usability pass asks first. It is a fixed identifier, never content.
+	Code string `json:"code,omitempty"`
+	OK   bool   `json:"ok"`
+	Err  string `json:"err,omitempty"`
+	Ms   int64  `json:"ms"`
 }
 
 var (
@@ -340,6 +345,7 @@ func logFriction(session, name, root string, args, res map[string]any, started t
 	frictionIdent()
 	isError, _ := res["isError"].(bool)
 	outcome, _ := res["outcome"].(string)
+	code, _ := res["code"].(string)
 	client, _ := res["client"].(string)
 
 	frictionMu.Lock()
@@ -355,6 +361,7 @@ func logFriction(session, name, root string, args, res map[string]any, started t
 		Tool:    name,
 		Args:    argKeys(args),
 		Outcome: outcome,
+		Code:    code,
 		OK:      frictionOutcomeOK(outcome, isError),
 		Ms:      time.Since(started).Milliseconds(),
 	}

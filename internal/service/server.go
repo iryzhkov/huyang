@@ -67,6 +67,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			map[string]any{
 				"isError": isError,
 				"outcome": fmt.Sprint(envelope["outcome"]),
+				"code":    envelope["code"],
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
@@ -140,7 +141,7 @@ func modernClientName(request *mcp.CallToolRequest) string {
 
 func logModernValidationFriction(session, name, root string, arguments map[string]any, err error, client string, started time.Time) {
 	logFriction(session, name, root, arguments, map[string]any{
-		"isError": true, "outcome": "failed", "client": client,
+		"isError": true, "outcome": "failed", "code": "invalid_arguments", "client": client,
 		"content": []map[string]any{{"type": "text", "text": err.Error()}},
 	}, started)
 }
