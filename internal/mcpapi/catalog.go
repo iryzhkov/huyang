@@ -211,6 +211,34 @@ func planOperationSchema(operationKinds []string) map[string]any {
 	}, "op_id", "kind")
 }
 
+// undescribed is the same schema with its property descriptions removed. A
+// tool that offers one operation and a list of the same operations sends
+// that shape twice, and the second copy is a few hundred tokens of prose the
+// reader has already been given on the same page; the names, the types and
+// the enum of kinds, which is where the meaning is, stay.
+func undescribed(schema map[string]any) map[string]any {
+	copied := CloneEnvelope(schema)
+	delete(copied, "description")
+	if items, ok := schema["items"].(map[string]any); ok {
+		copied["items"] = undescribed(items)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return copied
+	}
+	stripped := make(map[string]any, len(properties))
+	for name, value := range properties {
+		property, isObject := value.(map[string]any)
+		if !isObject {
+			stripped[name] = value
+			continue
+		}
+		stripped[name] = undescribed(property)
+	}
+	copied["properties"] = stripped
+	return copied
+}
+
 // editOperationSchema is one edit_apply operation. replace_range needs a
 // handle from a workspace that exists, so it is offered only for the
 // single operation, not in the list.
@@ -243,7 +271,7 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	operation := planOperationSchema(operationKinds)
 	operations := map[string]any{
 		"type": "array", "items": operation, "maxItems": MaxPlanOperations,
-		"description": "At most 8 operations per request. Build larger plans incrementally with action=edit and edit.mode=add.",
+		"description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
 	}
 	return schemaObject(map[string]any{
 		"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
@@ -254,7 +282,7 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 		"prepared_revision":  stringSchema("Required when action=apply."),
 		"accept_provisional": map[string]any{"type": "boolean", "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence."},
 		"edit": schemaObject(map[string]any{
-			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": operations,
+			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": undescribed(operations),
 			"op_ids": map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
 		}, "mode"),
 	}, "action")
@@ -374,7 +402,7 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"verbose":      map[string]any{"type": "boolean", "description": "Add the full change record, hashes and handle resolution to the response."},
 			"format":       map[string]any{"type": "boolean", "description": "Run the language's formatter on the edited files after the edit (gofmt for Go, natively) and report what it changed. Default true; false keeps the bytes exactly as written. Moved, copied and deleted files are never formatted."},
 			"operation":    editOperationSchema(true),
-			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many.", "items": editOperationSchema(false)},
+			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many. Each item takes the fields of operation above, which describes them.", "items": undescribed(editOperationSchema(false))},
 		})},
 		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds), ExperimentalProperties: map[string]any{
 			"view":       enumSchema("plan", "impact", "semantic"),
