@@ -1,0 +1,62 @@
+{
+  "title": "Goal 1: Literal Search for Int Overload References",
+  "timestamp": "2026-09-13T10:29:00Z",
+  "workspace_revision": "wsrev_3",
+  "searches": [
+    {
+      "request_id": "req_243",
+      "query": "quoteTotal(int",
+      "mode": "literal",
+      "matches": 1,
+      "total": 1,
+      "files_searched": 1,
+      "hit": {
+        "path": "src/main/java/workshop/Billing.java",
+        "line": 3,
+        "column": 20,
+        "match_text": "quoteTotal(int",
+        "context": "public static int quoteTotal(int units) { return units < 0 ? 0 : units * 7; }",
+        "interpretation": "Declaration of int overload"
+      }
+    },
+    {
+      "request_id": "req_244",
+      "query": "quoteTotal(3",
+      "mode": "literal",
+      "matches": 1,
+      "total": 1,
+      "files_searched": 1,
+      "hit": {
+        "path": "src/main/java/workshop/Main.java",
+        "line": 4,
+        "column": 15,
+        "match_text": "quoteTotal(3",
+        "context": "if (Billing.quoteTotal(3) != 21 || ...",
+        "interpretation": "Call to int overload with literal argument 3"
+      }
+    },
+    {
+      "request_id": "req_247",
+      "query": "quoteTotal(-1",
+      "mode": "literal",
+      "matches": 1,
+      "total": 1,
+      "files_searched": 1,
+      "hit": {
+        "path": "src/main/java/workshop/Main.java",
+        "line": 4,
+        "column": 46,
+        "match_text": "quoteTotal(-1",
+        "context": "... Billing.quoteTotal(-1) != 0 || ...",
+        "interpretation": "Call to int overload with literal argument -1"
+      }
+    }
+  ],
+  "summary": {
+    "declaration_locations": 1,
+    "call_locations": 2,
+    "total_int_overload_references": 3,
+    "string_overload_references_captured": 0,
+    "coverage": "Complete isolation of int overload achieved via literal pattern matching"
+  }
+}

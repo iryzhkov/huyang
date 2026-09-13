@@ -447,7 +447,7 @@ func (w *Workspace) ResolveSymbolLocator(path, namePath string) (HandleRecord, e
 		unique[key] = record
 	}
 	if len(unique) != 1 {
-		return HandleRecord{}, fmt.Errorf("symbol locator resolved to %d declarations", len(unique))
+		return HandleRecord{}, fmt.Errorf("symbol locator resolved to %d declarations; use search with mode=literal and include_handles=true in the target file, select the exact identifier for the intended declaration or alias, then retry with target.handle and a new idempotency key", len(unique))
 	}
 	for _, record := range unique {
 		return record, nil

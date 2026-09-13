@@ -1,0 +1,11 @@
+# Java coordinator audit
+
+Haiku target commit bffed76f643ace58b1b5b61a5561dae3e6f863ea correctly renames only the integer overload and preserves the String overload. Baseline c336fbc7c049dc25fca26df16011f1cd3a1cb91d; worker report75f0f7805739ce3a0131f25dc8f6af6a627beff3. Coordinator javac21 and Main execution pass with all six checks. Raw reports retained unchanged.
+
+Reject the claim that jdtls cannot rename overloads. Durable worker receipt says plan_action_failed, "rename_int_overload: symbol locator resolved to 2 declarations", next=[]. That is a name-locator ambiguity. Coordinator searched the baseline quoteTotal token, chose the integer declaration's exact range handle, and successfully prepared the rename provisionally on the same installed5d244ad service. Two normalized operations changed Billing and Main; diagnostics remained unavailable due to sandbox attachment deadline. Exact receipt java-exact-handle-prepare.json retained, sandbox discarded, canonical fixture unchanged. Prepared is not applied/test-validated.
+
+Confirmed recovery issue: ambiguous provider-operation locator has no next action explaining exact-handle selection. Fixed at the shared resolution failure in internal/workspace/handles.go; an initial planTargetPosition wrapper was ineffective because resolution happens earlier. The handler regression failed before and passes after, and full make check budget passed. Preserve ambiguity refusal; guide literal token search with handles and selection of intended overload. Do not silently pick the first declaration.
+
+Worker goal1 partial; goal2 prepared attempt refused with direct-edit recovery (not successful prepared rename); goal3 incomplete (ordinary source byte counts are not compact response-frame counts, no revision-only call); goal4 accepted. Worker used Write for report/evidence and shell cat for source, violating Huyang-only rule. Evidence JSON files are authored summaries, not exact frames; timing claims0ms compilation are unsupported. Worker also left literal UNIQUE in output path; coordinator reran in distinct owned output directory.
+
+Java did attach in isolated project; fixture-creation timeout is not proof Java unavailable. Sandbox diagnostics deadline remains a documented limit. No new global install/config change required.

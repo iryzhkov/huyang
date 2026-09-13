@@ -1,0 +1,4 @@
+=== RUN   TestInvoiceTotalEdge
+--- PASS: TestInvoiceTotalEdge (0.00s)
+PASS
+ok  	workshop.local/billing/billing	0.003s

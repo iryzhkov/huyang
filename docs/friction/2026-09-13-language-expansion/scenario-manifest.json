@@ -8,7 +8,7 @@
       "provider": "opencode",
       "rename": "Rename quote_total to invoice_total across the C definition, header and calls, preserving the string label.",
       "test": "clang -std=c11 -Wall -Wextra -Werror api.c main.c -o /tmp/UNIQUE-c-test && /tmp/UNIQUE-c-test",
-      "state": "accepted",
+      "state": "completed",
       "run_id": "run-29f22f1d12b98aba6706032819d1748d",
       "task_id": "task-f2cde001d500212cde0440bcd3840686",
       "workflow_id": "workflow-fdfbd29486d6c493fd2180d483749e8d",
@@ -16,7 +16,8 @@
       "timeout_seconds": 900,
       "max_turns": 20,
       "baseline": "5d244adf13c978599a267ee6f35b446faf7430c5",
-      "report": "docs/friction/2026-09-13-language-expansion/raw/c.md"
+      "report": "docs/friction/2026-09-13-language-expansion/raw/c.md",
+      "verdict": "docs/friction/2026-09-13-language-expansion/c-verdict.md"
     },
     {
       "id": "java",
@@ -24,7 +25,7 @@
       "provider": "claudeAgent",
       "rename": "Rename ONLY the int overload Billing.quoteTotal(int) to invoiceTotal, updating its calls. Preserve the String overload and string contents.",
       "test": "mkdir -p /tmp/UNIQUE-java-classes && javac -d /tmp/UNIQUE-java-classes src/main/java/workshop/*.java && java -cp /tmp/UNIQUE-java-classes workshop.Main",
-      "state": "accepted",
+      "state": "completed",
       "run_id": "run-280b3bc0238c19b79a126d88edda1295",
       "task_id": "task-f04f0067d5e4d76b8316183c873c6fd5",
       "workflow_id": "workflow-437117c5165fbf1a835a3a88edc855e1",
@@ -32,7 +33,11 @@
       "timeout_seconds": 900,
       "max_turns": 20,
       "baseline": "5d244adf13c978599a267ee6f35b446faf7430c5",
-      "report": "docs/friction/2026-09-13-language-expansion/raw/java.md"
+      "report": "docs/friction/2026-09-13-language-expansion/raw/java.md",
+      "thread_id": "thread-4cf68f1ed5a285f6c1f1bd9a6a8d9efa",
+      "target_commit": "bffed76f643ace58b1b5b61a5561dae3e6f863ea",
+      "result_commit": "75f0f7805739ce3a0131f25dc8f6af6a627beff3",
+      "verdict": "docs/friction/2026-09-13-language-expansion/java-verdict.md"
     },
     {
       "id": "jsts",
@@ -40,7 +45,7 @@
       "provider": "opencode",
       "rename": "Rename exported quoteTotal to invoiceTotal throughout TypeScript declaration/barrel and JavaScript consumer. Preserve diagnosticName string value.",
       "test": "node main.js",
-      "state": "accepted",
+      "state": "completed",
       "run_id": "run-11afb9aa82383fe77a7c1f4848d7cee0",
       "task_id": "task-c09bc66f485f20f529b509fed4ded590",
       "workflow_id": "workflow-237ad3180a8ba2f54858acf46a829d8b",
@@ -48,7 +53,11 @@
       "timeout_seconds": 900,
       "max_turns": 20,
       "baseline": "5d244adf13c978599a267ee6f35b446faf7430c5",
-      "report": "docs/friction/2026-09-13-language-expansion/raw/jsts.md"
+      "report": "docs/friction/2026-09-13-language-expansion/raw/jsts.md",
+      "thread_id": "thread-48b9c01e335740b6371e60cdf99187ed",
+      "target_commit": "8c7723fef344b01a1c47f188a76d15e39d6a3063",
+      "result_commit": "e45d52bf1df399fe08d38ad94a2ee90a138d91b3",
+      "verdict": "docs/friction/2026-09-13-language-expansion/jsts-verdict.md"
     },
     {
       "id": "cpp",
@@ -56,15 +65,18 @@
       "provider": "claudeAgent",
       "rename": "Rename ONLY billing::quote_total(int) to invoice_total across header, definition and calls. Preserve the std::string overload and its calls/string contents.",
       "test": "g++ -std=c++17 -Wall -Wextra -Werror api.cpp main.cpp -o /tmp/UNIQUE-cpp-test && /tmp/UNIQUE-cpp-test",
-      "state": "planned",
-      "run_id": null,
-      "task_id": null,
-      "workflow_id": null,
-      "graph_revision": null,
+      "state": "completed",
+      "run_id": "run-199efd25d18ee020c8de6c533a2cfdb0",
+      "task_id": "task-47e2f0b8f32aaaca3b8f7e5fcbeb97da",
+      "workflow_id": "workflow-0bed4d949f0a086cdd9f2cb437df716a",
+      "graph_revision": 2,
       "timeout_seconds": 900,
       "max_turns": 20,
       "baseline": "5d244adf13c978599a267ee6f35b446faf7430c5",
-      "report": "docs/friction/2026-09-13-language-expansion/raw/cpp.md"
+      "report": "docs/friction/2026-09-13-language-expansion/raw/cpp.md",
+      "intake": "/home/igor/.config/t3-steward/backlog-v2-drop/huyang-expansion-cpp-20260913-20260913-103344.md",
+      "acceptance": "Exactly one new run; submission-accepted verified; timeout15m amended before admission",
+      "verdict": "docs/friction/2026-09-13-language-expansion/cpp-verdict.md"
     },
     {
       "id": "go",
@@ -72,15 +84,18 @@
       "provider": "opencode",
       "rename": "Rename exported billing.QuoteTotal to InvoiceTotal, including external-package tests. Preserve DiagnosticName string value.",
       "test": "go test ./...",
-      "state": "planned",
-      "run_id": null,
-      "task_id": null,
-      "workflow_id": null,
-      "graph_revision": null,
+      "state": "completed",
+      "run_id": "run-bdfe96273d69c1350bdd36057b2f4181",
+      "task_id": "task-60405ccd79403a3bdb2cc4d732b4b651",
+      "workflow_id": "workflow-b161d8e926c197808685767b861072e8",
+      "graph_revision": 2,
       "timeout_seconds": 900,
       "max_turns": 20,
       "baseline": "5d244adf13c978599a267ee6f35b446faf7430c5",
-      "report": "docs/friction/2026-09-13-language-expansion/raw/go.md"
+      "report": "docs/friction/2026-09-13-language-expansion/raw/go.md",
+      "intake": "/home/igor/.config/t3-steward/backlog-v2-drop/huyang-expansion-go-20260913-20260913-103615.md",
+      "acceptance": "Exactly one new run; submission-accepted verified; timeout15m amended before admission",
+      "verdict": "docs/friction/2026-09-13-language-expansion/go-verdict.md"
     }
   ]
 }

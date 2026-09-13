@@ -1,0 +1,7 @@
+# C coordinator verdict
+
+Accepted with semantic coverage limitation. Muse run run-29f22f1d12b98aba6706032819d1748d completed all four goals. Target baseline 68b56f34b7b2d65d5b444b465dc4afc7a464985c; result 9320760206d33242c7c0d91533eb77717024957c. Coordinator clang -std=c11 -Wall -Wextra -Werror build and assertions passed. Definition, header and calls now agree; both diagnostic strings remain unchanged.
+
+clangd returned definition/calls but omitted the header in plan_67ccf1869e93485a4a131b5cf100aa8b. Participant reviewed the provisional plan, accepted its diagnostic gap, then repaired the remaining header with a guarded edit. This was not a complete atomic public rename. Header navigation also reported disagreement with literal search. The observed mixed C/C++ header filetype is a possible explanation, not an established cause; no compilation database was supplied. Huyang must not fabricate extra rename edits from literal strings. The new rename coverage receipt warns to review remaining matches before applying; project-specific clangd configuration remains relevant.
+
+Exact compact read/revision frames are preserved. A 64-byte source cap produced a 1583-byte full frame; revision-only data still produced a 1523-byte compatibility envelope. Source byte bounds are not whole-response byte bounds. No C verification command was declared, so successful shell compilation supplies the behavioral evidence.

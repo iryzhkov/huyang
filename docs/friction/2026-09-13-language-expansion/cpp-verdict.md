@@ -1,0 +1,5 @@
+# C++ coordinator verdict
+
+Accepted rename and behavior; compact-output goal incomplete. Run run-199efd25d18ee020c8de6c533a2cfdb0 used Haiku. Target baseline 725d905c9c9169502169d5c6a75000397d23c634; final a9a624be935a032dce610bb0a8c2c48c1d311153. Coordinator rebuilt with g++ -std=c++17 -Wall -Wextra -Werror and ran all six assertions successfully. Header, implementation and int calls changed; std::string overload and strings remained intact.
+
+Participant used a prepared semantic rename and explicitly accepted provisional evidence. That demonstrates this fixture's successful rename, not complete diagnostics or universal overload coverage. Goal 3 used status/diff/ordinary reads: no demonstrated max_bytes/compact read or revision-only inspect. The claim that all four requested goals completed is rejected. Evidence JSONs are participant-authored summaries, not exact response frames; thread archive preserves the available call trail. The report's invoice_total length is incorrect (13 characters, two more than quote_total). No new runtime defect established here.

@@ -1,0 +1,243 @@
+{
+  "api_version": "huyang.workspace/v1alpha1",
+  "data": {
+    "plan": {
+      "base_state_seq": 1,
+      "created_at": "2026-09-13T17:34:33.939108742Z",
+      "event_count": 4,
+      "operation_count": 2,
+      "operations": [
+        {
+          "content_bytes": 12,
+          "content_sha256": "31ae01d9fc3946235c26c1926e896a27aeae9fef057b691f266c248cc5f90f3d",
+          "depends_on": null,
+          "destination_revision_id": "",
+          "from": "",
+          "indentation": "exact",
+          "kind": "replace_range",
+          "op_id": "int-only_1",
+          "path": "",
+          "revision_id": "",
+          "target": {
+            "file_range": {
+              "path": "src/main/java/workshop/Billing.java",
+              "revision_id": "docrev_9186783e31598312f641616b0320c72f43dec01f096f250e320b9ce4c9ca709d"
+            }
+          },
+          "to": ""
+        },
+        {
+          "content_bytes": 45,
+          "content_sha256": "17b535ecb2a9688b1559e1ecfc9dac071f3fa1ca244164c79faeeef13b842517",
+          "depends_on": [
+            "int-only_1"
+          ],
+          "destination_revision_id": "",
+          "from": "",
+          "indentation": "exact",
+          "kind": "replace_range",
+          "op_id": "int-only_2",
+          "path": "",
+          "revision_id": "",
+          "target": {
+            "file_range": {
+              "path": "src/main/java/workshop/Main.java",
+              "revision_id": "docrev_2b370ab0358fbfdbc135765d2361af281aa351cf0639ffc40c05d971388f199e"
+            }
+          },
+          "to": ""
+        }
+      ],
+      "plan_id": "plan_ab09d8263a39a2e09f9a268b52b4f3fd",
+      "plan_revision": 1,
+      "preparation": {
+        "prepared_revision": "prep_7d1c7be2ca1f00b8dd6c24db10d4910a19448606598c57f10c808ad7934a9165",
+        "provider_epoch": 1,
+        "affected_files": [
+          "src/main/java/workshop/Billing.java",
+          "src/main/java/workshop/Main.java"
+        ],
+        "canonical_changed": false,
+        "diagnostics": "unavailable",
+        "disk_checks": "sandbox_manifest_verified",
+        "intermediate_reports": false,
+        "sandbox_backend": "reflink",
+        "base_revision": "wsrev_1",
+        "evidence_paths": "canonical",
+        "verification": [
+          {
+            "stage": "format_gate",
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "not_configured"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "parser",
+            "mode": "check",
+            "scope": [
+              "src/main/java/workshop/Billing.java",
+              "src/main/java/workshop/Main.java"
+            ],
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 2,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "parser_unavailable:.java"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "check",
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "not_configured"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "tests",
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "not_configured"
+              ],
+              "capped": false,
+              "semantic": ""
+            },
+            "test_scope": "full",
+            "test_verdict": "full_tests_unavailable"
+          },
+          {
+            "stage": "diagnostics",
+            "mode": "provider",
+            "started_revision": "wsrev_1",
+            "exit": 0,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "lsp_attach_deadline_exceeded"
+              ],
+              "capped": false,
+              "semantic": "unavailable"
+            },
+            "evidence_ids": [
+              "ev_a0489ab8ffb37f6448724f0b4d6c61f2"
+            ]
+          }
+        ]
+      },
+      "preview": {
+        "affected_files": [
+          "src/main/java/workshop/Billing.java",
+          "src/main/java/workshop/Main.java"
+        ],
+        "canonical_changed": false,
+        "conflicts": null,
+        "diffs": [
+          {
+            "after_bytes": 211,
+            "after_sha256": "3ab9a8c347d1c2b182088aef11610c17e64c568c673ba48453168aa845365885",
+            "before_bytes": 209,
+            "before_sha256": "818dd5a52dcb794a3ce153d60694766060fb77225edd8def94b40bda8f19b432",
+            "patch_bytes": 116,
+            "path": "src/main/java/workshop/Billing.java"
+          },
+          {
+            "after_bytes": 249,
+            "after_sha256": "d790cd8db5ca3ac4047a28a8c8c8fd9316f9e1904a160ce153c5000e1e574810",
+            "before_bytes": 245,
+            "before_sha256": "35dad8d692b43fce35b5622ddfe594a2b856350dc2b5dcebb0f6fda46e184546",
+            "patch_bytes": 176,
+            "path": "src/main/java/workshop/Main.java"
+          }
+        ],
+        "normalized_order": [
+          "int-only_1",
+          "int-only_2"
+        ],
+        "outcome": "ok",
+        "plan_revision": 1,
+        "preview_revision": "preview_015da593effb11a4f2820ca41560b198"
+      },
+      "state": "PROVISIONAL",
+      "updated_at": "2026-09-13T17:34:45.60184291Z",
+      "workspace_id": "ws_e264fddfd0d7b56f7592b114241d7919"
+    }
+  },
+  "evidence": {
+    "ids": [
+      "ev_a0489ab8ffb37f6448724f0b4d6c61f2"
+    ],
+    "truncated": false
+  },
+  "idempotency": "created",
+  "next": [
+    {
+      "accept_provisional": true,
+      "action": "apply",
+      "note": "Apply only if you explicitly accept the incomplete evidence for this exact prepared revision: diagnostics",
+      "plan_id": "plan_ab09d8263a39a2e09f9a268b52b4f3fd",
+      "plan_revision": 1,
+      "prepared_revision": "prep_7d1c7be2ca1f00b8dd6c24db10d4910a19448606598c57f10c808ad7934a9165",
+      "tool": "change_plan",
+      "use_new_idempotency_key": true
+    }
+  ],
+  "outcome": "provisional",
+  "request_id": "req_322",
+  "summary": "Plan prepared in an isolated sandbox; canonical workspace unchanged",
+  "transaction": {
+    "id": "plan_ab09d8263a39a2e09f9a268b52b4f3fd",
+    "state": "PROVISIONAL"
+  },
+  "warnings": [],
+  "workspace": {
+    "id": "ws_e264fddfd0d7b56f7592b114241d7919",
+    "revision": "wsrev_1"
+  }
+}

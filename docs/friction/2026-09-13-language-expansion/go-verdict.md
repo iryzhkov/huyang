@@ -1,0 +1,5 @@
+# Go coordinator verdict
+
+Accepted all four goals. Muse run run-bdfe96273d69c1350bdd36057b2f4181 used gopls and completed an exported function rename including external-package tests, preserving DiagnosticName strings. Baseline c2d4301ed945198470cee1b95a54f5b97ee52bd2; result 8651b28c8019406870a7d81dc698fe914687fa56. Coordinator go test ./... and go vet ./... passed.
+
+Exact prepare frame confirms plan_2c062ef0c3785855a88a83677c554c72 READY; exact apply confirms COMMITTED and canonical_changed true. No provisional acceptance was needed. Compact read delivered 120 of 139 source bytes, with continuation; revision view contained only data.revision. Full frames were 1695 and 1523 bytes respectively, so envelopes still matter. Initial prepare output capture was lost and replayed; participant then used a fresh key. That is a harness capture/retry observation, not demonstrated transaction failure. Compact parsing initially assumed structuredContent and recovered to text content; clients must handle the documented compact mode. No new runtime defect established.

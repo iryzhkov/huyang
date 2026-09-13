@@ -1,16 +1,19 @@
 # Recovery fixes and five-language expansion
 
-Active user request: fix prior session issues and run C, Java, JavaScript/TypeScript, Go and C++ live sessions. This work is NOT complete. First wave C/Muse, Java/Haiku, JS+TS/Muse accepted exactly once (three submission-accepted events verified). C++/Haiku and Go/Muse prompts ready, not submitted yet; submit after first-wave capacity clears. Normal scheduling, no overrides, maximum3 active assignments. All five synthetic source fixtures compile/test successfully on coordinator (C clang, C++ g++, Java21, Node26 TypeScript stripping, Go). Originals are copied by Huyang into owned repositories; fixture tests alone do not validate usability.
+All five live sessions completed through normal steward admission, at most three assignments active. Participants used installed Huyang 5d244ad; their raw reports, evidence and thread archives remain unchanged under raw/. These are synthetic language repositories, not large production-repository coverage.
 
-Implemented locally, not committed/published:
-- Specific undeclared-write recovery now precedes generic prepare-failure recovery. Regression failed before and passes after.
-- Verification audit error names stage and command while preserving wrapped code and rollback.
-- Recovery explicitly says dependency environments must be prepared separately and non-mutating checks must remain read-only; no automatic .venv permission.
-- Rename receipts warn that LSP edits are not exhaustive, suggesting review of remaining literal matches, including extensionless scripts. This is an evidence-boundary fix, not fabricated complete alias analysis.
-- Workshop helper --describe returns one object; unknown wire name returns typed error and valid names, exit2. Tested on installed shared endpoint.
+| Language | Audited result |
+| --- | --- |
+| C / Muse | Correct final rename; clangd missed header, repaired separately. Compact read and revision-only exercised. |
+| Java / Haiku | Correct direct edits; ambiguous prepared rename refused. Coordinator exact-handle prepare succeeded provisionally. Compact goal skipped. |
+| JS+TS / Muse | Correct public rename after review of API-preserving barrel alias and guarded follow-up edits. Node tests passed; no tsc claim. |
+| C++ / Haiku | Correct prepared overload rename with explicit provisional acceptance. Compact goal skipped. |
+| Go / Muse | READY semantic rename applied exactly; compact read and revision-only exercised; tests/vet passed. |
 
-Focused handler/workspace tests and full make check budget passed (exit0): /tmp/huyang-language-fixes-gates.log and .exit. Post-fix owned-daemon MCP replay confirmed compact undeclared_tool_write receipt names the command, includes environment recovery, and leaves canonical new.txt/.venv absent; exact receipt in recovery-after.json. Review final gate, fix failures, add appropriate receipt coverage tests if needed, and validate Python recovery on new owned binary before publication. Need source commit/trailer, feature+main to both remotes, controller validation through UpKeeper, reviewed capture preserving unrelated pins, exact release CI, then fleet convergence. Current installed source remains5d244ad and release2aa8ecc; don't restart baseline workers' shared daemon mid-session.
+Coordinator independently rebuilt/tested each final target. Individual *-verdict.md files qualify participant claims and evidence gaps. All-five success is a final behavior result, not universal semantic/diagnostic coverage.
 
-Known fresh observation: Java fixture creation reported lsp_attach_deadline_exceeded twice despite installed jdtls and working javac21. Participant should assess isolated project attachment; no defect conclusion yet.
+Implemented recovery fixes: environment-write failures name the offending verification command and explain separate dependency preparation without weakening read-only checks; rename receipts warn that provider edits are not exhaustive; unresolved/ambiguous locators guide exact identifier handles and fresh retry keys. Workshop helper now describes a single tool as one object and gives valid names on unknown-tool errors.
 
-Next on wake: inspect repository and run state, collect exact results, audit target commits/tests and provider evidence. Preserve raw feedback; fix confirmed new issues. Submit C++/Go when capacity allows (prompts under prompts/). Source checkout before this request was clean2615bf0; all current dirty changes belong to this request. No unreviewed participant source merges.
+Regression tests failed before and passed after. Full make check budget passed for both recovery changes (/tmp/huyang-language-fixes-gates.log and /tmp/huyang-locator-recovery-gates-r2.log, exit 0). Owned-daemon environment replay preserved canonical files and returned compact actionable recovery (recovery-after.json). Source-byte caps do not cap the entire protocol envelope: observed revision-only compatibility frames remain ~1.5 KB. Compact mode avoids duplicate structured/text payloads; clients must read the selected representation.
+
+Publication pending: commit/push source, validate the exact clean controller installation through UpKeeper, review capture against the current release preserving all unrelated pins/environment, confirm release CI, then converge. Prior installed Huyang is 5d244ad; current UpKeeper checkout advanced independently to b189474 and must be preserved.

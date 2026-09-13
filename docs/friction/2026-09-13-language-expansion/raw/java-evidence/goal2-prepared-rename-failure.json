@@ -1,0 +1,25 @@
+{
+  "title": "Goal 2: Prepared Rename Failure and Recovery",
+  "timestamp": "2026-09-13T10:29:00Z",
+  "request_id": "req_255",
+  "operation": "change_plan action=prepare with rename_symbol",
+  "target": {
+    "type": "symbol_locator",
+    "path": "src/main/java/workshop/Billing.java",
+    "name_path": "Billing/quoteTotal"
+  },
+  "requested_new_name": "invoiceTotal",
+  "workspace_revision": "wsrev_3",
+  "outcome": "failed",
+  "error_code": "plan_action_failed",
+  "error_detail": "rename_int_overload: symbol locator resolved to 2 declarations",
+  "affected_declarations": 2,
+  "interpretation": "The prepared rename could not proceed because the symbol locator 'Billing/quoteTotal' resolves to both the int and String overloads. Semantic refactoring requires explicit method signature or byte-range information to disambiguate.",
+  "recovery_method": "Manual literal replacement using edit_apply kind=replace_literal with expected_count guards",
+  "recovery_status": "successful",
+  "recovery_details": {
+    "operation_1": "Replaced declaration: 'public static int quoteTotal(int units)' → 'public static int invoiceTotal(int units)'",
+    "operation_2": "Replaced calls: 'Billing.quoteTotal(3) ... Billing.quoteTotal(-1)' → 'Billing.invoiceTotal(3) ... Billing.invoiceTotal(-1)'",
+    "result_revision": "wsrev_5"
+  }
+}

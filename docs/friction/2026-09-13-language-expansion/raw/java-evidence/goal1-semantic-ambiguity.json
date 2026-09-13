@@ -1,0 +1,20 @@
+{
+  "title": "Goal 1: Semantic Definition Resolution Ambiguity",
+  "timestamp": "2026-09-13T10:29:00Z",
+  "request_id": "req_241",
+  "operation": "search with mode=definition",
+  "query": "quoteTotal",
+  "workspace_revision": "wsrev_3",
+  "outcome": "conflict",
+  "error_code": "symbol_ambiguous",
+  "declarations_found": 5,
+  "declarations": [
+    "src/main/java/workshop/Billing.java#Billing/quoteTotal (int overload)",
+    "src/main/java/workshop/Billing.java#Billing/quoteTotal (String overload)",
+    "src/main/java/workshop/Main.java#Main/main/equals/quoteTotal",
+    "src/main/java/workshop/Main.java#Main/main/quoteTotal (call site 1)",
+    "src/main/java/workshop/Main.java#Main/main/quoteTotal (call site 2)"
+  ],
+  "interpretation": "Language server cannot disambiguate between overloaded methods by name alone. Both quoteTotal(int) and quoteTotal(String) resolve to the same symbol.",
+  "recovery": "Use literal pattern matching with method signature (e.g., 'quoteTotal(int') to isolate target overload"
+}
