@@ -1029,6 +1029,12 @@ classified by the bridge with `errors.As`, never by substring; their text keeps 
 `prepared_revision_changed` is no longer reported as `commit_precondition_changed`, which
 asks for a different recovery.
 
+A committed plan's `committed_diffs` carry `path`, both hashes and
+`before_bytes`/`after_bytes`/`patch_bytes`; the bodies are omitted rather than sent as null
+fields, and are read with `revision_diff` over the committed range or summarised by
+`change_plan view=semantic`. A patch records the narrowest span that differs between the
+two versions, so a whole-file write of a small change is a small patch.
+
 The numeric bounds the catalog declares are enforced on the way in. An integer argument
 outside its schema's `minimum` or `maximum` is refused with the bound named, the way an
 oversized array and an oversized string already were.

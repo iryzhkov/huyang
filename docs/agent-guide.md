@@ -100,7 +100,10 @@ existing workspace, because its handle comes from one.
   `sections_truncated` says a generated file's list was cut, with `search` scoped to
   that path as the way to the rest.
 - Need locations: `search` (literal by default; multi-line queries must match whitespace
-  exactly). `paths: ["*.go", "internal/"]` scopes the hits and `context_lines: 2` adds the
+  exactly). `paths: ["*.go", "internal/"]` scopes what the search reads, before the match
+  bound applies and before the result set is frozen, so a scoped search of a common term
+  answers about that scope and a set frozen from it holds nothing else. `context_lines: 2`
+  adds the
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that
   usually follows it. Hits carry handles that `edit_apply replace_range` accepts, for the
   rare edit whose target you cannot name by content.
