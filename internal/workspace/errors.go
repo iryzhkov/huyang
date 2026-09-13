@@ -16,6 +16,8 @@ const (
 	CodePlanRevisionChanged       = "plan_revision_changed"
 	CodePlanStateInvalid          = "plan_state_invalid"
 	CodePlanNotFound              = "plan_not_found"
+	CodeHandleUnknown             = "handle_unknown"
+	CodeHandleExpired             = "handle_expired"
 	CodePlanValidationConflicts   = "plan_validation_conflicts"
 	CodeProvisionalNotAccepted    = "provisional_not_accepted"
 	CodeInvariantNotProven        = "invariant_not_proven"

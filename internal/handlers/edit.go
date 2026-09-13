@@ -190,7 +190,7 @@ func resolveEditTarget(requestID string, workspace *workspacecore.Workspace, req
 	}
 	resolved, err := workspace.ResolveHandle(workspacecore.HandleID(request.Handle))
 	if err != nil {
-		result := mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
+		result := handleResolveFailure(requestID, workspace, request.Handle, err)
 		result["next"] = []any{
 			map[string]any{"tool": "edit_apply", "action": "retry_as_replace_literal_with_the_old_text", "expired_handle": request.Handle},
 			map[string]any{"tool": "search", "action": "repeat_source_query_and_retry_with_fresh_handle", "expired_handle": request.Handle},

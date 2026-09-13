@@ -39,6 +39,9 @@ type live struct {
 	homeDir     string
 	spoolDir    string
 	environment []string
+	// stop ends the daemon this installation is currently running, so a test
+	// can replace it the way a deploy does.
+	stop func()
 }
 
 // start runs the daemon with a disposable home, which is a machine where no
@@ -94,6 +97,15 @@ func launch(t *testing.T, isolateHome bool) *live {
 	return instance
 }
 
+// redeploy replaces the running daemon the way a deployment does: the process
+// is stopped and started again on the same socket and the same state
+// directory, while whatever is talking to it stays where it is.
+func (l *live) redeploy() {
+	l.t.Helper()
+	l.stop()
+	l.serve()
+}
+
 // serve starts the daemon and waits for its socket, then stops it when the
 // test ends. Its output is kept and reported only when the test fails, so a
 // passing run stays quiet and a failing one has the log.
@@ -108,14 +120,21 @@ func (l *live) serve() {
 		cancel()
 		l.t.Fatalf("start daemon: %v", err)
 	}
-	l.t.Cleanup(func() {
+	stopped := false
+	shutdown := func() {
+		if stopped {
+			return
+		}
+		stopped = true
 		cancel()
 		_ = command.Wait()
 		if l.t.Failed() {
 			l.t.Logf("daemon log:\n%s", log.String())
 		}
 		_ = os.Remove(l.socketPath)
-	})
+	}
+	l.stop = shutdown
+	l.t.Cleanup(shutdown)
 	deadline := time.Now().Add(startDeadline)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(l.socketPath); err == nil {

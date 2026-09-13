@@ -7,9 +7,11 @@ import (
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 )
 
-// An edit addressed by a handle the service no longer knows fails with
-// handle_resolve_failed and tells the caller to repeat the query for a fresh
-// handle rather than guessing a range.
+// An edit addressed by a handle the service no longer knows is refused as
+// handle_unknown - one code for a handle that was never issued, one the cap
+// dropped and one an earlier process issued, because the repair is the same -
+// and tells the caller to repeat the query for a fresh handle rather than
+// guessing a range.
 func TestEditApplyUnknownHandleSuggestsFreshHandle(t *testing.T) {
 	direct, workspaceID, _ := openProbeProject(t, map[string]string{"note.txt": "before\n"})
 	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
@@ -19,7 +21,7 @@ func TestEditApplyUnknownHandleSuggestsFreshHandle(t *testing.T) {
 		"idempotency_key": "expired-handle",
 		"operation":       map[string]any{"kind": "replace_range", "target": map[string]any{"handle": "rng_pre_restart"}, "content": "after"},
 	})
-	if result["code"] != "handle_resolve_failed" {
+	if result["code"] != "handle_unknown" || result["outcome"] != "conflict" {
 		t.Fatalf("unknown handle result = %#v", result)
 	}
 	next := result["next"].([]any)

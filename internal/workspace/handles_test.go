@@ -139,7 +139,7 @@ func TestSymbolHandleDeleteRecreateTTLAndEpochInvalidation(t *testing.T) {
 	workspace, _ = newHandleWorkspace(t, map[string]string{"a.go": "func foo()\nbody\n---\n"})
 	workspace.SetHandleTTL(-time.Second)
 	expired := onlySymbol(t, workspace, "foo")
-	if _, err := workspace.ResolveHandle(expired.Handle); err == nil || err.Error() != "handle expired" {
+	if _, err := workspace.ResolveHandle(expired.Handle); err == nil || ErrorCode(err) != CodeHandleExpired {
 		t.Fatalf("expired handle error = %v", err)
 	}
 

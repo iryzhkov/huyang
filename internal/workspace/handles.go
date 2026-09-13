@@ -456,13 +456,18 @@ func (w *Workspace) InspectHandle(id HandleID) (HandleRecord, error) {
 	record, ok := store.handles[id]
 	store.mu.RUnlock()
 	if !ok {
-		return HandleRecord{}, errors.New("unknown handle")
+		// Handles live in a bounded in-memory store, so one can be missing
+		// because it was never issued, because the cap dropped it, or because
+		// the service was restarted under the caller. The caller cannot tell
+		// those apart and does not need to: all three mean take a fresh one.
+		return HandleRecord{}, Codedf(CodeHandleUnknown,
+			"handle %s is not known to this service instance; handles are held in memory, so one is lost when the cap drops it or the service restarts", id)
 	}
 	if !record.ExpiresAt.After(time.Now()) {
 		store.mu.Lock()
 		delete(store.handles, id)
 		store.mu.Unlock()
-		return HandleRecord{}, errors.New("handle expired")
+		return HandleRecord{}, Codedf(CodeHandleExpired, "handle %s expired at %s", id, record.ExpiresAt.UTC().Format(time.RFC3339))
 	}
 	if identity := w.Identity(); record.WorkspaceID != identity.ID || record.Epoch != identity.Epoch {
 		return HandleRecord{}, &Conflict{Code: ConflictWorkspaceEpoch, Path: record.Locator.Path}

@@ -212,14 +212,14 @@ func readCommitChanges(requestID string, workspace *workspacecore.Workspace, req
 func (h *Handlers) readHandle(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	resolution, err := workspace.ResolveHandle(workspacecore.HandleID(request.Handle))
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
+		return handleResolveFailure(requestID, workspace, request.Handle, err)
 	}
 	if resolution.Status == workspacecore.ResolutionConflicted {
 		return modernHandleConflict(requestID, workspace, resolution)
 	}
 	resolved, err := resolution.RangeHandle()
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "handle_resolve_failed", err)
+		return handleResolveFailure(requestID, workspace, request.Handle, err)
 	}
 	request.Path = resolved.Path
 	read, err := workspace.Read(request.Path)
@@ -243,6 +243,25 @@ func (h *Handlers) readHandle(ctx context.Context, requestID string, workspace *
 		return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s", resolved.Path), data)
 	}
 	return h.readPath(ctx, requestID, workspace, request)
+}
+
+// handleResolveFailure answers a handle that did not resolve. A handle is
+// unknown because it was never issued, because the bounded store dropped it,
+// or because the service was replaced under the caller, and the workspace's
+// code says which; all three have the same repair, and a reply that offers it
+// costs the caller one call instead of a guess. Handles are in-memory on
+// purpose, so this is the ordinary way a long session meets one.
+func handleResolveFailure(requestID string, workspace *workspacecore.Workspace, handle string, err error) map[string]any {
+	code, outcome := workspacecore.ErrorCode(err), "conflict"
+	if code == "" {
+		code, outcome = "handle_resolve_failed", "failed"
+	}
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, err.Error(), map[string]any{"handle": handle})
+	result["next"] = []any{
+		map[string]any{"tool": "search", "action": "repeat_the_search_and_take_a_fresh_handle", "include_handles": true},
+		map[string]any{"tool": "read", "action": "read_by_path_or_symbol_locator_instead"},
+	}
+	return result
 }
 
 // readSymbol reads the declaration a symbol locator names: natively when
