@@ -238,7 +238,7 @@ func (h *Handlers) expandSafeDelete(ctx context.Context, requestID string, works
 		return nil, fmt.Errorf("%s: the references that would prove this deletion safe are unavailable: %w", operation.OpID, err)
 	}
 	payload, _ := value.(map[string]any)
-	locations := mcpapi.AnySlice(payload["locations"])
+	locations := referenceLocations(payload)
 	if total := argInt(payload, "count", len(locations)); total > len(locations) {
 		return nil, fmt.Errorf("%s: the server reported %d references but listed %d, so this deletion cannot be proved safe", operation.OpID, total, len(locations))
 	}
@@ -251,19 +251,40 @@ func (h *Handlers) expandSafeDelete(ctx context.Context, requestID string, works
 	return []workspacecore.PlanOperation{deletion}, nil
 }
 
+// referenceLocation is one place the language server reported the symbol.
+type referenceLocation struct {
+	file string
+	line int
+}
+
+// referenceLocations flattens the reference reply, which groups hits by file
+// so a path is written once rather than once per hit. A reply in any other
+// shape flattens to nothing, and the count check above then refuses the
+// deletion rather than reading silence as safety.
+func referenceLocations(payload map[string]any) []referenceLocation {
+	var locations []referenceLocation
+	for _, rawFile := range mcpapi.AnySlice(payload["files"]) {
+		group, _ := rawFile.(map[string]any)
+		file := fmt.Sprint(group["file"])
+		for _, rawHit := range mcpapi.AnySlice(group["hits"]) {
+			hit, _ := rawHit.(map[string]any)
+			locations = append(locations, referenceLocation{file: file, line: argInt(hit, "line", 0)})
+		}
+	}
+	return locations
+}
+
 // referencesOutside are the reported references that do not fall inside the
 // declaration itself: its own name and anything recursive are not reasons to
 // keep it.
-func referencesOutside(workspace *workspacecore.Workspace, locations []any, path string, startLine, endLine int) []string {
+func referencesOutside(workspace *workspacecore.Workspace, locations []referenceLocation, path string, startLine, endLine int) []string {
 	var outside []string
-	for _, raw := range locations {
-		location, _ := raw.(map[string]any)
-		file := workspacePath(workspace, fmt.Sprint(location["file"]))
-		line := argInt(location, "line", 0)
-		if file == path && line >= startLine && line <= endLine {
+	for _, location := range locations {
+		file := workspacePath(workspace, location.file)
+		if file == path && location.line >= startLine && location.line <= endLine {
 			continue
 		}
-		outside = append(outside, fmt.Sprintf("%s:%d", file, line))
+		outside = append(outside, fmt.Sprintf("%s:%d", file, location.line))
 	}
 	return outside
 }

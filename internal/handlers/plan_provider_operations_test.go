@@ -17,7 +17,7 @@ import (
 type refactorProvider struct {
 	stubProvider
 	edit       map[string]any
-	references []any
+	references map[string][]int
 	// reportedCount overrides the reference count, the way a server does
 	// when it found more than it is willing to list.
 	reportedCount int
@@ -30,11 +30,22 @@ func (p *refactorProvider) Call(_ context.Context, request provider.Request) (pr
 	case "huyang_workspace_edit":
 		return provider.Result{Value: p.edit}, nil
 	case "references":
-		count := len(p.references)
+		// The reference reply groups hits by file, so a path is written
+		// once rather than once per hit.
+		count := 0
+		files := make([]any, 0, len(p.references))
+		for file, lines := range p.references {
+			hits := make([]any, 0, len(lines))
+			for _, line := range lines {
+				hits = append(hits, map[string]any{"line": line, "text": "..."})
+			}
+			count += len(lines)
+			files = append(files, map[string]any{"file": file, "hits": hits})
+		}
 		if p.reportedCount > count {
 			count = p.reportedCount
 		}
-		return provider.Result{Value: map[string]any{"count": count, "locations": p.references}}, nil
+		return provider.Result{Value: map[string]any{"count": count, "files": files}}, nil
 	}
 	return provider.Result{Value: map[string]any{}}, nil
 }
@@ -146,10 +157,7 @@ func TestInlineSymbolRefusesWithTheActionsTheServerOffers(t *testing.T) {
 // A declaration is deleted only when the server reports no reference to it
 // outside its own lines; a caller elsewhere refuses the deletion and is named.
 func TestSafeDeleteSymbolRefusesWhileCallersRemain(t *testing.T) {
-	backend := &refactorProvider{references: []any{
-		map[string]any{"file": "ledger.go", "line": 3},
-		map[string]any{"file": "ledger.go", "line": 5},
-	}}
+	backend := &refactorProvider{references: map[string][]int{"ledger.go": {3, 5}}}
 	handlers, workspaceID, _ := newRefactorFixture(t, backend)
 	deletion := func() map[string]any {
 		return handlers.Execute(context.Background(), "req_plan", "change_plan", map[string]any{
@@ -166,7 +174,7 @@ func TestSafeDeleteSymbolRefusesWhileCallersRemain(t *testing.T) {
 		t.Fatalf("deletion with a caller left = %#v", refused)
 	}
 	// The declaration's own line is not a reason to keep it.
-	backend.references = []any{map[string]any{"file": "ledger.go", "line": 3}}
+	backend.references = map[string][]int{"ledger.go": {3}}
 	operations := planOperations(t, deletion())
 	if len(operations) != 1 || operations[0].Kind != workspacecore.OperationDeleteSymbol {
 		t.Fatalf("safe delete staged %#v", operations)
@@ -180,7 +188,7 @@ func TestSafeDeleteSymbolRefusesWhileCallersRemain(t *testing.T) {
 // deletion is refused rather than taken on trust.
 func TestSafeDeleteSymbolRefusesATruncatedReferenceList(t *testing.T) {
 	backend := &refactorProvider{
-		references:    []any{map[string]any{"file": "ledger.go", "line": 3}},
+		references:    map[string][]int{"ledger.go": {3}},
 		reportedCount: 40,
 	}
 	handlers, workspaceID, _ := newRefactorFixture(t, backend)
