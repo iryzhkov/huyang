@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -379,9 +380,39 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 			preparation.ToolDelta[index].Before = nil
 			preparation.ToolDelta[index].After = nil
 		}
-		result["preparation"] = preparation
+		result["preparation"] = compactPreparation(preparation)
 	}
 	return result
+}
+
+// compactPreparation renders a preparation with its verification stages
+// compacted the way verify_run compacts them. A prepared plan carried the
+// verbose record of every stage -- the command argv, the mode, the started
+// revision and a coverage object of zeros for each -- which was two
+// thirds of a prepare reply and none of it the answer to "did it prepare".
+func compactPreparation(preparation workspacecore.PlanPreparation) map[string]any {
+	stages := preparation.Verification
+	preparation.Verification = nil
+	encoded, err := json.Marshal(preparation)
+	if err != nil {
+		preparation.Verification = stages
+		return map[string]any{"preparation": preparation}
+	}
+	var compact map[string]any
+	if err := json.Unmarshal(encoded, &compact); err != nil {
+		preparation.Verification = stages
+		return map[string]any{"preparation": preparation}
+	}
+	if len(stages) == 0 {
+		return compact
+	}
+	records := make([]any, 0, len(stages))
+	for _, stage := range stages {
+		record, _ := compactVerificationStage(stage, false)
+		records = append(records, record)
+	}
+	compact["verification"] = records
+	return compact
 }
 
 // CompactRevisionDiff keeps the default revision history response bounded by
