@@ -42,6 +42,7 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 		if !ok || number != float64(int64(number)) {
 			return fmt.Errorf("%s must be an integer", path)
 		}
+		return validateIntegerBounds(schema, int64(number), path)
 	case "array":
 		return validateArray(schema, value, path)
 	}
@@ -74,6 +75,21 @@ func validateOneOf(schema map[string]any, alternatives []any, value any, path st
 	}
 	if matches != 1 {
 		return fmt.Errorf("%s must match exactly one allowed shape", path)
+	}
+	return nil
+}
+
+// validateIntegerBounds enforces the minimum and maximum an integer property
+// declares. A bound the catalog advertises and the service ignores is worse
+// than no bound at all: a caller that reads the schema and stays inside it
+// gets the same answer as one that ignores it, and the reply carries no sign
+// that the argument was out of range.
+func validateIntegerBounds(schema map[string]any, number int64, path string) error {
+	if minimum, ok := schema["minimum"].(int); ok && number < int64(minimum) {
+		return fmt.Errorf("%s is %d, minimum %d", path, number, minimum)
+	}
+	if maximum, ok := schema["maximum"].(int); ok && number > int64(maximum) {
+		return fmt.Errorf("%s is %d, maximum %d", path, number, maximum)
 	}
 	return nil
 }

@@ -75,6 +75,30 @@ func TestChangePlanRequestBoundsAdvertiseChunkedRecovery(t *testing.T) {
 	}
 }
 
+// A numeric bound in the catalog is a promise about what the service accepts,
+// so an argument outside it is refused here rather than passed to a handler
+// that has no bound of its own: context_lines is the case that showed it,
+// where a million lines of context were attached to every hit.
+func TestDeclaredNumericBoundsAreRefused(t *testing.T) {
+	schema := searchSchema()
+	err := ValidateToolArguments(schema, map[string]any{
+		"workspace_id": "ws_test", "query": "needle", "context_lines": float64(1000000),
+	})
+	if err == nil || !strings.Contains(err.Error(), "maximum 20") {
+		t.Fatalf("context_lines above its declared maximum was accepted: %v", err)
+	}
+	if err := ValidateToolArguments(schema, map[string]any{
+		"workspace_id": "ws_test", "query": "needle", "context_lines": float64(20),
+	}); err != nil {
+		t.Fatalf("context_lines at its declared maximum was refused: %v", err)
+	}
+	if err := ValidateToolArguments(schema, map[string]any{
+		"workspace_id": "ws_test", "query": "needle", "limit": float64(0),
+	}); err == nil || !strings.Contains(err.Error(), "minimum 1") {
+		t.Fatalf("limit below its declared minimum was accepted: %v", err)
+	}
+}
+
 func TestEveryRegisteredToolDeclaresASchedulerClass(t *testing.T) {
 	if err := ValidateRegistry(); err != nil {
 		t.Fatal(err)
