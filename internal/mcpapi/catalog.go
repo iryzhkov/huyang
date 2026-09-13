@@ -33,6 +33,11 @@ type ToolDescriptor struct {
 	// is advertised in ProfileExperimental only, under APIVersionExperimental,
 	// and may change without the deliberation the frozen catalog requires.
 	Experimental bool
+	// ExperimentalProperties are input properties a frozen tool grows only in
+	// the experimental catalog. The frozen schema is a contract with every
+	// agent that cached it, so a new argument is offered to callers who asked
+	// for the experimental profile and to nobody else.
+	ExperimentalProperties map[string]any
 	// Class is the scheduler class the handler runs under. It is declared next
 	// to the schema so a tool cannot be registered without one; ClassForCall
 	// refines it for argument-dependent behaviour.
@@ -349,7 +354,9 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"operation":    editOperationSchema(true),
 			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many.", "items": editOperationSchema(false)},
 		})},
-		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds)},
+		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds), ExperimentalProperties: map[string]any{
+			"view": enumSchema("plan", "impact"),
+		}},
 		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
 			"verbose":                 map[string]any{"type": "boolean", "description": "Full per-stage record (mode, revision, coverage, scopes, test lists). Default: verdict, output of stages that did not pass, skip reasons and counts."},
@@ -369,16 +376,42 @@ func Catalog(profile Profile) []ToolDescriptor {
 		byName[descriptor.Name] = descriptor
 	}
 	names := modernProfileNames[profile]
-	if profile == ProfileExperimental {
+	experimental := profile == ProfileExperimental
+	if experimental {
 		names = experimentalProfileNames()
 	}
 	catalog := make([]ToolDescriptor, 0, len(names))
 	for _, name := range names {
-		if descriptor, ok := byName[name]; ok {
-			catalog = append(catalog, descriptor)
+		descriptor, ok := byName[name]
+		if !ok {
+			continue
 		}
+		if experimental && len(descriptor.ExperimentalProperties) > 0 {
+			descriptor.InputSchema = withExperimentalProperties(descriptor.InputSchema, descriptor.ExperimentalProperties)
+		}
+		catalog = append(catalog, descriptor)
 	}
 	return catalog
+}
+
+// withExperimentalProperties copies a frozen schema and adds the properties
+// only the experimental catalog offers, leaving the original untouched so the
+// frozen profiles cannot acquire them.
+func withExperimentalProperties(schema map[string]any, extra map[string]any) map[string]any {
+	copied := make(map[string]any, len(schema))
+	for key, value := range schema {
+		copied[key] = value
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	merged := make(map[string]any, len(properties)+len(extra))
+	for key, value := range properties {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	copied["properties"] = merged
+	return copied
 }
 
 func OutputEnvelopeSchema() map[string]any {

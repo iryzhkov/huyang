@@ -58,6 +58,19 @@ func call(t *testing.T, session *mcp.ClientSession, name string, arguments map[s
 	return envelope
 }
 
+// callRefused runs a tool that the server is expected to reject outright, and
+// returns the refusal. A schema violation is refused by the transport rather
+// than answered with an envelope, which is the point when the question is
+// whether an argument is advertised at all.
+func callRefused(t *testing.T, session *mcp.ClientSession, name string, arguments map[string]any) error {
+	t.Helper()
+	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err == nil {
+		t.Fatalf("%s accepted arguments it does not advertise", name)
+	}
+	return err
+}
+
 // outcome is the envelope's outcome, or the empty string when there is none.
 func outcome(envelope map[string]any) string {
 	text, _ := envelope["outcome"].(string)

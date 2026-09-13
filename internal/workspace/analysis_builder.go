@@ -32,16 +32,21 @@ func newAnalysisBuilder(caps AnalysisCaps) *AnalysisBuilder {
 	}
 }
 
-// Node records a node, keeping the first description of it. Contributors
-// disagree about language labels far more often than they disagree about
-// existence, and the first writer is the one with the file in hand.
+// Node records a node. A later contributor that knows more about what a file
+// is - that it is a test, generated or configuration rather than just a file
+// - refines it; nothing else about a known node is overwritten, because the
+// first writer is the one that had the file in hand.
 func (b *AnalysisBuilder) Node(node AnalysisNode) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if node.ID == "" {
 		node.ID = NodeID(node.Kind, node.Path, node.NamePath)
 	}
-	if _, known := b.nodes[node.ID]; known {
+	if known, exists := b.nodes[node.ID]; exists {
+		if known.Kind == NodeFile && node.Kind != NodeFile && node.Kind != "" {
+			known.Kind = node.Kind
+			b.nodes[node.ID] = known
+		}
 		return
 	}
 	if len(b.nodes) >= b.caps.MaxNodes {

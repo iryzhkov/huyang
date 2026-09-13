@@ -1178,6 +1178,24 @@ consulted is named even when it found nothing, so "nobody looked" and "looked an
 relation" stay distinguishable, and a contributor that failed appears as a named gap in
 coverage rather than as a thinner graph.
 
+### Impact preview (experimental)
+
+`change_plan` accepts `view: "impact"` on `preview` and `inspect` in the experimental
+catalog only, because the frozen input schemas are a contract with every agent that cached
+them. A client asks for it with `huyang mcp --profile experimental`, which serves the whole
+frozen surface plus what is being designed.
+
+The answer is what the plan would reach: the declarations and files its operations name,
+whether each is exported, who calls them today, which tests are associated with the files
+and which paths have none, the generated and configuration files involved, the project
+variants the change reaches, what no contributor could see, and whether broader verification
+is recommended.
+
+Two revisions appear in it and they mean different things. `analysed_revision` is the
+canonical revision the facts are about, because the callers of a declaration are a fact
+about the repository as it stands. `preview_revision` identifies the proposal being weighed
+against it. A preview writes nothing and runs no discovered command.
+
 ### Behaviour changes
 
 - The native sectioner covers Go and Python, so `read` by `symbol_locator`, `symbol_find`

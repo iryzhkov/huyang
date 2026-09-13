@@ -104,13 +104,15 @@ type AnalysisNode struct {
 	Language string           `json:"language,omitempty"`
 }
 
-// NodeID is the identity of a node: its kind, its path, and its name path
-// when it is a declaration inside a file.
+// NodeID is the identity of a node: what it is and where it lives, but not
+// what kind of file it turned out to be. A file is one thing whether or not
+// it is a test, and a contributor that records a fact about it without
+// knowing that must still meet the contributor that did.
 func NodeID(kind AnalysisNodeKind, path, namePath string) string {
-	if namePath == "" {
-		return fmt.Sprintf("%s:%s", kind, path)
+	if kind == NodeSymbol || namePath != "" {
+		return fmt.Sprintf("symbol:%s#%s", path, namePath)
 	}
-	return fmt.Sprintf("%s:%s#%s", kind, path, namePath)
+	return "file:" + path
 }
 
 // FactProducer is one contributor's claim about one fact: who said it, how

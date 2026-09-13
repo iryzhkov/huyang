@@ -22,6 +22,10 @@ type planRequest struct {
 	Operations        []workspacecore.PlanOperation
 	HasOperations     bool
 	Edit              workspacecore.PlanEdit
+	// View selects what a preview or inspection answers with: the plan
+	// record, or the impact the plan would have. Only the experimental
+	// catalog advertises it.
+	View string
 }
 
 // planOutcome is what one plan action produced: the record to render and,
@@ -40,6 +44,7 @@ func decodePlanRequest(arguments map[string]any) (planRequest, error) {
 		PreparedRevision: fmt.Sprint(arguments["prepared_revision"]),
 	}
 	request.Action, _ = arguments["action"].(string)
+	request.View, _ = arguments["view"].(string)
 	request.AcceptProvisional, _ = arguments["accept_provisional"].(bool)
 	if raw, present := arguments["operations"]; present {
 		request.HasOperations = true
@@ -77,8 +82,14 @@ func (h *Handlers) changePlan(ctx context.Context, requestID string, workspace *
 		outcome = h.planEdit(ctx, requestID, workspace, request)
 	case "preview":
 		outcome = planPreview(workspace, request)
+		if impact := h.impactView(ctx, requestID, workspace, request, outcome); impact != nil {
+			return impact
+		}
 	case "inspect":
 		outcome = planInspect(workspace, request)
+		if impact := h.impactView(ctx, requestID, workspace, request, outcome); impact != nil {
+			return impact
+		}
 	case "prepare":
 		outcome = h.planPrepare(ctx, requestID, workspace, request)
 	case "discard":
@@ -117,6 +128,16 @@ func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *wo
 	request.Edit.Operations = expanded
 	plan, err := workspace.EditPlan(request.PlanID, request.PlanRevision, request.Edit)
 	return planOutcome{summary: "Plan intent updated; canonical workspace unchanged", plan: plan, err: err}
+}
+
+// impactView answers preview and inspect as impact when the caller asked for
+// that view, which only the experimental catalog offers. A plan that could not
+// be read has no impact to report, so the ordinary failure is returned.
+func (h *Handlers) impactView(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest, outcome planOutcome) map[string]any {
+	if request.View != "impact" || outcome.err != nil {
+		return nil
+	}
+	return h.planImpact(ctx, requestID, workspace, outcome.plan)
 }
 
 func planPreview(workspace *workspacecore.Workspace, request planRequest) planOutcome {

@@ -128,6 +128,12 @@ existing workspace, because its handle comes from one.
   state and, when the source was tracked, `next` names the one command to run
   (`git add -A -- old new`); after it `git diff --cached -M` reports the move as a
   rename. Symlinks and directories go through `change_plan`.
+- Before changing a declaration, ask what it reaches: `change_plan {action: preview,
+  plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
+  exported, which tests are associated with the files, what generated or configuration
+  files are involved, and what no contributor could see. It needs the experimental profile
+  (`huyang mcp --profile experimental`), because the frozen schemas do not advertise
+  `view`. It writes nothing.
 - Refactors the language server owns are `change_plan` operations: `rename_symbol`
   (`content` is the new name), `apply_code_action` (`content` is the title `code_actions`
   listed), `inline_symbol`, and `safe_delete_symbol`, which refuses and names the call

@@ -302,7 +302,7 @@ func runAffectedTests(ctx context.Context, sandbox *Sandbox, policy PipelinePoli
 	_, graph, err := AnalyzeImpact(ctx, AnalysisRequest{
 		Key: AnalysisKey{
 			WorkspaceID: request.WorkspaceID, Epoch: request.ProviderEpoch, Revision: request.Revision,
-			Profile: "impact/v1", ConfigHash: pipelineFingerprint(policy),
+			Profile: "impact/v1", ConfigHash: PipelineFingerprint(policy),
 		},
 		Root: sandbox.Tree, Changed: affected,
 	}, policy.Impact, policy.Variants, request.Contributors...)

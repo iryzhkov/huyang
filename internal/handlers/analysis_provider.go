@@ -106,14 +106,20 @@ func (c providerAnalysisContributor) contributeReferences(ctx context.Context, p
 		return nil
 	}
 	payload, _ := value.(map[string]any)
+	symbolNode := workspacecore.NodeID(workspacecore.NodeSymbol, path, name)
 	for _, location := range referenceLocations(payload) {
 		other := workspacePath(c.workspace, location.file)
 		if other == path {
 			continue
 		}
 		builder.Node(workspacecore.AnalysisNode{Kind: workspacecore.NodeFile, Path: other})
+		// Both granularities: the file relation answers "what does this
+		// change reach", and the symbol relation answers "who calls this
+		// declaration", which is the question asked before an edit.
 		builder.Fact(workspacecore.NodeID(workspacecore.NodeFile, other, ""), fileNode,
 			workspacecore.EdgeReferences, c.producer())
+		builder.Fact(workspacecore.NodeID(workspacecore.NodeFile, other, ""), symbolNode,
+			workspacecore.EdgeCalls, c.producer())
 	}
 	return nil
 }

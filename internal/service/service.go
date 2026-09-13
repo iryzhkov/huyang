@@ -113,13 +113,13 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		flags.SetOutput(stderr)
 		profileName := "full"
 		socketPath := defaultHuyangSocket()
-		flags.StringVar(&profileName, "profile", "full", "fixed catalog: full, orient, edit, or debug")
+		flags.StringVar(&profileName, "profile", "full", "fixed catalog: full, orient, edit, debug, or experimental")
 		flags.StringVar(&socketPath, "socket", socketPath, "Huyang Unix control socket")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang mcp [--profile full|orient|edit|debug] [--socket PATH]")
+			return errors.New("usage: huyang mcp [--profile full|orient|edit|debug|experimental] [--socket PATH]")
 		}
 		profile, err := modernOnlyProfile(profileName)
 		if err != nil {
@@ -662,6 +662,10 @@ func modernOnlyProfile(name string) (mcpapi.Profile, error) {
 	profile := mcpapi.Profile(name)
 	switch profile {
 	case mcpapi.ProfileFull, mcpapi.ProfileOrient, mcpapi.ProfileEdit, mcpapi.ProfileDebug:
+		return profile, nil
+	case mcpapi.ProfileExperimental:
+		// The frozen surface plus whatever is being designed. A caller asks
+		// for it by name and knows what it is getting.
 		return profile, nil
 	default:
 		return "", fmt.Errorf("unknown MCP profile %q", name)
