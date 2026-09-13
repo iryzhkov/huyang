@@ -104,10 +104,14 @@ type HistorySearchHit struct {
 	Excerpt string        `json:"excerpt,omitempty"`
 }
 type HistorySearchResult struct {
-	Query     string             `json:"query"`
-	Hits      []HistorySearchHit `json:"hits"`
-	ResultSet ResultSet          `json:"result_set"`
-	Coverage  GitCoverage        `json:"coverage"`
+	Query string             `json:"query"`
+	Hits  []HistorySearchHit `json:"hits"`
+	// ScannedCommits is how far back the search looked. limit is a window
+	// over history, not a cap on results, so a search that found nothing in
+	// five commits has to say five rather than imply the whole history.
+	ScannedCommits int         `json:"scanned_commits"`
+	ResultSet      ResultSet   `json:"result_set"`
+	Coverage       GitCoverage `json:"coverage"`
 }
 type commitRecord struct {
 	summary CommitSummary
@@ -782,7 +786,7 @@ func (w *Workspace) SearchHistory(req HistorySearchRequest) (HistorySearchResult
 	if err != nil {
 		return HistorySearchResult{}, err
 	}
-	return HistorySearchResult{Query: req.Query, Hits: hits, ResultSet: set, Coverage: c}, nil
+	return HistorySearchResult{Query: req.Query, Hits: hits, ScannedCommits: len(blocks), ResultSet: set, Coverage: c}, nil
 }
 
 // historyFields selects the searched fields: message only by default, otherwise the

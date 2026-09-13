@@ -47,7 +47,10 @@ func searchHistory(requestID string, workspace *workspacecore.Workspace, source 
 	if len(result.Hits) == 1 {
 		noun = "match"
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d historical %s", len(result.Hits), noun), result)
+	// The window, not only the count: limit is how many commits were read,
+	// so "0 matches" in a five-commit window is not "not in this history".
+	summary := fmt.Sprintf("%d historical %s in the %d most recent commits", len(result.Hits), noun, result.ScannedCommits)
+	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, result)
 }
 
 func refineSearch(requestID string, workspace *workspacecore.Workspace, parent string, arguments map[string]any) map[string]any {
