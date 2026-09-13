@@ -22,6 +22,18 @@ func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any)
 	switch kind {
 	case "project":
 		options.Root, _ = arguments["root"].(string)
+		// A relative root would be resolved in this process, whose working
+		// directory no caller can see: benchmark agents that named
+		// "bench/agent-efficiency/fixtures/go" opened and edited that path
+		// under the service's own directory, in a different repository,
+		// and were told the literal they were replacing was not there.
+		if options.Root != "" && !filepath.IsAbs(options.Root) {
+			result := mcpapi.Envelope(requestID, nil, "failed", "root_not_absolute",
+				fmt.Sprintf("root must be an absolute path; %q would be resolved against the service's own working directory, not yours", options.Root),
+				map[string]any{"root": options.Root})
+			result["next"] = []any{map[string]any{"action": "name_the_repository_root_by_its_absolute_path"}}
+			return options, result
+		}
 	case "documents":
 		for _, value := range mcpapi.AnySlice(arguments["files"]) {
 			if name, ok := value.(string); ok {
