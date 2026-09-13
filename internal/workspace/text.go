@@ -113,6 +113,11 @@ type SearchResult struct {
 	DocumentRevisions map[string]RevisionID `json:"-"`
 	SourceFiles       []string              `json:"-"`
 	ResultSet         *ResultSet            `json:"result_set,omitempty"`
+	// MatchLimit is how many matches this search collects before it stops.
+	// When coverage says the search was capped, the hit count is this bound
+	// rather than the number of matches in the workspace, and the caller
+	// needs the bound to tell the two apart.
+	MatchLimit int `json:"match_limit"`
 }
 
 type RangeHandle struct {
@@ -662,6 +667,7 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	result := SearchResult{
 		Workspace: w.Identity(), Hits: hits, Coverage: coverage, Query: request.Query, Mode: mode,
 		DocumentRevisions: revisions, SourceFiles: append([]string(nil), files...),
+		MatchLimit: w.limits.MaxMatches,
 	}
 	set, err := w.FreezeSearch(result)
 	if err != nil {

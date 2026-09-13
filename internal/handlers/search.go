@@ -113,9 +113,17 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	if context := argInt(arguments, "context_lines", 0); context > 0 {
 		attachSearchContext(workspace, hits, context)
 	}
+	// A capped search stopped collecting; the matches it holds are the bound
+	// it stopped at, not the matches in the workspace. Saying "1000 matches"
+	// for a hundred thousand is the one number an agent uses to decide
+	// whether to refine, so the count says it is a floor and names the bound.
+	stoppedAtBound := result.Coverage.Capped && len(result.Hits) >= result.MatchLimit && result.MatchLimit > 0
 	summary := fmt.Sprintf("%d matches", len(result.Hits))
 	if len(result.Hits) == 1 {
 		summary = "1 match"
+	}
+	if stoppedAtBound {
+		summary = fmt.Sprintf("at least %d matches; the search stopped at its %d-match bound", len(result.Hits), result.MatchLimit)
 	}
 	if !result.Coverage.Complete {
 		summary += "; search coverage incomplete"
@@ -124,13 +132,28 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		"hits": hits, "returned": len(hits), "total": len(result.Hits),
 		"result_set": mcpapi.CompactResultSet(result.ResultSet),
 	}
+	if stoppedAtBound {
+		data["total_is_lower_bound"], data["match_limit"] = true, result.MatchLimit
+	}
 	if !result.Coverage.Complete {
 		data["coverage"] = result.Coverage
 	}
 	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 	if truncated {
-		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %d matches", len(hits), len(result.Hits))}
+		of := fmt.Sprintf("%d", len(result.Hits))
+		if stoppedAtBound {
+			of = "at least " + of
+		}
+		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %s matches", len(hits), of)}
 		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.ResultSet.Handle}}
+		if stoppedAtBound {
+			// Refining a frozen set that is itself a truncation of the
+			// workspace narrows the wrong thing; a narrower query or a
+			// scoped path searches the files this one never reached.
+			envelope["next"] = append(envelope["next"].([]any), map[string]any{
+				"tool": "search", "action": "narrow_the_query_or_scope_it_with_paths", "query": result.Query,
+			})
+		}
 	} else if !result.Coverage.Complete {
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}

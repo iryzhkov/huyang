@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,43 @@ func TestSearchPathsAndContextLines(t *testing.T) {
 	}
 	if context, _ := hits[0]["context"].(string); context != "4\t\n5\tvar total = 1\n" {
 		t.Fatalf("context = %q", context)
+	}
+}
+
+// A search that stopped at its match bound holds the bound, not the number
+// of matches in the workspace. The count says it is a floor, the bound is
+// named, and the follow-up offers the narrowing that reaches the files the
+// capped search never opened.
+func TestSearchStoppedAtItsBoundReportsAFloor(t *testing.T) {
+	var many strings.Builder
+	many.WriteString("package a\n")
+	for index := range 4000 {
+		fmt.Fprintf(&many, "// needle %d\n", index)
+	}
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"many.go": many.String()})
+	result := handlers.Execute(context.Background(), "req_search", "search", map[string]any{
+		"workspace_id": workspaceID, "query": "needle",
+	})
+	data := result["data"].(map[string]any)
+	limit, _ := data["match_limit"].(int)
+	if data["total_is_lower_bound"] != true || limit == 0 || data["total"] != limit {
+		t.Fatalf("a capped search reported %#v as if it were the whole count", data)
+	}
+	if summary, _ := result["summary"].(string); !strings.HasPrefix(summary, "at least ") {
+		t.Fatalf("summary states the cap as a total: %q", summary)
+	}
+	warnings, _ := result["warnings"].([]string)
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "at least") {
+		t.Fatalf("warning counts against the cap as if it were the total: %#v", warnings)
+	}
+	narrowing := false
+	for _, raw := range result["next"].([]any) {
+		if step, _ := raw.(map[string]any); step != nil && strings.Contains(fmt.Sprint(step["action"]), "narrow") {
+			narrowing = true
+		}
+	}
+	if !narrowing {
+		t.Fatalf("a capped search only offered to refine what it already holds: %#v", result["next"])
 	}
 }
 
