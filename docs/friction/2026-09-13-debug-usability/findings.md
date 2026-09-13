@@ -1,0 +1,20 @@
+# Findings ledger
+
+| ID | Classification | Severity | Evidence | Disposition |
+|---|---|---|---|---|
+| F01 | output/budget | medium | 131142 source bytes delivered with max_lines=1; Haiku card 9.2 independently blocked | Implemented opt-in UTF-8 byte windows with revision-guarded continuation; focused/live tests pass; fresh replay pending |
+| F02 | output/budget | medium | status costs 4506 combined / 2097 envelope characters for revision-only goal | Implemented experimental revision view; isolated socket envelope 266 bytes; fresh replay pending |
+| F03 | output/budget | medium | 263186 JSON characters for 131142 ASCII source across both MCP copies | Implemented opt-in text/structured formats and compact default text-only; socket test 1024 source bytes in 2277-byte result |
+| F04 | output/budget | medium | User and Haiku mutation receipt filtering; retained plan inspect measured 11235 combined / 5286 structured characters | Implemented compact edit/plan receipts with optional diagnostics, full-details follow-up, retained verification/invariants/recovery; tests pass; fresh measured replay pending |
+| F05 | discovery/recovery | medium | Haiku launch failed then left Huyang; coordinator reproduced relative program/cwd build failure and relative cwd executable-not-found, while absolute module paths launch and stop | Clarified experimental launch schema with verified absolute module directory setup; adapter behavior preserved, fresh retry pending |
+| F06 | misleading participant claims | high | Haiku debug cards claim trace overlay and watchpoint limitation after direct Delve CLI fallback, no Huyang trace/value_origin calls; reconstructed evidence notes | Claims rejected; supported diagnosis separated from incomplete workflow. Preserve raw artifacts, target fresh cross-model trace/value-origin verification. Do not weaken API evidence semantics |
+| F07 | expected semantic behavior | low | TypeScript rename preserved barrel public name as alias, requiring five additional edits for user goal | Completed and independently tested; no confirmed Huyang defect, no rename engine change |
+| F09 | misleading error / recovery | medium | Cancelled execution validation on unchanged source returned graph_source_changed; regression fails before/passes after | Fixed analysis_cancelled with interruption cause and smaller-workspace guidance; original Muse refusal cause remains unproven; full gates rerunning |
+| F08 | unconfirmed discovery | low | Muse says continue-after-exit next guidance is unhelpful | No demonstrated incorrect outcome; defer unless assigned recovery evidence establishes actionable defect |
+| E01 | harness/environment | medium | Normandy Huyang project allows Codex Sol only; requested inexpensive Luna route ineligible | Codex coverage blocked, no expensive substitution or fleet policy changes |
+| E02 | harness/environment | low | normandy SSH helper validation exit64; OS hostname not a configured worker | Recovered invocation-only helper hostname, verified replacements exactly once and cancelled original wrong-host runs |
+| E03 | harness/environment | low | max_turns=40 rejected (supports 1–20) | Supported max20; two later assigned runs received 15m timeout before dispatch with normal scheduling |
+
+Haiku editing report omitted missing-op_id and reused-idempotency-key retries; both recovered from typed refusals. Haiku baseline repaired the fixture but skipped tracing and violated source-interface rules. These are audited participant limitations, not proof of product correctness or product failure. Muse baseline correctly diagnosed and repaired with debugger/static evidence; trace lifecycle is assessed separately.
+
+Full make check budget passed for the response implementation (log /tmp/huyang-usability-gates-1528.log). Launch-description changes triggered a second gate run and a final focused schema/service test. Source commit, fresh verification, deployment and UpKeeper publication remain pending. No distributed fix claimed.

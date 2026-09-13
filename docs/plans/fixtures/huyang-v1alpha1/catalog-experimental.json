@@ -27,6 +27,23 @@
           ],
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "root": {
           "description": "Project root; required for kind=project.",
           "type": "string"
@@ -40,16 +57,34 @@
     "name": "workspace_open"
   },
   {
-    "description": "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.",
+    "description": "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation. view=revision refreshes known documents and returns only the current workspace revision, without loading provider or pipeline details.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "view": {
           "enum": [
             "status",
             "overview",
-            "map"
+            "map",
+            "revision"
           ],
           "type": "string"
         },
@@ -175,6 +210,23 @@
           },
           "type": "object"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "result_set_handle": {
           "description": "Frozen current-source result set.",
           "type": "string"
@@ -203,6 +255,23 @@
         },
         "query": {
           "description": "Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+          "type": "string"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
           "type": "string"
         },
         "root": {
@@ -245,6 +314,23 @@
             "incoming_calls",
             "outgoing_calls",
             "hover"
+          ],
+          "type": "string"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
           ],
           "type": "string"
         },
@@ -380,18 +466,33 @@
     "name": "navigate"
   },
   {
-    "description": "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.",
+    "description": "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters. Experimental: max_bytes bounds each source selection, including a single minified line; byte_offset and expected_revision_id continue that same selection safely. Offsets count UTF-8 bytes after line selection and numbering; retain the same target/options on continuation. Outline/history views do not accept byte windows.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "byte_offset": {
+          "description": "Zero-based byte offset into the same selected/rendered source. Nonzero offsets require expected_revision_id. Use returned next_byte_offset to preserve UTF-8 characters.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "end_line": {
           "minimum": 1,
           "type": "integer"
         },
+        "expected_revision_id": {
+          "description": "Document revision from the preceding read; a changed document refuses continuation instead of mixing versions.",
+          "type": "string"
+        },
         "limit": {
           "description": "history and changes views: number of entries.",
           "minimum": 1,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "description": "Maximum UTF-8 content bytes per source target, including numbering. Metadata/JSON escaping are additional. Explicit opt-in; compact mode defaults to 65536. Does not bound acquisition memory.",
+          "maximum": 1048576,
+          "minimum": 4,
           "type": "integer"
         },
         "max_lines": {
@@ -411,6 +512,23 @@
           "description": "Expected plan revision; a preparation replaced since is refused rather than answered.",
           "minimum": 1,
           "type": "integer"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
         },
         "revision": {
           "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
@@ -551,8 +669,23 @@
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
+              "byte_offset": {
+                "description": "Zero-based byte offset into the same selected/rendered source. Nonzero offsets require expected_revision_id. Use returned next_byte_offset to preserve UTF-8 characters.",
+                "minimum": 0,
+                "type": "integer"
+              },
               "end_line": {
                 "minimum": 1,
+                "type": "integer"
+              },
+              "expected_revision_id": {
+                "description": "Document revision from the preceding read; a changed document refuses continuation instead of mixing versions.",
+                "type": "string"
+              },
+              "max_bytes": {
+                "description": "Maximum UTF-8 content bytes per source target, including numbering. Metadata/JSON escaping are additional. Explicit opt-in; compact mode defaults to 65536. Does not bound acquisition memory.",
+                "maximum": 1048576,
+                "minimum": 4,
                 "type": "integer"
               },
               "max_lines": {
@@ -642,6 +775,23 @@
           "minimum": 1,
           "type": "integer"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "revision": {
           "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
           "type": "string"
@@ -676,6 +826,23 @@
           "description": "Expected plan revision; a preparation replaced since is refused rather than answered.",
           "minimum": 1,
           "type": "integer"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
         },
         "revision": {
           "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
@@ -802,7 +969,7 @@
     "name": "code_actions"
   },
   {
-    "description": "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -\u003e new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.",
+    "description": "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -\u003e new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record. response_mode=compact returns a concise receipt and optional diagnostics; evidence and refusal recovery remain available.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -814,6 +981,10 @@
         "idempotency_key": {
           "description": "Optional stable key for safe retries; generated when omitted.",
           "type": "string"
+        },
+        "include_diagnostics": {
+          "description": "In compact mode include diagnostic bodies/notices; otherwise return their availability and verification status, with diagnostics as the follow-up.",
+          "type": "boolean"
         },
         "operation": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1034,6 +1205,23 @@
           "description": "Compute the diff without changing canonical bytes.",
           "type": "boolean"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "root": {
           "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
           "type": "string"
@@ -1052,7 +1240,7 @@
     "name": "edit_apply"
   },
   {
-    "description": "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.",
+    "description": "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call. response_mode=compact returns a concise receipt and optional diagnostics; evidence and refusal recovery remain available.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1293,6 +1481,10 @@
         "idempotency_key": {
           "description": "Optional stable key for safe retries; generated when omitted.",
           "type": "string"
+        },
+        "include_diagnostics": {
+          "description": "In compact mode include diagnostic bodies/notices; otherwise return their availability and verification status, with diagnostics as the follow-up.",
+          "type": "boolean"
         },
         "invariants": {
           "description": "What the result must satisfy, checked against the prepared revision before anything is applied. A required invariant that is violated or that nobody could evaluate keeps the plan out of READY and has no accept flag; an advisory one leaves the plan PROVISIONAL. Editing the plan drops every proof. api_compatible reads each affected file's exported surface before and after (Go and TypeScript); path_unreachable can refute reachability from one remaining reference but cannot yet prove it, so it answers violated or unknown.",
@@ -1578,6 +1770,23 @@
           "description": "Required when action=apply.",
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "view": {
           "enum": [
             "plan",
@@ -1608,6 +1817,23 @@
       "properties": {
         "idempotency_key": {
           "description": "Optional stable key for safe retries; generated when omitted.",
+          "type": "string"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
           "type": "string"
         },
         "revision_or_transaction": {
@@ -1666,6 +1892,23 @@
           "description": "Earlier revision.",
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "to_revision_or_current": {
           "description": "Later revision or current.",
           "type": "string"
@@ -1705,6 +1948,23 @@
           "description": "Evidence identifier.",
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
@@ -1724,6 +1984,23 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
@@ -1760,6 +2037,23 @@
         "parser": {
           "type": "boolean"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "server": {
           "description": "Optional Mason package or lspconfig name; none installs only the parser.",
           "type": "string"
@@ -1779,7 +2073,7 @@
     "name": "language_server_setup"
   },
   {
-    "description": "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
+    "description": "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints. A launch build error is not an adapter capability refusal: inspect adapter output and check program/cwd/module paths before retrying with a new idempotency key.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1815,6 +2109,7 @@
           "type": "string"
         },
         "cwd": {
+          "description": "Debuggee working directory. Prefer an absolute path to the directory containing the target Go module go.mod when using Delve; relative cwd can build successfully but fail to launch.",
           "type": "string"
         },
         "env": {
@@ -1965,6 +2260,24 @@
           "type": "integer"
         },
         "program": {
+          "description": "Program to launch. For Delve in a nested Go module, use the absolute module directory for both program and cwd. Relative program/cwd combinations are adapter-dependent; inspect build output on failure.",
+          "type": "string"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
           "type": "string"
         },
         "stop_on_entry": {
@@ -2183,6 +2496,23 @@
         "log_message": {
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
@@ -2325,6 +2655,23 @@
         "line_offset": {
           "minimum": 1,
           "type": "integer"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
         },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2507,6 +2854,23 @@
           ],
           "type": "string"
         },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
+        },
         "scope": {
           "enum": [
             "locals",
@@ -2562,6 +2926,23 @@
         "plan_revision": {
           "minimum": 1,
           "type": "integer"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
         },
         "revision": {
           "description": "Current content revision or a prepared revision.",
@@ -2640,6 +3021,23 @@
         "plan_revision": {
           "minimum": 1,
           "type": "integer"
+        },
+        "response_format": {
+          "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+          "enum": [
+            "both",
+            "text",
+            "structured"
+          ],
+          "type": "string"
+        },
+        "response_mode": {
+          "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "type": "string"
         },
         "revision": {
           "description": "Current content revision or a prepared revision.",

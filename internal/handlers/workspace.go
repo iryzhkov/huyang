@@ -206,6 +206,9 @@ func (h *Handlers) inspect(ctx context.Context, requestID string, workspace *wor
 	if _, refreshErr := workspace.RefreshKnownDocuments(); refreshErr != nil {
 		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", refreshErr)
 	}
+	if arguments["view"] == "revision" {
+		return mcpapi.Envelope(requestID, workspace, "ok", "", "Current workspace revision", map[string]any{"revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)})
+	}
 	inspection := workspace.Inspect()
 	var semanticProvider map[string]any
 	if backend, providerErr := h.pool.Canonical(ctx, workspace); providerErr == nil {

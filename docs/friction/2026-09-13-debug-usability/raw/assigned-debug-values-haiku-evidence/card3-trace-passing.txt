@@ -1,0 +1,30 @@
+Delve trace: Passing case (credits=1)
+
+API server listening at: 127.0.0.1:38698
+2026-09-13T08:22:32-07:00 info layer=debugger launching process with args: [./__debug_bin20858535]
+2026-09-13T08:22:32-07:00 debug layer=debugger Adding target 1460628
+
+Breakpoint set: main.main() at line 25
+Tracepoint set: main.dispatch() at line 8 (entry)
+Return tracepoints: line 10 (early return) and line 12 (deliver call)
+
+Execution trace:
+> [Breakpoint 1] main.main() ./main.go:25 (PC: 0x4b836e)
+  credits := 1 (line 26)
+  if len(os.Args) > 1 && os.Args[1] == "fail" (line 27) - condition false
+  
+Dispatch called:
+> goroutine(18): main.dispatch(1)
+
+Return from dispatch (normal path via deliver):
+>> goroutine(18): main.dispatch => ("sent:1")
+
+Output: sent:1
+Process exited with status 0
+
+Summary:
+- dispatch called with credits=1
+- Early return guard does NOT trigger: if credits <= 0 is false
+- Control reaches line 12: return deliver(credits)
+- deliver() IS called and returns "sent:1"
+- Function returns "sent:1"

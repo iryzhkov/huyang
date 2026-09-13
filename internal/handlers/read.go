@@ -28,8 +28,12 @@ type readRequest struct {
 	// MaxLines caps the lines delivered for a source read; zero is no cap.
 	// A capped read says so and reports the total, so the agent can window
 	// or outline the rest instead of receiving a blind dump.
-	MaxLines int
-	Targets  []map[string]any
+	MaxLines         int
+	MaxBytes         int
+	Compact          bool
+	ByteOffset       int
+	ExpectedRevision string
+	Targets          []map[string]any
 }
 
 func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
@@ -37,6 +41,10 @@ func decodeReadRequest(arguments map[string]any) (readRequest, bool) {
 		StartLine: argInt(arguments, "start_line", 0), EndLine: argInt(arguments, "end_line", 0),
 		Limit: argInt(arguments, "limit", 20), MaxLines: argInt(arguments, "max_lines", 0),
 	}
+	request.MaxBytes = argInt(arguments, "max_bytes", 0)
+	request.Compact = arguments["response_mode"] == "compact"
+	request.ByteOffset = argInt(arguments, "byte_offset", 0)
+	request.ExpectedRevision, _ = arguments["expected_revision_id"].(string)
 	request.Numbered, _ = arguments["numbered"].(bool)
 	request.View, _ = arguments["view"].(string)
 	for _, raw := range mcpapi.AnySlice(arguments["targets"]) {
@@ -75,7 +83,7 @@ func (h *Handlers) read(ctx context.Context, requestID string, workspace *worksp
 }
 
 // readOne dispatches a single-target read on the shape of its target.
-func (h *Handlers) readOne(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
+func (h *Handlers) readOneUnbounded(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	if request.View == "changes" {
 		return readCommitChanges(requestID, workspace, request)
 	}
@@ -106,6 +114,8 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		single := readRequest{
 			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
 			Limit: request.Limit, Numbered: request.Numbered, MaxLines: argInt(target, "max_lines", request.MaxLines),
+			MaxBytes: argInt(target, "max_bytes", request.MaxBytes), ByteOffset: argInt(target, "byte_offset", request.ByteOffset),
+			ExpectedRevision: request.ExpectedRevision, Compact: request.Compact,
 		}
 		// Every option of a single-target read applies per target, so one
 		// call can outline one file and window another.
@@ -115,11 +125,14 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		if numbered, ok := target["numbered"].(bool); ok {
 			single.Numbered = numbered
 		}
+		if revision, ok := target["expected_revision_id"].(string); ok {
+			single.ExpectedRevision = revision
+		}
 		decodeReadTarget(&single, target)
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
 			failed++
-			files = append(files, map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"]})
+			files = append(files, map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]})
 			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
 			continue
 		}

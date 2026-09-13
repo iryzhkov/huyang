@@ -1,0 +1,270 @@
+{
+  "api_version": "huyang.workspace/v1alpha1",
+  "data": {
+    "canonical_changed": true,
+    "changed_paths": [
+      "index.ts",
+      "labels.ts"
+    ],
+    "from_revision": "wsrev_1",
+    "plan": {
+      "base_state_seq": 1,
+      "created_at": "2026-09-13T15:14:13.618201964Z",
+      "event_count": 6,
+      "operation_count": 2,
+      "operations": [
+        {
+          "content_bytes": 23,
+          "content_sha256": "8e03f6195c353907b6f5d25b0f473a5760e6272077902a7ea9b17f4beed7a49d",
+          "depends_on": null,
+          "destination_revision_id": "",
+          "from": "",
+          "indentation": "exact",
+          "kind": "replace_range",
+          "op_id": "rename_1_1",
+          "path": "",
+          "revision_id": "",
+          "target": {
+            "file_range": {
+              "path": "index.ts",
+              "revision_id": "docrev_f9ca3e6fece6359127507298ad304497e9a65b46040eb040c892ec914dba483d"
+            }
+          },
+          "to": ""
+        },
+        {
+          "content_bytes": 8,
+          "content_sha256": "1406e452042b85706aafab8c32c8ddbf95a5b5e580db93f5e3d3ebdc1a6ca728",
+          "depends_on": [
+            "rename_1_1"
+          ],
+          "destination_revision_id": "",
+          "from": "",
+          "indentation": "exact",
+          "kind": "replace_range",
+          "op_id": "rename_1_2",
+          "path": "",
+          "revision_id": "",
+          "target": {
+            "file_range": {
+              "path": "labels.ts",
+              "revision_id": "docrev_9d6c4d55aa2d6ef57283a20e43e4206474eb5ba6dabf30a53c78bee0f413bd38"
+            }
+          },
+          "to": ""
+        }
+      ],
+      "plan_id": "plan_dfab3a458c869d356672aa655ce1ed27",
+      "plan_revision": 1,
+      "preparation": {
+        "prepared_revision": "prep_cbbf8f642ca413fac45f801bde1f8b195ee24162db996355e48baff38f0123fe",
+        "provider_epoch": 1,
+        "affected_files": [
+          "index.ts",
+          "labels.ts"
+        ],
+        "canonical_changed": true,
+        "canonical_revision": "wsrev_2",
+        "journal_id": "plan_dfab3a458c869d356672aa655ce1ed27",
+        "diagnostics": "authoritative",
+        "disk_checks": "sandbox_manifest_verified",
+        "intermediate_reports": false,
+        "sandbox_backend": "reflink",
+        "base_revision": "wsrev_1",
+        "canonical_from_revision": "wsrev_1",
+        "evidence_paths": "canonical",
+        "verification": [
+          {
+            "stage": "format_gate",
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "not_configured"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "parser",
+            "mode": "check",
+            "scope": [
+              "index.ts",
+              "labels.ts"
+            ],
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 2,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "parser_unavailable:.ts"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "check",
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": -1,
+            "status": "unavailable",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": false,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "skipped": [
+                "not_configured"
+              ],
+              "capped": false,
+              "semantic": ""
+            }
+          },
+          {
+            "stage": "tests",
+            "implementation": [
+              "npm",
+              "test",
+              "--silent"
+            ],
+            "mode": "check",
+            "started_revision": "wsrev_1",
+            "exit": 0,
+            "output": "labels behavior passed\n",
+            "status": "passed",
+            "duration_ms": 616,
+            "coverage": {
+              "complete": true,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "capped": false,
+              "semantic": ""
+            },
+            "test_scope": "full",
+            "test_verdict": "full_tests_passed",
+            "executed_tests": [
+              "npm-test"
+            ]
+          },
+          {
+            "stage": "diagnostics",
+            "mode": "provider",
+            "started_revision": "wsrev_1",
+            "exit": 0,
+            "status": "passed",
+            "duration_ms": 0,
+            "coverage": {
+              "complete": true,
+              "files_considered": 0,
+              "files_read": 0,
+              "bytes_read": 0,
+              "capped": false,
+              "semantic": "authoritative"
+            },
+            "evidence_ids": [
+              "ev_2f09f530fa19b323de740ffbc32addd2"
+            ]
+          }
+        ],
+        "committed_diffs": [
+          {
+            "path": "index.ts",
+            "before_sha256": "58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63",
+            "after_sha256": "985735c47d8d8997647e3d84a288faafe42328358dabceac85b1dd19b0b8ffb5",
+            "before_bytes": 43,
+            "after_bytes": 55,
+            "patch_bytes": 62
+          },
+          {
+            "path": "labels.ts",
+            "before_sha256": "fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67",
+            "after_sha256": "8845269271d1b797e928e3051a6e9b97a0f7121347d6d780b5841a3ab4dfc3e5",
+            "before_bytes": 83,
+            "after_bytes": 80,
+            "patch_bytes": 73
+          }
+        ]
+      },
+      "preview": {
+        "affected_files": [
+          "index.ts",
+          "labels.ts"
+        ],
+        "canonical_changed": false,
+        "conflicts": null,
+        "diffs": [
+          {
+            "after_bytes": 55,
+            "after_sha256": "985735c47d8d8997647e3d84a288faafe42328358dabceac85b1dd19b0b8ffb5",
+            "before_bytes": 43,
+            "before_sha256": "58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63",
+            "patch_bytes": 62,
+            "path": "index.ts"
+          },
+          {
+            "after_bytes": 80,
+            "after_sha256": "8845269271d1b797e928e3051a6e9b97a0f7121347d6d780b5841a3ab4dfc3e5",
+            "before_bytes": 83,
+            "before_sha256": "fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67",
+            "patch_bytes": 73,
+            "path": "labels.ts"
+          }
+        ],
+        "normalized_order": [
+          "rename_1_1",
+          "rename_1_2"
+        ],
+        "outcome": "ok",
+        "plan_revision": 1,
+        "preview_revision": "preview_4c05578382610f0e704905a542a005b1"
+      },
+      "state": "COMMITTED",
+      "updated_at": "2026-09-13T15:14:25.681125511Z",
+      "workspace_id": "ws_f45fb707072eca012eb4f10fc5bbb96a"
+    },
+    "revision": "wsrev_2"
+  },
+  "evidence": {
+    "ids": [
+      "ev_2f09f530fa19b323de740ffbc32addd2"
+    ],
+    "truncated": false
+  },
+  "guide": [
+    "Name the repository with root on any call; workspace_open is for this overview only.",
+    "Change text you know with edit_apply replace_literal: one call, no search first.",
+    "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+    "Move, copy and delete files with edit_apply, then run the git command under next.",
+    "A file over 500 lines: read view=outline or max_lines before the whole file."
+  ],
+  "idempotency": "created",
+  "next": [],
+  "outcome": "ok",
+  "request_id": "req_302",
+  "summary": "Plan inspection loaded from durable intent",
+  "transaction": {
+    "id": "plan_dfab3a458c869d356672aa655ce1ed27",
+    "state": "COMMITTED"
+  },
+  "warnings": [],
+  "workspace": {
+    "id": "ws_f45fb707072eca012eb4f10fc5bbb96a",
+    "revision": "wsrev_8"
+  }
+}

@@ -1,0 +1,7 @@
+# Checkpoint 2026-09-13 15:19 UTC
+
+Both baseline runs collected. Muse repair independently tests clean; report/evidence plus final/thread copied unchanged. Haiku repair works but baseline skipped debugging and violated source-interface/reporting requirements. See separate verdicts. All assigned cards now have exactly one accepted owner in scenario-manifest.json. Three assigned runs await handoff; shared service remains baseline 2c22cbf. Native terminal waits will resume the coordinator.
+
+Local uncommitted output fixes pass focused handlers/mcpapi/service tests and isolated live TestExperimentalByteReadsAndCompactReceiptsCrossSocket. Live measurement: 131085-byte source, 1024-byte requested excerpt, 2277-byte text-only MCP result; focused revision envelope 266 bytes. Earlier lint passed; full gates still pending after final edits. No source commit, push, shared service replacement or UpKeeper publication yet.
+
+Next: collect assigned reports and provenance; reproduce actionable findings. Audit compact edit receipt fields against actual receipts and measure before/after mutation output. Extend byte-window regression to prepared source/handles/numbering and ensure read-only views plus continuation behave correctly. response-controls.md currently documents implemented experimental controls. Full gates and fresh unhinted cross-model replays are required before claiming complete. Keep old deployed service while assigned baseline users remain active. Publication must follow exact source/release validation and preserve unrelated UpKeeper pins.

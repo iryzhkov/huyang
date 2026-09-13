@@ -1,0 +1,30 @@
+Delve trace: Failing case (credits=0)
+
+API server listening at: 127.0.0.1:38697
+2026-09-13T08:22:16-07:00 info layer=debugger launching process with args: [./__debug_bin1846717319 fail]
+2026-09-13T08:22:16-07:00 debug layer=debugger Adding target 1459728
+
+Breakpoint set: main.main() at line 25
+Tracepoint set: main.dispatch() at line 8 (entry)
+Return tracepoints: line 10 (early return) and line 12 (deliver call)
+
+Execution trace:
+> [Breakpoint 1] main.main() ./main.go:25 (PC: 0x4b836e)
+  credits := 1 (line 26)
+  if len(os.Args) > 1 && os.Args[1] == "fail" (line 27)
+  credits = 0 (line 28) - SECOND WRITE TO CREDITS
+
+Dispatch called:
+> goroutine(18): main.dispatch(0)
+
+Return from dispatch (early path):
+>> goroutine(18): main.dispatch => ("rejected")
+
+Output: rejected
+Process exited with status 1
+
+Summary:
+- dispatch called with credits=0
+- Early return guard triggers: if credits <= 0 { return "rejected" }
+- Return value: "rejected"
+- deliver() never called (unobserved)

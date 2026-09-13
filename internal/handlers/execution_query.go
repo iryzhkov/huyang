@@ -78,11 +78,20 @@ func (h *Handlers) captureExecution(ctx context.Context, w *workspacecore.Worksp
 	return q, nil
 }
 func (q *executionQuery) validate(ctx context.Context, h *Handlers) error {
+	if err := executionContextError(ctx); err != nil {
+		return err
+	}
 	if q.closedDirectory != nil && !workspacecore.ClosedGoInventoryComplete(q.request.Root, q.sources, *q.closedDirectory) {
 		return workspacecore.Codedf("graph_source_changed", "closed package inventory changed during proof")
 	}
 	_, revision, _, err := q.sourceWorkspace.ExecutionSources(ctx)
-	if err != nil || revision != q.request.Key.Revision || q.workspace.Identity().Epoch != q.epoch {
+	if cancelled := executionContextError(ctx); cancelled != nil {
+		return cancelled
+	}
+	if err != nil {
+		return err
+	}
+	if revision != q.request.Key.Revision || q.workspace.Identity().Epoch != q.epoch {
 		return workspacecore.Codedf("graph_source_changed", "source changed during execution acquisition")
 	}
 	if q.prepared != nil {

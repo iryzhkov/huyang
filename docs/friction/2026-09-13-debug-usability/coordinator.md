@@ -1,0 +1,9 @@
+# Coordinator-only ground truth and continuation
+
+Do not supply this file to participants.
+
+Fresh delivery fixture: dispatch rejects credits <= 0, contrary to the zero-credits acceptance test. Exact source alone supports the early-return diagnosis for these inputs; missing debugger samples alone do not prove absence or cause. Minimal repair is credits < 0; negative credits stay rejected. A goroutine sends the dispatch result on an unbuffered channel; receiving it gives program-level synchronization, not a general trace causal proof.
+
+2026-09-13 baseline executions: go run . printed sent:1 (0); go run . fail printed rejected and exited 1; go test ./... failed only credits=0 (got rejected, want sent:0). Hashes are in participant prompts. No fixture repair has been applied by the coordinator.
+
+Continue original bounded workshop after baseline: collect immutable raw reports through steward artifacts/branch, verify provenance; reproduce every actionable claim; distribute all nine cards including TS rename and output cases; prioritize response volume per user's new raw feedback. Fix F01–F04 with regression tests, fresh uncoached cross-model verification, then full source/release gates and UpKeeper publication. Luna currently blocked by Normandy worker eligibility; do not substitute Sol or change fleet policy. Do not claim workshop complete when parked. Manifest and intake-evidence.json retain all accepted/cancelled IDs. Native steward waits will resume the coordinator; re-read current run state before collecting results. Legacy helper supplies no timeout flag: post-intake 15m amendment was refused because Muse was already assigned; the prompt still bounds active work to 15m and the scheduler caps 20 turns. For later waves configure timeout before assignment through a supported intake mechanism. All current source/report scaffolding is uncommitted; no source fix, gate suite or UpKeeper publication yet.

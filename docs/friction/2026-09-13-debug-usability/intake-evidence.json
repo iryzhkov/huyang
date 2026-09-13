@@ -1,0 +1,644 @@
+[
+  {
+    "run": {
+      "id": "run-a2117e2db07b56f5d799a37f4fb686e2",
+      "workflowId": "workflow-29027b935501028087137f7ed0b7649c",
+      "graphRevision": 1,
+      "sink": {
+        "id": "sink:run-a2117e2db07b56f5d799a37f4fb686e2",
+        "name": "__sink",
+        "graphRevision": 1,
+        "needs": [
+          "task-f1bf060151fe31083c7724dda5320d3f"
+        ],
+        "progress": "blocked"
+      },
+      "progress": "ready",
+      "inputArtifactIds": [
+        "artifact-071fba3051c4bbee7b688a453869d565"
+      ],
+      "revision": 2,
+      "createdAt": "2026-09-13T14:58:49.9245743Z",
+      "updatedAt": "2026-09-13T14:59:04.539361161Z"
+    },
+    "workflow": {
+      "id": "workflow-29027b935501028087137f7ed0b7649c",
+      "version": 2,
+      "name": "legacy-single-task",
+      "project": "huyang",
+      "environment": {
+        "type": "git",
+        "scope": "task"
+      },
+      "class": "surplus",
+      "taskIds": [
+        "task-f1bf060151fe31083c7724dda5320d3f"
+      ],
+      "inputArtifactIds": [
+        "artifact-071fba3051c4bbee7b688a453869d565"
+      ],
+      "createdAt": "2026-09-13T14:58:49.9245743Z"
+    },
+    "tasks": [
+      {
+        "task": {
+          "id": "task-f1bf060151fe31083c7724dda5320d3f",
+          "workflowId": "workflow-29027b935501028087137f7ed0b7649c",
+          "name": "task",
+          "class": "surplus",
+          "promptArtifactId": "artifact-68a769e3ad6c5c46362e9a93d7619e5f",
+          "verification": [
+            "true"
+          ],
+          "placement": {
+            "hosts": [
+              "normandy"
+            ]
+          },
+          "routes": [
+            {
+              "workerId": "normandy",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-haiku-4-5"
+            }
+          ],
+          "importance": 3,
+          "difficulty": 2,
+          "maxTurns": 20,
+          "notBefore": "2026-09-13T07:58:42-07:00"
+        },
+        "attempt": {
+          "id": "attempt-8026da40c32fe35dccbac4c472c43b67",
+          "workflowRunId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+          "taskId": "task-f1bf060151fe31083c7724dda5320d3f",
+          "number": 1,
+          "progress": "ready",
+          "control": "unassigned",
+          "revision": 1,
+          "assignmentId": "assignment-90dbbcc555bc720004231127b6307e8f",
+          "updatedAt": "2026-09-13T14:59:06.175667649Z"
+        },
+        "assignment": {
+          "id": "assignment-90dbbcc555bc720004231127b6307e8f",
+          "attemptId": "attempt-8026da40c32fe35dccbac4c472c43b67",
+          "workerId": "normandy",
+          "route": {
+            "workerId": "normandy",
+            "providerInstanceId": "claudeAgent",
+            "model": "claude-haiku-4-5",
+            "quotaPoolId": "claude-main"
+          },
+          "state": "offered",
+          "epoch": 1,
+          "leaseExpiresAt": "0001-01-01T00:00:00Z",
+          "threadId": "thread-5a15170f783fe6ffc008fb302e83b755",
+          "createdAt": "2026-09-13T14:59:06.175667649Z",
+          "updatedAt": "2026-09-13T14:59:06.175667649Z"
+        },
+        "artifacts": [
+          {
+            "metadata": {
+              "id": "artifact-68a769e3ad6c5c46362e9a93d7619e5f",
+              "workflowRunId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+              "taskId": "task-f1bf060151fe31083c7724dda5320d3f",
+              "kind": "input",
+              "name": "prompts/task.md",
+              "mediaType": "text/markdown; charset=utf-8",
+              "size": 5135,
+              "sha256": "c859a55730c5a3e93ece1ba744d974ccd6d177f9515b4d4d2e6463cdbc6c161e",
+              "producer": "submission",
+              "createdAt": "2026-09-13T14:58:49.9245743Z"
+            },
+            "download": "/backlog/artifacts/artifact-68a769e3ad6c5c46362e9a93d7619e5f"
+          }
+        ]
+      }
+    ],
+    "assignments": [
+      {
+        "id": "assignment-90dbbcc555bc720004231127b6307e8f",
+        "attemptId": "attempt-8026da40c32fe35dccbac4c472c43b67",
+        "workerId": "normandy",
+        "route": {
+          "workerId": "normandy",
+          "providerInstanceId": "claudeAgent",
+          "model": "claude-haiku-4-5",
+          "quotaPoolId": "claude-main"
+        },
+        "state": "offered",
+        "epoch": 1,
+        "leaseExpiresAt": "0001-01-01T00:00:00Z",
+        "threadId": "thread-5a15170f783fe6ffc008fb302e83b755",
+        "createdAt": "2026-09-13T14:59:06.175667649Z",
+        "updatedAt": "2026-09-13T14:59:06.175667649Z"
+      }
+    ],
+    "accepted": [
+      {
+        "id": "submission-accepted:legacy-e91801a2037b24c694a80e9491d6b43bdd8a83257c85d0cc90ea83760e379077",
+        "sequence": 70367,
+        "workflowRunId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+        "kind": "submission-accepted",
+        "targetType": "submission",
+        "targetId": "legacy-e91801a2037b24c694a80e9491d6b43bdd8a83257c85d0cc90ea83760e379077",
+        "actor": "coordinator",
+        "reason": "submission accepted",
+        "at": "2026-09-13T14:58:49.997748919Z",
+        "detail": {
+          "key": "legacy-e91801a2037b24c694a80e9491d6b43bdd8a83257c85d0cc90ea83760e379077",
+          "digest": "0feac56d383fc6123a91faabb58ffff42daa265e0484a69a1fa7b47cfab0ae0e",
+          "workflowId": "workflow-29027b935501028087137f7ed0b7649c",
+          "runId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+          "state": "accepted",
+          "createdAt": "2026-09-13T14:58:49.9245743Z",
+          "acceptedAt": "2026-09-13T14:58:49.997748919Z"
+        }
+      }
+    ],
+    "explanations": [
+      {
+        "workflowRunId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+        "taskId": "task-f1bf060151fe31083c7724dda5320d3f",
+        "attemptId": "attempt-8026da40c32fe35dccbac4c472c43b67",
+        "eligible": true,
+        "summary": "task is eligible to start",
+        "blockers": []
+      },
+      {
+        "workflowRunId": "run-a2117e2db07b56f5d799a37f4fb686e2",
+        "taskId": "sink:run-a2117e2db07b56f5d799a37f4fb686e2",
+        "eligible": false,
+        "summary": "coordinator sink waits for all predecessors to be terminal and execution to be quiescent",
+        "blockers": []
+      }
+    ]
+  },
+  {
+    "run": {
+      "id": "run-71f3f619886ab12875329b836e86ca5f",
+      "workflowId": "workflow-7691ac95cf040477b52a743eed1ec000",
+      "graphRevision": 1,
+      "sink": {
+        "id": "sink:run-71f3f619886ab12875329b836e86ca5f",
+        "name": "__sink",
+        "graphRevision": 1,
+        "needs": [
+          "task-95df4846b24fffb65a226c7fb480fa83"
+        ],
+        "progress": "blocked"
+      },
+      "progress": "active",
+      "inputArtifactIds": [
+        "artifact-366a760bc54d278989b610e0fcb8e5f5"
+      ],
+      "revision": 3,
+      "createdAt": "2026-09-13T14:58:23.47579761Z",
+      "updatedAt": "2026-09-13T14:58:46.473402493Z"
+    },
+    "workflow": {
+      "id": "workflow-7691ac95cf040477b52a743eed1ec000",
+      "version": 2,
+      "name": "legacy-single-task",
+      "project": "huyang",
+      "environment": {
+        "type": "git",
+        "scope": "task"
+      },
+      "class": "surplus",
+      "taskIds": [
+        "task-95df4846b24fffb65a226c7fb480fa83"
+      ],
+      "inputArtifactIds": [
+        "artifact-366a760bc54d278989b610e0fcb8e5f5"
+      ],
+      "createdAt": "2026-09-13T14:58:23.47579761Z"
+    },
+    "tasks": [
+      {
+        "task": {
+          "id": "task-95df4846b24fffb65a226c7fb480fa83",
+          "workflowId": "workflow-7691ac95cf040477b52a743eed1ec000",
+          "name": "task",
+          "class": "surplus",
+          "promptArtifactId": "artifact-c8778219f59c5d66cf107e070cdaad45",
+          "verification": [
+            "true"
+          ],
+          "placement": {
+            "hosts": [
+              "normandy"
+            ]
+          },
+          "routes": [
+            {
+              "workerId": "normandy",
+              "providerInstanceId": "opencode",
+              "model": "opencode/muse-spark-1.3-contributor-free"
+            }
+          ],
+          "importance": 3,
+          "difficulty": 2,
+          "maxTurns": 20,
+          "notBefore": "2026-09-13T07:58:19-07:00"
+        },
+        "attempt": {
+          "id": "attempt-5ca523c61739d16a5d4f0127e30a0422",
+          "workflowRunId": "run-71f3f619886ab12875329b836e86ca5f",
+          "taskId": "task-95df4846b24fffb65a226c7fb480fa83",
+          "number": 1,
+          "progress": "active",
+          "control": "preparing",
+          "revision": 3,
+          "assignmentId": "assignment-c80bbf5de335fb36873f576cecad9241",
+          "updatedAt": "2026-09-13T14:58:39.775393428Z"
+        },
+        "assignment": {
+          "id": "assignment-c80bbf5de335fb36873f576cecad9241",
+          "attemptId": "attempt-5ca523c61739d16a5d4f0127e30a0422",
+          "workerId": "normandy",
+          "route": {
+            "workerId": "normandy",
+            "providerInstanceId": "opencode",
+            "model": "opencode/muse-spark-1.3-contributor-free",
+            "quotaPoolId": "opencode-free"
+          },
+          "state": "claimed",
+          "epoch": 1,
+          "leaseExpiresAt": "2026-09-13T15:00:51.788953418Z",
+          "createdAt": "2026-09-13T14:58:32.751402718Z",
+          "updatedAt": "2026-09-13T14:58:51.788953418Z"
+        },
+        "artifacts": [
+          {
+            "metadata": {
+              "id": "artifact-c8778219f59c5d66cf107e070cdaad45",
+              "workflowRunId": "run-71f3f619886ab12875329b836e86ca5f",
+              "taskId": "task-95df4846b24fffb65a226c7fb480fa83",
+              "kind": "input",
+              "name": "prompts/task.md",
+              "mediaType": "text/markdown; charset=utf-8",
+              "size": 5152,
+              "sha256": "3b9e72b634fb5966105393b0399200b2b69203b4dc84fad43d7ba12ddfd03eee",
+              "producer": "submission",
+              "createdAt": "2026-09-13T14:58:23.47579761Z"
+            },
+            "download": "/backlog/artifacts/artifact-c8778219f59c5d66cf107e070cdaad45"
+          }
+        ]
+      }
+    ],
+    "assignments": [
+      {
+        "id": "assignment-c80bbf5de335fb36873f576cecad9241",
+        "attemptId": "attempt-5ca523c61739d16a5d4f0127e30a0422",
+        "workerId": "normandy",
+        "route": {
+          "workerId": "normandy",
+          "providerInstanceId": "opencode",
+          "model": "opencode/muse-spark-1.3-contributor-free",
+          "quotaPoolId": "opencode-free"
+        },
+        "state": "claimed",
+        "epoch": 1,
+        "leaseExpiresAt": "2026-09-13T15:00:51.788953418Z",
+        "createdAt": "2026-09-13T14:58:32.751402718Z",
+        "updatedAt": "2026-09-13T14:58:51.788953418Z"
+      }
+    ],
+    "accepted": [
+      {
+        "id": "submission-accepted:legacy-afdb8f9f4e5e1eea520b7bc2dbf973d9e01953ac126e59fc46036e31c45de0a6",
+        "sequence": 70347,
+        "workflowRunId": "run-71f3f619886ab12875329b836e86ca5f",
+        "kind": "submission-accepted",
+        "targetType": "submission",
+        "targetId": "legacy-afdb8f9f4e5e1eea520b7bc2dbf973d9e01953ac126e59fc46036e31c45de0a6",
+        "actor": "coordinator",
+        "reason": "submission accepted",
+        "at": "2026-09-13T14:58:23.537882818Z",
+        "detail": {
+          "key": "legacy-afdb8f9f4e5e1eea520b7bc2dbf973d9e01953ac126e59fc46036e31c45de0a6",
+          "digest": "2c2eb7494db35db560f5a84294e7be4a731c3b0830c9203bb3f31a033224a2d4",
+          "workflowId": "workflow-7691ac95cf040477b52a743eed1ec000",
+          "runId": "run-71f3f619886ab12875329b836e86ca5f",
+          "state": "accepted",
+          "createdAt": "2026-09-13T14:58:23.47579761Z",
+          "acceptedAt": "2026-09-13T14:58:23.537882818Z"
+        }
+      }
+    ],
+    "explanations": [
+      {
+        "workflowRunId": "run-71f3f619886ab12875329b836e86ca5f",
+        "taskId": "task-95df4846b24fffb65a226c7fb480fa83",
+        "attemptId": "attempt-5ca523c61739d16a5d4f0127e30a0422",
+        "eligible": false,
+        "summary": "task has 0 blocker(s)",
+        "blockers": []
+      },
+      {
+        "workflowRunId": "run-71f3f619886ab12875329b836e86ca5f",
+        "taskId": "sink:run-71f3f619886ab12875329b836e86ca5f",
+        "eligible": false,
+        "summary": "coordinator sink waits for all predecessors to be terminal and execution to be quiescent",
+        "blockers": []
+      }
+    ]
+  },
+  {
+    "run": {
+      "id": "run-506d3431855ce7d0f30597aa0513f9e5",
+      "workflowId": "workflow-e9926d043f4f230f55d04cdcbea5e390",
+      "graphRevision": 1,
+      "sink": {
+        "id": "sink:run-506d3431855ce7d0f30597aa0513f9e5",
+        "name": "__sink",
+        "graphRevision": 1,
+        "needs": [
+          "task-25d64e5bed23a6e5b111f606d72cb6eb"
+        ],
+        "progress": "succeeded",
+        "result": {
+          "failedTaskIds": [],
+          "cancelledTaskIds": [
+            "task-25d64e5bed23a6e5b111f606d72cb6eb"
+          ],
+          "skippedTaskIds": []
+        },
+        "completedAt": "2026-09-13T14:58:07.490440648Z"
+      },
+      "progress": "cancelled",
+      "inputArtifactIds": [
+        "artifact-cf91b30cb50adc6fab36e1fa69d9b802"
+      ],
+      "revision": 4,
+      "createdAt": "2026-09-13T14:56:13.444901371Z",
+      "updatedAt": "2026-09-13T14:58:07.490440648Z",
+      "completedAt": "2026-09-13T14:58:07.490440648Z"
+    },
+    "workflow": {
+      "id": "workflow-e9926d043f4f230f55d04cdcbea5e390",
+      "version": 2,
+      "name": "legacy-single-task",
+      "project": "huyang",
+      "environment": {
+        "type": "git",
+        "scope": "task"
+      },
+      "class": "surplus",
+      "taskIds": [
+        "task-25d64e5bed23a6e5b111f606d72cb6eb"
+      ],
+      "inputArtifactIds": [
+        "artifact-cf91b30cb50adc6fab36e1fa69d9b802"
+      ],
+      "createdAt": "2026-09-13T14:56:13.444901371Z"
+    },
+    "tasks": [
+      {
+        "task": {
+          "id": "task-25d64e5bed23a6e5b111f606d72cb6eb",
+          "workflowId": "workflow-e9926d043f4f230f55d04cdcbea5e390",
+          "name": "task",
+          "class": "surplus",
+          "promptArtifactId": "artifact-828d6de7bdd580f1ba187453b631487c",
+          "verification": [
+            "true"
+          ],
+          "placement": {
+            "hosts": [
+              "omarchy-normandy"
+            ]
+          },
+          "routes": [
+            {
+              "workerId": "omarchy-normandy",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-haiku-4-5"
+            }
+          ],
+          "importance": 3,
+          "difficulty": 2,
+          "maxTurns": 20,
+          "notBefore": "2026-09-13T07:56:04-07:00"
+        },
+        "attempt": {
+          "id": "attempt-a5a71180121b0023c069e747ace8ee29",
+          "workflowRunId": "run-506d3431855ce7d0f30597aa0513f9e5",
+          "taskId": "task-25d64e5bed23a6e5b111f606d72cb6eb",
+          "number": 1,
+          "progress": "cancelled",
+          "control": "stopped",
+          "revision": 1,
+          "updatedAt": "2026-09-13T14:58:00.324061177Z",
+          "completedAt": "2026-09-13T14:58:00.324061177Z"
+        },
+        "artifacts": [
+          {
+            "metadata": {
+              "id": "artifact-828d6de7bdd580f1ba187453b631487c",
+              "workflowRunId": "run-506d3431855ce7d0f30597aa0513f9e5",
+              "taskId": "task-25d64e5bed23a6e5b111f606d72cb6eb",
+              "kind": "input",
+              "name": "prompts/task.md",
+              "mediaType": "text/markdown; charset=utf-8",
+              "size": 5135,
+              "sha256": "c859a55730c5a3e93ece1ba744d974ccd6d177f9515b4d4d2e6463cdbc6c161e",
+              "producer": "submission",
+              "createdAt": "2026-09-13T14:56:13.444901371Z"
+            },
+            "download": "/backlog/artifacts/artifact-828d6de7bdd580f1ba187453b631487c"
+          }
+        ]
+      }
+    ],
+    "assignments": null,
+    "accepted": [
+      {
+        "id": "submission-accepted:legacy-1e518ba5efe8dff908ab62f6c00d48dabaf627f287f32b7efcc64f6835c99e96",
+        "sequence": 70281,
+        "workflowRunId": "run-506d3431855ce7d0f30597aa0513f9e5",
+        "kind": "submission-accepted",
+        "targetType": "submission",
+        "targetId": "legacy-1e518ba5efe8dff908ab62f6c00d48dabaf627f287f32b7efcc64f6835c99e96",
+        "actor": "coordinator",
+        "reason": "submission accepted",
+        "at": "2026-09-13T14:56:13.506617235Z",
+        "detail": {
+          "key": "legacy-1e518ba5efe8dff908ab62f6c00d48dabaf627f287f32b7efcc64f6835c99e96",
+          "digest": "8378e6511df918c4514cf599f90084b102fad371f674b22a769d25e3a2d06c7c",
+          "workflowId": "workflow-e9926d043f4f230f55d04cdcbea5e390",
+          "runId": "run-506d3431855ce7d0f30597aa0513f9e5",
+          "state": "accepted",
+          "createdAt": "2026-09-13T14:56:13.444901371Z",
+          "acceptedAt": "2026-09-13T14:56:13.506617235Z"
+        }
+      }
+    ],
+    "explanations": [
+      {
+        "workflowRunId": "run-506d3431855ce7d0f30597aa0513f9e5",
+        "taskId": "task-25d64e5bed23a6e5b111f606d72cb6eb",
+        "attemptId": "attempt-a5a71180121b0023c069e747ace8ee29",
+        "eligible": false,
+        "summary": "task is terminal",
+        "blockers": []
+      },
+      {
+        "workflowRunId": "run-506d3431855ce7d0f30597aa0513f9e5",
+        "taskId": "sink:run-506d3431855ce7d0f30597aa0513f9e5",
+        "eligible": false,
+        "summary": "coordinator sink is terminal: succeeded",
+        "blockers": []
+      }
+    ]
+  },
+  {
+    "run": {
+      "id": "run-a6731050c5ad032133eeac602b1f5636",
+      "workflowId": "workflow-31c2564279d640de4e034a1aea572ea8",
+      "graphRevision": 1,
+      "sink": {
+        "id": "sink:run-a6731050c5ad032133eeac602b1f5636",
+        "name": "__sink",
+        "graphRevision": 1,
+        "needs": [
+          "task-1cb942c8fdb642b80b3ff502a9d45891"
+        ],
+        "progress": "succeeded",
+        "result": {
+          "failedTaskIds": [],
+          "cancelledTaskIds": [
+            "task-1cb942c8fdb642b80b3ff502a9d45891"
+          ],
+          "skippedTaskIds": []
+        },
+        "completedAt": "2026-09-13T14:58:07.490440648Z"
+      },
+      "progress": "cancelled",
+      "inputArtifactIds": [
+        "artifact-258b98b987d47582328f2de494c7c100"
+      ],
+      "revision": 4,
+      "createdAt": "2026-09-13T14:55:50.452428459Z",
+      "updatedAt": "2026-09-13T14:58:07.490440648Z",
+      "completedAt": "2026-09-13T14:58:07.490440648Z"
+    },
+    "workflow": {
+      "id": "workflow-31c2564279d640de4e034a1aea572ea8",
+      "version": 2,
+      "name": "legacy-single-task",
+      "project": "huyang",
+      "environment": {
+        "type": "git",
+        "scope": "task"
+      },
+      "class": "surplus",
+      "taskIds": [
+        "task-1cb942c8fdb642b80b3ff502a9d45891"
+      ],
+      "inputArtifactIds": [
+        "artifact-258b98b987d47582328f2de494c7c100"
+      ],
+      "createdAt": "2026-09-13T14:55:50.452428459Z"
+    },
+    "tasks": [
+      {
+        "task": {
+          "id": "task-1cb942c8fdb642b80b3ff502a9d45891",
+          "workflowId": "workflow-31c2564279d640de4e034a1aea572ea8",
+          "name": "task",
+          "class": "surplus",
+          "promptArtifactId": "artifact-495c3abb2302f5149a91f73fc3ae0b8f",
+          "verification": [
+            "true"
+          ],
+          "placement": {
+            "hosts": [
+              "omarchy-normandy"
+            ]
+          },
+          "routes": [
+            {
+              "workerId": "omarchy-normandy",
+              "providerInstanceId": "opencode",
+              "model": "opencode/muse-spark-1.3-contributor-free"
+            }
+          ],
+          "importance": 3,
+          "difficulty": 2,
+          "maxTurns": 20,
+          "notBefore": "2026-09-13T07:55:48-07:00"
+        },
+        "attempt": {
+          "id": "attempt-b48b0e4ead48209702190eef885d2832",
+          "workflowRunId": "run-a6731050c5ad032133eeac602b1f5636",
+          "taskId": "task-1cb942c8fdb642b80b3ff502a9d45891",
+          "number": 1,
+          "progress": "cancelled",
+          "control": "stopped",
+          "revision": 1,
+          "updatedAt": "2026-09-13T14:57:59.780515043Z",
+          "completedAt": "2026-09-13T14:57:59.780515043Z"
+        },
+        "artifacts": [
+          {
+            "metadata": {
+              "id": "artifact-495c3abb2302f5149a91f73fc3ae0b8f",
+              "workflowRunId": "run-a6731050c5ad032133eeac602b1f5636",
+              "taskId": "task-1cb942c8fdb642b80b3ff502a9d45891",
+              "kind": "input",
+              "name": "prompts/task.md",
+              "mediaType": "text/markdown; charset=utf-8",
+              "size": 5152,
+              "sha256": "3b9e72b634fb5966105393b0399200b2b69203b4dc84fad43d7ba12ddfd03eee",
+              "producer": "submission",
+              "createdAt": "2026-09-13T14:55:50.452428459Z"
+            },
+            "download": "/backlog/artifacts/artifact-495c3abb2302f5149a91f73fc3ae0b8f"
+          }
+        ]
+      }
+    ],
+    "assignments": null,
+    "accepted": [
+      {
+        "id": "submission-accepted:legacy-131b420717270ab0ea97acd531f15a9eb58a9bbb88196be654ba85d279fd89c7",
+        "sequence": 70267,
+        "workflowRunId": "run-a6731050c5ad032133eeac602b1f5636",
+        "kind": "submission-accepted",
+        "targetType": "submission",
+        "targetId": "legacy-131b420717270ab0ea97acd531f15a9eb58a9bbb88196be654ba85d279fd89c7",
+        "actor": "coordinator",
+        "reason": "submission accepted",
+        "at": "2026-09-13T14:55:50.519544044Z",
+        "detail": {
+          "key": "legacy-131b420717270ab0ea97acd531f15a9eb58a9bbb88196be654ba85d279fd89c7",
+          "digest": "7145117ef1fe06315bf900575ec18f7dd6f8fd977137dfd400452fa115fc66a1",
+          "workflowId": "workflow-31c2564279d640de4e034a1aea572ea8",
+          "runId": "run-a6731050c5ad032133eeac602b1f5636",
+          "state": "accepted",
+          "createdAt": "2026-09-13T14:55:50.452428459Z",
+          "acceptedAt": "2026-09-13T14:55:50.519544044Z"
+        }
+      }
+    ],
+    "explanations": [
+      {
+        "workflowRunId": "run-a6731050c5ad032133eeac602b1f5636",
+        "taskId": "task-1cb942c8fdb642b80b3ff502a9d45891",
+        "attemptId": "attempt-b48b0e4ead48209702190eef885d2832",
+        "eligible": false,
+        "summary": "task is terminal",
+        "blockers": []
+      },
+      {
+        "workflowRunId": "run-a6731050c5ad032133eeac602b1f5636",
+        "taskId": "sink:run-a6731050c5ad032133eeac602b1f5636",
+        "eligible": false,
+        "summary": "coordinator sink is terminal: succeeded",
+        "blockers": []
+      }
+    ]
+  }
+]

@@ -414,6 +414,9 @@ func Catalog(profile Profile) []ToolDescriptor {
 		if experimental && len(descriptor.ExperimentalProperties) > 0 {
 			descriptor.InputSchema = withExperimentalProperties(descriptor.InputSchema, descriptor.ExperimentalProperties)
 		}
+		if experimental {
+			descriptor = usabilityDescriptor(descriptor)
+		}
 		catalog = append(catalog, descriptor)
 	}
 	return catalog

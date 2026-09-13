@@ -1,0 +1,11 @@
+# Coordinator audit: Haiku cards 8 and 9
+
+Run run-d429d948dc62b6d2a6ee75c49aaeeabe completed successfully. Raw report, evidence notes and steward final/thread artifacts retained unchanged. Commit chain is baseline 2c22cbf → fixture commit 8fea12327c69aa25d84e98d186453483a0f79ea8 → report commit 052d4813c3029f910c9a5c066d249293b33fc63a. Coordinator independently ran node test.ts in the worker fixture: labels behavior passed.
+
+Card 8 completed through semantic rename plus five explicit textual updates. The TypeScript language server preserved the barrel's public name as an alias; this is not established as a Huyang defect. The user goal required changing that public name too, and the agent correctly inspected and updated it. Diagnostic strings remain covered by the fixture assertions. Worker code is not merged.
+
+Card 9.1 obtained revision but paid full status cost; focused lookup limitation confirmed independently by coordinator baseline measurement. Card 9.2 blocked through Huyang: one-line read/search delivery exceeded requested useful excerpt size. Shell extraction is an explicitly reported fallback, not completion through Huyang. Card 9.3 confirmed embedded receipts; numeric estimates in the report are not precise wire measurements.
+
+The archived thread also records a missing op_id schema refusal and idempotency_key_reused on apply after reusing the prepare key. Both recovered but are absent from the report's friction narrative. Its call/time/turn estimates vary between report and final; do not use them as audited performance metrics. Preserved evidence notes paraphrase responses rather than containing complete raw exchanges; the archive truncates successful results too. The worker's claim of 50+ KB plan detail is not independently established. Coordinator inspection of the retained committed plan produced 11235 serialized characters across both result copies, 5286 in structured envelope, on 2026-09-13. Different action/serialization makes this a separate measurement, not a correction of the original report.
+
+Local fixes now cover byte-bounded source reads, revision-only inspection, transport deduplication and compact mutation/plan presentation. Verification evidence, acceptance gaps, invariant results, warnings and failure recovery must survive compaction. Fresh participant validation and publication remain pending.

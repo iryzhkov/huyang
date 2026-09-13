@@ -70,16 +70,32 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
-		pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))
-		if renderErr != nil {
-			return nil, renderErr
-		}
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: string(pretty)}},
-			StructuredContent: mcpapi.CompactStructuredEnvelope(envelope),
-			IsError:           isError,
-		}, nil
+		return renderToolResponse(descriptor.Name, arguments, envelope, isError)
 	})
+}
+
+func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
+	envelope = mcpapi.CompactReceipt(tool, arguments, envelope)
+	pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))
+	if renderErr != nil {
+		return nil, renderErr
+	}
+	result := &mcp.CallToolResult{
+		Content:           []mcp.Content{&mcp.TextContent{Text: string(pretty)}},
+		StructuredContent: mcpapi.CompactStructuredEnvelope(envelope),
+		IsError:           isError,
+	}
+	format, _ := arguments["response_format"].(string)
+	if format == "" && arguments["response_mode"] == "compact" {
+		format = "text"
+	}
+	if format == "text" {
+		result.StructuredContent = nil
+	}
+	if format == "structured" {
+		result.Content = []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%v: %v", envelope["outcome"], envelope["summary"])}}
+	}
+	return result, nil
 }
 
 // clientIdentityHeader names the HTTP client for diagnostic_updates. The

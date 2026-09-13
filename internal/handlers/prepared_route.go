@@ -39,7 +39,9 @@ func (h *Handlers) routePrepared(ctx context.Context, requestID, name string, wo
 		if !ok {
 			return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "read requires target or targets", map[string]any{})
 		}
-		return h.readPrepared(requestID, workspace, view, request)
+		return readWithByteWindow(requestID, workspace, request, func(r readRequest) map[string]any {
+			return h.readPrepared(requestID, workspace, view, r)
+		})
 	case "navigate":
 		return h.navigatePrepared(ctx, requestID, workspace, view, arguments)
 	case "diagnostics":

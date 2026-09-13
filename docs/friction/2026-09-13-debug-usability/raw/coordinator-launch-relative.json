@@ -1,0 +1,25 @@
+{
+  "api_version": "huyang.workspace/v1alpha1",
+  "code": "debugger_failed",
+  "data": {},
+  "idempotency": "created",
+  "next": [
+    {
+      "action": "inspect_language_and_debugger_availability",
+      "tool": "language_server_status"
+    },
+    {
+      "action": "start",
+      "tool": "debug_session",
+      "use_new_idempotency_key": true
+    }
+  ],
+  "outcome": "failed",
+  "request_id": "req_327",
+  "summary": "launch failed: Failed to launch .: Failed to launch .: could not launch process: fork/exec /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-53d6266411e279d3216d89b719ebe7bb/task-dcdf94f7cf40cd65813ef1d1eb1dcf6a/attempt-673ab7ae72b17042d644b659edb4c804/workspace/fixtures/workshop/__debug_bin4221699786: no such file or directory\nnvim-dap: Error on launch: Failed to launch .: could not launch process: fork/exec /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-53d6266411e279d3216d89b719ebe7bb/task-dcdf94f7cf40cd65813ef1d1eb1dcf6a/attempt-673ab7ae72b17042d644b659edb4c804/workspace/fixtures/workshop/__debug_bin4221699786: no such file or directory\nadapter output: Building .",
+  "warnings": [],
+  "workspace": {
+    "id": "ws_00e8de2d224706ca47fab3baa81ec8fd",
+    "revision": "wsrev_6"
+  }
+}

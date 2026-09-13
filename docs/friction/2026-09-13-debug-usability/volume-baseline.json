@@ -1,0 +1,36 @@
+{
+  "read": {
+    "request": {
+      "workspace_id": "ws_32c0f6a08e0150b469857f8558b21df6",
+      "target": {
+        "path": "/tmp/huyang-output-workshop-20260913/minified.json"
+      },
+      "max_lines": 1
+    },
+    "total_result_json_chars": 263186,
+    "text_chars": 131531,
+    "structured_chars": 131515,
+    "delivered_source_chars": 131142,
+    "truncated": false,
+    "lines": 1,
+    "revision": "wsrev_2"
+  },
+  "status": {
+    "request": {
+      "workspace_id": "ws_32c0f6a08e0150b469857f8558b21df6",
+      "view": "status"
+    },
+    "total_result_json_chars": 4506,
+    "envelope_chars": 2097,
+    "keys": [
+      "inspection",
+      "pipeline_policy",
+      "pipeline_state",
+      "revision",
+      "scheduler",
+      "semantic_provider",
+      "service_limits",
+      "view"
+    ]
+  }
+}

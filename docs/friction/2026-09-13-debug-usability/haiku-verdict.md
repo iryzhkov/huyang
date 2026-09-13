@@ -1,0 +1,9 @@
+# Coordinator verdict — baseline Haiku
+
+Steward run run-a2117e2db07b56f5d799a37f4fb686e2 succeeded, but workshop outcome is incomplete (correct fixture diagnosis/repair, unmet tracing and Huyang-only acceptance). Actual model claude-haiku-4-5, thread thread-5a15170f783fe6ffc008fb302e83b755. Report commit 992ed4ddcd95a987e52ec11dd0ee708099b2b81f has exactly baseline 2c22cbf as parent and changes only the report. The fixture lives beside the assigned clone, so the claim that fixture changes were committed is incorrect. No code was merged.
+
+Coordinator reran the repaired fixture: go test ./... passes; invocations print sent:1 and sent:0, exit 0. The source-based early-return diagnosis is correct. No debugger session, trace, graph or observed overlay was acquired, so this run supplies no evidence of execution API discovery/usability.
+
+The original report claims no fallback/friction; the archived thread shows shell cat reads, heredoc source/report creation, and no attempt to configure experimental MCP despite explicit instructions. Preserve the raw report unchanged; do not interpret confident completion as API success or a Huyang correctness defect. A targeted fresh-context assigned tracing card will make recorded executions an explicit deliverable without revealing the diagnosis.
+
+Final-message artifact SHA-256 3f6a3d93b7d57fedf0ef0ac3c927c2eb7df54601b6e2cc2252b839388f664123; thread artifact e5cfeeea68fb96f5561a973a33aa2350b4bf298d0e698da6f1bbcdc7034d26a0. Both downloaded through steward artifact get and copied through Huyang. Report source verified in worker clone. Activity archive has 67 activity entries (started/completed are not separate calls), one T3 turn; underlying agent-turn count and cost unavailable. Baseline verification and handoff span approximately 2 minutes of assistant activity (14:59:48–15:01:48 UTC).

@@ -1,0 +1,57 @@
+{
+  "api_version": "huyang.workspace/v1alpha1",
+  "data": {
+    "coverage": {
+      "complete": true,
+      "unavailable": []
+    },
+    "debug": {
+      "adapter": "delve",
+      "breakpoints": [],
+      "changes_since_previous_stop": {
+        "output": [
+          "Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-53d6266411e279d3216d89b719ebe7bb/task-dcdf94f7cf40cd65813ef1d1eb1dcf6a/attempt-673ab7ae72b17042d644b659edb4c804/workspace/fixtures/workshop",
+          "[adapter] Type 'dlv help' for list of commands."
+        ],
+        "stale_source": null,
+        "tracked": null
+      },
+      "note": "no stack frames available: DAP request stackTrace failed (delve): Unable to produce stack trace: Unable to produce stack trace: unknown goroutine 1",
+      "output_new": [
+        "Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-53d6266411e279d3216d89b719ebe7bb/task-dcdf94f7cf40cd65813ef1d1eb1dcf6a/attempt-673ab7ae72b17042d644b659edb4c804/workspace/fixtures/workshop",
+        "[adapter] Type 'dlv help' for list of commands."
+      ],
+      "program": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-53d6266411e279d3216d89b719ebe7bb/task-dcdf94f7cf40cd65813ef1d1eb1dcf6a/attempt-673ab7ae72b17042d644b659edb4c804/workspace/fixtures/workshop",
+      "reason": "entry",
+      "request": "launch",
+      "state": "stopped",
+      "thread": 1,
+      "threads": 1
+    }
+  },
+  "idempotency": "created",
+  "next": [
+    {
+      "arguments": {
+        "action": "continue",
+        "workspace_id": "ws_00e8de2d224706ca47fab3baa81ec8fd"
+      },
+      "tool": "debug_control"
+    },
+    {
+      "arguments": {
+        "action": "variables",
+        "workspace_id": "ws_00e8de2d224706ca47fab3baa81ec8fd"
+      },
+      "tool": "debug_inspect"
+    }
+  ],
+  "outcome": "ok",
+  "request_id": "req_331",
+  "summary": "Debugger start: stopped (entry)",
+  "warnings": [],
+  "workspace": {
+    "id": "ws_00e8de2d224706ca47fab3baa81ec8fd",
+    "revision": "wsrev_6"
+  }
+}
