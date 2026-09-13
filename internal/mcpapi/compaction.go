@@ -585,9 +585,19 @@ func outputTail(output string) string {
 // handle records - hashes, anchors, revisions, one per declaration - stay
 // behind their ids, which read and edit_apply accept on their own. Listing
 // them made the outline of a fifty-declaration file larger than the file.
+// MaxOutlineSections bounds the declarations one outline lists. A generated
+// file can hold thousands of them, and the outline is what an agent reads
+// instead of the file: a list that long is not a cheaper way to see the file,
+// it is the file again under another name.
+const MaxOutlineSections = 200
+
 func CompactOutline(outline workspacecore.Outline, content []byte) map[string]any {
-	sections := make([]map[string]any, 0, len(outline.Sections))
-	for index, section := range outline.Sections {
+	listed := outline.Sections
+	if len(listed) > MaxOutlineSections {
+		listed = listed[:MaxOutlineSections]
+	}
+	sections := make([]map[string]any, 0, len(listed))
+	for index, section := range listed {
 		entry := map[string]any{
 			"name": section.Name, "kind": section.Kind,
 			"start_line": lineOfByte(content, section.ByteStart),
@@ -600,7 +610,12 @@ func CompactOutline(outline workspacecore.Outline, content []byte) map[string]an
 	}
 	compact := map[string]any{
 		"path": outline.Path, "sections": sections,
-		"declaration_count": len(sections), "coverage": outline.Coverage,
+		// declaration_count is what the file holds, listed_count is what this
+		// reply carries: an outline that was cut says so here rather than
+		// reading as a complete list of a shorter file.
+		"declaration_count": len(outline.Sections), "listed_count": len(sections),
+		"sections_truncated": len(sections) < len(outline.Sections),
+		"coverage":           outline.Coverage,
 	}
 	// A document nothing could section answers a handle to the whole of it,
 	// which is the only way to address it.

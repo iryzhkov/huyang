@@ -136,7 +136,10 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		outcome, summary = "partial", fmt.Sprintf("Read %d of %d targets; %d failed", len(files)-failed, len(files), failed)
 	}
 	if truncated > 0 {
-		summary += fmt.Sprintf("; %d truncated at max_lines", truncated)
+		// A source target stops at max_lines and an outline at the outline
+		// bound, so the count is of deliveries that were cut, whichever bound
+		// cut them; each entry says which one it hit.
+		summary += fmt.Sprintf("; %d truncated", truncated)
 	}
 	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
 }
@@ -159,8 +162,14 @@ func readTargetData(payload any, label string) map[string]any {
 // the delivery stopped at max_lines. An outline target has no bytes of its
 // own, so its entry counts the sections instead.
 func readEntry(data map[string]any) map[string]any {
-	if sections, ok := data["sections"].([]map[string]any); ok {
-		return map[string]any{"path": data["path"], "section_count": len(sections)}
+	if _, ok := data["sections"].([]map[string]any); ok {
+		// The count is what the file declares, not what this reply listed, so
+		// a truncated outline is not mistaken for a small file.
+		entry := map[string]any{"path": data["path"], "section_count": data["declaration_count"]}
+		if data["sections_truncated"] == true {
+			entry["truncated"] = true
+		}
+		return entry
 	}
 	content, _ := data["content"].(string)
 	entry := map[string]any{"path": data["path"], "bytes": len(content)}
@@ -392,7 +401,20 @@ func (h *Handlers) readOutline(ctx context.Context, requestID string, workspace 
 	if read, readErr := workspace.Read(outline.Path); readErr == nil {
 		content = read.Content
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, mcpapi.CompactOutline(outline, content))
+	compact := mcpapi.CompactOutline(outline, content)
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, compact)
+	if compact["sections_truncated"] == true {
+		// The outline is the call the guide recommends for a large file, so a
+		// generated one is exactly where it gets cut. Say which declarations
+		// arrived and name the two ways to reach the rest.
+		result["summary"] = fmt.Sprintf("Outline read: %d declarations, the first %d listed; truncated at the outline bound",
+			compact["declaration_count"], compact["listed_count"])
+		result["next"] = []any{
+			map[string]any{"tool": "search", "action": "find_the_declaration_by_name", "paths": []string{outline.Path}},
+			map[string]any{"tool": "read", "action": "window_what_matters", "path": outline.Path},
+		}
+	}
+	return result
 }
 
 // outlineViaProvider asks the semantic provider for every declaration in one

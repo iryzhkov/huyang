@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -80,6 +83,50 @@ func TestOutlineOfUnparsedLanguageUsesProvider(t *testing.T) {
 	}
 	if content := read["data"].(map[string]any)["content"].(string); content != "function M.setup(options)\n    return options\nend\n" {
 		t.Fatalf("read by outline locator = %q", content)
+	}
+}
+
+// A generated file can declare thousands of symbols, and the outline is the
+// call the guide recommends for exactly that file. The list is bounded, the
+// count stays the file's own, and the reply says the list was cut.
+func TestOutlineOfAGeneratedFileIsBoundedAndSaysSo(t *testing.T) {
+	root := t.TempDir()
+	var source strings.Builder
+	source.WriteString("package generated\n")
+	declarations := mcpapi.MaxOutlineSections + 50
+	for index := range declarations {
+		fmt.Fprintf(&source, "\nfunc Generated%04d() int { return %d }\n", index, index)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated.go"), []byte(source.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &outlineProvider{stubProvider: stubProvider{descriptor: provider.Descriptor{ID: "outline", Backend: "test", Epoch: 1, Root: root}}}
+	handlers := newTestHandlers(t, fixedFactory{backend: backend})
+	opened := handlers.Execute(context.Background(), "req_open", "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
+	result := handlers.Execute(context.Background(), "req_outline", "read", map[string]any{
+		"workspace_id": workspaceID, "view": "outline", "target": map[string]any{"path": "generated.go"},
+	})
+	if result["outcome"] != "ok" {
+		t.Fatalf("outline = %#v", result)
+	}
+	data := result["data"].(map[string]any)
+	sections := data["sections"].([]map[string]any)
+	if len(sections) != mcpapi.MaxOutlineSections {
+		t.Fatalf("outline listed %d declarations, want the %d-section bound", len(sections), mcpapi.MaxOutlineSections)
+	}
+	if data["declaration_count"] != declarations || data["listed_count"] != mcpapi.MaxOutlineSections {
+		t.Fatalf("outline counts = %#v / %#v, want %d declared and %d listed",
+			data["declaration_count"], data["listed_count"], declarations, mcpapi.MaxOutlineSections)
+	}
+	if data["sections_truncated"] != true {
+		t.Fatalf("a cut outline did not say so: %#v", data)
+	}
+	if next, _ := result["next"].([]any); len(next) == 0 {
+		t.Fatalf("a cut outline offered no way to reach the rest: %#v", result)
+	}
+	if !strings.Contains(result["summary"].(string), "truncated") {
+		t.Fatalf("summary does not mention the cut: %q", result["summary"])
 	}
 }
 
