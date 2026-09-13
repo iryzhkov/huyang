@@ -45,6 +45,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "view": {
           "enum": [
             "status",
@@ -58,9 +62,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "workspace_inspect"
@@ -607,6 +608,10 @@
           "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
           "type": "boolean"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "since": {
           "description": "Optional diagnostic cursor.",
           "type": "string"
@@ -616,9 +621,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "diagnostics"
@@ -629,6 +631,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "target": {
           "oneOf": [
             {
@@ -742,7 +748,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "target"
       ],
       "type": "object"
@@ -1445,14 +1450,16 @@
           "description": "Required when action=apply.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1525,6 +1532,10 @@
           "description": "Earlier revision.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "to_revision_or_current": {
           "description": "Later revision or current.",
           "type": "string"
@@ -1535,7 +1546,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "from_revision",
         "to_revision_or_current"
       ],
@@ -1557,13 +1567,16 @@
           "description": "Evidence identifier.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
       "required": [
-        "workspace_id",
         "evidence_id"
       ],
       "type": "object"
@@ -1576,14 +1589,15 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "language_server_status"
@@ -1612,6 +1626,10 @@
         "parser": {
           "type": "boolean"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "server": {
           "description": "Optional Mason package or lspconfig name; none installs only the parser.",
           "type": "string"
@@ -1622,8 +1640,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1819,6 +1835,9 @@
         "program": {
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "stop_on_entry": {
           "type": "boolean"
         },
@@ -1850,8 +1869,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1889,6 +1906,9 @@
         "log_message": {
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
@@ -1991,8 +2011,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2027,6 +2045,9 @@
         "line_offset": {
           "minimum": 1,
           "type": "integer"
+        },
+        "root": {
+          "type": "string"
         },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2135,8 +2156,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2197,6 +2216,9 @@
           ],
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "scope": {
           "enum": [
             "locals",
@@ -2216,7 +2238,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "action"
       ],
       "type": "object"

@@ -45,6 +45,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "view": {
           "enum": [
             "status",
@@ -58,9 +62,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "workspace_inspect"
@@ -607,6 +608,10 @@
           "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
           "type": "boolean"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "since": {
           "description": "Optional diagnostic cursor.",
           "type": "string"
@@ -616,9 +621,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "diagnostics"
@@ -637,13 +639,16 @@
           "description": "Evidence identifier.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
       "required": [
-        "workspace_id",
         "evidence_id"
       ],
       "type": "object"
