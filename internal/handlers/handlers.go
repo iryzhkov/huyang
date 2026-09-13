@@ -131,10 +131,12 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 	// Registered before the call runs, so the notices it produces are
 	// delivered and the ones that predate this client are not.
 	workspace := h.registry.Lookup(workspacecore.ID(workspaceID))
+	previous := ""
 	if workspace != nil {
 		h.notices.Register(workspace.Identity().ID, clientIdentity(ctx), workspace.DiagnosticNoticeHead())
+		previous = h.notices.NoteCall(workspace.Identity().ID, clientIdentity(ctx), name)
 	}
-	return h.withGuide(ctx, h.route(ctx, requestID, name, workspaceID, arguments))
+	return h.withGuide(ctx, h.route(withPreviousCall(ctx, previous), requestID, name, workspaceID, arguments))
 }
 
 // withGuide adds the rules for calling this server at its cheapest to the

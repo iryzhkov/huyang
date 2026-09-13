@@ -124,6 +124,15 @@ func (h *Handlers) edit(ctx context.Context, requestID string, workspace *worksp
 	if err != nil {
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "operation_unavailable", err.Error(), map[string]any{})
 	}
+	result := h.editOne(ctx, requestID, workspace, request)
+	// Two single-operation edits in a row are one edit with operations; the
+	// hint arrives on the second one, where it is about the call just made.
+	h.batchHint(ctx, workspace, "edit_apply", result)
+	return result
+}
+
+// editOne applies one edit of any kind.
+func (h *Handlers) editOne(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request editRequest) map[string]any {
 	switch request.Kind {
 	case "replace_literal":
 		return h.editLiteral(ctx, requestID, workspace, request)

@@ -51,6 +51,42 @@ func clientIdentity(ctx context.Context) string {
 	return identity
 }
 
+// previousCallKey carries the tool this client called before this one, so a
+// handler can answer a repeated single-target call with the one-call
+// alternative at the moment it would have helped.
+type previousCallKey struct{}
+
+func withPreviousCall(ctx context.Context, tool string) context.Context {
+	return context.WithValue(ctx, previousCallKey{}, tool)
+}
+
+func previousCall(ctx context.Context) string {
+	tool, _ := ctx.Value(previousCallKey{}).(string)
+	return tool
+}
+
+// batchHint is the one-call alternative to a repeated single-target call,
+// attached at most once per client and workspace.
+func (h *Handlers) batchHint(ctx context.Context, workspace *workspacecore.Workspace, tool string, result map[string]any) {
+	if previousCall(ctx) != tool || workspace == nil {
+		return
+	}
+	if !h.notices.TakeHint(workspace.Identity().ID, clientIdentity(ctx), tool) {
+		return
+	}
+	var hint map[string]any
+	switch tool {
+	case "read":
+		hint = map[string]any{"tool": "read", "action": "read_several_files_in_one_call", "targets": "[{path}, {path}, ...]"}
+	case "edit_apply":
+		hint = map[string]any{"tool": "edit_apply", "action": "apply_several_edits_in_one_call", "operations": "[{kind, ...}, ...]"}
+	default:
+		return
+	}
+	next, _ := result["next"].([]any)
+	result["next"] = append(next, hint)
+}
+
 // noticeDelivery remembers, per workspace and client, the last diagnostic
 // notice cursor already delivered, so diagnostic_updates is a delta rather
 // than the same pending notices on every reply.
@@ -77,7 +113,14 @@ type clientCursors struct {
 	// second answer is the same tree, the same commands and the same
 	// capabilities they were shown the first time.
 	opened map[string]string
-	order  []string
+	// lastTool is the tool each client called last in this workspace, and
+	// hinted the one-call alternatives it has already been shown. Agents
+	// read one file at a time and edit one line at a time when read.targets
+	// and edit_apply.operations take dozens of either: 1,843 read-then-read
+	// and 1,396 edit-then-edit pairs in four days of fleet spool.
+	lastTool map[string]string
+	hinted   map[string]bool
+	order    []string
 }
 
 func newNoticeDelivery() *noticeDelivery {
@@ -135,6 +178,43 @@ func (n *noticeDelivery) TakeOverview(workspaceID workspacecore.ID, client, fing
 	repeated := clients.opened[client] == fingerprint
 	clients.opened[client] = fingerprint
 	return repeated
+}
+
+// NoteCall records the tool this client is calling now and returns the one
+// it called before, in this workspace.
+func (n *noticeDelivery) NoteCall(workspaceID workspacecore.ID, client, tool string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return ""
+	}
+	if clients.lastTool == nil {
+		clients.lastTool = map[string]string{}
+	}
+	previous := clients.lastTool[client]
+	clients.lastTool[client] = tool
+	return previous
+}
+
+// TakeHint reports whether this client still has to be shown one hint in
+// this workspace, and records that it now has been.
+func (n *noticeDelivery) TakeHint(workspaceID workspacecore.ID, client, name string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return false
+	}
+	if clients.hinted == nil {
+		clients.hinted = map[string]bool{}
+	}
+	key := client + "\x00" + name
+	if clients.hinted[key] {
+		return false
+	}
+	clients.hinted[key] = true
+	return true
 }
 
 // last is the newest notice already delivered to this client, and whether
@@ -195,6 +275,7 @@ func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *cli
 			delete(clients.owed, clients.order[0])
 			delete(clients.unavailable, clients.order[0])
 			delete(clients.opened, clients.order[0])
+			delete(clients.lastTool, clients.order[0])
 			clients.order = clients.order[1:]
 		}
 	}

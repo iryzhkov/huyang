@@ -80,7 +80,11 @@ func (h *Handlers) read(ctx context.Context, requestID string, workspace *worksp
 	if len(request.Targets) > 0 && request.Handle == "" && !request.HasPath && request.Symbol == nil && !request.HasRange {
 		return h.readMany(ctx, requestID, workspace, request)
 	}
-	return h.readOne(ctx, requestID, workspace, request)
+	result := h.readOne(ctx, requestID, workspace, request)
+	// Two single-file reads in a row are one read with targets; the hint
+	// arrives on the second one, where it is about the call just made.
+	h.batchHint(ctx, workspace, "read", result)
+	return result
 }
 
 // readOne dispatches a single-target read on the shape of its target.
