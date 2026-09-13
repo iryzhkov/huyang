@@ -88,7 +88,9 @@ func TestNativeSectionerSectionsMarkdownByHeading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Title", "Title/Rules of thumb", "Title/Rules of thumb/Read - write", "Title/Out of scope"}
+	// The single top-level heading is the document's title, so it does not
+	// prefix the name path of every other section.
+	want := []string{"Title", "Rules of thumb", "Rules of thumb/Read - write", "Out of scope"}
 	if len(sections) != len(want) {
 		t.Fatalf("markdown sections = %#v", sections)
 	}

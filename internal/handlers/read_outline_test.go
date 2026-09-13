@@ -120,7 +120,7 @@ func TestOutlineOfNativelySectionedFilesStaysNative(t *testing.T) {
 	// A heading is addressed by its path through the document, and the
 	// section spans the lines a reader would edit.
 	sections := outline("plan.md")
-	if len(sections) != 2 || sections[1]["name"] != "Plan/Waves" || sections[1]["start_line"] != 5 || sections[1]["end_line"] != 7 {
+	if len(sections) != 2 || sections[1]["name"] != "Waves" || sections[1]["start_line"] != 5 || sections[1]["end_line"] != 7 {
 		t.Fatalf("Markdown outline = %#v", sections)
 	}
 	if sections := outline("config.toml"); len(sections) != 1 || sections[0]["name"] != "tool/ruff" {

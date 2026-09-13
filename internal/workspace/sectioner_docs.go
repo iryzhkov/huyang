@@ -30,6 +30,9 @@ type documentHeading struct {
 	start int
 	name  string
 	path  string
+	// prefix is what this heading contributes to its children's name path,
+	// which is its own path except for a document title.
+	prefix string
 }
 
 // markdownSections names every heading, nested by level, each covering the
@@ -60,14 +63,19 @@ func markdownSections(content []byte) []Section {
 // next heading of the same or a higher level begins.
 func headingSections(headings []documentHeading, total int) []Section {
 	sections := make([]Section, 0, len(headings))
+	titled := hasDocumentTitle(headings)
 	var ancestors []documentHeading
 	for index, heading := range headings {
 		for len(ancestors) > 0 && ancestors[len(ancestors)-1].level >= heading.level {
 			ancestors = ancestors[:len(ancestors)-1]
 		}
 		heading.path = heading.name
-		if len(ancestors) > 0 {
-			heading.path = ancestors[len(ancestors)-1].path + "/" + heading.name
+		if len(ancestors) > 0 && ancestors[len(ancestors)-1].prefix != "" {
+			heading.path = ancestors[len(ancestors)-1].prefix + "/" + heading.name
+		}
+		heading.prefix = heading.path
+		if index == 0 && titled {
+			heading.prefix = ""
 		}
 		ancestors = append(ancestors, heading)
 		end := total
@@ -80,6 +88,22 @@ func headingSections(headings []documentHeading, total int) []Section {
 		sections = append(sections, Section{Name: heading.path, Kind: "heading", ByteStart: heading.start, ByteEnd: end})
 	}
 	return sections
+}
+
+// hasDocumentTitle reports whether the first heading stands above every
+// other one. Such a heading is the document's title rather than a container:
+// carrying it in every name path would make "Rules of thumb" unwritable
+// without quoting the whole title first. It stays a section of its own.
+func hasDocumentTitle(headings []documentHeading) bool {
+	if len(headings) < 2 {
+		return false
+	}
+	for _, heading := range headings[1:] {
+		if heading.level <= headings[0].level {
+			return false
+		}
+	}
+	return true
 }
 
 // tomlSections names every table, from its header line to the next header.
