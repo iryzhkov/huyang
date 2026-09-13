@@ -4282,6 +4282,176 @@ local function rename_symbol(args)
 end
 
 -- ---------------------------------------------------------------------------
+-- huyang_workspace_edit: the exact bytes a server-owned refactor would
+-- change, without changing them.
+--
+-- The Go coordinator owns every mutation: it binds each range to a document
+-- revision, previews it, stages it in a sandbox and verifies it before a
+-- canonical byte moves. A rename or a code action therefore cannot be applied
+-- here; it has to come back as byte ranges the coordinator can turn into
+-- ordinary guarded edits, which is also what makes an LSP refactor
+-- previewable and undoable like any other change.
+--
+-- Positions are converted against the loaded buffer because the server counts
+-- UTF-16 code units and the coordinator counts bytes.
+
+local function position_byte(bufnr, position, encoding)
+    local total = vim.api.nvim_buf_line_count(bufnr)
+    if position.line >= total then
+        return vim.api.nvim_buf_get_offset(bufnr, total)
+    end
+    local base = vim.api.nvim_buf_get_offset(bufnr, position.line)
+    local text = vim.api.nvim_buf_get_lines(bufnr, position.line, position.line + 1, false)[1] or ""
+    local ok, index = pcall(vim.str_byteindex, text, encoding, position.character, false)
+    if not ok then
+        index = math.min(position.character, #text)
+    end
+    return base + index
+end
+
+-- The byte edits of one workspace edit, grouped by file and ordered from the
+-- end of each file backwards: applied in that order, no edit shifts the
+-- offsets of the ones that follow it.
+local function workspace_edit_bytes(edit, encoding)
+    local per_file, order, file_operations = {}, {}, {}
+    local function add(uri, edits)
+        local file = vim.uri_to_fname(uri)
+        local bufnr = load_buf(file)
+        if not per_file[file] then
+            per_file[file] = {}
+            order[#order + 1] = file
+        end
+        for _, e in ipairs(edits or {}) do
+            per_file[file][#per_file[file] + 1] = {
+                byte_start = position_byte(bufnr, e.range.start, encoding),
+                byte_end = position_byte(bufnr, e.range["end"], encoding),
+                new_text = e.newText or "",
+            }
+        end
+    end
+    for uri, edits in pairs(edit.changes or {}) do
+        add(uri, edits)
+    end
+    for _, dc in ipairs(edit.documentChanges or {}) do
+        if dc.textDocument then
+            add(dc.textDocument.uri, dc.edits)
+        elseif dc.kind then
+            file_operations[#file_operations + 1] = dc.kind .. " "
+                .. (dc.uri or dc.newUri or dc.oldUri or "?")
+        end
+    end
+    table.sort(order)
+    local changes = {}
+    for _, file in ipairs(order) do
+        local edits = per_file[file]
+        table.sort(edits, function(a, b)
+            if a.byte_start ~= b.byte_start then return a.byte_start > b.byte_start end
+            return a.byte_end > b.byte_end
+        end)
+        changes[#changes + 1] = { file = file, edits = edits }
+    end
+    return changes, file_operations
+end
+
+local function rename_workspace_edit(bufnr, args)
+    local new_name = args.new_name
+    if type(new_name) ~= "string" or new_name == "" then
+        err("missing required argument: new_name")
+    end
+    local client = get_client(bufnr, "textDocument/rename")
+    local params = position_params(bufnr, client, args)
+    if client:supports_method("textDocument/prepareRename") then
+        local okp, prep = pcall(request, client, bufnr, "textDocument/prepareRename", params)
+        if okp and prep == nil then
+            err("the server refuses to rename at this position (not a renamable symbol)")
+        end
+    end
+    params.newName = new_name
+    local edit = request(client, bufnr, "textDocument/rename", params)
+    if not edit or (not edit.changes and not edit.documentChanges) then
+        err("the server returned no edit for this rename")
+    end
+    local files = summarize_workspace_edit(edit)
+    return edit, client, { references_not_renamed = references_outside(client, bufnr, params, files) }
+end
+
+-- The action the caller asked for: by kind prefix ("refactor.inline" matches
+-- "refactor.inline.variable") and then by title, so a caller can name what it
+-- wants without knowing how a particular server spells it.
+local function select_code_action(actions, only, title)
+    local offered = {}
+    for _, action in ipairs(actions) do
+        offered[#offered + 1] = { title = action.title, kind = action.kind }
+    end
+    for _, action in ipairs(actions) do
+        local kind = action.kind or ""
+        local matches = only == nil or #only == 0
+        for _, wanted in ipairs(only or {}) do
+            if kind == wanted or kind:sub(1, #wanted + 1) == wanted .. "." then
+                matches = true
+            end
+        end
+        if matches and (title == nil or title == ""
+            or (action.title or ""):lower():find(title:lower(), 1, true)) then
+            return action, offered
+        end
+    end
+    return nil, offered
+end
+
+local function code_action_workspace_edit(bufnr, args)
+    local client = get_client(bufnr, "textDocument/codeAction")
+    local position = make_position(bufnr, client, args.line, args.symbol, args.col)
+    local lsp_diags = {}
+    pcall(function()
+        lsp_diags = vim.lsp.diagnostic.from(vim.diagnostic.get(bufnr, { lnum = position.line }))
+    end)
+    local actions = request(client, bufnr, "textDocument/codeAction", {
+        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+        range = { start = position, ["end"] = position },
+        context = { diagnostics = lsp_diags, triggerKind = 1, only = args.only },
+    }) or {}
+    local action, offered = select_code_action(actions, args.only, args.title)
+    if not action then
+        return nil, client, { actions_offered = offered }
+    end
+    if not action.edit and client:supports_method("codeAction/resolve") then
+        local ok, resolved = pcall(request, client, bufnr, "codeAction/resolve", action)
+        if ok and resolved then action = resolved end
+    end
+    if not action.edit then
+        -- A command runs inside the server and sends its edit back later,
+        -- which cannot be previewed or staged; the caller is told plainly.
+        err("the action %q is a server command rather than an edit, so it cannot be "
+            .. "staged; apply it through code_actions in an editing session instead",
+            action.title or "?")
+    end
+    return action.edit, client, { applied_title = action.title, applied_kind = action.kind }
+end
+
+local function huyang_workspace_edit(args)
+    local bufnr = load_buf(args.file)
+    local kind = args.kind or "rename"
+    local edit, client, detail
+    if kind == "rename" then
+        edit, client, detail = rename_workspace_edit(bufnr, args)
+    elseif kind == "code_action" then
+        edit, client, detail = code_action_workspace_edit(bufnr, args)
+    else
+        err("unknown workspace edit kind: %s", tostring(kind))
+    end
+    local result = detail or {}
+    if edit == nil then
+        result.changes = {}
+        return result
+    end
+    local changes, file_operations = workspace_edit_bytes(edit, client.offset_encoding)
+    result.changes = changes
+    result.file_operations = #file_operations > 0 and file_operations or nil
+    return result
+end
+
+-- ---------------------------------------------------------------------------
 -- replace_pattern: the same shape of change in many places.
 --
 -- Not every bulk edit is a rename. When a call site moves from one receiver
@@ -4736,6 +4906,7 @@ M.silent_server = silent_server
 M.stopped_servers = stopped_servers
 M.code_actions = code_actions
 M.apply_code_action = apply_code_action
+M.huyang_workspace_edit = huyang_workspace_edit
 M.replace_symbol_body = replace_symbol_body
 M.replace_symbol_lines = replace_symbol_lines
 M.insert_symbol_tool = insert_symbol_tool

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
@@ -21,9 +24,28 @@ func argInt(args map[string]any, key string, def int) int {
 	return def
 }
 
+// uintArgument reads a plan revision however the client spelled it. JSON
+// decoding gives float64, but a caller in this process passes an int and a
+// strict decoder a json.Number; reading either as zero turned a correct call
+// into "expected 0, current 1", which names the wrong problem.
 func uintArgument(value any) uint64 {
-	number, _ := value.(float64)
-	return uint64(number)
+	switch number := value.(type) {
+	case float64:
+		return uint64(number)
+	case int:
+		return uint64(number)
+	case int64:
+		return uint64(number)
+	case uint64:
+		return number
+	case json.Number:
+		parsed, _ := number.Int64()
+		return uint64(parsed)
+	case string:
+		parsed, _ := strconv.ParseUint(strings.TrimSpace(number), 10, 64)
+		return parsed
+	}
+	return 0
 }
 
 func decodeRangeHandle(value map[string]any) (workspacecore.RangeHandle, error) {

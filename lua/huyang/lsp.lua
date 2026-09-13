@@ -37,6 +37,7 @@ local workspace_symbols, find_symbol = index.workspace_symbols, index.find_symbo
 
 local edit = require("huyang.edit")
 local code_actions = edit.code_actions
+local huyang_workspace_edit = edit.huyang_workspace_edit
 
 local install = require("huyang.install")
 local workspace_support, install_language = install.workspace_support, install.install_language
@@ -533,6 +534,9 @@ local dispatch_table = {
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
     code_actions = code_actions,
+    -- The bytes a server-owned refactor would change, for the coordinator to
+    -- stage as ordinary guarded edits; it never applies anything itself.
+    huyang_workspace_edit = huyang_workspace_edit,
     workspace_tree = workspace_tree,
     workspace_support = workspace_support,
     install_language = install_language,

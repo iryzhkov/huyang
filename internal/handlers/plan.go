@@ -98,7 +98,11 @@ func (h *Handlers) planCreate(ctx context.Context, requestID string, workspace *
 	if err := h.resolvePlanSymbolLocators(ctx, requestID, workspace, request.Operations); err != nil {
 		return planOutcome{err: err}
 	}
-	plan, err := workspace.CreatePlan(request.Operations)
+	operations, err := h.expandProviderOperations(ctx, requestID, workspace, request.Operations)
+	if err != nil {
+		return planOutcome{err: err}
+	}
+	plan, err := workspace.CreatePlan(operations)
 	return planOutcome{summary: "Plan intent created; canonical workspace unchanged", plan: plan, err: err}
 }
 
@@ -106,6 +110,11 @@ func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *wo
 	if err := h.resolvePlanSymbolLocators(ctx, requestID, workspace, request.Edit.Operations); err != nil {
 		return planOutcome{err: err}
 	}
+	expanded, err := h.expandProviderOperations(ctx, requestID, workspace, request.Edit.Operations)
+	if err != nil {
+		return planOutcome{err: err}
+	}
+	request.Edit.Operations = expanded
 	plan, err := workspace.EditPlan(request.PlanID, request.PlanRevision, request.Edit)
 	return planOutcome{summary: "Plan intent updated; canonical workspace unchanged", plan: plan, err: err}
 }

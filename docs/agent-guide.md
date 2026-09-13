@@ -128,6 +128,12 @@ existing workspace, because its handle comes from one.
   state and, when the source was tracked, `next` names the one command to run
   (`git add -A -- old new`); after it `git diff --cached -M` reports the move as a
   rename. Symlinks and directories go through `change_plan`.
+- Refactors the language server owns are `change_plan` operations: `rename_symbol`
+  (`content` is the new name), `apply_code_action` (`content` is the title `code_actions`
+  listed), `inline_symbol`, and `safe_delete_symbol`, which refuses and names the call
+  sites when anything outside the declaration still refers to it. Each one asks the server
+  what it would change and stages that answer as exact ranges, so the plan previews,
+  verifies and rolls back like any other; the operations it produced carry `derived_from`.
 - Go files are gofmt-formatted after every edit; the response says so under `format`.
   Pass `format: false` to keep bytes exactly.
 - Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:

@@ -23,20 +23,25 @@ const (
 type OperationKind string
 
 const (
-	OperationReplaceSymbol   OperationKind = "replace_symbol"
-	OperationDeleteSymbol    OperationKind = "delete_symbol"
-	OperationInsertBefore    OperationKind = "insert_before"
-	OperationInsertAfter     OperationKind = "insert_after"
-	OperationReplaceRange    OperationKind = "replace_range"
-	OperationCreateFile      OperationKind = "create_file"
-	OperationMoveFile        OperationKind = "move_file"
-	OperationCopyFile        OperationKind = "copy_file"
-	OperationDeleteFile      OperationKind = "delete_file"
-	OperationRenameSymbol    OperationKind = "rename_symbol"
-	OperationMoveSymbols     OperationKind = "move_symbols"
-	OperationReplaceMatches  OperationKind = "replace_matches"
-	OperationApplyCodeAction OperationKind = "apply_code_action"
+	OperationReplaceSymbol  OperationKind = "replace_symbol"
+	OperationDeleteSymbol   OperationKind = "delete_symbol"
+	OperationInsertBefore   OperationKind = "insert_before"
+	OperationInsertAfter    OperationKind = "insert_after"
+	OperationReplaceRange   OperationKind = "replace_range"
+	OperationCreateFile     OperationKind = "create_file"
+	OperationMoveFile       OperationKind = "move_file"
+	OperationCopyFile       OperationKind = "copy_file"
+	OperationDeleteFile     OperationKind = "delete_file"
+	OperationReplaceMatches OperationKind = "replace_matches"
 )
+
+// A plan holds only operations it can execute against exact bytes. The kinds
+// whose edit a language server owns - rename_symbol, apply_code_action,
+// inline_symbol, safe_delete_symbol - are request vocabulary: the handlers
+// ask the server what it would change and store the answer as the ranges
+// below, with DerivedFrom naming where they came from. A durable plan
+// therefore never holds a promise, and preview, prepare, apply and recovery
+// all work on the same exact bytes.
 
 type PlanState string
 
@@ -138,6 +143,10 @@ type PlanOperation struct {
 	ExpectedSHA256 string   `json:"expected_sha256,omitempty"`
 	DependsOn      []string `json:"depends_on,omitempty"`
 	Indentation    string   `json:"indentation,omitempty"`
+	// DerivedFrom names the requested operation a language server expanded
+	// into this one, so a plan of twelve ranges still says "this is the
+	// rename you asked for".
+	DerivedFrom string `json:"derived_from,omitempty"`
 }
 
 type PlanEdit struct {
@@ -758,19 +767,16 @@ func (w *Workspace) normalizeOperations(operations []PlanOperation) ([]PlanOpera
 // their target to an exact file range; file kinds bind a missing revision to the current
 // document; provider kinds only check that a target is named.
 var operationNormalizers = map[OperationKind]func(*Workspace, *PlanOperation) error{
-	OperationReplaceSymbol:   (*Workspace).normalizeEditTarget,
-	OperationDeleteSymbol:    (*Workspace).normalizeEditTarget,
-	OperationInsertBefore:    (*Workspace).normalizeEditTarget,
-	OperationInsertAfter:     (*Workspace).normalizeEditTarget,
-	OperationReplaceRange:    (*Workspace).normalizeEditTarget,
-	OperationCreateFile:      (*Workspace).normalizeCreateFile,
-	OperationDeleteFile:      (*Workspace).normalizeDeleteFile,
-	OperationMoveFile:        (*Workspace).normalizeMoveFile,
-	OperationCopyFile:        (*Workspace).normalizeCopyFile,
-	OperationRenameSymbol:    normalizeProviderTarget,
-	OperationMoveSymbols:     normalizeProviderTarget,
-	OperationApplyCodeAction: normalizeProviderTarget,
-	OperationReplaceMatches:  (*Workspace).normalizeReplaceMatches,
+	OperationReplaceSymbol:  (*Workspace).normalizeEditTarget,
+	OperationDeleteSymbol:   (*Workspace).normalizeEditTarget,
+	OperationInsertBefore:   (*Workspace).normalizeEditTarget,
+	OperationInsertAfter:    (*Workspace).normalizeEditTarget,
+	OperationReplaceRange:   (*Workspace).normalizeEditTarget,
+	OperationCreateFile:     (*Workspace).normalizeCreateFile,
+	OperationDeleteFile:     (*Workspace).normalizeDeleteFile,
+	OperationMoveFile:       (*Workspace).normalizeMoveFile,
+	OperationCopyFile:       (*Workspace).normalizeCopyFile,
+	OperationReplaceMatches: (*Workspace).normalizeReplaceMatches,
 }
 
 func normalizeIndentation(operation *PlanOperation) error {
@@ -933,13 +939,6 @@ func (w *Workspace) normalizeCopyFile(operation *PlanOperation) error {
 			return err
 		}
 		operation.DestinationRevision = revision
-	}
-	return nil
-}
-
-func normalizeProviderTarget(_ *Workspace, operation *PlanOperation) error {
-	if operation.Target == nil || (operation.Target.Handle == "" && operation.Target.FileRange == nil && operation.Target.SymbolLocator == nil) {
-		return fmt.Errorf("%s requires target", operation.OpID)
 	}
 	return nil
 }

@@ -141,9 +141,26 @@ discriminated union:
 - `move_file`
 - `delete_file`
 - `rename_symbol`
-- `move_symbols`
+- `safe_delete_symbol`
+- `inline_symbol`
 - `replace_matches`
 - `apply_code_action`
+
+The last four are request vocabulary rather than stored operations. A plan holds only
+operations it can execute against exact bytes, so before it is stored the language server
+is asked what the refactor would change and its answer is bound to the current document
+revisions as `replace_range` operations, each carrying `derived_from` with the request it
+came from. Preview, prepare, verification, apply and recovery therefore work on the same
+exact bytes for a server refactor as for a hand-written edit, and a durable plan never
+holds a promise. `safe_delete_symbol` additionally asks for the symbol's references first
+and refuses, naming the call sites, when any remain outside the declaration; a reference
+list the server truncated refuses too, because a deletion that cannot be proved safe is
+not safe. An edit that also creates, renames or deletes files is refused: those paths go
+through `create_file`, `move_file` and `delete_file`, which say what Git has to be told.
+
+`move_symbols` was declared in this contract and never implemented; it is removed rather
+than left as a promise. Moving a declaration between files is `delete_symbol` plus
+`insert_after` in one plan today.
 
 Every operation carries:
 
