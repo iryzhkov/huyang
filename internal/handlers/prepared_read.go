@@ -134,6 +134,36 @@ func declarationLine(absolute, leaf string) (int, bool) {
 	return firstIdentifierLine(content, leaf, 0)
 }
 
+// stagedDeclaration answers whether leaf is declared in a staged file, and
+// whether a parser answered it. Only a language the native sectioner reads
+// can settle the question: everywhere else the best evidence available is
+// the first mention of the name outside a comment, which a call site, an
+// import or a string literal satisfies exactly as well as a declaration.
+// declarationLine takes that guess on purpose, because a position that is
+// probably right beats no position at all; an assertion about whether a
+// declaration exists must not, so the second return says which of the two
+// this answer is.
+func stagedDeclaration(absolute, leaf string) (present, parsed bool) {
+	content, err := os.ReadFile(absolute)
+	if err != nil || leaf == "" {
+		return false, false
+	}
+	sections, sectionErr := (workspacecore.NativeSectioner{}).Sections(absolute, content)
+	if sectionErr != nil {
+		return false, false
+	}
+	for _, section := range sections {
+		name := section.Name
+		if index := strings.LastIndexAny(name, "/"); index >= 0 {
+			name = name[index+1:]
+		}
+		if name == leaf {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // firstIdentifierLine is the first line of content mentioning leaf outside a
 // comment, counted from offset lines into the file.
 func firstIdentifierLine(content []byte, leaf string, before int) (int, bool) {

@@ -419,6 +419,38 @@ func TestReferencesInTheStagedBytesSettleTheAssertion(t *testing.T) {
 	}
 }
 
+// A symbol assertion about a language no native parser reads is unknown.
+// The staged file is TypeScript, where the only evidence available without a
+// parser is the first mention of the name outside a comment: that is a call
+// site or a string as readily as a declaration, and "proven" would be a
+// text scan wearing the word proof.
+func TestASymbolAssertionWithoutAParserIsUnknown(t *testing.T) {
+	instance := start(t)
+	session := instance.connect("experimental")
+	root := fixture(t, "typescript")
+	opened := call(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := workspaceIdentity(t, opened)
+
+	prepared := prepareWithInvariants(t, session, workspaceID, "typescript-symbol",
+		[]any{map[string]any{
+			"op_id": "add-note", "kind": "create_file", "path": "note.txt", "content": "touched\n",
+		}},
+		[]any{
+			map[string]any{"id": "still-there", "kind": "symbol_exists", "enforcement": "advisory",
+				"scope": map[string]any{"symbol": map[string]any{"path": "ledger.ts", "name_path": "total"}}},
+			map[string]any{"id": "never-was", "kind": "symbol_absent", "enforcement": "advisory",
+				"scope": map[string]any{"symbol": map[string]any{"path": "ledger.ts", "name_path": "retired"}}},
+		})
+
+	_, _, invariants := preparedPlan(t, prepared)
+	for id, invariant := range invariants {
+		if invariant["status"] != "unknown" {
+			t.Fatalf("%s was settled by a text scan of a language no parser reads: %#v", id, invariant)
+		}
+		t.Logf("%s: %v", id, invariant["detail"])
+	}
+}
+
 // Without a language server, a reference assertion is unknown rather than
 // quietly true.
 func TestWithoutALanguageServerNoReferencesIsUnknown(t *testing.T) {

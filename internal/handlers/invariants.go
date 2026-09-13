@@ -363,9 +363,9 @@ func firstReason(reasons ...string) string {
 	return "no reason given"
 }
 
-// stagedSymbolInvariant reads the staged file itself. A file that is not there
-// settles both assertions: a declaration in a file that does not exist is
-// absent.
+// stagedSymbolInvariant reads the staged file itself, and answers only where
+// a parser read it: a name found by scanning text is a guess, and a guess is
+// not a proof of anything, in either direction.
 func stagedSymbolInvariant(view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
 	symbol := invariant.Scope.Symbol
 	absolute, err := preparedPath(view, symbol.Path)
@@ -376,11 +376,18 @@ func stagedSymbolInvariant(view providerpool.PreparedView, invariant workspaceco
 	if index := strings.LastIndexAny(leaf, "/"); index >= 0 {
 		leaf = leaf[index+1:]
 	}
-	present := false
+	// A file that is not there settles both assertions without a parser:
+	// everything it declared is gone.
+	present, parsed := false, true
 	if _, err := os.Stat(absolute); err == nil {
-		_, present = declarationLine(absolute, leaf)
+		present, parsed = stagedDeclaration(absolute, leaf)
 	} else if !os.IsNotExist(err) {
 		return invariantUnknown(invariant, fmt.Sprintf("%s could not be read in the prepared revision", symbol.Path))
+	}
+	if !parsed {
+		return invariantUnknown(invariant, fmt.Sprintf(
+			"no native parser reads %s, so whether %s is declared there cannot be settled: a text scan finds the name in a call, an import or a string as readily as in a declaration",
+			symbol.Path, leaf))
 	}
 	answer := invariant
 	answer.Coverage = workspacecore.Coverage{Complete: true, FilesRead: 1, Semantic: "parser_sections"}
