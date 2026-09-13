@@ -66,8 +66,13 @@ type clientCursors struct {
 	// the service resolves a root into a workspace before the call runs
 	// and discards that reply, so the debt is remembered here and settled
 	// by the first reply that does reach the client.
-	owed  map[string]bool
-	order []string
+	owed map[string]bool
+	// unavailable is the last diagnostic unavailability each client was
+	// told about. A workspace with no language server repeats the same
+	// reason and the same recovery on every edit of a session, which is a
+	// paragraph the client has already read and cannot act on twice.
+	unavailable map[string]string
+	order       []string
 }
 
 func newNoticeDelivery() *noticeDelivery {
@@ -85,6 +90,29 @@ func (n *noticeDelivery) TakeGuide(workspaceID workspacecore.ID, client string) 
 	}
 	delete(clients.owed, client)
 	return true
+}
+
+// TakeUnavailability reports whether this client has already been told this
+// exact diagnostic unavailability for this workspace, and records it. An
+// empty fingerprint clears the memory, so the next unavailability is told in
+// full however often the verdict flips.
+func (n *noticeDelivery) TakeUnavailability(workspaceID workspacecore.ID, client, fingerprint string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return false
+	}
+	if clients.unavailable == nil {
+		clients.unavailable = map[string]string{}
+	}
+	if fingerprint == "" {
+		delete(clients.unavailable, client)
+		return false
+	}
+	repeated := clients.unavailable[client] == fingerprint
+	clients.unavailable[client] = fingerprint
+	return repeated
 }
 
 // last is the newest notice already delivered to this client, and whether
@@ -143,6 +171,7 @@ func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *cli
 		for len(clients.order) > maxNoticeClients {
 			delete(clients.cursors, clients.order[0])
 			delete(clients.owed, clients.order[0])
+			delete(clients.unavailable, clients.order[0])
 			clients.order = clients.order[1:]
 		}
 	}

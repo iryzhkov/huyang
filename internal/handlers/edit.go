@@ -280,7 +280,7 @@ func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *
 	if len(evidenceIDs) > 0 {
 		result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
 	}
-	if outcome != "ok" {
+	if outcome != "ok" && !repeatedUnavailability(data) {
 		result["next"] = editDiagnosticRecovery(data["revision"])
 	} else if len(applied.next) > 0 {
 		result["next"] = applied.next
@@ -400,7 +400,7 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 		report, err = providerpool.RecordDiagnostics(ctx, workspace, backend, files, revision, "edit_"+requestID)
 	}
 	if err != nil {
-		data["verification"] = map[string]any{"confidence": "unavailable", "reasons": []string{err.Error()}}
+		data["verification"] = h.unavailability(ctx, workspace, "unavailable", []string{err.Error()})
 		return "provisional", "semantic diagnostic refresh failed", nil
 	}
 	delta := compactDiagnosticDelta(workspace, report)
@@ -412,10 +412,7 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 		// verification block would only repeat it.
 		return "ok", diagnosticSummary(report), report.EvidenceIDs
 	}
-	data["verification"] = map[string]any{
-		"confidence": report.Confidence,
-		"reasons":    mcpapi.NonNilStrings(report.ProvisionalReasons),
-	}
+	data["verification"] = h.unavailability(ctx, workspace, string(report.Confidence), mcpapi.NonNilStrings(report.ProvisionalReasons))
 	return "provisional", provisionalSummary(report, files), report.EvidenceIDs
 }
 
@@ -512,6 +509,31 @@ func editSummary(relocated, preview bool) string {
 	default:
 		return "Guarded range edit applied"
 	}
+}
+
+// unavailability words an incomplete diagnostic verdict, in full the first
+// time a client meets it in a workspace and as reasons_unchanged after that.
+// A workspace with no language server answers the same paragraph and the
+// same two recovery actions on every edit of a session; the first one is
+// information and the rest is a toll.
+func (h *Handlers) unavailability(ctx context.Context, workspace *workspacecore.Workspace, confidence string, reasons []string) map[string]any {
+	fingerprint := confidence + "\x00" + strings.Join(reasons, "\x00")
+	if h.notices.TakeUnavailability(workspace.Identity().ID, clientIdentity(ctx), fingerprint) {
+		return map[string]any{"confidence": confidence, "reasons_unchanged": true}
+	}
+	return map[string]any{"confidence": confidence, "reasons": reasons}
+}
+
+// repeatedUnavailability reports whether the reply's verification block is
+// the short form, which is also when the recovery actions beside it would be
+// a repeat.
+func repeatedUnavailability(data map[string]any) bool {
+	verification, ok := data["verification"].(map[string]any)
+	if !ok {
+		return false
+	}
+	repeated, _ := verification["reasons_unchanged"].(bool)
+	return repeated
 }
 
 func editDiagnosticRecovery(revision any) []any {
