@@ -1970,6 +1970,151 @@
         "stop_on_entry": {
           "type": "boolean"
         },
+        "trace_policy": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "capture_values": {
+              "description": "Persist bounded locals; default false. Sensitive names are redacted.",
+              "type": "boolean"
+            },
+            "max_events": {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "mode": {
+              "enum": [
+                "stops",
+                "path",
+                "conditions",
+                "mutations"
+              ],
+              "type": "string"
+            },
+            "redact_names": {
+              "items": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            "targets": {
+              "items": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "properties": {
+                  "line_offset": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "target": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "additionalProperties": false,
+                    "oneOf": [
+                      {
+                        "additionalProperties": true,
+                        "required": [
+                          "handle"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": true,
+                        "required": [
+                          "file_range"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": true,
+                        "required": [
+                          "symbol_locator"
+                        ],
+                        "type": "object"
+                      }
+                    ],
+                    "properties": {
+                      "file_range": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "additionalProperties": false,
+                        "properties": {
+                          "after_sha256": {
+                            "type": "string"
+                          },
+                          "anchor_bytes": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "before_sha256": {
+                            "type": "string"
+                          },
+                          "byte_end": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "byte_start": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "expected_sha256": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "revision_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "revision_id",
+                          "byte_start",
+                          "byte_end",
+                          "expected_sha256",
+                          "before_sha256",
+                          "after_sha256",
+                          "anchor_bytes"
+                        ],
+                        "type": "object"
+                      },
+                      "handle": {
+                        "type": "string"
+                      },
+                      "symbol_locator": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "additionalProperties": false,
+                        "properties": {
+                          "name_path": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "name_path"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              },
+              "maxItems": 128,
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "track": {
           "items": {
             "description": "Expression tracked at each stop.",
@@ -2299,11 +2444,12 @@
       "properties": {
         "action": {
           "enum": [
-            "evaluate",
-            "scopes",
-            "stack",
             "threads",
-            "variables"
+            "stack",
+            "scopes",
+            "variables",
+            "evaluate",
+            "trace"
           ],
           "type": "string"
         },
@@ -2355,6 +2501,10 @@
         },
         "thread": {
           "type": "integer"
+        },
+        "trace_id": {
+          "description": "A completed or active trace; omit for the current/latest trace.",
+          "type": "string"
         },
         "transaction_id": {
           "type": "string"

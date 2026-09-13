@@ -161,6 +161,9 @@ type Workspace struct {
 	sectioner       Sectioner
 	failures        []EnvironmentFailure
 
+	tracesMu sync.Mutex
+	traces   *executionTraceStore
+
 	handlesMu   sync.Mutex
 	handles     *handleStore
 	git         *gitState

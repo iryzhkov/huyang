@@ -90,7 +90,8 @@ func modernDebugSessionTool(profiles []Profile) ToolDescriptor {
 		"items": schemaObject(debugTargetOptions(), "target"),
 	}
 	return ToolDescriptor{
-		Class: ClassProviderRead, Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
+		ExperimentalProperties: map[string]any{"trace_policy": executionTracePolicySchema()},
+		Class:                  ClassProviderRead, Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
 		Profiles: profiles, Destructive: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
 			"start", "attach", "restart", "stop"),
@@ -141,7 +142,8 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 		properties[key] = value
 	}
 	return ToolDescriptor{
-		Class: ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
+		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace"), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
+		Class:                  ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
 		Profiles: profiles, ReadOnly: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "action"},
 			"threads", "stack", "scopes", "variables", "evaluate"),
@@ -186,12 +188,12 @@ func ValidateDebugArguments(name string, arguments map[string]any) error {
 func debugSessionExtras(action string, arguments map[string]any) ([]string, error) {
 	switch action {
 	case "start":
-		return []string{"file", "program", "args", "cwd", "env", "config", "adapter", "stop_on_entry", "variables", "track", "wait_ms", "initial_breakpoints"}, nil
+		return []string{"file", "program", "args", "cwd", "env", "config", "adapter", "stop_on_entry", "variables", "track", "wait_ms", "initial_breakpoints", "trace_policy"}, nil
 	case "attach":
 		if arguments["pid"] == nil && arguments["port"] == nil {
 			return nil, errors.New("debug_session attach requires pid or port")
 		}
-		return []string{"pid", "host", "port", "file", "config", "adapter", "variables", "track", "wait_ms", "initial_breakpoints"}, nil
+		return []string{"pid", "host", "port", "file", "config", "adapter", "variables", "track", "wait_ms", "initial_breakpoints", "trace_policy"}, nil
 	case "restart":
 		return []string{"wait_ms"}, nil
 	case "stop":
@@ -233,6 +235,8 @@ func debugControlExtras(action string, arguments map[string]any) ([]string, erro
 
 func debugInspectExtras(action string, arguments map[string]any) ([]string, error) {
 	switch action {
+	case "trace":
+		return []string{"trace_id"}, nil
 	case "threads":
 		return nil, nil
 	case "stack":

@@ -16,7 +16,7 @@ import (
 
 const modernDebugTimeout = 5 * time.Minute
 
-func (h *Handlers) debug(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) debugWithoutTrace(ctx context.Context, requestID, name string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
 	if name == "debug_inspect" && action == "evaluate" {
 		policy, _ := arguments["policy"].(string)
@@ -175,7 +175,7 @@ func copyDebugArguments(arguments map[string]any) map[string]any {
 	copied := make(map[string]any, len(arguments))
 	for key, value := range arguments {
 		switch key {
-		case "workspace_id", "idempotency_key", "transaction_id", "initial_breakpoints", "target", "line_offset", "policy":
+		case "workspace_id", "idempotency_key", "transaction_id", "initial_breakpoints", "target", "line_offset", "policy", "trace_policy":
 		default:
 			copied[key] = value
 		}

@@ -121,6 +121,38 @@ path_unreachable can prove an unexported non-entry target in a closed Go main
 package; other cases retain conservative call refutation or unknown.
 The frozen v1alpha1 descriptor's older invariant prose is unchanged.
 
+## Observed debugger traces (X25)
+
+The experimental four-tool debugger facade accepts trace_policy on start/attach
+and debug_inspect action=trace with an optional trace_id. A trace has a random
+workspace-scoped identity and, once finalized, an immutable content digest.
+The stable catalogs are unchanged. Traced launches and debugger control use
+external_job scheduling; trace inspection is pure_read.
+
+stops records user-visible stops. path installs owned temporary breakpoints at
+selected source targets; conditions additionally permits explicitly requested
+bounded locals. Values remain off unless capture_values=true. These modes
+require operator control to continue between stops, do not evaluate condition
+expressions, and do not promise complete instruction or branch coverage.
+mutations currently returns trace_capability_unavailable.
+
+Events retain goroutine/thread identity, bounded stack frames, launch-source
+hashes and revision-bound handles when mapping succeeds. Missed stop sequence
+numbers and event/value caps are disclosed. Explicit executable files receive
+a SHA-256 fingerprint when bounded acquisition succeeds; adapter-managed build
+identity remains unverified. Even a fingerprint does not prove correspondence
+between the binary and launch sources. Changed source or epoch makes mapping
+stale. Arguments, environment values and debugger output are never persisted.
+
+Trace storage is bounded to 16 records, 8 MiB each, with 32 frames per event,
+128 targets, and the value ceilings above. Secret-like local names and optional
+redact_names are redacted before persistence. Files use mode 0600. Restart
+finalizes interrupted recordings with a coverage gap; corrupt records refuse
+recovery. Completed traces cannot be appended to. Temporary breakpoint cleanup
+preserves pre-existing and subsequently replaced user breakpoints.
+Source handles retain their normal lifetime; trace source fingerprints remain
+available after handles expire. Every trace describes only one sampled execution.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

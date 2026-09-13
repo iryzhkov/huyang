@@ -520,6 +520,10 @@ local function install_listeners(dap)
         state.active = session
         state.stop = body or {}
         state.stop.at = now()
+        if state.trace_enabled then
+            state.trace_sequence=(state.trace_sequence or 0)+1
+            state.stop.trace_sequence=state.trace_sequence
+        end
         wake("stopped", body)
     end
     L.after.event_exited[key] = function(session, body)
@@ -1572,7 +1576,7 @@ local function is_noise(v)
     return name:match("^__.*__$") ~= nil
 end
 -- Locals and arguments of a frame, one string each, capped.
-local function frame_locals(session, frame, max)
+local function frame_locals(session, frame, max, structured)
     local e, sc = try_request(session, "scopes", { frameId = frame.id })
     if e or not sc then return {}, 0 end
     local lines, total = {}, 0
@@ -1585,16 +1589,20 @@ local function frame_locals(session, frame, max)
                     if not is_noise(v) then
                         total = total + 1
                         if #lines < max then
+                            if structured then
+                                lines[#lines+1]={name=v.name,type=v.type,value=tostring(v.value or ""):sub(1,1025)}
+                            else
                             lines[#lines + 1] = state.variables_mode == "names"
                                 and clip(v.name .. (v.type and v.type ~= "" and (": " .. v.type) or ""))
                                 or render_var(v)
+                            end
                         end
                     end
                 end
             end
         end
     end
-    if total > #lines then
+    if total > #lines and not structured then
         lines[#lines + 1] = ("+%d more, debug_variables has them"):format(total - #lines)
     end
     return lines, total
@@ -1759,6 +1767,7 @@ local function stop_reply(session, root)
     local stop = state.stop or {}
     local thread_id = stop.threadId
     local reply = { state = "stopped", reason = stop.reason or "unknown", thread = thread_id }
+    if state.trace_enabled then reply.trace_sequence=stop.trace_sequence; reply.trace_capture={adapter=state.adapter,mode=state.config and state.config.mode,request=state.request} end
     if not thread_id then
         reply.output_new = output_new()
         return reply
@@ -1774,6 +1783,13 @@ local function stop_reply(session, root)
         return reply
     end
     local frames = st.stackFrames
+    if state.trace_enabled then
+        reply.trace_frames={}
+        for i,frame in ipairs(frames) do
+            if i>32 then break end
+            reply.trace_frames[#reply.trace_frames+1]={file=frame_file(frame),line=frame.line,column=frame.column,name=frame.name}
+        end
+    end
     local top = frames[1]
     local info, bufnr = annotate_frame(top)
     reply.frame = info
@@ -1781,6 +1797,7 @@ local function stop_reply(session, root)
     if state.variables_mode ~= "none" then
         reply.locals = frame_locals(session, top, LOCALS_MAX)
     end
+    if state.trace_enabled and state.trace_values then reply.trace_values=frame_locals(session,top,128,true) end
     reply.stack = format_stack(frames, root, STACK_MAX, false)
     if stop.hitBreakpointIds and #stop.hitBreakpointIds > 0 then
         reply.hit = { id = stop.hitBreakpointIds[1], file = info.file, line = top.line }
@@ -1990,6 +2007,9 @@ local function start_session(dap, adapter_name, adapter, config, args, root, req
     state.finished = finished
     session_options(args)
     state.origin = "agent"
+    state.trace_enabled=args.trace_enabled==true
+    state.trace_values=args.trace_values==true
+    state.trace_sequence=0
     state.request = request_kind
     state.adapter = adapter_name
     state.config = config
@@ -2497,6 +2517,9 @@ local function debug_breakpoint(args)
         if not idx then
             err("no agent breakpoint at %s:%d (the user's breakpoints are left alone)", I().rel_path(file), line)
         end
+        if args.trace_owner and state.breakpoints[idx].trace_owner~=args.trace_owner then
+            error({code="trace_breakpoint_changed",message="temporary breakpoint ownership changed",detail=""},0)
+        end
         table.remove(state.breakpoints, idx)
         local ok, removed = pcall(bp_module().remove, bufnr, line)
         local s = state.session
@@ -2510,6 +2533,9 @@ local function debug_breakpoint(args)
     bp_buffers[bufnr] = true
     -- Find the entry before nvim-dap's set replaces the sign (a new id).
     local idx, entry = ledger_find(bufnr, line)
+    if args.trace_owner and (entry or sign_at(bufnr,line)) then
+        error({code="trace_breakpoint_conflict",message="trace target already has a breakpoint; existing breakpoint was preserved",detail=""},0)
+    end
     bp_module().set({ condition = opts.condition, hit_condition = opts.hit_condition, log_message = opts.log_message },
         bufnr, line)
     local sign_id = sign_at(bufnr, line)
@@ -2522,6 +2548,7 @@ local function debug_breakpoint(args)
         idx = #state.breakpoints
     end
     entry.sign_id = sign_id
+    entry.trace_owner=args.trace_owner
     entry.result = nil
     entry.condition, entry.hit_condition, entry.log_message = opts.condition, opts.hit_condition, opts.log_message
     if state.session and state.fingerprints[file] == nil and file_exists(file) then
@@ -2544,6 +2571,22 @@ end
 local function debug_breakpoints(args)
     need_dap()
     ledger_prune()
+    if args.clear_trace and args.trace_owner then
+        local cleared,changed=0,0
+        for i=#state.breakpoints,1,-1 do
+            local entry=state.breakpoints[i]
+            if entry.trace_owner==args.trace_owner then
+                local line=ledger_line(entry) or entry.line
+                if sign_at(entry.bufnr,line)==entry.sign_id then
+                    bp_module().remove(entry.bufnr,line); cleared=cleared+1
+                else changed=changed+1 end
+                table.remove(state.breakpoints,i)
+            end
+        end
+        local session=state.session
+        if session and not session.closed then sync_breakpoints(session) end
+        return {cleared=cleared,changed=changed}
+    end
     if args.clear then
         local n = #state.breakpoints
         clear_own_breakpoints()
