@@ -28,8 +28,15 @@ type DiagnosticUpdate struct {
 	Kind        string                            `json:"kind"`
 	Severity    int                               `json:"severity,omitempty"`
 	Path        string                            `json:"path,omitempty"`
+	Line        int                               `json:"line,omitempty"`
+	Message     string                            `json:"message,omitempty"`
 	Attribution *workspacecore.CulpritAttribution `json:"attribution,omitempty"`
 }
+
+// maxNoticeMessage bounds the message a notice carries. A compiler says what
+// is wrong in a line; a type checker can say it in a paragraph, and the
+// paragraph belongs in diagnostics, not in the delta of every reply.
+const maxNoticeMessage = 160
 
 // clientIdentityKey carries the MCP session identity through the request
 // context so per-client delivery state can be keyed without a session object.
@@ -180,10 +187,55 @@ func (h *Handlers) AttachDiagnosticUpdates(ctx context.Context, workspace *works
 	if len(updates) == 0 {
 		return
 	}
+	describeNotices(workspace, updates)
 	result["diagnostic_updates"] = updates
+	// The summary was written before the language server published these,
+	// so an edit that says "no new diagnostics" can arrive with findings
+	// beside it. Say what the reply carries rather than contradicting it.
+	if summary, ok := result["summary"].(string); ok && strings.HasSuffix(summary, "no new diagnostics") {
+		if count := countNewNotices(updates); count > 0 {
+			result["summary"] = strings.TrimSuffix(summary, "no new diagnostics") +
+				fmt.Sprintf("%d diagnostic(s) published since, in diagnostic_updates", count)
+		}
+	}
 	if dropped || page.More || page.Truncated {
 		result["diagnostic_updates_truncated"] = true
 	}
+}
+
+// describeNotices fills in the line and the message of every update whose
+// finding the ledger still holds.
+func describeNotices(workspace *workspacecore.Workspace, updates []DiagnosticUpdate) {
+	ids := make([]string, 0, len(updates))
+	for _, update := range updates {
+		if update.Kind != "resolved" {
+			ids = append(ids, update.ID)
+		}
+	}
+	findings := workspace.DiagnosticFindings(ids)
+	for index, update := range updates {
+		finding, known := findings[update.ID]
+		if !known {
+			continue
+		}
+		updates[index].Line = finding.Range.StartLine
+		message := finding.Message
+		if len(message) > maxNoticeMessage {
+			message = message[:maxNoticeMessage] + "..."
+		}
+		updates[index].Message = message
+	}
+}
+
+// countNewNotices counts the findings a delta reports as new.
+func countNewNotices(updates []DiagnosticUpdate) int {
+	count := 0
+	for _, update := range updates {
+		if update.Kind == "new" {
+			count++
+		}
+	}
+	return count
 }
 
 // collapseNotices keeps one entry per finding, newest first, its last kind
