@@ -297,12 +297,26 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 // symbolReadMiss answers a locator that resolved to no or several
 // declarations, with the cheapest recovery for each case.
 func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact []workspacecore.HandleRecord, rawName, path string) map[string]any {
-	outcome, code, summary := "conflict", "symbol_not_found", "Symbol locator did not resolve uniquely"
+	// A name that is not there and a name that is there twice are different
+	// mistakes with different repairs - use another name, or qualify the one
+	// you used - and "did not resolve uniquely" described both.
+	outcome, code := "conflict", "symbol_not_found"
+	summary := fmt.Sprintf("No declaration named %s in %s", rawName, path)
+	if len(exact) > 1 {
+		summary = fmt.Sprintf("%d declarations named %s in %s; the locator selects none of them", len(exact), rawName, path)
+	}
 	if !coverage.Complete {
 		outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
 	}
-	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{"coverage": coverage, "matches": exact})
-	result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary,
+		map[string]any{"coverage": coverage, "matches": exact, "match_count": len(exact)})
+	next := []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+	if len(exact) == 0 && coverage.Complete {
+		// The outline is the list of names this file does declare, which is
+		// the answer to "then what is it called".
+		next = append([]any{map[string]any{"tool": "read", "action": "outline_the_file_to_see_what_it_declares", "path": path, "view": "outline"}}, next...)
+	}
+	result["next"] = next
 	return result
 }
 
