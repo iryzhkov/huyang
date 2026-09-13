@@ -289,6 +289,43 @@ func TestAnExternalWriteBeforeApplyIsRefused(t *testing.T) {
 	}
 }
 
+// A plan with no operations is refused at prepare, and the canonical
+// revision does not move. Committing it wrote no byte and still answered
+// canonical_changed with an empty changed-path list beside it, advancing the
+// revision counter for a change that does not exist.
+func TestAnEmptyPlanIsRefusedAtPrepare(t *testing.T) {
+	instance := start(t)
+	session := instance.connect("experimental")
+	root := fixture(t, "go")
+	opened := call(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := workspaceIdentity(t, opened)
+	before := workspaceRevision(call(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID}))
+
+	created := planAction(t, session, workspaceID, "empty-create", map[string]any{
+		"action": "create", "operations": []any{},
+	})
+	if outcome(created) != "ok" {
+		t.Fatalf("create with no operations = %s: %s", outcome(created), summary(created))
+	}
+	plan, _ := data(created)["plan"].(map[string]any)
+	prepared := planAction(t, session, workspaceID, "empty-prepare", map[string]any{
+		"action": "prepare", "plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+	})
+	if outcome(prepared) == "ok" || outcome(prepared) == "provisional" {
+		t.Fatalf("a plan with no operations was prepared: %s", summary(prepared))
+	}
+	if code, _ := prepared["code"].(string); code != "plan_state_invalid" {
+		t.Fatalf("empty prepare code = %q, want plan_state_invalid: %s", code, summary(prepared))
+	}
+	if !offers(nextActions(prepared), "edit") && !offers(nextActions(prepared), "discard") {
+		t.Fatalf("the refusal leaves nothing to do next: %#v", prepared["next"])
+	}
+	after := call(t, session, "workspace_inspect", map[string]any{"workspace_id": workspaceID})
+	if got := workspaceRevision(after); got != before {
+		t.Fatalf("the canonical revision moved from %s to %s for a plan that changes nothing", before, got)
+	}
+}
+
 // The frozen catalog and the experimental one describe the same workspace. An
 // agent on the frozen profile cannot reach the experimental arguments, and is
 // refused rather than quietly given the default behaviour.

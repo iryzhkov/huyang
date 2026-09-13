@@ -765,7 +765,11 @@ func (run *commitRun) complete() (PlanRecord, error) {
 	if _, err := w.sealCommittedJournal(run.journalPath, &run.journal); err != nil {
 		return run.fail(err)
 	}
-	run.preparation.CanonicalChanged = true
+	// What the commit wrote, not that a commit happened: a receipt that says
+	// the canonical tree changed while its own changed-path list is empty
+	// contradicts itself, and a caller that gates a rebuild or a verification
+	// run on the flag does the work for a change that does not exist.
+	run.preparation.CanonicalChanged = len(run.request.Files) > 0
 	run.preparation.CanonicalRevision = run.journal.CanonicalRevision
 	run.preparation.JournalID = plan.PlanID
 	result, err := w.transitionPlan(plan.PlanID, run.expected, PlanCommitted, "commit", "ok", &run.preparation)

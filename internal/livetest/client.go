@@ -114,6 +114,14 @@ func workspaceIdentity(t *testing.T, envelope map[string]any) string {
 	return id
 }
 
+// workspaceRevision is the canonical revision the envelope's workspace block
+// reports, which is how a test sees whether a refused call moved anything.
+func workspaceRevision(envelope map[string]any) string {
+	identity, _ := envelope["workspace"].(map[string]any)
+	revision, _ := identity["revision"].(string)
+	return revision
+}
+
 // fixture copies one of tests/fixtures into a disposable directory, so a live
 // run never edits the repository it is run from.
 func fixture(t *testing.T, language string) string {

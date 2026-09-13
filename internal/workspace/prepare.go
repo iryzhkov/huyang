@@ -261,6 +261,14 @@ func (w *Workspace) previewedPlan(planID string, expected uint64) (PlanRecord, e
 	if !canTransition(plan.State, PlanPreparing) {
 		return PlanRecord{}, illegalTransition(planID, plan.State, PlanPreparing)
 	}
+	// A plan with no operations stages nothing, so committing it would write
+	// no byte and still advance the canonical revision and answer a receipt
+	// that says a change was made. There is nothing here to prepare, and
+	// saying so is cheaper than a commit that means nothing.
+	if len(plan.Operations) == 0 {
+		return plan, Codedf(CodePlanStateInvalid,
+			"plan %s declares no operations; add them with action=edit and edit.mode=add before preparing", planID)
+	}
 	if plan.Preview == nil || plan.Preview.PlanRevision != expected {
 		plan, err = w.PreviewPlan(planID, expected)
 		if err != nil {
