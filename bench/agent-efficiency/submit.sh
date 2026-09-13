@@ -6,7 +6,12 @@
 #
 # Usage: submit.sh BATCH [--scenarios "R1 E1"] [--languages "go python"]
 #                        [--families "huyang builtin bash"] [--reps 3]
-#                        [--model ID] [--instance ID] [--max-turns N] [--dry-run]
+#                        [--model ID] [--instance ID] [--max-turns N] [--host NAME]
+#                        [--dry-run]
+#
+# --host names the machine whose T3 server runs the tasks (an SSH alias the
+# steward knows). A benchmark measures wall time as well as tokens, so run a
+# batch on an idle machine and keep the host constant for every family of it.
 #
 # Every queued task is recorded in runs/BATCH.tsv (scenario, language, family,
 # repetition, title, task file). The title is what score.py looks up in the T3 database,
@@ -27,6 +32,7 @@ languages="go"
 families="huyang builtin bash"
 reps=3
 max_turns=4
+host=""
 dry_run=false
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -37,6 +43,7 @@ while [ $# -gt 0 ]; do
         --model) MODEL="$2"; shift 2 ;;
         --instance) INSTANCE="$2"; shift 2 ;;
         --max-turns) max_turns="$2"; shift 2 ;;
+        --host) host="$2"; shift 2 ;;
         --dry-run) dry_run=true; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -66,8 +73,11 @@ for scenario in $scenarios; do
                     echo "would queue: $title"
                     continue
                 fi
+                host_option=()
+                [ -n "$host" ] && host_option=(--host "$host")
                 task_file="$(printf '%s\n' "$prompt" | t3-backlog --project "$PROJECT" --title "$title" --name "$name" \
-                    --instance "$INSTANCE" --model "$MODEL" --max-turns "$max_turns" --importance 2 --difficulty 1 --ungated | tail -1)"
+                    --instance "$INSTANCE" --model "$MODEL" --max-turns "$max_turns" --importance 2 --difficulty 1 --ungated \
+                    "${host_option[@]}" | tail -1)"
                 printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$scenario" "$language" "$family" "$rep" "$title" "$task_file" >> "$log"
                 queued=$((queued + 1))
                 echo "queued: $title"
