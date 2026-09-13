@@ -254,7 +254,7 @@ func (s *analysisStore) get(id string) (AnalysisSnapshot, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, ok := s.entries[id]
-	return snapshot, ok
+	return cloneExecution(snapshot), ok
 }
 
 func (s *analysisStore) put(snapshot AnalysisSnapshot) {
@@ -263,7 +263,7 @@ func (s *analysisStore) put(snapshot AnalysisSnapshot) {
 	if _, known := s.entries[snapshot.ID]; known {
 		return
 	}
-	s.entries[snapshot.ID] = snapshot
+	s.entries[snapshot.ID] = cloneExecution(snapshot)
 	s.order = append(s.order, snapshot.ID)
 	for len(s.order) > maxAnalysisSnapshots {
 		delete(s.entries, s.order[0])

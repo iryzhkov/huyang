@@ -68,12 +68,14 @@ type ProducerVersion struct {
 
 // AnalysisKey is everything a snapshot's identity depends on.
 type AnalysisKey struct {
-	WorkspaceID ID                `json:"workspace_id"`
-	Epoch       uint64            `json:"epoch"`
-	Revision    string            `json:"revision"`
-	Profile     string            `json:"profile"`
-	ConfigHash  string            `json:"config_hash"`
-	Producers   []ProducerVersion `json:"producers"`
+	ExecutionBudget *GraphBudget      `json:"execution_budget,omitempty"`
+	ExecutionDomain string            `json:"execution_domain,omitempty"`
+	WorkspaceID     ID                `json:"workspace_id"`
+	Epoch           uint64            `json:"epoch"`
+	Revision        string            `json:"revision"`
+	Profile         string            `json:"profile"`
+	ConfigHash      string            `json:"config_hash"`
+	Producers       []ProducerVersion `json:"producers"`
 }
 
 // ID is the deterministic identity of the key: the same inputs in any order
@@ -145,6 +147,7 @@ type AnalysisConflict struct {
 
 // AnalysisSnapshot is the immutable result.
 type AnalysisSnapshot struct {
+	Execution *ExecutionGraph    `json:"execution,omitempty"`
 	ID        string             `json:"id"`
 	Key       AnalysisKey        `json:"key"`
 	Nodes     []AnalysisNode     `json:"nodes"`

@@ -40,7 +40,17 @@ their edges even when further traversal stops.
 The result schema and examples in `tests/fixtures/execution/contracts` freeze
 the shared evidence header. Stage-specific path, trace and comparison payloads
 are added by their owning stages; X20 does not freeze invented payloads for
-operations that have not yet been implemented. This narrows the original
+operations that have not yet been implemented.
+
+X21 adds experimental execution_graph under provider_read scheduling. Its snapshot
+extends AnalysisSnapshot with an execution graph, a content-derived revision and
+an explicit canonical/prepared domain in the identity. The initial live adapter
+records unresolved source boundaries and always reports incomplete call coverage.
+The four stable catalogs remain byte-identical. The existing bounded analysis
+cache now copies on insertion and retrieval; live graph queries currently rebuild
+rather than retain snapshots. Graph bytes reserve 256 KiB for bounded coverage and
+risk metadata, so a caller lowering the byte ceiling must allow at least 512 KiB.
+The path walker is an internal API until X24 adds path_explain. This narrows the original
 "schemas frozen" gate to the common header and request budgets.
 
 Each fact names its content revision, revision-bound source handles, producer

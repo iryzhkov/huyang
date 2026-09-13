@@ -174,6 +174,8 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 		return h.routePrepared(ctx, requestID, name, workspace, selector, arguments)
 	}
 	switch name {
+	case "execution_graph":
+		return h.executionGraph(ctx, requestID, workspace, arguments)
 	case "workspace_inspect":
 		return h.inspect(ctx, requestID, workspace, arguments)
 	case "search":

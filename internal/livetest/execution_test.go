@@ -68,6 +68,46 @@ func TestExecutionFixturesRecordCanonicalIdentity(t *testing.T) {
 	}
 }
 
+func TestExecutionGraphDisclosesUnresolvedBoundaries(t *testing.T) {
+	instance := start(t)
+	root := fixture(t, filepath.Join("execution", "go"))
+	before := hashTree(t, root)
+	session := instance.connect("experimental")
+	first := call(t, session, "execution_graph", map[string]any{"root": root})
+	second := call(t, session, "execution_graph", map[string]any{"root": root})
+	if outcome(first) != "partial" || data(first)["status"] != "unknown" {
+		t.Fatalf("%v", first)
+	}
+	snapshot := data(first)["snapshot"].(map[string]any)
+	again := data(second)["snapshot"].(map[string]any)
+	if snapshot["id"] != again["id"] {
+		t.Fatal("unchanged bytes changed graph identity")
+	}
+	graph := snapshot["execution"].(map[string]any)
+	if len(graph["nodes"].([]any)) == 0 {
+		t.Fatal("source boundaries missing")
+	}
+	if graph["coverage"].(map[string]any)["complete"] != false {
+		t.Fatal("no adapter claimed complete graph")
+	}
+	if first["api_version"] != "huyang.workspace/v1alpha2" {
+		t.Fatal("experimental graph used frozen version")
+	}
+	if !reflect.DeepEqual(before, hashTree(t, root)) {
+		t.Fatal("graph query changed canonical bytes")
+	}
+	edited := call(t, session, "edit_apply", map[string]any{"root": root, "operation": map[string]any{
+		"kind": "replace_literal", "path": "main.go", "old": "return n * 2", "new": "return n * 3",
+	}})
+	if data(edited)["canonical_changed"] != true {
+		t.Fatalf("%v", edited)
+	}
+	changed := call(t, session, "execution_graph", map[string]any{"root": root})
+	if data(changed)["snapshot"].(map[string]any)["id"] == snapshot["id"] {
+		t.Fatal("content change reused graph identity")
+	}
+}
+
 func TestExecutionGoFixtureHasKnownDivergence(t *testing.T) {
 	root := fixture(t, filepath.Join("execution", "go"))
 	binary := filepath.Join(t.TempDir(), "execution-fixture")

@@ -273,6 +273,7 @@ func buildModernTools() []ToolDescriptor {
 		modernDebugBreakpointsTool(debug),
 		modernDebugControlTool(debug),
 		modernDebugInspectTool(debug),
+		executionGraphTool(),
 	)
 	return tools
 }

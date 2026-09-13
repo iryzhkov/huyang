@@ -2370,5 +2370,24 @@
       "type": "object"
     },
     "name": "debug_inspect"
+  },
+  {
+    "description": "Build an experimental revision-keyed execution snapshot. Source boundaries remain unresolved where no call adapter supplies evidence; partial graphs cannot prove unreachability.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "execution_graph"
   }
 ]
