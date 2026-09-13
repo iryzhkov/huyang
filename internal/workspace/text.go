@@ -171,9 +171,23 @@ type ExactDiff struct {
 	Path         string `json:"path"`
 	BeforeSHA256 string `json:"before_sha256"`
 	AfterSHA256  string `json:"after_sha256"`
-	Before       []byte `json:"before"`
-	After        []byte `json:"after"`
-	Patch        string `json:"patch"`
+	Before       []byte `json:"before,omitempty"`
+	After        []byte `json:"after,omitempty"`
+	Patch        string `json:"patch,omitempty"`
+	// The sizes of what a summarised diff no longer carries. A reply that
+	// drops the bodies says how big they were instead of leaving three
+	// fields that read as "nothing changed".
+	BeforeBytes int `json:"before_bytes,omitempty"`
+	AfterBytes  int `json:"after_bytes,omitempty"`
+	PatchBytes  int `json:"patch_bytes,omitempty"`
+}
+
+// Summarize drops the bodies of a diff and records their sizes, for a reply
+// that has to stay bounded. The hashes are untouched, so what the diff
+// claims about the change is still independently checkable.
+func (d *ExactDiff) Summarize() {
+	d.BeforeBytes, d.AfterBytes, d.PatchBytes = len(d.Before), len(d.After), len(d.Patch)
+	d.Before, d.After, d.Patch = nil, nil, ""
 }
 
 type TextChange struct {
@@ -1031,11 +1045,38 @@ func (w *Workspace) validateRange(workspaceID ID, handle RangeHandle) (DocumentS
 }
 
 func exactDiff(path string, before, after []byte, start, end int, replacement []byte) ExactDiff {
+	// The patch quotes the span that actually differs, not the span the
+	// caller replaced. A whole-file write - which is how a plan records every
+	// file it commits - would otherwise quote the file twice, so a fourteen
+	// byte change in a seven kilobyte file produced a sixteen kilobyte patch
+	// and a two-file migration produced eighty kilobytes of receipt that said
+	// nothing a reader could use.
+	if start == 0 && end == len(before) && len(replacement) == len(after) {
+		start, end, replacement = changedSpan(before, after)
+	}
 	return ExactDiff{
 		Path: path, BeforeSHA256: hashBytes(before), AfterSHA256: hashBytes(after),
 		Before: append([]byte(nil), before...), After: append([]byte(nil), after...),
 		Patch: fmt.Sprintf("--- %s\n+++ %s\n@@ bytes %d:%d @@\n-%q\n+%q\n", path, path, start, end, before[start:end], replacement),
 	}
+}
+
+// changedSpan is the narrowest byte range that differs between two versions
+// of a document, with the bytes that replace it: the common prefix and the
+// common suffix are dropped. It is exact rather than a heuristic - the range
+// and the replacement reconstruct after from before - and it costs one pass
+// in each direction.
+func changedSpan(before, after []byte) (int, int, []byte) {
+	prefix := 0
+	for prefix < len(before) && prefix < len(after) && before[prefix] == after[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(before)-prefix && suffix < len(after)-prefix &&
+		before[len(before)-1-suffix] == after[len(after)-1-suffix] {
+		suffix++
+	}
+	return prefix, len(before) - suffix, after[prefix : len(after)-suffix]
 }
 
 func (w *Workspace) ApplyReplace(workspaceID ID, handle RangeHandle, replacement []byte) (TextChange, DocumentSnapshot, error) {

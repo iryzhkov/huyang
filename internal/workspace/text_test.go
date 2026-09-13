@@ -340,6 +340,44 @@ func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
 	}
 }
 
+// A whole-file write records the span that changed, not the file twice. A
+// plan commits every file as a whole-file write, so a two-file migration of
+// six short call sites was producing eighty kilobytes of patch that no reader
+// could use.
+func TestAWholeFileWriteRecordsOnlyTheSpanThatChanged(t *testing.T) {
+	root := t.TempDir()
+	var body strings.Builder
+	for index := range 400 {
+		fmt.Fprintf(&body, "line %03d of a file that mostly stays the same\n", index)
+	}
+	before := body.String()
+	path := filepath.Join(root, "big.txt")
+	writeFile(t, path, before)
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	read, err := ws.Read("big.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := strings.Replace(before, "line 200", "line two hundred", 1)
+	diff, _, err := ws.ApplyFile(ws.Identity().ID, "big.txt", read.Snapshot.Revision, FileReplace, []byte(after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff.Patch) > 200 {
+		t.Fatalf("a %d-byte file with an eight-byte change produced a %d-byte patch", len(before), len(diff.Patch))
+	}
+	if !strings.Contains(diff.Patch, "two hundred") {
+		t.Fatalf("the patch does not carry the change: %q", diff.Patch)
+	}
+	// The span is exact: the replacement put back where it was reconstructs
+	// the new document from the old one.
+	start, end, replacement := changedSpan([]byte(before), []byte(after))
+	rebuilt := string(before[:start]) + string(replacement) + string(before[end:])
+	if rebuilt != after {
+		t.Fatalf("the changed span does not reconstruct the document")
+	}
+}
+
 // A symlink is not an unreadable document. Every worker checkout carries a
 // couple of scaffolding symlinks, and treating them as gaps made every search
 // in it incomplete, which in turn made every all-match replacement ineligible.

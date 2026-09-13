@@ -359,9 +359,12 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 		preparation.ToolDelta = append([]workspacecore.ToolDelta(nil), plan.Preparation.ToolDelta...)
 		preparation.CommittedDiffs = append([]workspacecore.ExactDiff(nil), plan.Preparation.CommittedDiffs...)
 		for index := range preparation.CommittedDiffs {
-			preparation.CommittedDiffs[index].Before = nil
-			preparation.CommittedDiffs[index].After = nil
-			preparation.CommittedDiffs[index].Patch = ""
+			// The bodies are too large for every plan reply to carry them, and
+			// leaving the fields present and null said "there is no patch"
+			// rather than "the patch is not in this reply". They are dropped
+			// and replaced by their sizes, the way a preview diff already
+			// reports them; the hashes stay, so the change is still checkable.
+			preparation.CommittedDiffs[index].Summarize()
 		}
 		for index := range preparation.ToolDelta {
 			preparation.ToolDelta[index].Before = nil

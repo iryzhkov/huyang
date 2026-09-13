@@ -84,6 +84,36 @@ func TestCompactRevisionDiffOmitsEndpointBodies(t *testing.T) {
 	}
 }
 
+// A committed plan's diffs travel as sizes and hashes. They used to travel
+// as three fields set to null, which reads as "this commit changed nothing"
+// rather than "the bodies are not in this reply".
+func TestCompactedCommittedDiffsCarrySizesNotNulls(t *testing.T) {
+	plan := workspacecore.PlanRecord{
+		PlanID: "plan_test", State: workspacecore.PlanCommitted,
+		Preparation: &workspacecore.PlanPreparation{
+			PreparedRevision: "prep_test",
+			CommittedDiffs: []workspacecore.ExactDiff{{
+				Path: "ledger.go", BeforeSHA256: "before", AfterSHA256: "after",
+				Before: []byte(strings.Repeat("a", 4096)), After: []byte(strings.Repeat("b", 4097)),
+				Patch: "@@ bytes 10:20 @@\n-\"old\"\n+\"new\"\n",
+			}},
+		},
+	}
+	encoded, err := json.Marshal(CompactTextData(map[string]any{"plan": plan}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(encoded)
+	if strings.Contains(rendered, `"before":`) || strings.Contains(rendered, `"patch":`) {
+		t.Fatalf("a committed diff carried its bodies: %s", rendered)
+	}
+	for _, want := range []string{`"before_bytes":4096`, `"after_bytes":4097`, `"patch_bytes":`, `"before_sha256":"before"`} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("a committed diff omitted %s: %s", want, rendered)
+		}
+	}
+}
+
 // A finding that was announced as new and has since gone stale is counted
 // under stale_count and left out of new; the report's stale count is
 // surfaced as is.
