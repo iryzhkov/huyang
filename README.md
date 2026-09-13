@@ -99,7 +99,23 @@ make build
 make smoke
 go test ./...
 go vet ./...
+make live
 ```
+
+`make check` runs the lot.
+
+`make live` is the service boundary: it starts the daemon as its own process with a
+disposable socket, state directory and friction spool, reaches it through the `huyang mcp`
+adapter, and drives real calls against the fixture repositories in `tests/fixtures/`. It is
+behind the `live` build tag, so `go test ./...` stays fast, and it is the only gate that
+sees what a client actually receives: the guide field reached every in-process test and no
+client at all, because the renderer that puts an envelope on the wire did not copy it.
+
+The suite includes a contract walk that calls every operation kind and navigation relation
+the catalog advertises. An advertised value with no implementation behind it fails there.
+The four frozen catalogs are also compared byte for byte against
+`docs/plans/fixtures/huyang-v1alpha1/catalog-*.json`; a deliberate schema change is adopted
+with `go test ./internal/mcpapi -run TestFrozenCatalog -update` and reviewed as a diff.
 
 The sole shipped executable is `bin/huyang`.
 

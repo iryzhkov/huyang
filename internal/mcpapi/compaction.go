@@ -229,7 +229,15 @@ func CompactTextEnvelope(envelope map[string]any) map[string]any {
 		"data": CompactTextData(envelope["data"]), "evidence": envelope["evidence"],
 		"warnings": envelope["warnings"], "next": envelope["next"],
 	}
-	for _, key := range []string{"code", "workspace", "transaction", "idempotency", "idempotency_persisted"} {
+	// The optional fields, copied when present. diagnostic_updates and guide
+	// are the two an agent acts on and neither is on every reply, so a
+	// renderer that forgets one drops it silently: the guide reached every
+	// in-process test and no client at all until a live test crossed the
+	// socket and found it missing.
+	for _, key := range []string{
+		"code", "workspace", "transaction", "idempotency", "idempotency_persisted",
+		"guide", "diagnostic_updates", "diagnostic_updates_truncated",
+	} {
 		if value, ok := envelope[key]; ok {
 			compact[key] = value
 		}

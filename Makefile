@@ -1,4 +1,4 @@
-.PHONY: build smoke lint budget check
+.PHONY: build smoke lint budget live check
 
 build:
 	go build -o bin/huyang ./cmd/huyang
@@ -20,7 +20,16 @@ lint:
 budget: build
 	bash tests/budget.sh
 
-# Full pre-commit gate: lint, then Go tests, then the smoke suites.
+# The service boundary: the daemon as its own process, reached through the
+# huyang mcp adapter over a socket, against the fixture repositories. It starts
+# processes and language servers, so it is tagged rather than part of go test
+# ./... - but it is the only gate that sees what a client actually receives.
+live: build
+	go test -tags live -count=1 ./internal/livetest/
+
+# Full pre-commit gate: lint, then Go tests, then the smoke suites, then the
+# live service boundary.
 check: lint
 	go test ./...
 	$(MAKE) smoke
+	$(MAKE) live
