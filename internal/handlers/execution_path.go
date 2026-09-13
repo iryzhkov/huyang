@@ -13,8 +13,8 @@ import (
 func (h *Handlers) pathExplain(ctx context.Context, requestID string, w *workspacecore.Workspace, args map[string]any, view *providerpool.PreparedView) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
 	defer cancel()
-	if mode, _ := args["mode"].(string); mode != "" && mode != "static" {
-		return mcpapi.Failure(requestID, w, "execution_mode_unavailable", workspacecore.Codedf("execution_mode_unavailable", "combined paths require the trace overlay stage"))
+	if args["mode"] == "combined" {
+		return h.combinedPathExplain(ctx, requestID, w, args, view)
 	}
 	maxPaths, maxDepth := argInt(args, "max_paths", workspacecore.MaxExecutionPaths), argInt(args, "max_depth", workspacecore.MaxExecutionDepth)
 	if maxPaths < 1 || maxPaths > workspacecore.MaxExecutionPaths || maxDepth < 1 || maxDepth > workspacecore.MaxExecutionDepth {

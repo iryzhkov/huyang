@@ -104,7 +104,7 @@ max_paths/max_depth. It automatically expands selected functions and returns
 ordered paths with the supporting snapshot. Ranking applies to the bounded
 candidates; it cannot guarantee globally optimal paths after a cap. Path IDs
 are stable identities supplied with their evidence, not registry lookup handles.
-Combined mode is unavailable until trace overlays exist.
+Combined mode requires an explicit completed trace from matching canonical source and workspace epoch; prepared overlays are refused.
 
 A statically_unreachable answer requires the closed Go adapter: an import-free
 package containing only nullary functions, direct calls, bare returns and
@@ -152,6 +152,29 @@ recovery. Completed traces cannot be appended to. Temporary breakpoint cleanup
 preserves pre-existing and subsequently replaced user breakpoints.
 Source handles retain their normal lifetime; trace source fingerprints remain
 available after handles expire. Every trace describes only one sampled execution.
+
+## Static/observed overlay (X26)
+
+path_explain mode=combined retains the static snapshot and candidate paths,
+adding a detached overlay keyed by graph, revision, trace ID and completed digest.
+Exact launch-source mappings plus unique caller/callee call-site matches mark
+static call edges observed. Duplicate call-site candidates remain ambiguous;
+a mapped stack relation missing from the static model is retained as a runtime-only
+adapter gap. No historical graph is rewritten.
+
+Verified declaration targets can qualify a call edge as not_observed; other
+unsampled edges remain uninstrumented. Both classifications concern only the
+retained samples. Dropped events and binary/source uncertainty remain visible.
+Unmapped stack frames are disclosed rather than guessed. Overlay work shares
+the acquisition deadline and has event, frame, edge and encoded byte ceilings.
+
+Sampled locations supply alternative frontier candidates. Thread transitions
+describe sample order, not synchronization. Branch-edge outcomes remain unknown:
+a stack in one branch does not establish the whole branch history. The live gate
+executes each branch separately, retains both static alternatives, records only
+the executed branch functions, preserves a dynamic callback as a runtime-only
+relation, and refuses an overlay after source changes. Combined status remains
+unknown rather than claiming that an entire candidate path was observed.
 
 ## Fixtures
 

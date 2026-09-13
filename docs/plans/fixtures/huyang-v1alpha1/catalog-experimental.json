@@ -2656,7 +2656,7 @@
           ]
         },
         "trace_id": {
-          "description": "Reserved for combined trace overlays.",
+          "description": "Required completed trace identity for combined mode; source revision and workspace epoch must match.",
           "type": "string"
         },
         "use_provider": {

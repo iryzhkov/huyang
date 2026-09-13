@@ -6,7 +6,7 @@ func pathExplainTool() ToolDescriptor {
 		InputSchema: schemaObject(map[string]any{"workspace_id": workspaceIDProperty(), "root": rootProperty(),
 			"revision": stringSchema("Current content revision or a prepared revision."), "plan_id": stringSchema("Read this plan's prepared revision."),
 			"plan_revision": map[string]any{"type": "integer", "minimum": 1}, "from": endpoint, "to": endpoint,
-			"mode": enumSchema("static", "combined"), "trace_id": stringSchema("Reserved for combined trace overlays."),
+			"mode": enumSchema("static", "combined"), "trace_id": stringSchema("Required completed trace identity for combined mode; source revision and workspace epoch must match."),
 			"use_provider": map[string]any{"type": "boolean"}, "max_paths": map[string]any{"type": "integer", "minimum": 1, "maximum": 16},
 			"max_depth": map[string]any{"type": "integer", "minimum": 1, "maximum": 64}}, "from", "to")}
 }
