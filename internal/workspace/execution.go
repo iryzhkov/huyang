@@ -40,13 +40,15 @@ type ExecutionEvidence struct {
 }
 
 type ExecutionNode struct {
-	Column   int                 `json:"column,omitempty"`
-	ID       string              `json:"id"`
-	Kind     string              `json:"kind"`
-	Path     string              `json:"path,omitempty"`
-	Name     string              `json:"name,omitempty"`
-	Line     int                 `json:"line,omitempty"`
-	Evidence []ExecutionEvidence `json:"evidence"`
+	Owner     string              `json:"owner,omitempty"`
+	Condition *ExecutionCondition `json:"condition,omitempty"`
+	Column    int                 `json:"column,omitempty"`
+	ID        string              `json:"id"`
+	Kind      string              `json:"kind"`
+	Path      string              `json:"path,omitempty"`
+	Name      string              `json:"name,omitempty"`
+	Line      int                 `json:"line,omitempty"`
+	Evidence  []ExecutionEvidence `json:"evidence"`
 }
 
 type ExecutionEdge struct {

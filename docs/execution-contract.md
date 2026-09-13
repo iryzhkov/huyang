@@ -81,6 +81,22 @@ The batch allows 32 files, 128 symbols, 1024 edges and 1024 references within
 1 MiB of facts, 16 hierarchy items and 1500 ms per server request. Provider
 acquisition uses at most six seconds of the twenty-second graph deadline.
 
+## Selected flow expansion (X23)
+
+expand_functions accepts up to 16 function IDs from an execution graph. The
+selection enters snapshot identity. Go expands each selected body into at most
+256 flow nodes with branches, exits, call sites and async boundaries. Conditions
+include expression hashes and identifiers; constant results require an
+identifier-free constant expression. Jump targets, case exhaustiveness, defer
+order, recovery, expression evaluation order and synchronization remain partial.
+
+TypeScript/Python/Lua provide bounded syntax slices with explicit incomplete CFG
+coverage. Their syntax_next links never count as execution paths. These slices
+describe conditions, exits and async syntax without claiming runtime ordering.
+Provider buffer hashes and source handles follow the X22 source contract.
+The selected-body expansion is broader than a minimal call-site slice and
+does not replace the interprocedural call summary.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

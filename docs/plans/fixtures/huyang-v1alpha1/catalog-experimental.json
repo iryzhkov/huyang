@@ -2377,6 +2377,14 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "expand_functions": {
+          "description": "Expand bounded flow evidence for selected function IDs from a prior graph.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
         "root": {
           "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
           "type": "string"

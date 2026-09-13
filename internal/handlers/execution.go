@@ -13,6 +13,10 @@ import (
 func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
 	defer cancel()
+	selected, err := executionFlowSelection(arguments)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
+	}
 	before := workspace.Identity()
 	sources, revision, coverage, err := workspace.ExecutionSources(ctx)
 	if err != nil {
@@ -33,6 +37,10 @@ func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspa
 	}
 	contributors := h.acquireExecution(ctx, workspace, sources, revision, withProvider)
 	contributors = append(contributors, workspacecore.AcquireImportExecutionCalls(ctx, request, sources, policy), executionBoundary{sources, coverage})
+	contributors, err = h.expandExecutionFlow(ctx, workspace, sources, &request, contributors, selected, withProvider)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
+	}
 	snapshot, err := workspacecore.BuildExecutionSnapshot(ctx, request, contributors...)
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
