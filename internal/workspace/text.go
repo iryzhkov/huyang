@@ -1130,7 +1130,15 @@ func (w *Workspace) mutateFile(path string, preExists bool, preimage []byte, pos
 		return err
 	}
 	if postExists {
-		err = atomicWriteFile(path, postimage, fs.FileMode(mode))
+		// A new file in a directory that does not exist yet is an ordinary
+		// thing to write, and there is no directory operation in the API to
+		// make the parent with, so creating it here is the difference between
+		// one call and a shell reach. The path is already confined to the
+		// workspace root. A rollback removes the file and leaves the empty
+		// directory, which is inert and untracked.
+		if err = os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+			err = atomicWriteFile(path, postimage, fs.FileMode(mode))
+		}
 	} else if err = os.Remove(path); err == nil {
 		err = syncDirectory(filepath.Dir(path))
 	}

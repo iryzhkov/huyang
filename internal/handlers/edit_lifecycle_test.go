@@ -196,6 +196,25 @@ func TestDeleteFileRequiresAGuard(t *testing.T) {
 	}
 }
 
+// A new file whose parent directory does not exist yet is written, parent
+// and all. There is no directory operation in the API, so the alternative is
+// a shell mkdir in the middle of a Huyang edit, which is what two unattended
+// runs did before this: create_file failed on the temporary file it writes
+// beside the target, with no next step.
+func TestCreateFileMakesItsParentDirectory(t *testing.T) {
+	handlers, workspaceID, root := literalFixture(t, map[string]string{"go.mod": "module fixture\n"})
+	created := lifecycleEdit(t, handlers, workspaceID, "mkparent", map[string]any{
+		"kind": "create_file", "path": "docs/friction/note.md", "content": "written in one call\n",
+	})
+	if created["outcome"] == "conflict" || created["outcome"] == "failed" {
+		t.Fatalf("create into a missing directory = %#v", created)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "docs", "friction", "note.md"))
+	if err != nil || string(content) != "written in one call\n" {
+		t.Fatalf("file after create = %q, %v", content, err)
+	}
+}
+
 // create_file on an existing path is refused with the revision that a
 // replace needs; with replace and that revision the file is overwritten in
 // one call, and a stale revision is refused.
