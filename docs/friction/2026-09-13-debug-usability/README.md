@@ -1,6 +1,6 @@
 # Debugging and usability workshop — 2026-09-13
 
-Bounded workshop and reproduced fixes complete; publication is awaiting exact release CI before fleet convergence. Original prompt: /home/igor/Work/plans/huyang-debug-usability-session-prompt.md. Coordinator thread: 92bdd669-fcfc-4a2c-90b1-3addf4dbe039.
+Bounded workshop, reproduced fixes and publication complete. Normandy, homelab and omarchy-pc converged; laptop revision remains unverified. Original prompt: /home/igor/Work/plans/huyang-debug-usability-session-prompt.md. Coordinator thread: 92bdd669-fcfc-4a2c-90b1-3addf4dbe039.
 
 Implementation: **5d244adf13c978599a267ee6f35b446faf7430c5**, pushed to feature/huyang and main on GitHub and Forgejo. Baseline: 2c22cbf24c4242eca17533866e86a9da1827e8c6. Raw participant reports are unedited; use coordinator verdicts and [findings](findings.md) to assess their claims. [Scenario manifest](scenario-manifest.json) records run provenance and terminal states.
 
@@ -45,4 +45,4 @@ Normandy was upgraded through UpKeeper's regular controller pull API to clean5d2
 
 UpKeeper capture ran from Normandy, then unrelated environment provenance was restored before publication. Release **2aa8ecc557f56a1dd8b93f68d16cf99a53ca53cd** is pushed to both configured remotes. Its manifest changes only the Huyang pin and capture timestamp. Local release gate passed233 tests, Ansible checks and4 redaction tests using an isolated Python3.11 environment; the existing Python3.14 environment was incompatible with pinned Ansible and was not altered.
 
-[Exact release CI](https://github.com/iryzhkov/UpKeeper/actions/runs/34767567619) is pending. Fleet convergence has not been started; the laptop remains managed by its local UpKeeper pull --self timer. No distributed completion claimed.
+[Exact release CI](https://github.com/iryzhkov/UpKeeper/actions/runs/34767567619) passed before fleet convergence. UpKeeper run20260913T160743Z-cd089171 exited0: Normandy converged, homelab and omarchy-pc updated, all at clean5d244ad with active services, sockets and successful MCP probes. [Fleet record](fleet-convergence.json) pins the exact published manifest. Laptop was skipped as self-managed; its installed revision remains unverified and it continues through its local UpKeeper pull --self timer.
