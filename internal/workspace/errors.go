@@ -15,6 +15,7 @@ const (
 	CodePreparedRevisionChanged   = "prepared_revision_changed"
 	CodePlanRevisionChanged       = "plan_revision_changed"
 	CodePlanStateInvalid          = "plan_state_invalid"
+	CodePlanNotFound              = "plan_not_found"
 	CodePlanValidationConflicts   = "plan_validation_conflicts"
 	CodeProvisionalNotAccepted    = "provisional_not_accepted"
 	CodeInvariantNotProven        = "invariant_not_proven"

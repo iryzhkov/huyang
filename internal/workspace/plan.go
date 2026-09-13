@@ -646,13 +646,21 @@ func (w *Workspace) InspectPlan(planID string, expected uint64) (PlanRecord, err
 	defer w.plansMu.Unlock()
 	plan, ok := w.plans[planID]
 	if !ok {
-		return PlanRecord{}, errors.New("unknown plan")
+		return PlanRecord{}, unknownPlan(planID)
 	}
 	if expected != 0 && plan.PlanRevision != expected {
 		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
 	}
 	// Inspection is a pure read: it records no event and never rewrites the plan file.
 	return clonePlan(plan), nil
+}
+
+// unknownPlan is a plan id this workspace has never held, or one retention
+// has removed. It is a fact about the request rather than about the service,
+// so it carries its own code: nothing about waiting or retrying reaches a
+// plan that is not there.
+func unknownPlan(planID string) error {
+	return Codedf(CodePlanNotFound, "no plan %s in this workspace; it was never created, or it was discarded and collected", planID)
 }
 
 func planRevisionChanged(expected, current uint64) error {
@@ -664,7 +672,7 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	defer w.plansMu.Unlock()
 	plan, ok := w.plans[planID]
 	if !ok {
-		return PlanRecord{}, errors.New("unknown plan")
+		return PlanRecord{}, unknownPlan(planID)
 	}
 	// READY and PROVISIONAL plans hold the provider lease and staged buffers, so they must
 	// be rolled back before their operations change; every other editable state carries no
@@ -774,7 +782,7 @@ func (w *Workspace) DiscardPlan(planID string, expected uint64) (PlanRecord, err
 	defer w.plansMu.Unlock()
 	plan, ok := w.plans[planID]
 	if !ok {
-		return PlanRecord{}, errors.New("unknown plan")
+		return PlanRecord{}, unknownPlan(planID)
 	}
 	if expected == 0 || plan.PlanRevision != expected {
 		return PlanRecord{}, planRevisionChanged(expected, plan.PlanRevision)
@@ -800,7 +808,7 @@ func (w *Workspace) PreviewPlan(planID string, expected uint64) (PlanRecord, err
 	plan, ok := w.plans[planID]
 	w.plansMu.Unlock()
 	if !ok {
-		return PlanRecord{}, errors.New("unknown plan")
+		return PlanRecord{}, unknownPlan(planID)
 	}
 	if plan.State != PlanOpen && plan.State != PlanPreviewed {
 		return PlanRecord{}, errors.New("plan cannot be previewed in its current state")

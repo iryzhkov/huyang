@@ -302,7 +302,7 @@ func (w *Workspace) recordInvariants(planID string, expected uint64, invariants 
 	defer w.plansMu.Unlock()
 	previous, ok := w.plans[planID]
 	if !ok {
-		return errors.New("unknown plan")
+		return unknownPlan(planID)
 	}
 	if expected == 0 || previous.PlanRevision != expected {
 		return planRevisionChanged(expected, previous.PlanRevision)
@@ -456,7 +456,7 @@ func (w *Workspace) transitionPlanWithConflict(planID string, expected uint64, s
 	defer w.plansMu.Unlock()
 	previous, ok := w.plans[planID]
 	if !ok {
-		return PlanRecord{}, errors.New("unknown plan")
+		return PlanRecord{}, unknownPlan(planID)
 	}
 	if expected == 0 || previous.PlanRevision != expected {
 		return PlanRecord{}, planRevisionChanged(expected, previous.PlanRevision)

@@ -261,7 +261,8 @@ func (h *Handlers) planDiscard(ctx context.Context, workspace *workspacecore.Wor
 func (h *Handlers) planApply(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest) map[string]any {
 	var plan workspacecore.PlanRecord
 	wasProvisional := false
-	if current, inspectErr := workspace.InspectPlan(request.PlanID, request.PlanRevision); inspectErr == nil {
+	current, inspectErr := workspace.InspectPlan(request.PlanID, request.PlanRevision)
+	if inspectErr == nil {
 		plan = current
 		wasProvisional = current.State == workspacecore.PlanProvisional
 	}
@@ -274,6 +275,8 @@ func (h *Handlers) planApply(ctx context.Context, requestID string, workspace *w
 		case recoverable:
 			stager, plan, err = recoveredStager, recoveredPlan, nil
 			wasProvisional = recoveredPlan.State == workspacecore.PlanProvisional
+		default:
+			err = missingPreparation(err, plan, inspectErr)
 		}
 	}
 	if err == nil {
@@ -309,6 +312,26 @@ func (h *Handlers) planApply(ctx context.Context, requestID string, workspace *w
 		}}
 	}
 	return result
+}
+
+// missingPreparation says why an apply found no prepared sandbox. The
+// provider is to blame only for a plan that ought to have one: a plan nobody
+// prepared, one that was applied or discarded already, and one that never
+// existed are facts about the request. Reporting them as provider_unavailable
+// sends a code-driven caller to restart a language server, which is the
+// documented meaning of that code and cannot help with any of the three.
+func missingPreparation(err error, plan workspacecore.PlanRecord, inspectErr error) error {
+	if workspacecore.ErrorCode(err) != workspacecore.CodeProviderUnavailable {
+		return err
+	}
+	switch {
+	case inspectErr != nil:
+		return inspectErr
+	case plan.State != workspacecore.PlanReady && plan.State != workspacecore.PlanProvisional:
+		return workspacecore.Codedf(workspacecore.CodePlanStateInvalid,
+			"plan %s is %s and holds no preparation to commit; only a prepared plan is applied", plan.PlanID, plan.State)
+	}
+	return err
 }
 
 func markAppliedFromProvisional(result map[string]any, plan workspacecore.PlanRecord) {
@@ -421,6 +444,10 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 		return item
 	}
 	switch {
+	case code == workspacecore.CodePlanNotFound:
+		// There is no plan to act on, so every follow-up that names one is a
+		// dead end; what is left is to make one.
+		return []any{map[string]any{"tool": "change_plan", "action": "create", "use_new_idempotency_key": true}}
 	case code == workspacecore.CodeProvisionalNotAccepted && plan.PlanID != "":
 		return []any{
 			withPlan("apply", map[string]any{
@@ -461,7 +488,7 @@ func classifyPlanError(err error, plan workspacecore.PlanRecord) (string, string
 	switch code := workspacecore.ErrorCode(err); code {
 	case workspacecore.CodePlanRevisionChanged, workspacecore.CodeWorkspaceBusy, workspacecore.CodePlanValidationConflicts,
 		workspacecore.CodeWorkspaceEpochChanged, workspacecore.CodeProvisionalNotAccepted, workspacecore.CodePlanStateInvalid,
-		workspacecore.CodeInvariantNotProven:
+		workspacecore.CodeInvariantNotProven, workspacecore.CodePlanNotFound:
 		return code, "conflict"
 	// A stale prepared revision keeps its own code. Both of these are
 	// conflicts refused before any write, and they ask for different

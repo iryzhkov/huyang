@@ -289,6 +289,75 @@ func TestAnExternalWriteBeforeApplyIsRefused(t *testing.T) {
 	}
 }
 
+// An apply that finds no prepared sandbox says which state error it is: a
+// plan nobody prepared, a plan already applied, and a plan id that never
+// existed are all facts about the request. Reported as provider_unavailable
+// they send a code-driven caller to restart a language server instead.
+func TestApplyWithoutAPreparationIsAStateError(t *testing.T) {
+	instance := start(t)
+	session := instance.connect("experimental")
+	root := fixture(t, "go")
+	opened := call(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := workspaceIdentity(t, opened)
+
+	created := planAction(t, session, workspaceID, "unprepared-create", map[string]any{
+		"action": "create",
+		"operations": []any{map[string]any{
+			"op_id": "add-note", "kind": "create_file", "path": "note.txt", "content": "noted\n",
+		}},
+	})
+	plan, _ := data(created)["plan"].(map[string]any)
+	unprepared := planAction(t, session, workspaceID, "unprepared-apply", map[string]any{
+		"action": "apply", "plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+		"prepared_revision": "prep_none",
+	})
+	if code, _ := unprepared["code"].(string); code != "plan_state_invalid" {
+		t.Fatalf("applying an unprepared plan = %q: %s", code, summary(unprepared))
+	}
+	if !offers(nextActions(unprepared), "prepare") {
+		t.Fatalf("an OPEN plan was not offered the prepare it needs: %#v", unprepared["next"])
+	}
+	if _, err := os.Stat(filepath.Join(root, "note.txt")); err == nil {
+		t.Fatal("a refused apply created the file")
+	}
+
+	missing := planAction(t, session, workspaceID, "missing-apply", map[string]any{
+		"action": "apply", "plan_id": "plan_00000000000000000000000000000000", "plan_revision": 1,
+		"prepared_revision": "prep_none",
+	})
+	if code, _ := missing["code"].(string); code != "plan_not_found" {
+		t.Fatalf("applying a plan that never existed = %q: %s", code, summary(missing))
+	}
+	if !offers(nextActions(missing), "create") {
+		t.Fatalf("a missing plan left nothing to do next: %#v", missing["next"])
+	}
+
+	// A plan that has already been applied is in the same family: its sandbox
+	// is gone because the commit consumed it, and the way forward is not to
+	// prepare the plan again.
+	prepared := planAction(t, session, workspaceID, "twice-prepare", map[string]any{
+		"action": "prepare", "plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+	})
+	committed, revision, _ := preparedPlan(t, prepared)
+	applied := planAction(t, session, workspaceID, "twice-apply", map[string]any{
+		"action": "apply", "plan_id": committed["plan_id"], "plan_revision": committed["plan_revision"],
+		"prepared_revision": revision, "accept_provisional": true,
+	})
+	if verdict := outcome(applied); verdict != "ok" && verdict != "provisional" {
+		t.Fatalf("apply = %s: %s", verdict, summary(applied))
+	}
+	again := planAction(t, session, workspaceID, "twice-apply-again", map[string]any{
+		"action": "apply", "plan_id": committed["plan_id"], "plan_revision": committed["plan_revision"],
+		"prepared_revision": revision, "accept_provisional": true,
+	})
+	if code, _ := again["code"].(string); code != "plan_state_invalid" {
+		t.Fatalf("applying a committed plan again = %q: %s", code, summary(again))
+	}
+	if offers(nextActions(again), "prepare") {
+		t.Fatalf("a committed plan was offered another preparation: %#v", again["next"])
+	}
+}
+
 // Applying with the prepared revision of a preparation that has been
 // released is refused under its own code, not under the coarser one for a
 // changed commit precondition. The two mean different things to a caller
