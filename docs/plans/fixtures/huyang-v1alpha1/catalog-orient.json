@@ -1,0 +1,653 @@
+[
+  {
+    "description": "Open a project (or an exact list of documents) and get its workspace_id, revision, capabilities, the verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), a top-level overview and recent commits. Call it once per repository root and pass the workspace_id to every other tool. Cheapest calls afterwards: read (path, line window, symbol_locator or several targets), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "description": "Allowlisted document.",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "project",
+            "documents"
+          ],
+          "type": "string"
+        },
+        "overview": {
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; required for kind=project.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "name": "workspace_open"
+  },
+  {
+    "description": "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "view": {
+          "enum": [
+            "status",
+            "overview",
+            "map"
+          ],
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id"
+      ],
+      "type": "object"
+    },
+    "name": "workspace_inspect"
+  },
+  {
+    "description": "Find text or symbols in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex; mode=references, definition, implementation, type_definition, incoming_calls or outgoing_calls asks the language server about the symbol named by query and falls back to literal matches when no server answers. paths scopes the hits, context_lines adds the surrounding lines; refine a large result set instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "context_lines": {
+          "description": "Lines of numbered context around each hit, like grep -C.",
+          "maximum": 20,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "git_history": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "items": {
+                "enum": [
+                  "message",
+                  "path",
+                  "diff"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "limit": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "query": {
+              "description": "Literal query over bounded local history.",
+              "type": "string"
+            },
+            "ref": {
+              "description": "Local revision or range; defaults to HEAD.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        },
+        "include_handles": {
+          "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
+          "type": "boolean"
+        },
+        "include_ranges": {
+          "description": "Add byte anchors to every hit.",
+          "type": "boolean"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "literal",
+            "regex",
+            "references",
+            "definition",
+            "implementation",
+            "type_definition",
+            "incoming_calls",
+            "outgoing_calls"
+          ],
+          "type": "string"
+        },
+        "paths": {
+          "description": "Keep only hits under these paths.",
+          "items": {
+            "description": "Path substring or glob (whole path or base name).",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "description": "Text, regular expression, or for the semantic modes a symbol name.",
+          "type": "string"
+        },
+        "refine": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "matched_text": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "literal": {
+                  "description": "Additional literal match constraint.",
+                  "type": "string"
+                },
+                "regex": {
+                  "description": "Additional regular-expression constraint.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "path": {
+              "description": "Additional path substring.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "result_set_handle": {
+          "description": "Frozen current-source result set.",
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "search"
+  },
+  {
+    "description": "Find declarations by name (substring match) and return handles that read and edit_apply accept. Go and Python resolve natively without a language server; other languages go through the semantic provider and merge into the native results.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "include_source": {
+          "type": "boolean"
+        },
+        "query": {
+          "description": "Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "symbol_find"
+  },
+  {
+    "description": "Ask the language server for the definition, references, implementation, type, callers, callees or hover of a declaration. Name it with symbol (one call, resolved to its declaration) or target it with symbol_locator {path, name_path}. Needs an attached language server (language_server_status); for a plain text search use search.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "definition",
+            "type_definition",
+            "implementation",
+            "references",
+            "incoming_calls",
+            "outgoing_calls",
+            "hover"
+          ],
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "symbol": {
+          "description": "Declaration name; resolved to its one declaration so no target is needed.",
+          "type": "string"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "handle": {
+                  "description": "Opaque revision-bound handle.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "handle"
+              ],
+              "type": "object"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "file_range": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "after_sha256": {
+                      "description": "SHA-256 of the bounded following anchor.",
+                      "type": "string"
+                    },
+                    "anchor_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "before_sha256": {
+                      "description": "SHA-256 of the bounded preceding anchor.",
+                      "type": "string"
+                    },
+                    "byte_end": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "byte_start": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "expected_sha256": {
+                      "description": "SHA-256 of the exact selected bytes.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Workspace-relative or absolute file path.",
+                      "type": "string"
+                    },
+                    "revision_id": {
+                      "description": "Expected document revision.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "revision_id",
+                    "byte_start",
+                    "byte_end",
+                    "expected_sha256",
+                    "before_sha256",
+                    "after_sha256",
+                    "anchor_bytes"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "file_range"
+              ],
+              "type": "object"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "symbol_locator": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "symbol_locator"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "object"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation"
+      ],
+      "type": "object"
+    },
+    "name": "navigate"
+  },
+  {
+    "description": "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limit": {
+          "description": "history and changes views: number of entries.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_lines": {
+          "description": "Deliver at most this many lines per source target; a capped reply says truncated and reports the total line count.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numbered": {
+          "description": "Prefix each line with its number and a tab.",
+          "type": "boolean"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "handle": {
+                  "description": "Opaque revision-bound handle.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "handle"
+              ],
+              "type": "object"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "file_range": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "after_sha256": {
+                      "description": "SHA-256 of the bounded following anchor.",
+                      "type": "string"
+                    },
+                    "anchor_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "before_sha256": {
+                      "description": "SHA-256 of the bounded preceding anchor.",
+                      "type": "string"
+                    },
+                    "byte_end": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "byte_start": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "expected_sha256": {
+                      "description": "SHA-256 of the exact selected bytes.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Workspace-relative or absolute file path.",
+                      "type": "string"
+                    },
+                    "revision_id": {
+                      "description": "Expected document revision.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "revision_id",
+                    "byte_start",
+                    "byte_end",
+                    "expected_sha256",
+                    "before_sha256",
+                    "after_sha256",
+                    "anchor_bytes"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "file_range"
+              ],
+              "type": "object"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "symbol_locator": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "symbol_locator"
+              ],
+              "type": "object"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "description": "Workspace-relative or absolute text file path.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "object"
+        },
+        "targets": {
+          "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.",
+          "items": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "end_line": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "max_lines": {
+                "description": "Cap for this target; overrides the call-level max_lines.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "numbered": {
+                "description": "Prefix each line with its number; overrides the call-level numbered.",
+                "type": "boolean"
+              },
+              "path": {
+                "description": "Workspace-relative file path.",
+                "type": "string"
+              },
+              "start_line": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "symbol_locator": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "properties": {
+                  "name_path": {
+                    "description": "Declaration name path.",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "File path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "name_path"
+                ],
+                "type": "object"
+              },
+              "view": {
+                "enum": [
+                  "source",
+                  "outline"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "type": "array"
+        },
+        "view": {
+          "enum": [
+            "source",
+            "outline",
+            "history",
+            "changes"
+          ],
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "read"
+  },
+  {
+    "description": "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "full": {
+          "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
+          "type": "boolean"
+        },
+        "since": {
+          "description": "Optional diagnostic cursor.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id"
+      ],
+      "type": "object"
+    },
+    "name": "diagnostics"
+  },
+  {
+    "description": "Page pending or final diff, diagnostic, command, or provenance evidence.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "Optional page cursor.",
+          "type": "string"
+        },
+        "evidence_id": {
+          "description": "Evidence identifier.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "evidence_id"
+      ],
+      "type": "object"
+    },
+    "name": "evidence_get"
+  }
+]

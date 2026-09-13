@@ -12,6 +12,11 @@ import (
 // APIVersion is the contract revision every envelope declares.
 const APIVersion = "huyang.workspace/v1alpha1"
 
+// APIVersionExperimental labels replies to a caller that opted into the
+// experimental profile, so an unfinished input shape is never mistaken for
+// part of the frozen contract.
+const APIVersionExperimental = "huyang.workspace/v1alpha2"
+
 // MaxNextEntries bounds the next array the output schema advertises.
 const MaxNextEntries = 2
 

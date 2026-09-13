@@ -14,6 +14,11 @@ const (
 	ProfileOrient Profile = "orient"
 	ProfileEdit   Profile = "edit"
 	ProfileDebug  Profile = "debug"
+	// ProfileExperimental is the frozen surface plus whatever input shape is
+	// being designed. A caller opts into it knowingly and loses nothing by
+	// doing so; the four profiles above never acquire an unfinished tool,
+	// because their schemas are a contract with every agent that cached them.
+	ProfileExperimental Profile = "experimental"
 )
 
 type ToolDescriptor struct {
@@ -24,6 +29,10 @@ type ToolDescriptor struct {
 	ReadOnly    bool
 	Destructive bool
 	Idempotent  bool
+	// Experimental marks a tool whose input shape is still being designed. It
+	// is advertised in ProfileExperimental only, under APIVersionExperimental,
+	// and may change without the deliberation the frozen catalog requires.
+	Experimental bool
 	// Class is the scheduler class the handler runs under. It is declared next
 	// to the schema so a tool cannot be registered without one; ClassForCall
 	// refines it for argument-dependent behaviour.
@@ -36,6 +45,8 @@ const (
 	MaxPlanContentBytes  = 4 << 20
 )
 
+// ProfileOrder is the frozen catalog: these four are compared byte for byte
+// against their fixtures. ProfileExperimental is deliberately absent.
 var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug}
 
 var modernProfileNames = map[Profile][]string{
@@ -55,6 +66,18 @@ var modernProfileNames = map[Profile][]string{
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
 		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
 	},
+}
+
+// experimentalProfileNames is the full frozen catalog plus every tool marked
+// experimental, assembled once at startup so the two cannot drift.
+func experimentalProfileNames() []string {
+	names := append([]string(nil), modernProfileNames[ProfileFull]...)
+	for _, descriptor := range Tools {
+		if descriptor.Experimental {
+			names = append(names, descriptor.Name)
+		}
+	}
+	return names
 }
 
 var Tools = buildModernTools()
@@ -346,6 +369,9 @@ func Catalog(profile Profile) []ToolDescriptor {
 		byName[descriptor.Name] = descriptor
 	}
 	names := modernProfileNames[profile]
+	if profile == ProfileExperimental {
+		names = experimentalProfileNames()
+	}
 	catalog := make([]ToolDescriptor, 0, len(names))
 	for _, name := range names {
 		if descriptor, ok := byName[name]; ok {
