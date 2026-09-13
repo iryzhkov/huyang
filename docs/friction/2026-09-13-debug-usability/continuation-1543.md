@@ -1,0 +1,11 @@
+# Checkpoint: validated source and fresh wave
+
+Source commit 5d244adf13c978599a267ee6f35b446faf7430c5 on feature/huyang contains response controls, cancellation classification fix and audited workshop evidence. Full make check budget plus go test -race ./internal/handlers passed in /tmp/huyang-usability-gates-cancel.log. Git diff check clean before commit. Clean build copied to /tmp/huyang-5d244ad-workshop; go version -m confirms exact revision and vcs.modified=false. This immutable binary is the fresh participant endpoint implementation.
+
+Pushed feature/huyang through origin successfully to GitHub and Forgejo. GitHub actions/workflows returns []: no source CI workflow to claim. Main not advanced, no installation/publication yet.
+
+Three fresh verification sessions accepted exactly once, prompt artifact mappings verified (creation order differed from submission order). See scenario-manifest.json verification_wave. 15m scheduler timeout applied to all before dispatch, graph revision2; 20turn supported cap. Two independent output/rename/receipt user goals (Muse+Haiku), one targeted debug trace/value_origin retry (Muse), each owns new daemon/state/socket with clean binary and no prior report/solution reading. No further broad workshop wave intended. Native terminal waits to be registered and park.
+
+Current uncommitted changes are new verification prompts, updated scenario manifest and this checkpoint. Keep them for final audit commit after handoffs. No code changes since validated source checkpoint. The old service is still2c22cbf, all old baseline/assigned runs are terminal. Fresh verification uses isolated new binary; can later validate shared controller with UpKeeper as deployment plan requires.
+
+Publication preflight: upkeeper executable resolves /home/igor/Work/dev-fleet/scripts/upkeeper (not Work/upkeeper or Work/UpKeeper). upkeeper push flags --no-commit/--no-push/--json and remotes. Must workspace_open /home/igor/Work/dev-fleet before source reads; inspect repo/instructions/current release, preserve unrelated pins/env/config. Capture only validated controller observed environment from clean current checkout. Main/source remotes and exact release CI/convergence remain required after fresh verification. User authorized publication already; do not ask again.

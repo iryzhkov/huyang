@@ -1,0 +1,251 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "language_server_status",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"attached_language_count\":7,\"attached_server_count\":6,\"attached_servers\":[\"gopls\",\"lua_ls\",\"ts_ls\",\"pyright\",\"bashls\",\"taplo\"],\"failed_attachment_languages\":[],\"install_options\":{\"json\":[\"ast_grep\",\"biome\",\"dprint\",\"jsonls\",\"oxfmt\",\"snyk_ls\",\"spectral\",\"symfony_lsp\"],\"markdown\":[\"codebook\",\"dprint\",\"grammarly\",\"harper_ls\",\"htmx\",\"ltex\",\"ltex_plus\",\"markdown_oxide\",\"marksman\",\"mpls\",\"oxfmt\",\"panache\",\"prosemd_lsp\",\"remark_ls\",\"rumdl\",\"tailwindcss\",\"unocss\",\"vale_ls\",\"zk\"],\"text\":[\"codebook\",\"ltex\",\"ltex_plus\",\"textlsp\",\"vale_ls\"]},\"language_servers\":{\"languages\":[{\"attach\":\"attached\",\"debugger\":\"delve (built-in, found at /home/igor/.local/share/nvim/mason/bin/dlv)\",\"files\":334,\"filetype\":\"go\",\"lsp\":\"gopls\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":true},{\"attach\":\"unconfigured\",\"files\":98,\"filetype\":\"json\",\"install_options_key\":\"json\",\"lsp\":\"none\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":true},{\"attach\":\"unconfigured\",\"files\":79,\"filetype\":\"markdown\",\"install_options_key\":\"markdown\",\"lsp\":\"none\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":true},{\"attach\":\"attached\",\"files\":29,\"filetype\":\"lua\",\"lsp\":\"lua_ls\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":false,\"verification_parser_recovery\":\"The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language.\"},{\"attach\":\"attached\",\"debugger\":\"js-debug (built-in, found at /home/igor/.local/share/nvim/mason/packages/js-debug-adapter/js-debug/src/dapDebugServer.js)\",\"files\":14,\"filetype\":\"typescript\",\"lsp\":\"ts_ls\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":false,\"verification_parser_recovery\":\"The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language.\"},{\"attach\":\"attached\",\"debugger\":\"debugpy (built-in, found at /home/igor/.local/share/nvim/mason/packages/debugpy/venv/bin/python)\",\"files\":13,\"filetype\":\"python\",\"lsp\":\"pyright\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":false,\"verification_parser_recovery\":\"The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language.\"},{\"attach\":\"attached\",\"files\":12,\"filetype\":\"gomod\",\"lsp\":\"gopls\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":false,\"verification_parser_recovery\":\"The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language.\"},{\"attach\":\"attached\",\"files\":11,\"filetype\":\"sh\",\"lsp\":\"bashls\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":false,\"verification_parser_recovery\":\"The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language.\"},{\"attach\":\"unconfigured\",\"files\":5,\"filetype\":\"text\",\"install_options_key\":\"text\",\"lsp\":\"none\",\"treesitter_parser\":false,\"treesitter_parser_installed\":false,\"verification_parser\":false},{\"attach\":\"attached\",\"files\":3,\"filetype\":\"toml\",\"lsp\":\"taplo\",\"treesitter_parser\":true,\"treesitter_parser_installed\":true,\"verification_parser\":true}],\"note\":\"6 further filetypes are in this tree and were not probed for a parser or a server (make (2), gitignore (2), tsv (2), systemd (1), gosum (1), yaml (1)); skim or find_symbol on one of their files says what it has\"},\"missing_languages\":[\"json\",\"markdown\",\"text\"],\"provider\":{\"backend\":\"embed\",\"capabilities\":[\"execute\",\"navigation\",\"rename\",\"diagnostics\",\"code_actions\"],\"detail\":\"nvim-dap runtime: /home/igor/.local/share/nvim/lazy/nvim-dap (c9a0738e45f1bd41d792a126941348dce661cf9b)\",\"endpoint\":\"\",\"epoch\":1,\"failure_code\":\"\",\"languages\":[\"*\"],\"observed_at\":\"2026-09-13T08:46:08.31114188-07:00\",\"process_id\":1555014,\"provider_id\":\"embed_f3f7b79fea0c98e9\",\"state\":\"healthy\"},\"starting_languages\":[]},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[{\"action\":\"install\",\"install_options_key\":\"json\",\"language\":\"json\",\"selection\":\"automatic_preferred\",\"tool\":\"language_server_setup\",\"use_new_idempotency_key\":true},{\"action\":\"install\",\"install_options_key\":\"markdown\",\"language\":\"markdown\",\"selection\":\"automatic_preferred\",\"tool\":\"language_server_setup\",\"use_new_idempotency_key\":true}],\"outcome\":\"ok\",\"request_id\":\"req_45\",\"summary\":\"6 unique language servers attached across 7 workspace language modes\",\"warnings\":[\"Some workspace languages have no attached language server.\"],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_14\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "attached_language_count": 7,
+     "attached_server_count": 6,
+     "attached_servers": [
+      "gopls",
+      "lua_ls",
+      "ts_ls",
+      "pyright",
+      "bashls",
+      "taplo"
+     ],
+     "failed_attachment_languages": [],
+     "install_options": {
+      "json": [
+       "ast_grep",
+       "biome",
+       "dprint",
+       "jsonls",
+       "oxfmt",
+       "snyk_ls",
+       "spectral",
+       "symfony_lsp"
+      ],
+      "markdown": [
+       "codebook",
+       "dprint",
+       "grammarly",
+       "harper_ls",
+       "htmx",
+       "ltex",
+       "ltex_plus",
+       "markdown_oxide",
+       "marksman",
+       "mpls",
+       "oxfmt",
+       "panache",
+       "prosemd_lsp",
+       "remark_ls",
+       "rumdl",
+       "tailwindcss",
+       "unocss",
+       "vale_ls",
+       "zk"
+      ],
+      "text": [
+       "codebook",
+       "ltex",
+       "ltex_plus",
+       "textlsp",
+       "vale_ls"
+      ]
+     },
+     "language_servers": {
+      "languages": [
+       {
+        "attach": "attached",
+        "debugger": "delve (built-in, found at /home/igor/.local/share/nvim/mason/bin/dlv)",
+        "files": 334,
+        "filetype": "go",
+        "lsp": "gopls",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": true
+       },
+       {
+        "attach": "unconfigured",
+        "files": 98,
+        "filetype": "json",
+        "install_options_key": "json",
+        "lsp": "none",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": true
+       },
+       {
+        "attach": "unconfigured",
+        "files": 79,
+        "filetype": "markdown",
+        "install_options_key": "markdown",
+        "lsp": "none",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": true
+       },
+       {
+        "attach": "attached",
+        "files": 29,
+        "filetype": "lua",
+        "lsp": "lua_ls",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": false,
+        "verification_parser_recovery": "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+       },
+       {
+        "attach": "attached",
+        "debugger": "js-debug (built-in, found at /home/igor/.local/share/nvim/mason/packages/js-debug-adapter/js-debug/src/dapDebugServer.js)",
+        "files": 14,
+        "filetype": "typescript",
+        "lsp": "ts_ls",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": false,
+        "verification_parser_recovery": "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+       },
+       {
+        "attach": "attached",
+        "debugger": "debugpy (built-in, found at /home/igor/.local/share/nvim/mason/packages/debugpy/venv/bin/python)",
+        "files": 13,
+        "filetype": "python",
+        "lsp": "pyright",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": false,
+        "verification_parser_recovery": "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+       },
+       {
+        "attach": "attached",
+        "files": 12,
+        "filetype": "gomod",
+        "lsp": "gopls",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": false,
+        "verification_parser_recovery": "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+       },
+       {
+        "attach": "attached",
+        "files": 11,
+        "filetype": "sh",
+        "lsp": "bashls",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": false,
+        "verification_parser_recovery": "The embedded Tree-sitter parser is usable for semantic operations; exact verification uses the trusted configured project check for this language."
+       },
+       {
+        "attach": "unconfigured",
+        "files": 5,
+        "filetype": "text",
+        "install_options_key": "text",
+        "lsp": "none",
+        "treesitter_parser": false,
+        "treesitter_parser_installed": false,
+        "verification_parser": false
+       },
+       {
+        "attach": "attached",
+        "files": 3,
+        "filetype": "toml",
+        "lsp": "taplo",
+        "treesitter_parser": true,
+        "treesitter_parser_installed": true,
+        "verification_parser": true
+       }
+      ],
+      "note": "6 further filetypes are in this tree and were not probed for a parser or a server (make (2), gitignore (2), tsv (2), systemd (1), gosum (1), yaml (1)); skim or find_symbol on one of their files says what it has"
+     },
+     "missing_languages": [
+      "json",
+      "markdown",
+      "text"
+     ],
+     "provider": {
+      "backend": "embed",
+      "capabilities": [
+       "execute",
+       "navigation",
+       "rename",
+       "diagnostics",
+       "code_actions"
+      ],
+      "detail": "nvim-dap runtime: /home/igor/.local/share/nvim/lazy/nvim-dap (c9a0738e45f1bd41d792a126941348dce661cf9b)",
+      "endpoint": "",
+      "epoch": 1,
+      "failure_code": "",
+      "languages": [
+       "*"
+      ],
+      "observed_at": "2026-09-13T08:46:08.31114188-07:00",
+      "process_id": 1555014,
+      "provider_id": "embed_f3f7b79fea0c98e9",
+      "state": "healthy"
+     },
+     "starting_languages": []
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "next": [
+     {
+      "action": "install",
+      "install_options_key": "json",
+      "language": "json",
+      "selection": "automatic_preferred",
+      "tool": "language_server_setup",
+      "use_new_idempotency_key": true
+     },
+     {
+      "action": "install",
+      "install_options_key": "markdown",
+      "language": "markdown",
+      "selection": "automatic_preferred",
+      "tool": "language_server_setup",
+      "use_new_idempotency_key": true
+     }
+    ],
+    "outcome": "ok",
+    "request_id": "req_45",
+    "summary": "6 unique language servers attached across 7 workspace language modes",
+    "warnings": [
+     "Some workspace languages have no attached language server."
+    ],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_14"
+    }
+   }
+  }
+ },
+ "req_bytes": 168,
+ "resp_bytes": 11085
+}

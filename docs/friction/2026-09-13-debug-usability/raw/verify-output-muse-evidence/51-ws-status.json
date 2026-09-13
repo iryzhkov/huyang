@@ -1,0 +1,198 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+   "name": "workspace_inspect",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "view": "status"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"inspection\":{\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"kind\":\"project\",\"root\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace\",\"epoch\":1,\"state_seq\":14},\"limits\":{\"max_files\":2000,\"max_bytes\":33554432,\"max_depth\":32,\"max_matches\":1000},\"coverage\":{\"complete\":true,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"capped\":false,\"semantic\":\"parser_sections\"},\"native\":{\"diff\":true,\"guarded_edit\":true,\"read\":true,\"recovery\":true,\"search\":true,\"walk\":true},\"optional\":{\"formatter\":\"available\",\"git\":\"available\",\"lsp\":\"probe_with_language_server_status\",\"parser\":\"available_for_go_json_jsonl_toml_yaml_markdown\",\"project_commands\":\"available\",\"provider\":\"available\"}},\"pipeline_policy\":{\"version\":1,\"format\":{\"gate\":{\"command\":[\"sh\",\"-c\",\"test -z \\\"$(gofmt -l cmd internal)\\\"\"]},\"transform\":{\"command\":null},\"mode\":\"check\",\"scope\":\"whole_repository\"},\"check\":[{\"name\":\"go-vet\",\"command\":[\"go\",\"vet\",\"./...\"],\"required\":true}],\"tests\":[{\"name\":\"go-unit\",\"command\":[\"go\",\"test\",\"./...\"],\"covers\":[\"**/*.go\",\"go.mod\",\"go.sum\"],\"variants\":[\"default\"]}],\"variants\":[{\"name\":\"default\",\"files\":[\"**\"],\"required\":true}],\"impact\":{\"max_files\":0,\"max_edges\":0},\"resource\":{\"timeout_seconds\":600,\"max_output_bytes\":262144,\"max_snapshot_bytes\":268435456,\"max_changed_files\":256,\"max_parallel\":1},\"trusted\":true,\"project_config\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/.huyang.toml\",\"user_config\":\"/home/igor/.config/huyang/config.toml\"},\"pipeline_state\":{\"configuration_scope\":\"The project .huyang.toml declares commands; execution trust is granted separately by [trust].roots in the user config.\",\"configured\":true,\"project_config\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/.huyang.toml\",\"reason\":\"Project commands are configured and this workspace root is trusted.\",\"state\":\"configured_trusted\",\"trusted\":true,\"user_config\":\"/home/igor/.config/huyang/config.toml\"},\"revision\":\"wsrev_14\",\"scheduler\":{\"classes\":[\"pure_read\",\"provider_read\",\"canonical_write\",\"sandbox_write\",\"external_job\"],\"external_job_quota\":2,\"provider_quota\":4,\"sandbox_service_quota\":4,\"sandbox_workspace_quota\":2},\"semantic_provider\":{\"backend\":\"embed\",\"capabilities\":[\"execute\",\"navigation\",\"rename\",\"diagnostics\",\"code_actions\"],\"detail\":\"nvim-dap runtime: /home/igor/.local/share/nvim/lazy/nvim-dap (c9a0738e45f1bd41d792a126941348dce661cf9b)\",\"endpoint\":\"\",\"epoch\":1,\"failure_code\":\"\",\"languages\":[\"*\"],\"observed_at\":\"2026-09-13T08:46:08.31114188-07:00\",\"process_id\":1555014,\"provider_id\":\"embed_f3f7b79fea0c98e9\",\"state\":\"healthy\"},\"service_limits\":{\"tool_call_timeout_ms\":120000},\"view\":\"status\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_46\",\"summary\":\"Workspace inspection is current\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_14\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "inspection": {
+      "workspace": {
+       "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+       "kind": "project",
+       "root": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace",
+       "epoch": 1,
+       "state_seq": 14
+      },
+      "limits": {
+       "max_files": 2000,
+       "max_bytes": 33554432,
+       "max_depth": 32,
+       "max_matches": 1000
+      },
+      "coverage": {
+       "complete": true,
+       "files_considered": 0,
+       "files_read": 0,
+       "bytes_read": 0,
+       "capped": false,
+       "semantic": "parser_sections"
+      },
+      "native": {
+       "diff": true,
+       "guarded_edit": true,
+       "read": true,
+       "recovery": true,
+       "search": true,
+       "walk": true
+      },
+      "optional": {
+       "formatter": "available",
+       "git": "available",
+       "lsp": "probe_with_language_server_status",
+       "parser": "available_for_go_json_jsonl_toml_yaml_markdown",
+       "project_commands": "available",
+       "provider": "available"
+      }
+     },
+     "pipeline_policy": {
+      "version": 1,
+      "format": {
+       "gate": {
+        "command": [
+         "sh",
+         "-c",
+         "test -z \"$(gofmt -l cmd internal)\""
+        ]
+       },
+       "transform": {
+        "command": null
+       },
+       "mode": "check",
+       "scope": "whole_repository"
+      },
+      "check": [
+       {
+        "name": "go-vet",
+        "command": [
+         "go",
+         "vet",
+         "./..."
+        ],
+        "required": true
+       }
+      ],
+      "tests": [
+       {
+        "name": "go-unit",
+        "command": [
+         "go",
+         "test",
+         "./..."
+        ],
+        "covers": [
+         "**/*.go",
+         "go.mod",
+         "go.sum"
+        ],
+        "variants": [
+         "default"
+        ]
+       }
+      ],
+      "variants": [
+       {
+        "name": "default",
+        "files": [
+         "**"
+        ],
+        "required": true
+       }
+      ],
+      "impact": {
+       "max_files": 0,
+       "max_edges": 0
+      },
+      "resource": {
+       "timeout_seconds": 600,
+       "max_output_bytes": 262144,
+       "max_snapshot_bytes": 268435456,
+       "max_changed_files": 256,
+       "max_parallel": 1
+      },
+      "trusted": true,
+      "project_config": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/.huyang.toml",
+      "user_config": "/home/igor/.config/huyang/config.toml"
+     },
+     "pipeline_state": {
+      "configuration_scope": "The project .huyang.toml declares commands; execution trust is granted separately by [trust].roots in the user config.",
+      "configured": true,
+      "project_config": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/.huyang.toml",
+      "reason": "Project commands are configured and this workspace root is trusted.",
+      "state": "configured_trusted",
+      "trusted": true,
+      "user_config": "/home/igor/.config/huyang/config.toml"
+     },
+     "revision": "wsrev_14",
+     "scheduler": {
+      "classes": [
+       "pure_read",
+       "provider_read",
+       "canonical_write",
+       "sandbox_write",
+       "external_job"
+      ],
+      "external_job_quota": 2,
+      "provider_quota": 4,
+      "sandbox_service_quota": 4,
+      "sandbox_workspace_quota": 2
+     },
+     "semantic_provider": {
+      "backend": "embed",
+      "capabilities": [
+       "execute",
+       "navigation",
+       "rename",
+       "diagnostics",
+       "code_actions"
+      ],
+      "detail": "nvim-dap runtime: /home/igor/.local/share/nvim/lazy/nvim-dap (c9a0738e45f1bd41d792a126941348dce661cf9b)",
+      "endpoint": "",
+      "epoch": 1,
+      "failure_code": "",
+      "languages": [
+       "*"
+      ],
+      "observed_at": "2026-09-13T08:46:08.31114188-07:00",
+      "process_id": 1555014,
+      "provider_id": "embed_f3f7b79fea0c98e9",
+      "state": "healthy"
+     },
+     "service_limits": {
+      "tool_call_timeout_ms": 120000
+     },
+     "view": "status"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_46",
+    "summary": "Workspace inspection is current",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_14"
+    }
+   }
+  }
+ },
+ "req_bytes": 181,
+ "resp_bytes": 7077
+}

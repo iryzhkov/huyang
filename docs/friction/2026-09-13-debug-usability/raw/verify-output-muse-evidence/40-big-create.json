@@ -1,0 +1,47 @@
+{
+ "request_bytes": 131508,
+ "response_bytes": 2413,
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json\"],\"details_omitted\":true,\"diagnostics\":\"Inspect with diagnostics; verification status above is unchanged.\",\"document_revision\":\"docrev_027e6929b3cd703db2cccf72bb3b0bb7376ecf3a9a6b4191d70b9b7622a5de9a\",\"from_revision\":\"wsrev_13\",\"revision\":\"wsrev_14\"},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_41\",\"summary\":\"Created docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_14\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revision": "docrev_027e6929b3cd703db2cccf72bb3b0bb7376ecf3a9a6b4191d70b9b7622a5de9a",
+     "from_revision": "wsrev_13",
+     "revision": "wsrev_14"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_41",
+    "summary": "Created docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_14"
+    }
+   }
+  }
+ }
+}

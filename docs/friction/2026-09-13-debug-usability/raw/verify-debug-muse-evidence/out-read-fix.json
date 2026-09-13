@@ -1,0 +1,131 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "read",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"package main\\n\\nimport (\\n\\t\\\"fmt\\\"\\n\\t\\\"os\\\"\\n)\\n\\nfunc dispatch(credits int) string {\\n\\tif credits <= 0 {\\n\\t\\treturn \\\"rejected\\\"\\n\\t}\\n\\treturn deliver(credits)\\n}\\n\\nfunc deliver(credits int) string {\\n\\treturn fmt.Sprintf(\\\"sent:%d\\\", credits)\\n}\\n\\nfunc run(credits int) string {\\n\\tresult := make(chan string)\\n\\tgo func() { result <- dispatch(credits) }()\\n\\treturn <-result\\n}\\n\\nfunc main() {\\n\\tcredits := 1\\n\\tif len(os.Args) > 1 && os.Args[1] == \\\"fail\\\" {\\n\\t\\tcredits = 0\\n\\t}\\n\\tresult := run(credits)\\n\\tfmt.Println(result)\\n\\tif result == \\\"rejected\\\" {\\n\\t\\tos.Exit(1)\\n\\t}\\n}\\n\",\"lines\":35,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go\",\"revision_id\":\"docrev_89bdd1e49a57db7eee13e3135547db14f59fe15020efc34ea42f846b7a67e6ce\"},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_2\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_1\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "content": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc dispatch(credits int) string {\n\tif credits <= 0 {\n\t\treturn \"rejected\"\n\t}\n\treturn deliver(credits)\n}\n\nfunc deliver(credits int) string {\n\treturn fmt.Sprintf(\"sent:%d\", credits)\n}\n\nfunc run(credits int) string {\n\tresult := make(chan string)\n\tgo func() { result <- dispatch(credits) }()\n\treturn <-result\n}\n\nfunc main() {\n\tcredits := 1\n\tif len(os.Args) > 1 && os.Args[1] == \"fail\" {\n\t\tcredits = 0\n\t}\n\tresult := run(credits)\n\tfmt.Println(result)\n\tif result == \"rejected\" {\n\t\tos.Exit(1)\n\t}\n}\n",
+              "lines": 35,
+              "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go",
+              "revision_id": "docrev_89bdd1e49a57db7eee13e3135547db14f59fe15020efc34ea42f846b7a67e6ce"
+            },
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "next": [],
+            "outcome": "ok",
+            "request_id": "req_2",
+            "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "tool": "read",
+      "request_id": 102,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"module workshop.example/delivery\\n\\ngo 1.23\\n\",\"lines\":3,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod\",\"revision_id\":\"docrev_a2c25e2ff5444dedff2157b6bc60bcc78c266f4de9b44e804fd0560e42f06835\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_3\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_1\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "content": "module workshop.example/delivery\n\ngo 1.23\n",
+              "lines": 3,
+              "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod",
+              "revision_id": "docrev_a2c25e2ff5444dedff2157b6bc60bcc78c266f4de9b44e804fd0560e42f06835"
+            },
+            "next": [],
+            "outcome": "ok",
+            "request_id": "req_3",
+            "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "tool": "read",
+      "request_id": 103,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"package main\\n\\nimport \\\"testing\\\"\\n\\nfunc TestWorkshopDeliveryCredits(t *testing.T) {\\n\\tfor _, tc := range []struct {\\n\\t\\tcredits int\\n\\t\\twant    string\\n\\t}{\\n\\t\\t{1, \\\"sent:1\\\"}, {0, \\\"sent:0\\\"}, {-1, \\\"rejected\\\"},\\n\\t} {\\n\\t\\tif got := run(tc.credits); got != tc.want {\\n\\t\\t\\tt.Errorf(\\\"credits=%d: got %q, want %q\\\", tc.credits, got, tc.want)\\n\\t\\t}\\n\\t}\\n}\\n\",\"lines\":16,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go\",\"revision_id\":\"docrev_b63c8aadd3a2d9b216bfe59b9c8ba3de97fe3490438ccfd86415f6b68326330b\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_4\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_1\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "content": "package main\n\nimport \"testing\"\n\nfunc TestWorkshopDeliveryCredits(t *testing.T) {\n\tfor _, tc := range []struct {\n\t\tcredits int\n\t\twant    string\n\t}{\n\t\t{1, \"sent:1\"}, {0, \"sent:0\"}, {-1, \"rejected\"},\n\t} {\n\t\tif got := run(tc.credits); got != tc.want {\n\t\t\tt.Errorf(\"credits=%d: got %q, want %q\", tc.credits, got, tc.want)\n\t\t}\n\t}\n}\n",
+              "lines": 16,
+              "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go",
+              "revision_id": "docrev_b63c8aadd3a2d9b216bfe59b9c8ba3de97fe3490438ccfd86415f6b68326330b"
+            },
+            "next": [],
+            "outcome": "ok",
+            "request_id": "req_4",
+            "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

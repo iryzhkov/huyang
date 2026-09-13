@@ -1,0 +1,81 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "change_plan",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "action": "create",
+    "idempotency_key": "verify-muse-plan-1",
+    "operations": [
+     {
+      "op_id": "op-note",
+      "kind": "create_file",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt",
+      "content": "prepared-plan probe note\n"
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "both"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"details\":{\"action\":\"inspect\",\"plan_id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"response_mode\":\"full\",\"tool\":\"change_plan\"},\"details_omitted\":true,\"plan\":{\"base_state_seq\":12,\"created_at\":\"2026-09-13T15:47:01.362347384Z\",\"plan_id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"plan_revision\":1,\"state\":\"OPEN\",\"updated_at\":\"2026-09-13T15:47:01.362347384Z\",\"workspace_id\":\"ws_0531a8913e6a16f907920954c8c7c07e\"}},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_27\",\"summary\":\"Plan intent created; canonical workspace unchanged\",\"transaction\":{\"id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"state\":\"OPEN\"},\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "details": {
+      "action": "inspect",
+      "plan_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+      "response_mode": "full",
+      "tool": "change_plan"
+     },
+     "details_omitted": true,
+     "plan": {
+      "base_state_seq": 12,
+      "created_at": "2026-09-13T15:47:01.362347384Z",
+      "plan_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+      "plan_revision": 1,
+      "state": "OPEN",
+      "updated_at": "2026-09-13T15:47:01.362347384Z",
+      "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e"
+     }
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_27",
+    "summary": "Plan intent created; canonical workspace unchanged",
+    "transaction": {
+     "id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+     "state": "OPEN"
+    },
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 469,
+ "resp_bytes": 2595
+}

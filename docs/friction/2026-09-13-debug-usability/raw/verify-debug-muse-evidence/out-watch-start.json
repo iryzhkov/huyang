@@ -1,0 +1,61 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "debug_session",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"code\":\"trace_capability_unavailable\",\"data\":{},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[],\"outcome\":\"failed\",\"request_id\":\"req_25\",\"summary\":\"trace_capability_unavailable: start a value-enabled conditions trace at a local scope, inspect mutation_capabilities, then use debug_breakpoints action=watch; automatic launch-time watchpoint resolution is unavailable\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_6\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "code": "trace_capability_unavailable",
+            "data": {},
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "idempotency": "created",
+            "next": [],
+            "outcome": "failed",
+            "request_id": "req_25",
+            "summary": "trace_capability_unavailable: start a value-enabled conditions trace at a local scope, inspect mutation_capabilities, then use debug_breakpoints action=watch; automatic launch-time watchpoint resolution is unavailable",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_6"
+            }
+          },
+          "isError": true
+        }
+      }
+    }
+  ]
+}

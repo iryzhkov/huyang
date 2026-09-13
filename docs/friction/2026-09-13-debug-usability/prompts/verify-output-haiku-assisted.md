@@ -1,0 +1,16 @@
+Bounded assisted transport verification: verify-output-haiku-assisted.
+Host normandy; provider claudeAgent; model claude-haiku-4-5 defaults; baseline 5d244adf13c978599a267ee6f35b446faf7430c5. 15minutes/20turns, no subagents. Steward-managed isolated clone only.
+
+This is an explicitly assisted transport retry. All configured mcp__huyang tools point at an older service and CANNOT validate this task. Do not call them. Use Huyang exclusively through this tested terminal helper:
+python3 /home/igor/Work/huyang/docs/friction/2026-09-13-debug-usability/mcp_transport.py --socket YOUR_OWN_SOCKET --list
+Use --describe TOOL for its normal schema, or --call '{"name":"TOOL","arguments":{...}}' for a tool request. The helper uses the new experimental MCP endpoint and prints the complete JSON-RPC response. Redirect large replies to owned artifact files and measure them; do not equate manual filtering with product-level compact output.
+Start your own /tmp/huyang-5d244ad-workshop serve --socket UNIQUE_ABSOLUTE_SOCKET --state-dir UNIQUE_ABSOLUTE_STATE and verify go version -m exact baseline with vcs.modified=false. Do not restart shared services. Use this helper for all source operations, including opening workspaces, creation and reports. Shell is allowed for transport, Git, binary/provenance, tests, measuring already-returned artifacts; no shell source extraction or source creation. Do not read prior reports, verdicts, implementation, response-controls or regression tests. Transport help above is assistance; the product controls are yours to discover.
+
+User goals, each needs exact evidence or a supported limitation:
+1. Create a synthetic one-line JSON with at least131072 ASCII payload bytes and marker field near the end. Obtain a useful marker excerpt in under4096 bytes of returned response body. Measure actual source/content/serialized result bytes separately, never an estimated wrapper. Demonstrate safe continuation.
+2. Obtain only the current workspace revision with minimal output, using supported tools. Measure response.
+3. Make a normal edit and a prepared change to owned synthetic text, obtaining concise mutation receipts with diagnostics available separately; preserve verification/revision/acceptance evidence. Compare default vs concise read-only inspection of the same result where supported. Test whether content appears twice.
+
+Do not claim a goal completed through hypothetical API calls or an authored summary. Save exact actual frames and requests as evidence, including errors/retries and endpoint. If unable to connect through the helper, stop with blocked disposition rather than use old MCP tools. No user questions.
+
+Checkpoint report after setup and each goal through the helper. Unique report docs/friction/2026-09-13-debug-usability/raw/verify-output-haiku-assisted.md and evidence under raw/verify-output-haiku-assisted-evidence/. Owned fixtures inside your clone. Cleanup owned daemon/debug sessions; commit only worker fixture/report/evidence on your branch, do not push main or coordinator changes. Handoff exact commit/path/socket/provenance/report to coordinator thread92bdd669-fcfc-4a2c-90b1-3addf4dbe039. End BACKLOG STATUS: done, continue or needs-input.

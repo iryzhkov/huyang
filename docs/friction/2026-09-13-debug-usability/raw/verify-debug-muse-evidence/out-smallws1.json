@@ -1,0 +1,142 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "workspace_open",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"capabilities\":{\"not_available\":{\"git\":\"unavailable\",\"lsp\":\"unavailable\",\"parser\":\"available_for_go_json_jsonl_toml_yaml_markdown\",\"provider\":\"unavailable\"},\"semantic\":\"parser_sections\"},\"commands\":{\"check\":[\"go-build: go build ./...\",\"go-vet: go vet ./...\"],\"detected_from\":[\"go.mod\"],\"format_gate\":\"sh -c test -z \\\"$(gofmt -l .)\\\"\",\"override\":\"write .huyang.toml at the workspace root to declare your own commands\",\"run\":\"verify_run with stages check and/or tests; test_scope=affected covers only edited files\",\"source\":\"detected\",\"state\":\"detected_trusted\",\"tests\":[\"go-test: go test ./...\"],\"trusted\":true},\"overview\":{\"coverage\":{\"complete\":true,\"files_considered\":1,\"files_read\":1,\"bytes_read\":0,\"capped\":false,\"semantic\":\"parser_sections\"},\"entry_count\":1,\"top_level\":[{\"kind\":\"regular_text\",\"path\":\"main.go\"}],\"top_level_count\":1,\"top_level_truncated\":false,\"workspace\":{\"id\":\"ws_75efe23b234dcd27750705e5e147cfce\",\"kind\":\"documents\",\"root\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery\",\"epoch\":1,\"state_seq\":1}},\"recent_commits\":{\"commits\":[],\"coverage\":{\"complete\":false,\"ref\":\"\",\"traversal\":\"\",\"rename_policy\":\"\",\"shallow\":false,\"rename_ambiguous\":false,\"missing_objects\":false,\"binary\":false,\"submodule\":false,\"truncated\":false,\"unavailable\":[\"git_history\"]}},\"registry\":{\"persistent\":true,\"reused\":false},\"revision\":\"wsrev_1\",\"semantic_provider\":null,\"service_limits\":{\"tool_call_timeout_ms\":120000}},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_19\",\"summary\":\"Opened documents workspace with 1 entries\",\"warnings\":[],\"workspace\":{\"id\":\"ws_75efe23b234dcd27750705e5e147cfce\",\"kind\":\"documents\",\"root\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery\",\"epoch\":1,\"state_seq\":1}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "capabilities": {
+                "not_available": {
+                  "git": "unavailable",
+                  "lsp": "unavailable",
+                  "parser": "available_for_go_json_jsonl_toml_yaml_markdown",
+                  "provider": "unavailable"
+                },
+                "semantic": "parser_sections"
+              },
+              "commands": {
+                "check": [
+                  "go-build: go build ./...",
+                  "go-vet: go vet ./..."
+                ],
+                "detected_from": [
+                  "go.mod"
+                ],
+                "format_gate": "sh -c test -z \"$(gofmt -l .)\"",
+                "override": "write .huyang.toml at the workspace root to declare your own commands",
+                "run": "verify_run with stages check and/or tests; test_scope=affected covers only edited files",
+                "source": "detected",
+                "state": "detected_trusted",
+                "tests": [
+                  "go-test: go test ./..."
+                ],
+                "trusted": true
+              },
+              "overview": {
+                "coverage": {
+                  "complete": true,
+                  "files_considered": 1,
+                  "files_read": 1,
+                  "bytes_read": 0,
+                  "capped": false,
+                  "semantic": "parser_sections"
+                },
+                "entry_count": 1,
+                "top_level": [
+                  {
+                    "kind": "regular_text",
+                    "path": "main.go"
+                  }
+                ],
+                "top_level_count": 1,
+                "top_level_truncated": false,
+                "workspace": {
+                  "id": "ws_75efe23b234dcd27750705e5e147cfce",
+                  "kind": "documents",
+                  "root": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery",
+                  "epoch": 1,
+                  "state_seq": 1
+                }
+              },
+              "recent_commits": {
+                "commits": [],
+                "coverage": {
+                  "complete": false,
+                  "ref": "",
+                  "traversal": "",
+                  "rename_policy": "",
+                  "shallow": false,
+                  "rename_ambiguous": false,
+                  "missing_objects": false,
+                  "binary": false,
+                  "submodule": false,
+                  "truncated": false,
+                  "unavailable": [
+                    "git_history"
+                  ]
+                }
+              },
+              "registry": {
+                "persistent": true,
+                "reused": false
+              },
+              "revision": "wsrev_1",
+              "semantic_provider": null,
+              "service_limits": {
+                "tool_call_timeout_ms": 120000
+              }
+            },
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "next": [],
+            "outcome": "ok",
+            "request_id": "req_19",
+            "summary": "Opened documents workspace with 1 entries",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_75efe23b234dcd27750705e5e147cfce",
+              "kind": "documents",
+              "root": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery",
+              "epoch": 1,
+              "state_seq": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

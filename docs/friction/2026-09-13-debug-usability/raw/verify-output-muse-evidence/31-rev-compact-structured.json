@@ -1,0 +1,45 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+   "name": "workspace_inspect",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "view": "revision",
+    "response_mode": "compact",
+    "response_format": "structured"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok: Current workspace revision"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "revision": "wsrev_13"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_33",
+    "summary": "Current workspace revision",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_13"
+    }
+   }
+  }
+ },
+ "req_bytes": 244,
+ "resp_bytes": 378
+}

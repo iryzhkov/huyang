@@ -1,0 +1,9 @@
+# Fresh Muse output verification audit
+
+Run run-c33bf9d2c8aff68f371f6c65957ccc25, thread thread-510885af4bf5f38e43aeff94eb148efb, final commit e20ef6106d41f1a2d818a0b0bf35258514c910cd. Correct clean 5d244ad binary and owned experimental socket were used. Report,49 evidence files/catalog and steward final/thread are preserved. Node test.ts in the handed-off renamed fixture independently passes.
+
+Accepted fresh verification: all three goals completed with recorded transport adaptation. Coordinator parsed exact saved frames31,43,24 and reserialized their ASCII JSON plus newline: byte counts exactly match378,1422,9974. Frame43 contains the marker,643 delivered source bytes and document revision guard. Frame31 has only current revision data. Frame24 remains outcome provisional with applied_from_provisional:true and missing diagnostic coverage; compact presentation did not erase acceptance evidence.
+
+Response improvement is real product behavior, not manual filtering. Read-only comparison records2378 bytes both/full vs922 text/compact for a168-byte source, but guide presence varies between calls; do not attribute the entire difference to compaction. Both duplicates source; text/structured variants carry it once. Large excerpt1422 bytes is below4KiB. Prepared receipt9974 bytes retains necessary verification information and explicitly requested both transport copies; compact is not an absolute metadata byte cap.
+
+Three refusal classes and one ambiguous-symbol conflict were retained; no false source/proof claims accepted. Unexplained guide appearance and revision increment are observed but not established as new defects, and are deferred outside the bounded response cleanup. Diagnostics unavailable is preserved rather than treated as proof of no errors. This supplies independent Muse verification; first Haiku new-version run was invalid, so one assisted transport retry is pending.

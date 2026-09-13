@@ -1,0 +1,48 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts"
+    }
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"import { formatLabel } from \\\"./index.ts\\\";\\nexport const diagnosticName = \\\"formatLabel\\\";\\nexport function greet(name: string): string {\\n  return `Hello ${formatLabel(name)}`;\\n}\\n\",\"lines\":5,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts\",\"revision_id\":\"docrev_b2b78f6a8ce0dd54c892c0754f43ca675a983624836a8ef387c0d3d14582047e\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_8\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_1\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "import { formatLabel } from \"./index.ts\";\nexport const diagnosticName = \"formatLabel\";\nexport function greet(name: string): string {\n  return `Hello ${formatLabel(name)}`;\n}\n",
+     "lines": 5,
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts",
+     "revision_id": "docrev_b2b78f6a8ce0dd54c892c0754f43ca675a983624836a8ef387c0d3d14582047e"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_8",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_1"
+    }
+   }
+  }
+ },
+ "req_bytes": 246,
+ "resp_bytes": 1484
+}

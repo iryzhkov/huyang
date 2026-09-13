@@ -1,0 +1,84 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+   "name": "search",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "query": "labelFor",
+    "paths": [
+     "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work"
+    ]
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"hits\":[{\"line\":1,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\"},{\"line\":4,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\"},{\"line\":1,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\"},{\"line\":1,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\"},{\"line\":2,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"},{\"line\":4,\"match\":\"labelFor\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"}],\"result_set\":{\"file_count\":4,\"handle\":\"set_5a79b27d8160736e7c359f2de469c935\",\"match_count\":6},\"returned\":6,\"total\":6},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_24\",\"summary\":\"6 matches\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "hits": [
+      {
+       "line": 1,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+      },
+      {
+       "line": 4,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+      },
+      {
+       "line": 1,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts"
+      },
+      {
+       "line": 1,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts"
+      },
+      {
+       "line": 2,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      },
+      {
+       "line": 4,
+       "match": "labelFor",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      }
+     ],
+     "result_set": {
+      "file_count": 4,
+      "handle": "set_5a79b27d8160736e7c359f2de469c935",
+      "match_count": 6
+     },
+     "returned": 6,
+     "total": 6
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_24",
+    "summary": "6 matches",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 256,
+ "resp_bytes": 2315
+}

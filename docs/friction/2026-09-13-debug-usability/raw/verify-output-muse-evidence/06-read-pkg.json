@@ -1,0 +1,48 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json"
+    }
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"{\\\"name\\\":\\\"workshop-labels\\\",\\\"private\\\":true,\\\"type\\\":\\\"module\\\",\\\"scripts\\\":{\\\"test\\\":\\\"node test.ts\\\"}}\\n\",\"lines\":1,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json\",\"revision_id\":\"docrev_60d1058490cc3dc1d78191c07997e14333c180b2d5324dbf22abc56c40cb079e\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_11\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_1\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "{\"name\":\"workshop-labels\",\"private\":true,\"type\":\"module\",\"scripts\":{\"test\":\"node test.ts\"}}\n",
+     "lines": 1,
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json",
+     "revision_id": "docrev_60d1058490cc3dc1d78191c07997e14333c180b2d5324dbf22abc56c40cb079e"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_11",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_1"
+    }
+   }
+  }
+ },
+ "req_bytes": 247,
+ "resp_bytes": 1362
+}

@@ -1,0 +1,48 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts"
+    }
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"import assert from \\\"node:assert/strict\\\";\\nimport { formatLabel } from \\\"./index.ts\\\";\\nimport { greet, diagnosticName } from \\\"./greeting.ts\\\";\\nassert.equal(formatLabel(\\\" Ada \\\"), \\\"[Ada]\\\");\\nassert.equal(greet(\\\" Ada \\\"), \\\"Hello [Ada]\\\");\\nassert.equal(diagnosticName, \\\"formatLabel\\\");\\nconsole.log(\\\"labels behavior passed\\\");\\n\",\"lines\":7,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts\",\"revision_id\":\"docrev_8eb16fc9e34c93f777905bae2924ae499f456749c9f2811177a26f7538e6d50c\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_10\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_1\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "import assert from \"node:assert/strict\";\nimport { formatLabel } from \"./index.ts\";\nimport { greet, diagnosticName } from \"./greeting.ts\";\nassert.equal(formatLabel(\" Ada \"), \"[Ada]\");\nassert.equal(greet(\" Ada \"), \"Hello [Ada]\");\nassert.equal(diagnosticName, \"formatLabel\");\nconsole.log(\"labels behavior passed\");\n",
+     "lines": 7,
+     "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts",
+     "revision_id": "docrev_8eb16fc9e34c93f777905bae2924ae499f456749c9f2811177a26f7538e6d50c"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_10",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_1"
+    }
+   }
+  }
+ },
+ "req_bytes": 242,
+ "resp_bytes": 1808
+}

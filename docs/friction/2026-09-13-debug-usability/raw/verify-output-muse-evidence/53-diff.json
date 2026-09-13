@@ -1,0 +1,199 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+   "name": "revision_diff",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "from_revision": "wsrev_1",
+    "to_revision_or_current": "current"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"code\":\"diff_evidence_incomplete\",\"data\":{\"current_revision\":\"wsrev_15\",\"diffs\":[{\"after_sha256\":\"e72676e1e31732c4fa8119f3f7460625627684507a7005b26d3b881bfda78daa\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\"},{\"after_sha256\":\"58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\"},{\"after_sha256\":\"fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\"},{\"after_sha256\":\"f611951acdeaaadfba88f33e5deba75b948cc2e2cb161d689d5a3bc85e56230f\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\"},{\"after_sha256\":\"0d83ba1252bb4e9334b7820d6e04578c7f51f4e09bb56187adead0793330a4c9\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"},{\"after_sha256\":\"0e5d7ec7ad9451def90f19c48af13c40867324670b97c98a896d97717b941268\",\"before_sha256\":\"e72676e1e31732c4fa8119f3f7460625627684507a7005b26d3b881bfda78daa\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\"},{\"after_sha256\":\"ec7e030450d831d870e418f32147bb1b17c9e67b3c4b62029b7599c91597e489\",\"before_sha256\":\"58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\"},{\"after_sha256\":\"8845269271d1b797e928e3051a6e9b97a0f7121347d6d780b5841a3ab4dfc3e5\",\"before_sha256\":\"fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\"},{\"after_sha256\":\"208d82f1a90b814cfe149a6b1ade469d5d2b4749c23025e2c85fbc0ea9b825d1\",\"before_sha256\":\"0d83ba1252bb4e9334b7820d6e04578c7f51f4e09bb56187adead0793330a4c9\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"},{\"after_sha256\":\"cf6e6075b8cfa4b4bb2ab72e5c8760b24202e096ab574ab089351add7761fd08\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":\"--- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\\n+++ docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\\n@@ bytes 0:0 @@\\n-\\\"\\\"\\n+\\\"prepared-plan probe note\\\\n\\\"\\n\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\"},{\"after_sha256\":\"1317c75260f0f6014cbc8aee690ccb6bfb0415d02cf684c1b9f4c7a3b9df7e67\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"patch\":null,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json\"}],\"from_revision\":\"wsrev_1\",\"gaps\":[{\"from_revision\":\"wsrev_14\",\"to_revision\":\"wsrev_15\"}],\"known_segments\":[{\"from_revision\":\"wsrev_1\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"to_revision\":\"wsrev_6\"},{\"from_revision\":\"wsrev_1\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\",\"to_revision\":\"wsrev_6\"},{\"from_revision\":\"wsrev_1\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"to_revision\":\"wsrev_6\"},{\"from_revision\":\"wsrev_1\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\",\"to_revision\":\"wsrev_6\"},{\"from_revision\":\"wsrev_1\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"to_revision\":\"wsrev_6\"},{\"from_revision\":\"wsrev_6\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"to_revision\":\"wsrev_12\"},{\"from_revision\":\"wsrev_6\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\",\"to_revision\":\"wsrev_12\"},{\"from_revision\":\"wsrev_6\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"to_revision\":\"wsrev_12\"},{\"from_revision\":\"wsrev_6\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"to_revision\":\"wsrev_12\"},{\"from_revision\":\"wsrev_12\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\",\"to_revision\":\"wsrev_13\"},{\"from_revision\":\"wsrev_13\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json\",\"to_revision\":\"wsrev_14\"}],\"to_revision\":\"wsrev_15\"},\"evidence\":null,\"next\":[{\"action\":\"inspect_known_changed_paths\",\"paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"],\"tool\":\"read\"},{\"action\":\"record_current_revision_as_new_baseline\",\"tool\":\"workspace_inspect\",\"view\":\"status\"}],\"outcome\":\"partial\",\"request_id\":\"req_48\",\"summary\":\"Known native edit segments are returned with explicit uncovered revision gaps\",\"warnings\":[\"Uncovered gaps may contain external writes, provider edits, or expired receipts; no diff is inferred for them.\"],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_15\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "code": "diff_evidence_incomplete",
+    "data": {
+     "current_revision": "wsrev_15",
+     "diffs": [
+      {
+       "after_sha256": "e72676e1e31732c4fa8119f3f7460625627684507a7005b26d3b881bfda78daa",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+      },
+      {
+       "after_sha256": "58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts"
+      },
+      {
+       "after_sha256": "fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts"
+      },
+      {
+       "after_sha256": "f611951acdeaaadfba88f33e5deba75b948cc2e2cb161d689d5a3bc85e56230f",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json"
+      },
+      {
+       "after_sha256": "0d83ba1252bb4e9334b7820d6e04578c7f51f4e09bb56187adead0793330a4c9",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      },
+      {
+       "after_sha256": "0e5d7ec7ad9451def90f19c48af13c40867324670b97c98a896d97717b941268",
+       "before_sha256": "e72676e1e31732c4fa8119f3f7460625627684507a7005b26d3b881bfda78daa",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+      },
+      {
+       "after_sha256": "ec7e030450d831d870e418f32147bb1b17c9e67b3c4b62029b7599c91597e489",
+       "before_sha256": "58f3622f92797ed835f6d44d75263605d8a53b4b60064b4f9c5143ef4054ec63",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts"
+      },
+      {
+       "after_sha256": "8845269271d1b797e928e3051a6e9b97a0f7121347d6d780b5841a3ab4dfc3e5",
+       "before_sha256": "fbfa3f452a783a64e6596ec7f3fb9d91c503d60d7d9294f8cdc4307689521f67",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts"
+      },
+      {
+       "after_sha256": "208d82f1a90b814cfe149a6b1ade469d5d2b4749c23025e2c85fbc0ea9b825d1",
+       "before_sha256": "0d83ba1252bb4e9334b7820d6e04578c7f51f4e09bb56187adead0793330a4c9",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      },
+      {
+       "after_sha256": "cf6e6075b8cfa4b4bb2ab72e5c8760b24202e096ab574ab089351add7761fd08",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": "--- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\n+++ docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\n@@ bytes 0:0 @@\n-\"\"\n+\"prepared-plan probe note\\n\"\n",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt"
+      },
+      {
+       "after_sha256": "1317c75260f0f6014cbc8aee690ccb6bfb0415d02cf684c1b9f4c7a3b9df7e67",
+       "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+       "patch": null,
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json"
+      }
+     ],
+     "from_revision": "wsrev_1",
+     "gaps": [
+      {
+       "from_revision": "wsrev_14",
+       "to_revision": "wsrev_15"
+      }
+     ],
+     "known_segments": [
+      {
+       "from_revision": "wsrev_1",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+       "to_revision": "wsrev_6"
+      },
+      {
+       "from_revision": "wsrev_1",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+       "to_revision": "wsrev_6"
+      },
+      {
+       "from_revision": "wsrev_1",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+       "to_revision": "wsrev_6"
+      },
+      {
+       "from_revision": "wsrev_1",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json",
+       "to_revision": "wsrev_6"
+      },
+      {
+       "from_revision": "wsrev_1",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+       "to_revision": "wsrev_6"
+      },
+      {
+       "from_revision": "wsrev_6",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+       "to_revision": "wsrev_12"
+      },
+      {
+       "from_revision": "wsrev_6",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+       "to_revision": "wsrev_12"
+      },
+      {
+       "from_revision": "wsrev_6",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+       "to_revision": "wsrev_12"
+      },
+      {
+       "from_revision": "wsrev_6",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+       "to_revision": "wsrev_12"
+      },
+      {
+       "from_revision": "wsrev_12",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt",
+       "to_revision": "wsrev_13"
+      },
+      {
+       "from_revision": "wsrev_13",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json",
+       "to_revision": "wsrev_14"
+      }
+     ],
+     "to_revision": "wsrev_15"
+    },
+    "next": [
+     {
+      "action": "inspect_known_changed_paths",
+      "paths": [
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json",
+       "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      ],
+      "tool": "read"
+     },
+     {
+      "action": "record_current_revision_as_new_baseline",
+      "tool": "workspace_inspect",
+      "view": "status"
+     }
+    ],
+    "outcome": "partial",
+    "request_id": "req_48",
+    "summary": "Known native edit segments are returned with explicit uncovered revision gaps",
+    "warnings": [
+     "Uncovered gaps may contain external writes, provider edits, or expired receipts; no diff is inferred for them."
+    ],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_15"
+    }
+   }
+  }
+ },
+ "req_bytes": 224,
+ "resp_bytes": 12664
+}

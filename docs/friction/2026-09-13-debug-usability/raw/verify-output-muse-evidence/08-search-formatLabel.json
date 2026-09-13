@@ -1,0 +1,94 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+   "name": "search",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "query": "formatLabel",
+    "paths": [
+     "docs/friction/2026-09-13-debug-usability/fixtures/typescript"
+    ]
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"hits\":[{\"line\":1,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts\"},{\"line\":2,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts\"},{\"line\":4,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts\"},{\"line\":1,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/index.ts\"},{\"line\":1,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/labels.ts\"},{\"line\":2,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts\"},{\"line\":4,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts\"},{\"line\":6,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts\"}],\"result_set\":{\"file_count\":4,\"handle\":\"set_201f41e9dae97f7ac38f4ac8fc55bca2\",\"match_count\":8},\"returned\":8,\"total\":8},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_13\",\"summary\":\"8 matches\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_1\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "hits": [
+      {
+       "line": 1,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts"
+      },
+      {
+       "line": 2,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts"
+      },
+      {
+       "line": 4,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts"
+      },
+      {
+       "line": 1,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/index.ts"
+      },
+      {
+       "line": 1,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/labels.ts"
+      },
+      {
+       "line": 2,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts"
+      },
+      {
+       "line": 4,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts"
+      },
+      {
+       "line": 6,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts"
+      }
+     ],
+     "result_set": {
+      "file_count": 4,
+      "handle": "set_201f41e9dae97f7ac38f4ac8fc55bca2",
+      "match_count": 8
+     },
+     "returned": 8,
+     "total": 8
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_13",
+    "summary": "8 matches",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_1"
+    }
+   }
+  }
+ },
+ "req_bytes": 251,
+ "resp_bytes": 2725
+}

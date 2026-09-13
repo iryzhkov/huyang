@@ -1,0 +1,113 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "edit_apply",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "operations": [
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+      "old": "function formatLabel",
+      "new": "function labelFor"
+     },
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+      "old": "export { formatLabel }",
+      "new": "export { labelFor }"
+     },
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+      "old": "import { formatLabel }",
+      "new": "import { labelFor }"
+     },
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+      "old": "formatLabel(name)",
+      "new": "labelFor(name)"
+     },
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+      "old": "import { formatLabel }",
+      "new": "import { labelFor }"
+     },
+     {
+      "kind": "replace_literal",
+      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+      "old": "assert.equal(formatLabel(",
+      "new": "assert.equal(labelFor("
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "both"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"],\"details_omitted\":true,\"diagnostics\":\"Inspect with diagnostics; verification status above is unchanged.\",\"document_revisions\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\":\"docrev_75667985517511bc57879212211e2199c81aa674b5a2b77e5b9cf17d4125c2a2\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\":\"docrev_b2465c3b853d747278f3005795c9d0b6d7f9d7c7af6541a93098de91284296be\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\":\"docrev_83da76b7f1a6cf45430f40b660274a50ca50061bd1b04dca0fc9e1f5708ff7ff\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\":\"docrev_aff460ed79aff9b08723ef85f767feeaa0e021538850f4e36e32517b69823544\"},\"from_revision\":\"wsrev_6\",\"replacements\":6,\"revision\":\"wsrev_12\"},\"evidence\":{\"ids\":[\"ev_64e121e55d97044481eb3511b0198753\"],\"truncated\":false},\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_19\",\"summary\":\"Applied 6 operations: 6 replacement(s) in 4 files; no new diagnostics\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revisions": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts": "docrev_75667985517511bc57879212211e2199c81aa674b5a2b77e5b9cf17d4125c2a2",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts": "docrev_b2465c3b853d747278f3005795c9d0b6d7f9d7c7af6541a93098de91284296be",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts": "docrev_83da76b7f1a6cf45430f40b660274a50ca50061bd1b04dca0fc9e1f5708ff7ff",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts": "docrev_aff460ed79aff9b08723ef85f767feeaa0e021538850f4e36e32517b69823544"
+     },
+     "from_revision": "wsrev_6",
+     "replacements": 6,
+     "revision": "wsrev_12"
+    },
+    "evidence": {
+     "ids": [
+      "ev_64e121e55d97044481eb3511b0198753"
+     ],
+     "truncated": false
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_19",
+    "summary": "Applied 6 operations: 6 replacement(s) in 4 files; no new diagnostics",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 1310,
+ "resp_bytes": 4161
+}

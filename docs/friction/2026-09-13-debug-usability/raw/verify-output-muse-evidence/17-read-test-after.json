@@ -1,0 +1,48 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+    }
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"import assert from \\\"node:assert/strict\\\";\\nimport { labelFor } from \\\"./index.ts\\\";\\nimport { greet, diagnosticName } from \\\"./greeting.ts\\\";\\nassert.equal(labelFor(\\\" Ada \\\"), \\\"[Ada]\\\");\\nassert.equal(greet(\\\" Ada \\\"), \\\"Hello [Ada]\\\");\\nassert.equal(diagnosticName, \\\"formatLabel\\\");\\nconsole.log(\\\"labels behavior passed\\\");\\n\",\"lines\":7,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"revision_id\":\"docrev_aff460ed79aff9b08723ef85f767feeaa0e021538850f4e36e32517b69823544\"},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_22\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "import assert from \"node:assert/strict\";\nimport { labelFor } from \"./index.ts\";\nimport { greet, diagnosticName } from \"./greeting.ts\";\nassert.equal(labelFor(\" Ada \"), \"[Ada]\");\nassert.equal(greet(\" Ada \"), \"Hello [Ada]\");\nassert.equal(diagnosticName, \"formatLabel\");\nconsole.log(\"labels behavior passed\");\n",
+     "lines": 7,
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+     "revision_id": "docrev_aff460ed79aff9b08723ef85f767feeaa0e021538850f4e36e32517b69823544"
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_22",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 250,
+ "resp_bytes": 1830
+}

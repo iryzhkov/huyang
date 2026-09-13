@@ -1,0 +1,68 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+   "name": "evidence_get",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "evidence_id": "ev_64e121e55d97044481eb3511b0198753"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"evidence\":{\"id\":\"ev_64e121e55d97044481eb3511b0198753\",\"kind\":\"lsp_push\",\"recorded_at\":\"2026-09-13T15:46:41.959417456Z\",\"payload\":{\"kind\":\"lsp_push\",\"provider_id\":\"ts_ls#5\",\"producer\":\"ts_ls\",\"document\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"document_revision\":\"wsrev_12\",\"expected_version\":4,\"transaction_id\":\"edit_req_19\",\"state_seq\":12,\"complete\":true,\"change_barrier\":true,\"selected\":true,\"dimension\":\"edited_documents\",\"observed_at\":\"2026-09-13T15:46:41.959417456Z\"}}},\"evidence\":{\"ids\":[\"ev_64e121e55d97044481eb3511b0198753\"],\"truncated\":false},\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_26\",\"summary\":\"Detailed diagnostic evidence retrieved\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "evidence": {
+      "id": "ev_64e121e55d97044481eb3511b0198753",
+      "kind": "lsp_push",
+      "recorded_at": "2026-09-13T15:46:41.959417456Z",
+      "payload": {
+       "kind": "lsp_push",
+       "provider_id": "ts_ls#5",
+       "producer": "ts_ls",
+       "document": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+       "document_revision": "wsrev_12",
+       "expected_version": 4,
+       "transaction_id": "edit_req_19",
+       "state_seq": 12,
+       "complete": true,
+       "change_barrier": true,
+       "selected": true,
+       "dimension": "edited_documents",
+       "observed_at": "2026-09-13T15:46:41.959417456Z"
+      }
+     }
+    },
+    "evidence": {
+     "ids": [
+      "ev_64e121e55d97044481eb3511b0198753"
+     ],
+     "truncated": false
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_26",
+    "summary": "Detailed diagnostic evidence retrieved",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 212,
+ "resp_bytes": 2277
+}

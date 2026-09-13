@@ -1,0 +1,240 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "change_plan",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "action": "apply",
+    "idempotency_key": "verify-muse-apply-2",
+    "plan_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+    "plan_revision": 1,
+    "prepared_revision": "prep_bed7a241ed20a651943bef783b72410a1f98c52a8c264e7644610447a34bda35",
+    "accept_provisional": true,
+    "response_mode": "compact",
+    "response_format": "both"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"applied_from_provisional\":true,\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\"],\"details\":{\"action\":\"inspect\",\"plan_id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"response_mode\":\"full\",\"tool\":\"change_plan\"},\"details_omitted\":true,\"from_revision\":\"wsrev_12\",\"missing_coverage\":[{\"dimension\":\"diagnostics\",\"detail\":\"status unavailable, semantic coverage \\\"unavailable\\\" (lsp_not_configured)\"}],\"plan\":{\"base_state_seq\":12,\"created_at\":\"2026-09-13T15:47:01.362347384Z\",\"plan_id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"plan_revision\":1,\"preparation\":{\"affected_files\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\"],\"base_revision\":\"wsrev_12\",\"canonical_changed\":true,\"canonical_from_revision\":\"wsrev_12\",\"canonical_revision\":\"wsrev_13\",\"diagnostics\":\"unavailable\",\"disk_checks\":\"sandbox_manifest_verified\",\"intermediate_reports\":false,\"journal_id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"missing_coverage\":[{\"detail\":\"status unavailable, semantic coverage \\\"unavailable\\\" (lsp_not_configured)\",\"dimension\":\"diagnostics\"}],\"prepared_revision\":\"prep_bed7a241ed20a651943bef783b72410a1f98c52a8c264e7644610447a34bda35\",\"provider_epoch\":1,\"provisional_accepted\":[\"diagnostics\"],\"verification\":[{\"coverage\":{\"bytes_read\":0,\"capped\":false,\"complete\":true,\"files_considered\":0,\"files_read\":0,\"semantic\":\"\"},\"duration_ms\":298,\"exit\":0,\"implementation\":[\"sh\",\"-c\",\"test -z \\\"$(gofmt -l cmd internal)\\\"\"],\"mode\":\"check\",\"stage\":\"format_gate\",\"started_revision\":\"wsrev_12\",\"status\":\"passed\"},{\"coverage\":{\"bytes_read\":0,\"capped\":false,\"complete\":false,\"files_considered\":1,\"files_read\":0,\"semantic\":\"\",\"skipped\":[\"parser_unavailable:.txt\"]},\"duration_ms\":0,\"exit\":-1,\"mode\":\"check\",\"scope\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt\"],\"stage\":\"parser\",\"started_revision\":\"wsrev_12\",\"status\":\"unavailable\"},{\"coverage\":{\"bytes_read\":0,\"capped\":false,\"complete\":true,\"files_considered\":0,\"files_read\":0,\"semantic\":\"\"},\"duration_ms\":45707,\"exit\":0,\"implementation\":[\"go\",\"vet\",\"./...\"],\"mode\":\"check\",\"stage\":\"check\",\"started_revision\":\"wsrev_12\",\"status\":\"passed\"},{\"coverage\":{\"bytes_read\":0,\"capped\":false,\"complete\":true,\"files_considered\":0,\"files_read\":0,\"semantic\":\"\"},\"duration_ms\":19939,\"executed_tests\":[\"go-unit\"],\"exit\":0,\"implementation\":[\"go\",\"test\",\"./...\"],\"mode\":\"check\",\"output\":\"?   \\tgithub.com/iryzhkov/huyang/bench/agent-efficiency/protocol\\t[no test files]\\n?   \\tgithub.com/iryzhkov/huyang/cmd/huyang\\t[no test files]\\nok  \\tgithub.com/iryzhkov/huyang/internal/handlers\\t2.452s\\nok  \\tgithub.com/iryzhkov/huyang/internal/mcpapi\\t0.030s\\nok  \\tgithub.com/iryzhkov/huyang/internal/provider\\t0.006s\\nok  \\tgithub.com/iryzhkov/huyang/internal/provider/embed\\t4.370s\\nok  \\tgithub.com/iryzhkov/huyang/internal/providerpool\\t1.536s\\nok  \\tgithub.com/iryzhkov/huyang/internal/service\\t7.264s\\nok  \\tgithub.com/iryzhkov/huyang/internal/workspace\\t6.143s\\n\",\"stage\":\"tests\",\"started_revision\":\"wsrev_12\",\"status\":\"passed\",\"test_scope\":\"full\",\"test_verdict\":\"full_tests_passed\"},{\"coverage\":{\"bytes_read\":0,\"capped\":false,\"complete\":false,\"files_considered\":0,\"files_read\":0,\"semantic\":\"unavailable\",\"skipped\":[\"lsp_not_configured\"]},\"duration_ms\":0,\"evidence_ids\":[\"ev_ad215822a6371726e4ea087091613ee6\"],\"exit\":0,\"mode\":\"provider\",\"stage\":\"diagnostics\",\"started_revision\":\"wsrev_12\",\"status\":\"unavailable\"}]},\"state\":\"COMMITTED\",\"updated_at\":\"2026-09-13T15:48:28.494013136Z\",\"workspace_id\":\"ws_0531a8913e6a16f907920954c8c7c07e\"},\"provisional_accepted\":[\"diagnostics\"],\"revision\":\"wsrev_13\"},\"evidence\":{\"ids\":[\"ev_ad215822a6371726e4ea087091613ee6\"],\"truncated\":false},\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[],\"outcome\":\"provisional\",\"request_id\":\"req_31\",\"summary\":\"Prepared plan applied with explicitly accepted incomplete diagnostic evidence; canonical provider resynced\",\"transaction\":{\"id\":\"plan_335f2e5bd39c8adbaf959b2ee452150f\",\"state\":\"COMMITTED\"},\"warnings\":[\"The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted.\"],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_13\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "applied_from_provisional": true,
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt"
+     ],
+     "details": {
+      "action": "inspect",
+      "plan_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+      "response_mode": "full",
+      "tool": "change_plan"
+     },
+     "details_omitted": true,
+     "from_revision": "wsrev_12",
+     "missing_coverage": [
+      {
+       "dimension": "diagnostics",
+       "detail": "status unavailable, semantic coverage \"unavailable\" (lsp_not_configured)"
+      }
+     ],
+     "plan": {
+      "base_state_seq": 12,
+      "created_at": "2026-09-13T15:47:01.362347384Z",
+      "plan_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+      "plan_revision": 1,
+      "preparation": {
+       "affected_files": [
+        "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt"
+       ],
+       "base_revision": "wsrev_12",
+       "canonical_changed": true,
+       "canonical_from_revision": "wsrev_12",
+       "canonical_revision": "wsrev_13",
+       "diagnostics": "unavailable",
+       "disk_checks": "sandbox_manifest_verified",
+       "intermediate_reports": false,
+       "journal_id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+       "missing_coverage": [
+        {
+         "detail": "status unavailable, semantic coverage \"unavailable\" (lsp_not_configured)",
+         "dimension": "diagnostics"
+        }
+       ],
+       "prepared_revision": "prep_bed7a241ed20a651943bef783b72410a1f98c52a8c264e7644610447a34bda35",
+       "provider_epoch": 1,
+       "provisional_accepted": [
+        "diagnostics"
+       ],
+       "verification": [
+        {
+         "coverage": {
+          "bytes_read": 0,
+          "capped": false,
+          "complete": true,
+          "files_considered": 0,
+          "files_read": 0,
+          "semantic": ""
+         },
+         "duration_ms": 298,
+         "exit": 0,
+         "implementation": [
+          "sh",
+          "-c",
+          "test -z \"$(gofmt -l cmd internal)\""
+         ],
+         "mode": "check",
+         "stage": "format_gate",
+         "started_revision": "wsrev_12",
+         "status": "passed"
+        },
+        {
+         "coverage": {
+          "bytes_read": 0,
+          "capped": false,
+          "complete": false,
+          "files_considered": 1,
+          "files_read": 0,
+          "semantic": "",
+          "skipped": [
+           "parser_unavailable:.txt"
+          ]
+         },
+         "duration_ms": 0,
+         "exit": -1,
+         "mode": "check",
+         "scope": [
+          "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/PLAN_NOTE.txt"
+         ],
+         "stage": "parser",
+         "started_revision": "wsrev_12",
+         "status": "unavailable"
+        },
+        {
+         "coverage": {
+          "bytes_read": 0,
+          "capped": false,
+          "complete": true,
+          "files_considered": 0,
+          "files_read": 0,
+          "semantic": ""
+         },
+         "duration_ms": 45707,
+         "exit": 0,
+         "implementation": [
+          "go",
+          "vet",
+          "./..."
+         ],
+         "mode": "check",
+         "stage": "check",
+         "started_revision": "wsrev_12",
+         "status": "passed"
+        },
+        {
+         "coverage": {
+          "bytes_read": 0,
+          "capped": false,
+          "complete": true,
+          "files_considered": 0,
+          "files_read": 0,
+          "semantic": ""
+         },
+         "duration_ms": 19939,
+         "executed_tests": [
+          "go-unit"
+         ],
+         "exit": 0,
+         "implementation": [
+          "go",
+          "test",
+          "./..."
+         ],
+         "mode": "check",
+         "output": "?   \tgithub.com/iryzhkov/huyang/bench/agent-efficiency/protocol\t[no test files]\n?   \tgithub.com/iryzhkov/huyang/cmd/huyang\t[no test files]\nok  \tgithub.com/iryzhkov/huyang/internal/handlers\t2.452s\nok  \tgithub.com/iryzhkov/huyang/internal/mcpapi\t0.030s\nok  \tgithub.com/iryzhkov/huyang/internal/provider\t0.006s\nok  \tgithub.com/iryzhkov/huyang/internal/provider/embed\t4.370s\nok  \tgithub.com/iryzhkov/huyang/internal/providerpool\t1.536s\nok  \tgithub.com/iryzhkov/huyang/internal/service\t7.264s\nok  \tgithub.com/iryzhkov/huyang/internal/workspace\t6.143s\n",
+         "stage": "tests",
+         "started_revision": "wsrev_12",
+         "status": "passed",
+         "test_scope": "full",
+         "test_verdict": "full_tests_passed"
+        },
+        {
+         "coverage": {
+          "bytes_read": 0,
+          "capped": false,
+          "complete": false,
+          "files_considered": 0,
+          "files_read": 0,
+          "semantic": "unavailable",
+          "skipped": [
+           "lsp_not_configured"
+          ]
+         },
+         "duration_ms": 0,
+         "evidence_ids": [
+          "ev_ad215822a6371726e4ea087091613ee6"
+         ],
+         "exit": 0,
+         "mode": "provider",
+         "stage": "diagnostics",
+         "started_revision": "wsrev_12",
+         "status": "unavailable"
+        }
+       ]
+      },
+      "state": "COMMITTED",
+      "updated_at": "2026-09-13T15:48:28.494013136Z",
+      "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e"
+     },
+     "provisional_accepted": [
+      "diagnostics"
+     ],
+     "revision": "wsrev_13"
+    },
+    "evidence": {
+     "ids": [
+      "ev_ad215822a6371726e4ea087091613ee6"
+     ],
+     "truncated": false
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [],
+    "outcome": "provisional",
+    "request_id": "req_31",
+    "summary": "Prepared plan applied with explicitly accepted incomplete diagnostic evidence; canonical provider resynced",
+    "transaction": {
+     "id": "plan_335f2e5bd39c8adbaf959b2ee452150f",
+     "state": "COMMITTED"
+    },
+    "warnings": [
+     "The plan was PROVISIONAL because diagnostic evidence was incomplete; the exact prepared revision was explicitly accepted."
+    ],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_13"
+    }
+   }
+  }
+ },
+ "req_bytes": 467,
+ "resp_bytes": 9974
+}

@@ -1,0 +1,12 @@
+Handoff to coordinator thread `92bdd669-fcfc-4a2c-90b1-3addf4dbe039`:
+
+- Worker branch: `worker-verify-output-muse`, commits `f39c011` (main content) + `e20ef61` (final receipt 64). HEAD now `e20ef6106d41f1a2d818a0b0bf35258514c910cd`. Never merged/pushed main; coordinator checkout untouched.
+- Actual clone path: `/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-c33bf9d2c8aff68f371f6c65957ccc25/task-b04ca0fa3c4d394b1061ab63e999627c/attempt-6467e29631dd09370f9f0f510a9da964/workspace` (started at detached `5d244adf13c978599a267ee6f35b446faf7430c5`).
+- Binary provenance: `/tmp/huyang-5d244ad-workshop`, `go version -m` → `vcs.revision=5d244adf13c978599a267ee6f35b446faf7430c5`, `vcs.modified=false`. Endpoint: owned daemon `serve --socket /tmp/verify-output-muse-huyang/huyang.sock --state-dir /tmp/verify-output-muse-huyang/state` + owned `mcp --profile experimental --socket <same>` over stdio (frames saved whole before printing). Shared MCP endpoint never used. Socket cleaned up; no debugger sessions started; no global config changed.
+- Report: `docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md`
+- Evidence: `docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/` (01–64 + tools-catalog)
+- Owned work: `docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/` (5 TS copies renamed + PLAN_NOTE.txt + big.json)
+- Workspace: `ws_0531a8913e6a16f907920954c8c7c07e`; `wsrev_1`→6 (copy) →12 (rename) →13 (plan apply) →14 (big.json) →15 recheck (unexplained +1, recorded) →61 pre-commit →65 final.
+- Dispositions: Goal 1 completed (6 code sites renamed, 2 `"formatLabel"` strings preserved, node pass before/after, compact receipt 4161 B + prepared COMMITTED receipt 9974 B, diagnostics via separate `diagnostics`/`evidence_get`); Goal 2 completed (minimal revision 378 B compact+structured; full/both 2378 vs compact/both 1704 vs text 922 vs structured 945 for same 168 B source; `both` duplicates body 2×); Goal 3 completed (131143 B source, 643 B excerpt at offset 130500, frame 1422 B <4 KiB, continuation contract proven). 3 preserved refusals (invalid_target, missing idempotency_key, prepared_revision_changed) + 1 symbol_ambiguous conflict. No prior reports/code read; all source ops via owned Huyang.
+
+BACKLOG STATUS: done

@@ -1,0 +1,428 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "edit_apply",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "operations": [
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/01-workspace-open.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/01-workspace-open.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/02-read-labels.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/02-read-labels.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/03-read-greeting.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/03-read-greeting.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/04-read-index.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/04-read-index.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/05-read-test.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/05-read-test.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/06-read-pkg.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/06-read-pkg.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/07-rev-initial.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/07-rev-initial.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/08-search-formatLabel.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/08-search-formatLabel.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/09-copy-compact.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/09-copy-compact.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/10-search-work-literal.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/10-search-work-literal.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/11-search-references.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/11-search-references.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/12-diag-after-copy.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/12-diag-after-copy.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/13-rev-after-copy.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/13-rev-after-copy.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/14-rename-compact.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/14-rename-compact.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/15-read-labels-after.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/15-read-labels-after.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/16-read-greeting-after.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/16-read-greeting-after.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/17-read-test-after.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/17-read-test-after.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/18-search-format-after.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/18-search-format-after.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/19-search-labelFor.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/19-search-labelFor.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/20-diag-full-after.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/20-diag-full-after.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/21-evidence-rename.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/21-evidence-rename.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/22-plan-create.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/22-plan-create.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/23-plan-prepare.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23-plan-prepare.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/23b-plan-inspect.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23b-plan-inspect.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/24-plan-apply.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/24-plan-apply.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/30-rev-default.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/30-rev-default.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/31-rev-compact-structured.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/31-rev-compact-structured.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/32-rev-compact-text.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/32-rev-compact-text.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/33-rev-compact-both.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/33-rev-compact-both.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/34-rev-full-both.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/34-rev-full-both.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/35-read-full-both.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/35-read-full-both.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/36-read-compact-both.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/36-read-compact-both.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/37-read-compact-text.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/37-read-compact-text.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/38-read-compact-structured.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/38-read-compact-structured.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/40-big-create.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/40-big-create.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/41-big-search.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/41-big-search.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/42-big-read-head.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/42-big-read-head.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/43-big-excerpt.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/43-big-excerpt.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/50-lsp-status.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/50-lsp-status.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/51-ws-status.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/51-ws-status.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/52-rev-final.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/52-rev-final.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/53-diff.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/53-diff.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/54-rev-recheck.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/54-rev-recheck.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/tools.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/tools-catalog.json"
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "structured"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok: Applied 44 operations: 0 replacement(s) in 44 files"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/01-workspace-open.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/02-read-labels.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/03-read-greeting.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/04-read-index.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/05-read-test.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/06-read-pkg.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/07-rev-initial.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/08-search-formatLabel.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/09-copy-compact.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/10-search-work-literal.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/11-search-references.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/12-diag-after-copy.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/13-rev-after-copy.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/14-rename-compact.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/15-read-labels-after.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/16-read-greeting-after.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/17-read-test-after.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/18-search-format-after.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/19-search-labelFor.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/20-diag-full-after.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/21-evidence-rename.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/22-plan-create.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23-plan-prepare.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23b-plan-inspect.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/24-plan-apply.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/30-rev-default.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/31-rev-compact-structured.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/32-rev-compact-text.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/33-rev-compact-both.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/34-rev-full-both.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/35-read-full-both.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/36-read-compact-both.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/37-read-compact-text.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/38-read-compact-structured.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/40-big-create.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/41-big-search.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/42-big-read-head.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/43-big-excerpt.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/50-lsp-status.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/51-ws-status.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/52-rev-final.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/53-diff.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/54-rev-recheck.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/tools-catalog.json"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revisions": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/01-workspace-open.json": "docrev_19330d50488cd751dd94f7a58eb763a2afa99b9421b8d299764b1cd5a64b2c82",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/02-read-labels.json": "docrev_d491e63d602dc7038570718e7ba39c820e98a0ab731d5fff3570f8ca55d413c2",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/03-read-greeting.json": "docrev_c8c761f87f3dada802a1f24dfda3239a70c303006f988d2d78c13238aa4a8cd4",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/04-read-index.json": "docrev_a16a8dd1c53f6fea7cb675fa7f38033db512da976230fd1aabb389b0f2b8f32d",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/05-read-test.json": "docrev_8f54f80d1b92143f2cf9b6b88a2de5820aff3e6fe9e5240089e7937b050add08",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/06-read-pkg.json": "docrev_31d0ee3ecf244f925768419e1b6bd0bf23b2df18c06b9c7dde5a17203eee2e35",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/07-rev-initial.json": "docrev_51d64351c661a452c337c0a704842e3180faff32732a0f30665ad1b32f318381",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/08-search-formatLabel.json": "docrev_c20e0cd8be9d15cbe368ba296f18d86790b6f5b3671427f7827f636003a4d37d",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/09-copy-compact.json": "docrev_c5cd461e803b493f8007ce90d1b33881b3d8d6b14d2f759efb6595091084483b",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/10-search-work-literal.json": "docrev_a62e223f3b59b2ffc561e01a44a3dda4cd38fb50aaca7f9ce929e141474f37b3",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/11-search-references.json": "docrev_6eebc94e55fdcda95b6b10af7cba444fd117254563b75ca19543c16506b5e6fa",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/12-diag-after-copy.json": "docrev_559c76c3319cb04f1505fb12b30029421114c16978033e3f6fe5e1936c4dbe30",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/13-rev-after-copy.json": "docrev_bd27e998df033ce969f1df3974f5774066686616fd101b87b2fa7e447b03396c",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/14-rename-compact.json": "docrev_f1e07fba2227093b20bf9b3f926a39a6c1f743b0ac78729c0a08cdc176f97a12",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/15-read-labels-after.json": "docrev_ac8f556de300970c517dbd32f8691eca9dbbe651f23781f4305bc2e0a5c96ded",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/16-read-greeting-after.json": "docrev_f12b4c7a6e9af66b6f21f728d43b8d35427819640ab6a756020c1903836602ea",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/17-read-test-after.json": "docrev_68948e8df6889be4604a77f67827c128a048ae68e28513cb3a20794c81520f50",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/18-search-format-after.json": "docrev_120707f454af79ff800c58506be6881d4d055122803dca6aa7d0a90e86898135",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/19-search-labelFor.json": "docrev_3b94d327d1299f8fad5d933fc5b30c83536546120b92cc211d2dcef2dccd2cfa",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/20-diag-full-after.json": "docrev_8c5dbabfb2bff55555cac79830bec8d34f7b51aaef12efbf6ca0c2e43d06416f",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/21-evidence-rename.json": "docrev_a86038be7403c2106bad30597de239f747ff797133f9c3f705c0ed19ed914fee",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/22-plan-create.json": "docrev_9fbcde472e2461a9d7364584816ddc9a95af5760681688d80dc816c0ec4826a3",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23-plan-prepare.json": "docrev_2fa06d89d3c0b10a9253d32e52d70927285223c188e1ecb000bc5e4bd6928bff",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23b-plan-inspect.json": "docrev_35a470a56efe74b9ae06c472294ee3b31e71efb143452ea2f7d34c96b0e4e311",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/24-plan-apply.json": "docrev_356fda48d84b9f1e3654aeb7cc9e0fe588b76a459720537d504ae8296a7847c3",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/30-rev-default.json": "docrev_251918a61e2b39646942fd8b9b6de5684e499388e498fa64f55dc6a4bd5db2ad",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/31-rev-compact-structured.json": "docrev_71e103af51dc5ae01dd698c45e119a3c9516a4a074b378dd48107ba0c323f164",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/32-rev-compact-text.json": "docrev_eaeaf6cde3ffc307e52ce4dd7a4e04919d2c8c3054fbb93a75349231f7267e8f",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/33-rev-compact-both.json": "docrev_8cafe1084dcba28284154fba44687186c69a57217f0ac97a46f53e4d1d175e46",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/34-rev-full-both.json": "docrev_bc04e60a2b11b306cc74d293dff6c8416a4a0596483ba6587e983339f129b519",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/35-read-full-both.json": "docrev_dca252ee60d434203e580067f3f20543159192412fd2fbfcc822cb92a310f6b8",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/36-read-compact-both.json": "docrev_d9da727b904b8f36b45c1aa85bc5e1514aa6d466a1d4e039a1d06ba4a66d30af",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/37-read-compact-text.json": "docrev_3286a8ba3b2dd6134211290c961da578599e1a5e4418fb2016c97f4e177236f6",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/38-read-compact-structured.json": "docrev_329070dcc2260b2044b0ca8069cd65f11dedcd10954e48b596bbf1248b4fa90e",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/40-big-create.json": "docrev_a4a824a49e86552f1d1bff6781f5a136fbf523e108da0e82aa81771192ddec1d",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/41-big-search.json": "docrev_5afca17d0915eb60a00909205e1fb793905f9d6e4d62f2d69507236f7679555e",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/42-big-read-head.json": "docrev_b5bb01fb266514519835ffd8fb380c2800e4c1f5d2033308be5ebbf9258b6f98",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/43-big-excerpt.json": "docrev_49b6f23e9c7b4bc3bd2c52aeb8ab9ee30b99d29be66cd8ab00cebde9625d89ff",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/50-lsp-status.json": "docrev_ee246ba7c9532df39acae12555e3f8b7a1013adc37c936a2995d5546624a05d8",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/51-ws-status.json": "docrev_a1e3bd3ac764d52e680ce6b3f313c13b1b0552e801f37ecc80c80462cd0ecf56",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/52-rev-final.json": "docrev_e23c1a583f013c83dbd8c548c4a5fbe6261b20afb74cce199c776d973e4763f5",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/53-diff.json": "docrev_786d05cb17bf70b29fbeb8d17fbd6561ac8987aa2f6892ff78d1c4f85bb50e13",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/54-rev-recheck.json": "docrev_dbc9284dd7163d98a61788b19a73f940c5679719bfb129ec88adce4d8d3b307d",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/tools-catalog.json": "docrev_7a0ef37d811119e673d4d457ae3ee5f393150e61391451971f5b1c086c13c98e"
+     },
+     "from_revision": "wsrev_15",
+     "git": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/01-workspace-open.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/02-read-labels.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/03-read-greeting.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/04-read-index.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/05-read-test.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/06-read-pkg.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/07-rev-initial.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/08-search-formatLabel.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/09-copy-compact.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/10-search-work-literal.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/11-search-references.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/12-diag-after-copy.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/13-rev-after-copy.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/14-rename-compact.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/15-read-labels-after.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/16-read-greeting-after.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/17-read-test-after.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/18-search-format-after.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/19-search-labelFor.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/20-diag-full-after.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/21-evidence-rename.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/22-plan-create.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23-plan-prepare.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/23b-plan-inspect.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/24-plan-apply.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/30-rev-default.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/31-rev-compact-structured.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/32-rev-compact-text.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/33-rev-compact-both.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/34-rev-full-both.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/35-read-full-both.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/36-read-compact-both.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/37-read-compact-text.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/38-read-compact-structured.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/40-big-create.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/41-big-search.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/42-big-read-head.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/43-big-excerpt.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/50-lsp-status.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/51-ws-status.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/52-rev-final.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/53-diff.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/54-rev-recheck.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/tools-catalog.json": "untracked"
+     },
+     "replacements": 0,
+     "revision": "wsrev_59"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/01-workspace-open.json",
+      "tool": "shell"
+     },
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/02-read-labels.json",
+      "tool": "shell"
+     }
+    ],
+    "outcome": "ok",
+    "request_id": "req_50",
+    "summary": "Applied 44 operations: 0 replacement(s) in 44 files",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_59"
+    }
+   }
+  }
+ },
+ "req_bytes": 9056,
+ "resp_bytes": 18080
+}

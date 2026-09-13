@@ -1,0 +1,171 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "debug_inspect",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha2\",\"code\":\"mutation_origin_unavailable\",\"data\":{\"value_origin\":{\"mutations\":[{\"sequence\":5,\"thread\":34,\"frame\":{\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go\",\"line\":16,\"name\":\"main.main.func1\",\"source_hash\":\"cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9\",\"source_handle\":\"rng_88a0e0228341e18a42ccfbc381ca32ae\",\"mapping\":\"launch_snapshot\"},\"mutation\":{\"name\":\"total\",\"object_id\":\"object_b056a69852ecb3a57c25a1c828041acce3aba55c6115437ae014c7b9b62eeff5\",\"access\":\"write\",\"evidence\":\"native_data_breakpoint_hit\",\"old_hash\":\"b47e22133c67168abb78cea1e14c4ed42df157dbb6b84980c9b1574697add07a\",\"values\":\"bounded_scalar_hashes\",\"source\":\"Stopped stack location; the adapter may report the instruction after the write.\"}}],\"trace_id\":\"trace_edcadb75ab5452bbc4b4ce577a43def6\",\"trace_digest\":\"43ec02a996fab02122350a8d811edb4df60345812efe7162a61f3e9439eab6cc\",\"name\":\"total\",\"status\":\"unknown\",\"identity\":\"unresolved\",\"samples\":[{\"sequence\":3,\"thread\":1,\"frame\":{\"function_hash\":\"226f1016704296361489b921f67a57d433efb890a45bd67e3206a514aa98a684\",\"token_offset\":10,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go\",\"line\":10,\"name\":\"main.main\",\"source_hash\":\"cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9\",\"source_handle\":\"rng_c9760e4274a0bfee24209bef5393881c\",\"mapping\":\"launch_snapshot\"},\"value\":{\"name\":\"total\",\"type\":\"int\",\"value\":\"0\",\"redacted\":false,\"truncated\":false},\"difference\":\"unknown\"},{\"sequence\":4,\"thread\":1,\"frame\":{\"function_hash\":\"226f1016704296361489b921f67a57d433efb890a45bd67e3206a514aa98a684\",\"token_offset\":14,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go\",\"line\":11,\"name\":\"main.main\",\"source_hash\":\"cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9\",\"source_handle\":\"rng_ae8f3c38859abc26c1a2b0e4868f9919\",\"mapping\":\"launch_snapshot\"},\"value\":{\"name\":\"total\",\"type\":\"int\",\"value\":\"1\",\"redacted\":false,\"truncated\":false},\"difference\":\"different_sampled_value\"},{\"sequence\":5,\"thread\":34,\"frame\":{\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go\",\"line\":16,\"name\":\"main.main.func1\",\"source_hash\":\"cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9\",\"source_handle\":\"rng_88a0e0228341e18a42ccfbc381ca32ae\",\"mapping\":\"launch_snapshot\"},\"value\":{\"name\":\"total\",\"type\":\"int\",\"value\":\"2\",\"redacted\":false,\"truncated\":false},\"difference\":\"unknown\"}],\"coverage\":{\"complete\":false,\"capped\":false,\"limits\":[],\"gaps\":[\"activation_and_alias_uncertainty\",\"executable_identity_unverified\",\"object_identity_unavailable\",\"one_execution\",\"source_inventory_incomplete\",\"unobserved_intervals\",\"user_visible_stops_only\"]},\"reason\":\"Retained local samples do not identify an object, assignment, final write, argument/return transfer or causal origin.\"}},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[],\"outcome\":\"partial\",\"request_id\":\"req_41\",\"summary\":\"Sampled values cannot establish exact mutation origin\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_6\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha2",
+            "code": "mutation_origin_unavailable",
+            "data": {
+              "value_origin": {
+                "mutations": [
+                  {
+                    "sequence": 5,
+                    "thread": 34,
+                    "frame": {
+                      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go",
+                      "line": 16,
+                      "name": "main.main.func1",
+                      "source_hash": "cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9",
+                      "source_handle": "rng_88a0e0228341e18a42ccfbc381ca32ae",
+                      "mapping": "launch_snapshot"
+                    },
+                    "mutation": {
+                      "name": "total",
+                      "object_id": "object_b056a69852ecb3a57c25a1c828041acce3aba55c6115437ae014c7b9b62eeff5",
+                      "access": "write",
+                      "evidence": "native_data_breakpoint_hit",
+                      "old_hash": "b47e22133c67168abb78cea1e14c4ed42df157dbb6b84980c9b1574697add07a",
+                      "values": "bounded_scalar_hashes",
+                      "source": "Stopped stack location; the adapter may report the instruction after the write."
+                    }
+                  }
+                ],
+                "trace_id": "trace_edcadb75ab5452bbc4b4ce577a43def6",
+                "trace_digest": "43ec02a996fab02122350a8d811edb4df60345812efe7162a61f3e9439eab6cc",
+                "name": "total",
+                "status": "unknown",
+                "identity": "unresolved",
+                "samples": [
+                  {
+                    "sequence": 3,
+                    "thread": 1,
+                    "frame": {
+                      "function_hash": "226f1016704296361489b921f67a57d433efb890a45bd67e3206a514aa98a684",
+                      "token_offset": 10,
+                      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go",
+                      "line": 10,
+                      "name": "main.main",
+                      "source_hash": "cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9",
+                      "source_handle": "rng_c9760e4274a0bfee24209bef5393881c",
+                      "mapping": "launch_snapshot"
+                    },
+                    "value": {
+                      "name": "total",
+                      "type": "int",
+                      "value": "0",
+                      "redacted": false,
+                      "truncated": false
+                    },
+                    "difference": "unknown"
+                  },
+                  {
+                    "sequence": 4,
+                    "thread": 1,
+                    "frame": {
+                      "function_hash": "226f1016704296361489b921f67a57d433efb890a45bd67e3206a514aa98a684",
+                      "token_offset": 14,
+                      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go",
+                      "line": 11,
+                      "name": "main.main",
+                      "source_hash": "cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9",
+                      "source_handle": "rng_ae8f3c38859abc26c1a2b0e4868f9919",
+                      "mapping": "launch_snapshot"
+                    },
+                    "value": {
+                      "name": "total",
+                      "type": "int",
+                      "value": "1",
+                      "redacted": false,
+                      "truncated": false
+                    },
+                    "difference": "different_sampled_value"
+                  },
+                  {
+                    "sequence": 5,
+                    "thread": 34,
+                    "frame": {
+                      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-watch/main.go",
+                      "line": 16,
+                      "name": "main.main.func1",
+                      "source_hash": "cd8a8ac00ce05a0ffb71e58b17699357220532382768a3b4a169c53fa40293d9",
+                      "source_handle": "rng_88a0e0228341e18a42ccfbc381ca32ae",
+                      "mapping": "launch_snapshot"
+                    },
+                    "value": {
+                      "name": "total",
+                      "type": "int",
+                      "value": "2",
+                      "redacted": false,
+                      "truncated": false
+                    },
+                    "difference": "unknown"
+                  }
+                ],
+                "coverage": {
+                  "complete": false,
+                  "capped": false,
+                  "limits": [],
+                  "gaps": [
+                    "activation_and_alias_uncertainty",
+                    "executable_identity_unverified",
+                    "object_identity_unavailable",
+                    "one_execution",
+                    "source_inventory_incomplete",
+                    "unobserved_intervals",
+                    "user_visible_stops_only"
+                  ]
+                },
+                "reason": "Retained local samples do not identify an object, assignment, final write, argument/return transfer or causal origin."
+              }
+            },
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "next": [],
+            "outcome": "partial",
+            "request_id": "req_41",
+            "summary": "Sampled values cannot establish exact mutation origin",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_6"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

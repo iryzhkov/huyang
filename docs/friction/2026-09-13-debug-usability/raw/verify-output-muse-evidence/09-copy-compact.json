@@ -1,0 +1,127 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "edit_apply",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "operations": [
+     {
+      "kind": "copy_file",
+      "from": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/labels.ts",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts"
+     },
+     {
+      "kind": "copy_file",
+      "from": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/greeting.ts",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+     },
+     {
+      "kind": "copy_file",
+      "from": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/index.ts",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts"
+     },
+     {
+      "kind": "copy_file",
+      "from": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/test.ts",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+     },
+     {
+      "kind": "copy_file",
+      "from": "docs/friction/2026-09-13-debug-usability/fixtures/typescript/package.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json"
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "both"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\"],\"details_omitted\":true,\"diagnostics\":\"Inspect with diagnostics; verification status above is unchanged.\",\"document_revisions\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\":\"docrev_e26f46781065740044491096d477f23fe0d32b5990e7d33e00f8fe8e7f083a8a\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\":\"docrev_67999dfc2ce96a91a50f8f3ce69ade56b6db293080e8b2d8ac4de398cd48052c\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\":\"docrev_1e68474cdf91df4edcb8b92fb43fdb84d1588a130c2a06848cab8594646d41e9\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\":\"docrev_6e967d921eba6d4a00a88903b9d519574486c727e4d39662895968aca2afe7e7\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\":\"docrev_780a24fb8e29ca56442ad7929e18e5638698515eb887f1b81c2974cf0f8af757\"},\"from_revision\":\"wsrev_1\",\"git\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\":\"untracked\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts\":\"untracked\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\":\"untracked\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json\":\"untracked\",\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\":\"untracked\"},\"replacements\":0,\"revision\":\"wsrev_6\",\"verification\":{\"confidence\":\"unavailable\",\"reasons\":[\"lsp_not_configured\"]}},\"evidence\":{\"ids\":[\"ev_7400ce1f2f0a2315314e2359a9c9f181\"],\"truncated\":false},\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[{\"action\":\"inspect_attachment_and_install_options\",\"tool\":\"language_server_status\"},{\"action\":\"retry_diagnostics_for_exact_revision\",\"revision_or_transaction\":\"wsrev_6\",\"tool\":\"verify_run\"}],\"outcome\":\"provisional\",\"request_id\":\"req_14\",\"summary\":\"Applied 5 operations: 0 replacement(s) in 5 files; no language server is configured for the edited files (lsp_not_configured); no diagnostics\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_6\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revisions": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts": "docrev_e26f46781065740044491096d477f23fe0d32b5990e7d33e00f8fe8e7f083a8a",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts": "docrev_67999dfc2ce96a91a50f8f3ce69ade56b6db293080e8b2d8ac4de398cd48052c",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts": "docrev_1e68474cdf91df4edcb8b92fb43fdb84d1588a130c2a06848cab8594646d41e9",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json": "docrev_6e967d921eba6d4a00a88903b9d519574486c727e4d39662895968aca2afe7e7",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts": "docrev_780a24fb8e29ca56442ad7929e18e5638698515eb887f1b81c2974cf0f8af757"
+     },
+     "from_revision": "wsrev_1",
+     "git": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/index.ts": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/package.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts": "untracked"
+     },
+     "replacements": 0,
+     "revision": "wsrev_6",
+     "verification": {
+      "confidence": "unavailable",
+      "reasons": [
+       "lsp_not_configured"
+      ]
+     }
+    },
+    "evidence": {
+     "ids": [
+      "ev_7400ce1f2f0a2315314e2359a9c9f181"
+     ],
+     "truncated": false
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [
+     {
+      "action": "inspect_attachment_and_install_options",
+      "tool": "language_server_status"
+     },
+     {
+      "action": "retry_diagnostics_for_exact_revision",
+      "revision_or_transaction": "wsrev_6",
+      "tool": "verify_run"
+     }
+    ],
+    "outcome": "provisional",
+    "request_id": "req_14",
+    "summary": "Applied 5 operations: 0 replacement(s) in 5 files; no language server is configured for the edited files (lsp_not_configured); no diagnostics",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_6"
+    }
+   }
+  }
+ },
+ "req_bytes": 1196,
+ "resp_bytes": 6343
+}

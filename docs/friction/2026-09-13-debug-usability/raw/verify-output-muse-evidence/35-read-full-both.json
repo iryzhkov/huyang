@@ -1,0 +1,57 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+    },
+    "response_mode": "full",
+    "response_format": "both"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"import { labelFor } from \\\"./index.ts\\\";\\nexport const diagnosticName = \\\"formatLabel\\\";\\nexport function greet(name: string): string {\\n  return `Hello ${labelFor(name)}`;\\n}\\n\",\"lines\":5,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"revision_id\":\"docrev_75667985517511bc57879212211e2199c81aa674b5a2b77e5b9cf17d4125c2a2\"},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_37\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_13\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "import { labelFor } from \"./index.ts\";\nexport const diagnosticName = \"formatLabel\";\nexport function greet(name: string): string {\n  return `Hello ${labelFor(name)}`;\n}\n",
+     "lines": 5,
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+     "revision_id": "docrev_75667985517511bc57879212211e2199c81aa674b5a2b77e5b9cf17d4125c2a2"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_37",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_13"
+    }
+   }
+  }
+ },
+ "req_bytes": 306,
+ "resp_bytes": 2378
+}

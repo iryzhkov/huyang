@@ -1,0 +1,32 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+    },
+    "response_mode": "compact",
+    "response_format": "text"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"byte_end\":168,\"byte_offset\":0,\"content\":\"import { labelFor } from \\\"./index.ts\\\";\\nexport const diagnosticName = \\\"formatLabel\\\";\\nexport function greet(name: string): string {\\n  return `Hello ${labelFor(name)}`;\\n}\\n\",\"delivered_bytes\":168,\"lines\":5,\"max_bytes\":65536,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"revision_id\":\"docrev_75667985517511bc57879212211e2199c81aa674b5a2b77e5b9cf17d4125c2a2\",\"selection_bytes\":168},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_39\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_13\"}}"
+    }
+   ]
+  }
+ },
+ "req_bytes": 309,
+ "resp_bytes": 922
+}

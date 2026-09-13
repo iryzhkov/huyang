@@ -1,0 +1,100 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "edit_apply",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "operations": [
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/61-copy-report.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/61-copy-report.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/62-report-head.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/62-report-head.json"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/63-rev-precommit.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/63-rev-precommit.json"
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "structured"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok: Applied 3 operations: 0 replacement(s) in 3 files"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/61-copy-report.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/62-report-head.json",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/63-rev-precommit.json"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revisions": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/61-copy-report.json": "docrev_9c082ef01510f56a2bfbbd94ecc5590e7fd4dc0ec434577587439deb7309a04b",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/62-report-head.json": "docrev_5b7e422a409f2e22faea32d07139bd34e66dd35a968b5ed833389c1d77a88ffc",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/63-rev-precommit.json": "docrev_809ee5bc89aab1df680f7572a9549e2f0a1b645079dc75be5956794cb7cc6e4e"
+     },
+     "from_revision": "wsrev_61",
+     "git": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/61-copy-report.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/62-report-head.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/63-rev-precommit.json": "untracked"
+     },
+     "replacements": 0,
+     "revision": "wsrev_64"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/61-copy-report.json",
+      "tool": "shell"
+     },
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/62-report-head.json",
+      "tool": "shell"
+     }
+    ],
+    "outcome": "ok",
+    "request_id": "req_54",
+    "summary": "Applied 3 operations: 0 replacement(s) in 3 files",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_64"
+    }
+   }
+  }
+ },
+ "req_bytes": 825,
+ "resp_bytes": 2544
+}

@@ -1,0 +1,218 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "edit_apply",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\"],\"diffs\":[{\"after_sha256\":\"39d143cf6f3082f595dd60216b05eb9da7341bb07c6f72ba961e7bba9750f82e\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\"}],\"document_revision\":\"docrev_737aae562cb4e4a91102bbb175bce9c2a453f113389f9a56fb140afac4757789\",\"from_revision\":\"wsrev_1\",\"git\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\":\"untracked\"},\"revision\":\"wsrev_2\",\"source\":{\"bytes\":530,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go\",\"sha256\":\"39d143cf6f3082f595dd60216b05eb9da7341bb07c6f72ba961e7bba9750f82e\"}},\"evidence\":{\"ids\":[\"ev_6508badc4981305b2b45c02e38becc8e\"],\"truncated\":false},\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[{\"action\":\"stage_the_new_file\",\"command\":\"git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"tool\":\"shell\"}],\"outcome\":\"ok\",\"request_id\":\"req_5\",\"summary\":\"Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go (530 bytes); no new diagnostics\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_2\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "canonical_changed": true,
+              "changed_paths": [
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go"
+              ],
+              "diffs": [
+                {
+                  "after_sha256": "39d143cf6f3082f595dd60216b05eb9da7341bb07c6f72ba961e7bba9750f82e",
+                  "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go"
+                }
+              ],
+              "document_revision": "docrev_737aae562cb4e4a91102bbb175bce9c2a453f113389f9a56fb140afac4757789",
+              "from_revision": "wsrev_1",
+              "git": {
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go": "untracked"
+              },
+              "revision": "wsrev_2",
+              "source": {
+                "bytes": 530,
+                "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go",
+                "sha256": "39d143cf6f3082f595dd60216b05eb9da7341bb07c6f72ba961e7bba9750f82e"
+              }
+            },
+            "evidence": {
+              "ids": [
+                "ev_6508badc4981305b2b45c02e38becc8e"
+              ],
+              "truncated": false
+            },
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "idempotency": "created",
+            "next": [
+              {
+                "action": "stage_the_new_file",
+                "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                "tool": "shell"
+              }
+            ],
+            "outcome": "ok",
+            "request_id": "req_5",
+            "summary": "Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/main.go to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go (530 bytes); no new diagnostics",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_2"
+            }
+          }
+        }
+      }
+    },
+    {
+      "tool": "edit_apply",
+      "request_id": 102,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod\"],\"diffs\":[{\"after_sha256\":\"b1bc4f2b75954f57215c5f43fef93369ae77a25f9f897973a055a30a30e3bcf0\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod\"}],\"document_revision\":\"docrev_0df31ec0eb0d447e9a7b255bf79c603db4e2e5e9506a1605d28a87b7788da0e3\",\"from_revision\":\"wsrev_2\",\"git\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod\":\"untracked\"},\"revision\":\"wsrev_3\",\"source\":{\"bytes\":42,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod\",\"sha256\":\"b1bc4f2b75954f57215c5f43fef93369ae77a25f9f897973a055a30a30e3bcf0\"}},\"evidence\":null,\"idempotency\":\"created\",\"next\":[{\"action\":\"stage_the_new_file\",\"command\":\"git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod\",\"tool\":\"shell\"}],\"outcome\":\"ok\",\"request_id\":\"req_6\",\"summary\":\"Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod (42 bytes)\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_3\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "canonical_changed": true,
+              "changed_paths": [
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod"
+              ],
+              "diffs": [
+                {
+                  "after_sha256": "b1bc4f2b75954f57215c5f43fef93369ae77a25f9f897973a055a30a30e3bcf0",
+                  "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod"
+                }
+              ],
+              "document_revision": "docrev_0df31ec0eb0d447e9a7b255bf79c603db4e2e5e9506a1605d28a87b7788da0e3",
+              "from_revision": "wsrev_2",
+              "git": {
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod": "untracked"
+              },
+              "revision": "wsrev_3",
+              "source": {
+                "bytes": 42,
+                "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod",
+                "sha256": "b1bc4f2b75954f57215c5f43fef93369ae77a25f9f897973a055a30a30e3bcf0"
+              }
+            },
+            "idempotency": "created",
+            "next": [
+              {
+                "action": "stage_the_new_file",
+                "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod",
+                "tool": "shell"
+              }
+            ],
+            "outcome": "ok",
+            "request_id": "req_6",
+            "summary": "Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/go.mod to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/go.mod (42 bytes)",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_3"
+            }
+          }
+        }
+      }
+    },
+    {
+      "tool": "edit_apply",
+      "request_id": 103,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"canonical_changed\":true,\"changed_paths\":[\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go\"],\"diffs\":[{\"after_sha256\":\"aa405f1d2ea2e8b9a016dcbe767aa68b6af621d5e31014332e3b3afdda290c22\",\"before_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go\"}],\"document_revision\":\"docrev_4584cf211f7235bf0febcbd4e68f50a4eb03cd8991c0479771e129d9a7414de1\",\"from_revision\":\"wsrev_3\",\"git\":{\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go\":\"untracked\"},\"revision\":\"wsrev_4\",\"source\":{\"bytes\":326,\"path\":\"docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go\",\"sha256\":\"aa405f1d2ea2e8b9a016dcbe767aa68b6af621d5e31014332e3b3afdda290c22\"}},\"evidence\":{\"ids\":[\"ev_c359c91eb1dfefd1ca0d6b8ac5a62ade\"],\"truncated\":false},\"idempotency\":\"created\",\"next\":[{\"action\":\"stage_the_new_file\",\"command\":\"git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go\",\"tool\":\"shell\"}],\"outcome\":\"ok\",\"request_id\":\"req_7\",\"summary\":\"Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go (326 bytes); no new diagnostics\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_4\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "canonical_changed": true,
+              "changed_paths": [
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go"
+              ],
+              "diffs": [
+                {
+                  "after_sha256": "aa405f1d2ea2e8b9a016dcbe767aa68b6af621d5e31014332e3b3afdda290c22",
+                  "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go"
+                }
+              ],
+              "document_revision": "docrev_4584cf211f7235bf0febcbd4e68f50a4eb03cd8991c0479771e129d9a7414de1",
+              "from_revision": "wsrev_3",
+              "git": {
+                "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go": "untracked"
+              },
+              "revision": "wsrev_4",
+              "source": {
+                "bytes": 326,
+                "path": "docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go",
+                "sha256": "aa405f1d2ea2e8b9a016dcbe767aa68b6af621d5e31014332e3b3afdda290c22"
+              }
+            },
+            "evidence": {
+              "ids": [
+                "ev_c359c91eb1dfefd1ca0d6b8ac5a62ade"
+              ],
+              "truncated": false
+            },
+            "idempotency": "created",
+            "next": [
+              {
+                "action": "stage_the_new_file",
+                "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go",
+                "tool": "shell"
+              }
+            ],
+            "outcome": "ok",
+            "request_id": "req_7",
+            "summary": "Copied docs/friction/2026-09-13-debug-usability/fixtures/delivery/main_test.go to docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main_test.go (326 bytes); no new diagnostics",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_4"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

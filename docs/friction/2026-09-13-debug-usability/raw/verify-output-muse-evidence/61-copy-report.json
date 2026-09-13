@@ -1,0 +1,92 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "edit_apply",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "operations": [
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/report.md",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md"
+     },
+     {
+      "kind": "copy_file",
+      "from": "/tmp/verify-output-muse-huyang/evidence/60-copy-evidence.json",
+      "to": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/60-copy-evidence.json"
+     }
+    ],
+    "response_mode": "compact",
+    "response_format": "structured"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok: Applied 2 operations: 0 replacement(s) in 2 files"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "canonical_changed": true,
+     "changed_paths": [
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/60-copy-evidence.json"
+     ],
+     "details_omitted": true,
+     "diagnostics": "Inspect with diagnostics; verification status above is unchanged.",
+     "document_revisions": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/60-copy-evidence.json": "docrev_2e29403ec216617651c2492fec909bfb048980024a11d6128267a2ba1c34d316",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md": "docrev_7dfe3ea6a6c3114aadbe1ea4b4c1c7cde1886771f5449a609b4ed5250d230cb6"
+     },
+     "from_revision": "wsrev_59",
+     "git": {
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/60-copy-evidence.json": "untracked",
+      "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md": "untracked"
+     },
+     "replacements": 0,
+     "revision": "wsrev_61"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "idempotency": "created",
+    "next": [
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse.md",
+      "tool": "shell"
+     },
+     {
+      "action": "stage_the_new_file",
+      "command": "git add -- docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-evidence/60-copy-evidence.json",
+      "tool": "shell"
+     }
+    ],
+    "outcome": "ok",
+    "request_id": "req_51",
+    "summary": "Applied 2 operations: 0 replacement(s) in 2 files",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_61"
+    }
+   }
+  }
+ },
+ "req_bytes": 584,
+ "resp_bytes": 2071
+}

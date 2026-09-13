@@ -1,0 +1,106 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+   "name": "diagnostics",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "full": true
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"diagnostics\":{\"confidence\":\"unavailable\",\"coverage\":{\"edited_documents\":{\"state\":\"incomplete\",\"confidence\":\"unavailable\",\"evidence_ids\":[\"ev_001b0cc6e455ec72b8bff4395f697ed3\",\"ev_35a377fb9fc804ceba3c02d67337bbe1\",\"ev_634e12ad92ad149961d7e5d1d9b19a6b\",\"ev_64e121e55d97044481eb3511b0198753\",\"ev_7400ce1f2f0a2315314e2359a9c9f181\",\"ev_90c38366824ba0c2c14e6024a391f347\",\"ev_a18cc00948baa366174ed4c305b1caf0\",\"ev_dbf837cc6d577e896f3c16b78d99661d\",\"ev_efedc2456c89130ca92daf67dea38e62\"],\"reasons\":[\"lsp_not_configured\"]}},\"new\":null,\"resolved\":null,\"preexisting_count\":0,\"current_count\":0,\"stale_count\":0,\"evidence_ids\":[\"ev_001b0cc6e455ec72b8bff4395f697ed3\",\"ev_35a377fb9fc804ceba3c02d67337bbe1\",\"ev_634e12ad92ad149961d7e5d1d9b19a6b\",\"ev_64e121e55d97044481eb3511b0198753\",\"ev_7400ce1f2f0a2315314e2359a9c9f181\",\"ev_90c38366824ba0c2c14e6024a391f347\",\"ev_a18cc00948baa366174ed4c305b1caf0\",\"ev_dbf837cc6d577e896f3c16b78d99661d\",\"ev_efedc2456c89130ca92daf67dea38e62\"],\"cursor\":\"diagcur_9\"}},\"evidence\":{\"ids\":[\"ev_001b0cc6e455ec72b8bff4395f697ed3\",\"ev_35a377fb9fc804ceba3c02d67337bbe1\",\"ev_634e12ad92ad149961d7e5d1d9b19a6b\",\"ev_64e121e55d97044481eb3511b0198753\",\"ev_7400ce1f2f0a2315314e2359a9c9f181\",\"ev_90c38366824ba0c2c14e6024a391f347\",\"ev_a18cc00948baa366174ed4c305b1caf0\",\"ev_dbf837cc6d577e896f3c16b78d99661d\",\"ev_efedc2456c89130ca92daf67dea38e62\"],\"truncated\":false},\"next\":[{\"action\":\"inspect_provider_and_pipeline_status\",\"tool\":\"workspace_inspect\",\"view\":\"status\"},{\"action\":\"run_configured_diagnostics_for_exact_revision\",\"tool\":\"verify_run\"}],\"outcome\":\"unavailable\",\"request_id\":\"req_25\",\"summary\":\"Diagnostic evidence is unavailable for this workspace\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "diagnostics": {
+      "confidence": "unavailable",
+      "coverage": {
+       "edited_documents": {
+        "state": "incomplete",
+        "confidence": "unavailable",
+        "evidence_ids": [
+         "ev_001b0cc6e455ec72b8bff4395f697ed3",
+         "ev_35a377fb9fc804ceba3c02d67337bbe1",
+         "ev_634e12ad92ad149961d7e5d1d9b19a6b",
+         "ev_64e121e55d97044481eb3511b0198753",
+         "ev_7400ce1f2f0a2315314e2359a9c9f181",
+         "ev_90c38366824ba0c2c14e6024a391f347",
+         "ev_a18cc00948baa366174ed4c305b1caf0",
+         "ev_dbf837cc6d577e896f3c16b78d99661d",
+         "ev_efedc2456c89130ca92daf67dea38e62"
+        ],
+        "reasons": [
+         "lsp_not_configured"
+        ]
+       }
+      },
+      "new": null,
+      "resolved": null,
+      "preexisting_count": 0,
+      "current_count": 0,
+      "stale_count": 0,
+      "evidence_ids": [
+       "ev_001b0cc6e455ec72b8bff4395f697ed3",
+       "ev_35a377fb9fc804ceba3c02d67337bbe1",
+       "ev_634e12ad92ad149961d7e5d1d9b19a6b",
+       "ev_64e121e55d97044481eb3511b0198753",
+       "ev_7400ce1f2f0a2315314e2359a9c9f181",
+       "ev_90c38366824ba0c2c14e6024a391f347",
+       "ev_a18cc00948baa366174ed4c305b1caf0",
+       "ev_dbf837cc6d577e896f3c16b78d99661d",
+       "ev_efedc2456c89130ca92daf67dea38e62"
+      ],
+      "cursor": "diagcur_9"
+     }
+    },
+    "evidence": {
+     "ids": [
+      "ev_001b0cc6e455ec72b8bff4395f697ed3",
+      "ev_35a377fb9fc804ceba3c02d67337bbe1",
+      "ev_634e12ad92ad149961d7e5d1d9b19a6b",
+      "ev_64e121e55d97044481eb3511b0198753",
+      "ev_7400ce1f2f0a2315314e2359a9c9f181",
+      "ev_90c38366824ba0c2c14e6024a391f347",
+      "ev_a18cc00948baa366174ed4c305b1caf0",
+      "ev_dbf837cc6d577e896f3c16b78d99661d",
+      "ev_efedc2456c89130ca92daf67dea38e62"
+     ],
+     "truncated": false
+    },
+    "next": [
+     {
+      "action": "inspect_provider_and_pipeline_status",
+      "tool": "workspace_inspect",
+      "view": "status"
+     },
+     {
+      "action": "run_configured_diagnostics_for_exact_revision",
+      "tool": "verify_run"
+     }
+    ],
+    "outcome": "unavailable",
+    "request_id": "req_25",
+    "summary": "Diagnostic evidence is unavailable for this workspace",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 171,
+ "resp_bytes": 3845
+}

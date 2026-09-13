@@ -1,0 +1,64 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+   "name": "search",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "query": "formatLabel",
+    "paths": [
+     "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work"
+    ]
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"hits\":[{\"line\":2,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts\"},{\"line\":6,\"match\":\"formatLabel\",\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts\"}],\"result_set\":{\"file_count\":2,\"handle\":\"set_7f78b9282d57578e8c296652f2f99e6f\",\"match_count\":2},\"returned\":2,\"total\":2},\"evidence\":null,\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_23\",\"summary\":\"2 matches\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "hits": [
+      {
+       "line": 2,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/greeting.ts"
+      },
+      {
+       "line": 6,
+       "match": "formatLabel",
+       "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/test.ts"
+      }
+     ],
+     "result_set": {
+      "file_count": 2,
+      "handle": "set_7f78b9282d57578e8c296652f2f99e6f",
+      "match_count": 2
+     },
+     "returned": 2,
+     "total": 2
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_23",
+    "summary": "2 matches",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 259,
+ "resp_bytes": 1345
+}

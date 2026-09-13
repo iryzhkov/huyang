@@ -1,0 +1,58 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json"
+    },
+    "max_bytes": 1500,
+    "byte_offset": 130500,
+    "expected_revision_id": "docrev_027e6929b3cd703db2cccf72bb3b0bb7376ecf3a9a6b4191d70b9b7622a5de9a",
+    "response_mode": "compact",
+    "response_format": "structured"
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "ok: Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "byte_end": 131143,
+     "byte_offset": 130500,
+     "content": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"marker\":\"NEEDLE_verify_output_muse_12345\",\"tail\":\"end\"}\n",
+     "delivered_bytes": 643,
+     "lines": 1,
+     "max_bytes": 1500,
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json",
+     "revision_id": "docrev_027e6929b3cd703db2cccf72bb3b0bb7376ecf3a9a6b4191d70b9b7622a5de9a",
+     "selection_bytes": 131143
+    },
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_44",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/big.json",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_14"
+    }
+   }
+  }
+ },
+ "req_bytes": 453,
+ "resp_bytes": 1422
+}

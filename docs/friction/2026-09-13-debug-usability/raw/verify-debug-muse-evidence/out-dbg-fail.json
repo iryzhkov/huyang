@@ -1,0 +1,159 @@
+{
+  "initialize": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "result": {
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "huyang",
+        "title": "Huyang",
+        "description": "Transactional semantic workspace for coding agents.",
+        "version": "0.4.0"
+      }
+    }
+  },
+  "results": [
+    {
+      "tool": "debug_session",
+      "request_id": 101,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"coverage\":{\"complete\":true,\"unavailable\":[]},\"debug\":{\"adapter\":\"delve\",\"breakpoints\":[{\"file\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"id\":1,\"line\":8,\"verified\":true},{\"file\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"id\":2,\"line\":15,\"verified\":true}],\"changes_since_previous_stop\":{\"output\":[\"Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery\",\"[adapter] Type 'dlv help' for list of commands.\"],\"stale_source\":null,\"tracked\":null},\"frame\":{\"at\":\"1/6\",\"file\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"line\":8,\"name\":\"main.dispatch\",\"symbol\":\"dispatch\"},\"hit\":{\"file\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"id\":1,\"line\":8},\"locals\":[\"credits: int = 0\",\"~r0: string = \\\"\\\"\"],\"output_new\":[\"Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery\",\"[adapter] Type 'dlv help' for list of commands.\"],\"program\":\"/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery\",\"reason\":\"breakpoint\",\"request\":\"launch\",\"source\":[\"6:   )\",\"7:   \",\"8: > func dispatch(credits int) string {\",\"9:   \\tif credits <= 0 {\",\"10:   \\t\\treturn \\\"rejected\\\"\"],\"stack\":[\"#0 main.dispatch docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:8\",\"#1 main.run.func1 docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:21\",\"#2 <external>\"],\"state\":\"stopped\",\"thread\":21,\"threads\":6,\"top_location\":{\"display\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:8 debugger source\",\"handle\":\"rng_42d3d5b0946db16dd952401918a6c594\",\"locator\":{\"file_range\":{\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go\",\"revision_id\":\"docrev_737aae562cb4e4a91102bbb175bce9c2a453f113389f9a56fb140afac4757789\",\"byte_start\":39,\"byte_end\":74,\"expected_sha256\":\"87cbf7b1a003a04670e27ca1a758c28e79219c910b21203e2a95fe73e293f071\",\"before_sha256\":\"c79a7033c5b7b9b1c46c7cf105934cc604887f67f10f6fa3e208710c34eb1877\",\"after_sha256\":\"38b04000a077e633ae13e21f73a84cd7030875da886237e4c27abc2f19d9cb8a\",\"anchor_bytes\":64}}}},\"trace_id\":\"trace_380357f1f0d5ca1293ff008c72b5fed8\"},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"idempotency\":\"created\",\"next\":[{\"arguments\":{\"action\":\"continue\",\"workspace_id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\"},\"tool\":\"debug_control\"},{\"arguments\":{\"action\":\"variables\",\"workspace_id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\"},\"tool\":\"debug_inspect\"}],\"outcome\":\"ok\",\"request_id\":\"req_13\",\"summary\":\"Debugger start: stopped (breakpoint)\",\"warnings\":[],\"workspace\":{\"id\":\"ws_1bea377236c86e75ee6d0b0927bf14e9\",\"revision\":\"wsrev_4\"}}"
+            }
+          ],
+          "structuredContent": {
+            "api_version": "huyang.workspace/v1alpha1",
+            "data": {
+              "coverage": {
+                "complete": true,
+                "unavailable": []
+              },
+              "debug": {
+                "adapter": "delve",
+                "breakpoints": [
+                  {
+                    "file": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                    "id": 1,
+                    "line": 8,
+                    "verified": true
+                  },
+                  {
+                    "file": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                    "id": 2,
+                    "line": 15,
+                    "verified": true
+                  }
+                ],
+                "changes_since_previous_stop": {
+                  "output": [
+                    "Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery",
+                    "[adapter] Type 'dlv help' for list of commands."
+                  ],
+                  "stale_source": null,
+                  "tracked": null
+                },
+                "frame": {
+                  "at": "1/6",
+                  "file": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                  "line": 8,
+                  "name": "main.dispatch",
+                  "symbol": "dispatch"
+                },
+                "hit": {
+                  "file": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                  "id": 1,
+                  "line": 8
+                },
+                "locals": [
+                  "credits: int = 0",
+                  "~r0: string = \"\""
+                ],
+                "output_new": [
+                  "Building /home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery",
+                  "[adapter] Type 'dlv help' for list of commands."
+                ],
+                "program": "/home/igor/.local/state/t3-steward/backlog-v2-workspaces/workers/9a9842d1ddc92dee/run-41c937f4eda809a135f73688bba5273d/task-46683ea6cfc3c1c460775cf077b9220f/attempt-f2315ac331fb435512df8eb202241cbe/workspace/docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery",
+                "reason": "breakpoint",
+                "request": "launch",
+                "source": [
+                  "6:   )",
+                  "7:   ",
+                  "8: > func dispatch(credits int) string {",
+                  "9:   \tif credits <= 0 {",
+                  "10:   \t\treturn \"rejected\""
+                ],
+                "stack": [
+                  "#0 main.dispatch docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:8",
+                  "#1 main.run.func1 docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:21",
+                  "#2 <external>"
+                ],
+                "state": "stopped",
+                "thread": 21,
+                "threads": 6,
+                "top_location": {
+                  "display": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go:8 debugger source",
+                  "handle": "rng_42d3d5b0946db16dd952401918a6c594",
+                  "locator": {
+                    "file_range": {
+                      "path": "docs/friction/2026-09-13-debug-usability/raw/verify-debug-muse-delivery/main.go",
+                      "revision_id": "docrev_737aae562cb4e4a91102bbb175bce9c2a453f113389f9a56fb140afac4757789",
+                      "byte_start": 39,
+                      "byte_end": 74,
+                      "expected_sha256": "87cbf7b1a003a04670e27ca1a758c28e79219c910b21203e2a95fe73e293f071",
+                      "before_sha256": "c79a7033c5b7b9b1c46c7cf105934cc604887f67f10f6fa3e208710c34eb1877",
+                      "after_sha256": "38b04000a077e633ae13e21f73a84cd7030875da886237e4c27abc2f19d9cb8a",
+                      "anchor_bytes": 64
+                    }
+                  }
+                }
+              },
+              "trace_id": "trace_380357f1f0d5ca1293ff008c72b5fed8"
+            },
+            "guide": [
+              "Name the repository with root on any call; workspace_open is for this overview only.",
+              "Change text you know with edit_apply replace_literal: one call, no search first.",
+              "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+              "Move, copy and delete files with edit_apply, then run the git command under next.",
+              "A file over 500 lines: read view=outline or max_lines before the whole file."
+            ],
+            "idempotency": "created",
+            "next": [
+              {
+                "arguments": {
+                  "action": "continue",
+                  "workspace_id": "ws_1bea377236c86e75ee6d0b0927bf14e9"
+                },
+                "tool": "debug_control"
+              },
+              {
+                "arguments": {
+                  "action": "variables",
+                  "workspace_id": "ws_1bea377236c86e75ee6d0b0927bf14e9"
+                },
+                "tool": "debug_inspect"
+              }
+            ],
+            "outcome": "ok",
+            "request_id": "req_13",
+            "summary": "Debugger start: stopped (breakpoint)",
+            "warnings": [],
+            "workspace": {
+              "id": "ws_1bea377236c86e75ee6d0b0927bf14e9",
+              "revision": "wsrev_4"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

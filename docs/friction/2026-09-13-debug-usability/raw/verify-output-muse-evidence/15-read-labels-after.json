@@ -1,0 +1,55 @@
+{
+ "request": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+   "name": "read",
+   "arguments": {
+    "workspace_id": "ws_0531a8913e6a16f907920954c8c7c07e",
+    "target": {
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts"
+    }
+   }
+  }
+ },
+ "response": {
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+   "content": [
+    {
+     "type": "text",
+     "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"content\":\"export function labelFor(name: string): string {\\n  return `[${name.trim()}]`;\\n}\\n\",\"lines\":3,\"path\":\"docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"revision_id\":\"docrev_83da76b7f1a6cf45430f40b660274a50ca50061bd1b04dca0fc9e1f5708ff7ff\"},\"evidence\":null,\"guide\":[\"Name the repository with root on any call; workspace_open is for this overview only.\",\"Change text you know with edit_apply replace_literal: one call, no search first.\",\"Several edits at once: edit_apply operations; change_plan when they must be atomic.\",\"Move, copy and delete files with edit_apply, then run the git command under next.\",\"A file over 500 lines: read view=outline or max_lines before the whole file.\"],\"next\":[],\"outcome\":\"ok\",\"request_id\":\"req_20\",\"summary\":\"Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts\",\"warnings\":[],\"workspace\":{\"id\":\"ws_0531a8913e6a16f907920954c8c7c07e\",\"revision\":\"wsrev_12\"}}"
+    }
+   ],
+   "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+     "content": "export function labelFor(name: string): string {\n  return `[${name.trim()}]`;\n}\n",
+     "lines": 3,
+     "path": "docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+     "revision_id": "docrev_83da76b7f1a6cf45430f40b660274a50ca50061bd1b04dca0fc9e1f5708ff7ff"
+    },
+    "guide": [
+     "Name the repository with root on any call; workspace_open is for this overview only.",
+     "Change text you know with edit_apply replace_literal: one call, no search first.",
+     "Several edits at once: edit_apply operations; change_plan when they must be atomic.",
+     "Move, copy and delete files with edit_apply, then run the git command under next.",
+     "A file over 500 lines: read view=outline or max_lines before the whole file."
+    ],
+    "next": [],
+    "outcome": "ok",
+    "request_id": "req_20",
+    "summary": "Read docs/friction/2026-09-13-debug-usability/raw/verify-output-muse-work/labels.ts",
+    "warnings": [],
+    "workspace": {
+     "id": "ws_0531a8913e6a16f907920954c8c7c07e",
+     "revision": "wsrev_12"
+    }
+   }
+  }
+ },
+ "req_bytes": 252,
+ "resp_bytes": 2172
+}
