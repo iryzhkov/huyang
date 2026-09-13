@@ -133,6 +133,17 @@ existing workspace, because its handle comes from one.
   experimental profile, and the answer comes from the sandbox and the language server that
   read it, in the paths you know. Once the plan is discarded, applied or edited, the same
   call is refused rather than answered about the canonical bytes.
+- Asking a prepared revision for `diagnostics` also answers what the proposal changed:
+  `data.delta` carries what is new against the canonical report, what it resolved, and how
+  many findings were already there and stayed. Findings are matched by what they say, not
+  by the line they sit on, so an edit that moves a warning down seven lines is not two
+  findings. Each new one names the operation that caused it, ranked by the evidence:
+  `exact` when it landed in bytes that operation wrote, `strong` when it is in a file the
+  operation targeted, `likely` when the snapshot connects its file to one, `ambiguous`
+  when several are equally plausible, `unattributed` when nothing supports a claim. A
+  finding the formatter caused is attributed to the formatter. `baseline_complete: false`
+  means the comparison could not be made at all: the workspace held no current evidence
+  about those files, so nothing in the report can be called new.
 - Before changing a declaration, ask what it reaches: `change_plan {action: preview,
   plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
   exported, which tests are associated with the files, what generated or configuration
