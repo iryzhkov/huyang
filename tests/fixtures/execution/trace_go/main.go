@@ -15,8 +15,9 @@ func main() {
 		n = -1
 	}
 	ch := make(chan int)
-	go worker(ch, n)
 	a := leaf(n)
+	// Start the worker after the first call so debugger stops cannot coalesce.
+	go worker(ch, n)
 	b := <-ch
 	if a < 0 {
 		os.Exit(1)

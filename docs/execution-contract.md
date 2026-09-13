@@ -229,6 +229,34 @@ backward slice remain unknown. Values-disabled traces explain that limitation;
 redacted values never acquire revealing hashes. No instrumentation modifies
 canonical source or runs implicitly.
 
+## Completed trace comparison (X29)
+
+debug_inspect action=compare_traces accepts passing_trace_id and failing_trace_id.
+Those roles are supplied by the caller; the comparison does not infer test
+success from debugger termination. Both records must be completed and share
+workspace identity and epoch. Inspection reads retained evidence without
+launching a program or changing either trace.
+
+Alignment follows sampled stack order. Matching source fingerprints, locations
+and stack context establish an exact-source prefix. New Go recordings also
+retain declaration-token fingerprints and stopped token offsets, allowing
+layout/comment relocation only when the entire declaration including its
+signature matches. Compiler/line directives refuse this fallback. Incompatible
+signatures, stale mappings, missing fingerprints and ambiguous stacks stop
+alignment. There is no speculative suffix realignment or portable goroutine ID.
+
+The common prefix counts aligned locations; values may differ inside it.
+Results distinguish local sample differences, unknown/redacted operands, native
+watch-evidence differences, stop reasons, thread-transition patterns and the
+earliest unaligned sampled frontier. Unaligned stop/mutation counts remain
+visible. At most 128 differences are returned with explicit cap coverage.
+
+Causal status remains unknown: this operation does not acquire a dependency
+graph or certify argument/return origin. Differences are evidence for further
+inspection, not ranked causal proofs. Concurrent schedules and omitted intervals
+can explain several alignments. Older traces without token fingerprints can
+still align on exact source, but cannot use relocation fallback.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

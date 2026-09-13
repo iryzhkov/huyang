@@ -14,6 +14,8 @@ type ExecutionTracePolicy struct {
 	RedactNames   []string `json:"redact_names,omitempty"`
 }
 type ExecutionTraceFrame struct {
+	FunctionHash string `json:"function_hash,omitempty"`
+	TokenOffset  int    `json:"token_offset,omitempty"`
 	Path         string `json:"path,omitempty"`
 	Line         int    `json:"line"`
 	Column       int    `json:"column,omitempty"`

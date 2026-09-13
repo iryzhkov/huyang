@@ -143,7 +143,7 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 		properties[key] = value
 	}
 	return ToolDescriptor{
-		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace", "mutation_capabilities", "value_origin"), "value_name": stringSchema("Exact captured local name; no evaluation is performed."), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
+		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace", "mutation_capabilities", "value_origin", "compare_traces"), "passing_trace_id": stringSchema("Completed reference trace; passing is a caller-supplied role."), "failing_trace_id": stringSchema("Completed comparison trace; failing is a caller-supplied role."), "value_name": stringSchema("Exact captured local name; no evaluation is performed."), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
 		Class:                  ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
 		Profiles: profiles, ReadOnly: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "action"},
@@ -241,6 +241,11 @@ func debugControlExtras(action string, arguments map[string]any) ([]string, erro
 
 func debugInspectExtras(action string, arguments map[string]any) ([]string, error) {
 	switch action {
+	case "compare_traces":
+		if arguments["passing_trace_id"] == nil || arguments["failing_trace_id"] == nil {
+			return nil, errors.New("compare_traces requires passing_trace_id and failing_trace_id")
+		}
+		return []string{"passing_trace_id", "failing_trace_id"}, nil
 	case "value_origin":
 		if arguments["trace_id"] == nil || arguments["value_name"] == nil {
 			return nil, errors.New("value_origin requires trace_id and value_name")

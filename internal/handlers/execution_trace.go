@@ -13,6 +13,9 @@ import (
 
 func (h *Handlers) debug(ctx context.Context, requestID, name string, w *workspacecore.Workspace, args map[string]any) map[string]any {
 	action, _ := args["action"].(string)
+	if name == "debug_inspect" && action == "compare_traces" {
+		return h.compareTraces(ctx, requestID, w, args)
+	}
 	if name == "debug_inspect" && action == "value_origin" {
 		return h.traceValueOrigin(requestID, w, args)
 	}

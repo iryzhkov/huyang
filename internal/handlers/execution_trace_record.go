@@ -100,6 +100,7 @@ func debugTraceEvent(ctx context.Context, w *workspacecore.Workspace, id string,
 		location := workspacecore.ExecutionTraceFrame{Path: path, Line: argInt(frame, "line", 0), Column: argInt(frame, "column", 1), Name: name, Mapping: "external"}
 		if source, ok := known[path]; ok && trace.SourceHashes[path] == source.Hash && !stale {
 			location.SourceHash = source.Hash
+			location.FunctionHash, location.TokenOffset = workspacecore.ExecutionFrameFingerprint(source, location)
 			handle, err := w.ExecutionSourceHandle(source, location.Line, 1)
 			if err == nil {
 				location.SourceHandle = handle
