@@ -718,9 +718,24 @@ func (run *commitRun) finish() {
 // prepared journal. A failure here happened before any canonical write.
 func (run *commitRun) stageWriteSet() error {
 	w, plan := run.w, run.plan
+	// The preview is recomputed against the canonical bytes as they are now.
+	// A different answer means those bytes moved after the plan was prepared,
+	// which is what the caller needs to be told: the preview is an internal
+	// record it never asked about, and "the preview is stale" reads as an
+	// instruction to re-run a preview rather than to rebase on a changed base.
 	freshPreview := w.buildPreview(plan)
-	if freshPreview.Outcome != "ok" || freshPreview.PreviewRevision != plan.Preview.PreviewRevision {
-		return Coded(CodeCommitPreconditionChanged, errors.New("plan preview is stale"))
+	if freshPreview.Outcome != "ok" {
+		detail := ""
+		if len(freshPreview.Conflicts) > 0 {
+			detail = ": " + freshPreview.Conflicts[0].Message
+		}
+		return Codedf(CodeCommitPreconditionChanged,
+			"the canonical bytes moved after this plan was prepared and it no longer applies to them, in %d place(s)%s; nothing was written",
+			len(freshPreview.Conflicts), detail)
+	}
+	if freshPreview.PreviewRevision != plan.Preview.PreviewRevision {
+		return Coded(CodeCommitPreconditionChanged, errors.New(
+			"the canonical bytes moved after this plan was prepared, so applying it would overwrite a change it never saw; nothing was written"))
 	}
 	request, err := w.planStageRequest(plan)
 	if err != nil {

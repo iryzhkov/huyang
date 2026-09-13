@@ -282,6 +282,12 @@ func TestAnExternalWriteBeforeApplyIsRefused(t *testing.T) {
 	if outcome(applied) == "ok" {
 		t.Fatalf("a plan prepared against other bytes was applied over them: %s", summary(applied))
 	}
+	// The refusal is the only explanation the agent gets, so it names what
+	// actually happened - the base moved - rather than the internal preview
+	// record, which the caller never asked about and cannot act on.
+	if !strings.Contains(summary(applied), "canonical bytes moved") {
+		t.Fatalf("the conflict does not say the base moved: %s", summary(applied))
+	}
 	t.Logf("refused: %s/%v %s", outcome(applied), applied["code"], summary(applied))
 	content, err := os.ReadFile(filepath.Join(root, "ledger.go"))
 	if err != nil || string(content) != external {
