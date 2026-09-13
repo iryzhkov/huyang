@@ -72,7 +72,12 @@ type clientCursors struct {
 	// reason and the same recovery on every edit of a session, which is a
 	// paragraph the client has already read and cannot act on twice.
 	unavailable map[string]string
-	order       []string
+	// opened is the workspace overview each client was last given. Agents
+	// open a workspace they already hold several times a session; the
+	// second answer is the same tree, the same commands and the same
+	// capabilities they were shown the first time.
+	opened map[string]string
+	order  []string
 }
 
 func newNoticeDelivery() *noticeDelivery {
@@ -112,6 +117,23 @@ func (n *noticeDelivery) TakeUnavailability(workspaceID workspacecore.ID, client
 	}
 	repeated := clients.unavailable[client] == fingerprint
 	clients.unavailable[client] = fingerprint
+	return repeated
+}
+
+// TakeOverview reports whether this client has already been given this exact
+// workspace overview, and records it.
+func (n *noticeDelivery) TakeOverview(workspaceID workspacecore.ID, client, fingerprint string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil || fingerprint == "" {
+		return false
+	}
+	if clients.opened == nil {
+		clients.opened = map[string]string{}
+	}
+	repeated := clients.opened[client] == fingerprint
+	clients.opened[client] = fingerprint
 	return repeated
 }
 
@@ -172,6 +194,7 @@ func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *cli
 			delete(clients.cursors, clients.order[0])
 			delete(clients.owed, clients.order[0])
 			delete(clients.unavailable, clients.order[0])
+			delete(clients.opened, clients.order[0])
 			clients.order = clients.order[1:]
 		}
 	}

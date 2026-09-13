@@ -119,7 +119,7 @@ func (h *Handlers) Execute(ctx context.Context, requestID, name string, argument
 		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
 	}
 	if name == "workspace_open" {
-		return h.withGuide(ctx, h.open(ctx, requestID, arguments))
+		return h.withGuide(ctx, h.open(ctx, requestID, arguments, true))
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
 	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
@@ -239,7 +239,7 @@ func (h *Handlers) AdoptProjectRoot(ctx context.Context, requestID string, argum
 // proceeds as if workspace_open had been called first. This saves the
 // separate open call on every task that starts in a known repository.
 func (h *Handlers) adoptImplicitProject(ctx context.Context, requestID, root string, arguments map[string]any) map[string]any {
-	return adoptOpenedProject(requestID, h.open(ctx, requestID, map[string]any{"kind": "project", "root": root}), arguments)
+	return adoptOpenedProject(requestID, h.open(ctx, requestID, map[string]any{"kind": "project", "root": root}, false), arguments)
 }
 
 // adoptOpenedProject writes the opened workspace's ID into the arguments, or
@@ -270,7 +270,7 @@ func (h *Handlers) readImplicitDocument(ctx context.Context, requestID string, a
 		// path without a workspace names nothing useful.
 		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
 	}
-	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}})
+	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}}, false)
 	if opened["outcome"] != "ok" {
 		return opened
 	}

@@ -37,7 +37,7 @@ func (h *Handlers) editImplicitDocument(ctx context.Context, requestID string, a
 			}
 		}
 	}
-	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": files})
+	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": files}, false)
 	if opened["outcome"] != "ok" {
 		return opened
 	}
