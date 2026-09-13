@@ -60,6 +60,11 @@ func TestExecutionTraceRealDelve(t *testing.T) {
 	if len(threads) < 2 || mapped == 0 {
 		t.Fatalf("threads=%v mapped=%d trace=%v", threads, mapped, trace)
 	}
+	combined := call(t, session, "path_explain", map[string]any{"workspace_id": workspace, "mode": "combined", "trace_id": id, "from": "main", "to": "leaf", "use_provider": false})
+	explanation, ok := data(combined)["explanation"].(map[string]any)
+	if !ok || explanation["cause_status"] != "unknown" || len(data(combined)["thread_transitions"].([]any)) == 0 {
+		t.Fatalf("concurrent explanation lost uncertainty: %v", combined)
+	}
 	breakpoints := call(t, session, "debug_breakpoints", map[string]any{"workspace_id": workspace, "idempotency_key": "trace-bps", "action": "list"})
 	if data(breakpoints)["debug"].(map[string]any)["count"] != float64(0) {
 		t.Fatalf("temporary breakpoints remain: %v", breakpoints)

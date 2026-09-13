@@ -176,6 +176,28 @@ the executed branch functions, preserves a dynamic callback as a runtime-only
 relation, and refuses an overlay after source changes. Combined status remains
 unknown rather than claiming that an entire candidate path was observed.
 
+## Branch and absence explanations (X27)
+
+Combined path responses add an explanation containing the target's observed or
+not_observed status within retained samples, candidate frontiers, captured
+condition operands and static/observed boundary candidates. Cause status stays
+unknown. An early return or exception near an absent target is not automatically
+its cause. Several visits and goroutines can support competing frontiers.
+
+Only a stopped top frame at the exact condition line with matching source
+fingerprint supplies operands. Go integer/bool comparisons, boolean combinations,
+parentheses and unary not/negation can be evaluated without running debuggee code.
+Calls, indexing, field access, arithmetic, missing/duplicate names, unsupported
+types and redacted/truncated values leave evaluation unknown. Even a successful
+evaluation is inferred from a snapshot and identifies candidate branch edges,
+not a proven subsequent branch history. true/false identifiers require captured
+bindings because Go permits shadowing.
+
+Explanations retain at most 128 condition samples and 1 MiB of condition details,
+with a separately capped 128 boundary candidates. All ceilings disclose coverage
+limits. Source ambiguity, uninstrumented callbacks, interrupted capture and
+schedule uncertainty prevent general negative or causal claims.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

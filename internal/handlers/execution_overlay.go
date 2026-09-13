@@ -44,8 +44,20 @@ func (h *Handlers) combinedPathExplain(ctx context.Context, requestID string, w 
 	paths, _ := payload["paths"].([]workspacecore.GraphPath)
 	payload["frontier_candidates"] = workspacecore.ExecutionOverlayFrontiers(paths, overlay)
 	payload["thread_transitions"] = workspacecore.ExecutionOverlayThreads(overlay)
-	payload["branch_outcomes"] = "unknown: sampled call stacks do not certify individual branch edges"
-	payload["coverage"] = overlay.Coverage
+	target, _ := payload["to"].(string)
+	explanation, err := workspacecore.ExplainExecution(ctx, *snapshot.Execution, trace, overlay, paths, target)
+	if err != nil {
+		return mcpapi.Failure(requestID, w, workspacecore.ErrorCode(err), err)
+	}
+	boundaries := workspacecore.ExecutionExplanationBoundaries(*snapshot.Execution, trace)
+	if len(boundaries) >= workspacecore.MaxExecutionExplanations {
+		explanation.Coverage.Capped = true
+		explanation.Coverage.Limits = append(explanation.Coverage.Limits, "explanation_boundaries")
+	}
+	payload["explanation"] = explanation
+	payload["boundary_candidates"] = boundaries
+	payload["branch_outcomes"] = explanation.Conditions
+	payload["coverage"] = explanation.Coverage
 	payload["observation_scope"] = "Recorded stack relations and sampled locations in one execution; static paths remain alternatives. Thread changes do not prove synchronization."
 	result["outcome"] = "partial"
 	result["summary"] = "Static alternatives with bounded observations from one execution"
