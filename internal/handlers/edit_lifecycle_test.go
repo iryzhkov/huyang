@@ -165,6 +165,20 @@ func TestDeleteFileRequiresAGuard(t *testing.T) {
 	if stale["outcome"] != "conflict" || stale["code"] != "delete_target_changed" {
 		t.Fatalf("stale hash = %#v", stale)
 	}
+	// A revision this service never issued is refused with the one it holds,
+	// in a field and in a follow-up that spells out the retry. The sentence
+	// named it before; a caller had to parse prose or read the file again.
+	wrong := lifecycleEdit(t, handlers, workspaceID, "rm2b", map[string]any{"kind": "delete_file", "path": "gone.txt", "revision_id": "docrev_wrong"})
+	if wrong["outcome"] != "conflict" {
+		t.Fatalf("wrong revision = %#v", wrong)
+	}
+	if got := wrong["data"].(map[string]any)["document_revision"]; got != data["revision_id"] {
+		t.Fatalf("refusal offers %#v as the current revision, want %#v", got, data["revision_id"])
+	}
+	retry, _ := wrong["next"].([]any)[0].(map[string]any)
+	if retry["revision_id"] != data["revision_id"] || retry["path"] != "gone.txt" {
+		t.Fatalf("the retry step does not carry the current revision: %#v", wrong["next"])
+	}
 	guarded := lifecycleEdit(t, handlers, workspaceID, "rm3", map[string]any{"kind": "delete_file", "path": "gone.txt", "revision_id": data["revision_id"]})
 	if guarded["outcome"] == "conflict" || guarded["outcome"] == "failed" {
 		t.Fatalf("guarded delete = %#v", guarded)

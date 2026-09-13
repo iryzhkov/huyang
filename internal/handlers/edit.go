@@ -226,13 +226,29 @@ func editFailure(requestID string, workspace *workspacecore.Workspace, handle wo
 	if !errors.As(err, &conflict) {
 		return mcpapi.Failure(requestID, workspace, "edit_failed", err)
 	}
-	result := mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), map[string]any{
-		"target": handle, "current_revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
-	})
-	result["next"] = []any{
-		map[string]any{"tool": "edit_apply", "action": "retry_as_replace_literal_with_the_old_text", "path": handle.Path},
-		map[string]any{"tool": "read", "action": "refresh_path", "path": handle.Path},
+	path := handle.Path
+	if conflict.Path != "" {
+		path = conflict.Path
 	}
+	data := map[string]any{
+		"target": handle, "current_revision": fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq),
+	}
+	next := []any{
+		map[string]any{"tool": "edit_apply", "action": "retry_as_replace_literal_with_the_old_text", "path": path},
+		map[string]any{"tool": "read", "action": "refresh_path", "path": path},
+	}
+	if conflict.Current != "" {
+		// The document revision the retry takes as revision_id, in a field of
+		// its own. It was already inside the sentence, which means a caller
+		// had to parse prose or read the file again to learn something the
+		// refusal already knew.
+		data["document_revision"] = conflict.Current
+		next = append([]any{map[string]any{
+			"tool": "edit_apply", "action": "retry_with_the_current_revision_id", "path": path, "revision_id": conflict.Current,
+		}}, next...)
+	}
+	result := mcpapi.Envelope(requestID, workspace, "conflict", string(conflict.Code), conflict.Error(), data)
+	result["next"] = next
 	return result
 }
 
