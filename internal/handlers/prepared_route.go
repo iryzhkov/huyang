@@ -98,6 +98,7 @@ func (h *Handlers) diagnosticsPrepared(ctx context.Context, requestID string, wo
 		files = files[:preparedDiagnosticBudget]
 	}
 	reports := make([]any, 0, len(files))
+	var findings []workspacecore.ComparableFinding
 	for _, path := range files {
 		absolute, err := preparedPath(view, path)
 		if err != nil {
@@ -110,12 +111,25 @@ func (h *Handlers) diagnosticsPrepared(ctx context.Context, requestID string, wo
 			return failure
 		}
 		reports = append(reports, map[string]any{"path": path, "report": value})
+		findings = append(findings, comparableFindings(path, value)...)
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "",
-		fmt.Sprintf("Diagnostics for %d file(s) at %s", len(reports), view.PreparedRevision), map[string]any{
-			"diagnostics": reports, "revision": view.PreparedRevision, "plan_id": view.PlanID,
-			"plan_revision": view.PlanRevision,
-		})
+	data := map[string]any{
+		"diagnostics": reports, "revision": view.PreparedRevision, "plan_id": view.PlanID,
+		"plan_revision": view.PlanRevision,
+	}
+	summary := fmt.Sprintf("Diagnostics for %d file(s) at %s", len(reports), view.PreparedRevision)
+	// What the proposal did, rather than what is wrong with the code: the
+	// findings that are new against the canonical report, who caused each,
+	// and what it resolved.
+	if delta := h.preparedDelta(ctx, requestID, workspace, view, findings, files); delta != nil {
+		data["delta"] = delta
+		summary = fmt.Sprintf("%d new, %d resolved, %d unchanged at %s",
+			len(delta.New), len(delta.Resolved), delta.UnchangedCount, view.PreparedRevision)
+		if !delta.BaselineComplete {
+			summary += "; the baseline was incomplete, so what is new cannot be established"
+		}
+	}
+	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 }
 
 // codeActionsPrepared lists what the server would offer for the staged bytes.

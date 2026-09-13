@@ -165,14 +165,31 @@ type PlanConflict struct {
 }
 
 type PlanPreview struct {
-	PreviewRevision  string         `json:"preview_revision"`
-	PlanRevision     uint64         `json:"plan_revision"`
-	Outcome          string         `json:"outcome"`
-	NormalizedOrder  []string       `json:"normalized_order"`
-	AffectedFiles    []string       `json:"affected_files"`
-	Diffs            []ExactDiff    `json:"diffs,omitempty"`
-	Conflicts        []PlanConflict `json:"conflicts,omitempty"`
-	CanonicalChanged bool           `json:"canonical_changed"`
+	PreviewRevision string         `json:"preview_revision"`
+	PlanRevision    uint64         `json:"plan_revision"`
+	Outcome         string         `json:"outcome"`
+	NormalizedOrder []string       `json:"normalized_order"`
+	AffectedFiles   []string       `json:"affected_files"`
+	Diffs           []ExactDiff    `json:"diffs,omitempty"`
+	Conflicts       []PlanConflict `json:"conflicts,omitempty"`
+	// Hunks are where each operation's bytes ended up. They are what lets a
+	// diagnostic in the prepared revision be traced back to the operation
+	// that caused it rather than to the nearest one.
+	Hunks            []PlanHunk `json:"hunks,omitempty"`
+	CanonicalChanged bool       `json:"canonical_changed"`
+}
+
+// PlanHunk is the region one operation wrote, in the image the plan would
+// produce. Superseded says a later operation rewrote those bytes, which makes
+// the region somebody else's doing and is worth saying rather than hiding.
+type PlanHunk struct {
+	OpID       string `json:"op_id"`
+	Path       string `json:"path"`
+	ByteStart  int    `json:"byte_start"`
+	ByteEnd    int    `json:"byte_end"`
+	StartLine  int    `json:"start_line"`
+	EndLine    int    `json:"end_line"`
+	Superseded bool   `json:"superseded,omitempty"`
 }
 
 type PlanRecord struct {
@@ -1115,6 +1132,7 @@ type previewBuilder struct {
 	exists   map[string]bool
 	before   map[string][]byte
 	touched  map[string]bool
+	hunks    []PlanHunk
 }
 
 func (b *previewBuilder) apply(operation PlanOperation) {
@@ -1151,6 +1169,30 @@ func (b *previewBuilder) conflict(operation PlanOperation, path string, expected
 // set records the simulated content and presence of a path touched by an operation.
 func (b *previewBuilder) set(path string, content []byte, exists bool) {
 	b.contents[path], b.exists[path], b.touched[path] = content, exists, true
+}
+
+// record remembers where one operation's replacement landed, and moves the
+// regions earlier operations wrote in the same file by however much this
+// splice changed their offsets. A region this splice overwrote is marked
+// superseded: those bytes are now the later operation's, and attributing a
+// diagnostic in them to the earlier one would be wrong.
+func (b *previewBuilder) record(operation PlanOperation, path string, start, end, replacement int) {
+	delta := replacement - (end - start)
+	for index := range b.hunks {
+		hunk := &b.hunks[index]
+		if hunk.Path != path {
+			continue
+		}
+		switch {
+		case hunk.ByteStart >= end:
+			hunk.ByteStart, hunk.ByteEnd = hunk.ByteStart+delta, hunk.ByteEnd+delta
+		case hunk.ByteEnd > start:
+			hunk.Superseded = true
+		}
+	}
+	b.hunks = append(b.hunks, PlanHunk{
+		OpID: operation.OpID, Path: path, ByteStart: start, ByteEnd: start + replacement,
+	})
 }
 
 // remember records content as both the before image and the simulated content of path.
@@ -1258,6 +1300,7 @@ func (b *previewBuilder) applyEdit(operation PlanOperation) {
 			return
 		}
 	}
+	b.record(operation, handle.Path, start, end, len(replacement))
 	b.set(handle.Path, splice(content, start, end, replacement), true)
 }
 
@@ -1392,6 +1435,15 @@ func (b *previewBuilder) finish() PlanPreview {
 	}
 	sort.Strings(preview.AffectedFiles)
 	sort.Slice(preview.Diffs, func(i, j int) bool { return preview.Diffs[i].Path < preview.Diffs[j].Path })
+	// Byte offsets are how the splices were tracked; lines are how a
+	// diagnostic will arrive, so the hunks carry both.
+	for index := range b.hunks {
+		hunk := &b.hunks[index]
+		content := b.contents[hunk.Path]
+		hunk.StartLine = 1 + bytes.Count(content[:min(hunk.ByteStart, len(content))], []byte{'\n'})
+		hunk.EndLine = 1 + bytes.Count(content[:min(hunk.ByteEnd, len(content))], []byte{'\n'})
+	}
+	preview.Hunks = b.hunks
 	return finalizePreview(preview)
 }
 

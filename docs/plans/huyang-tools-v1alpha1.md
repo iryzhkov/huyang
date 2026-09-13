@@ -1178,6 +1178,32 @@ consulted is named even when it found nothing, so "nobody looked" and "looked an
 relation" stay distinguishable, and a contributor that failed appears as a named gap in
 coverage rather than as a thinner graph.
 
+### What a proposal did, and who in it did it (experimental)
+
+Asking a prepared revision for its diagnostics returns a `delta` beside the findings: what
+is new against the canonical report, what the change resolved, and how many findings were
+already there and stayed. A finding is matched across the change by what it says rather
+than where it sits, so an edit that moves a warning down seven lines does not report one
+resolved and one new.
+
+Each new finding carries an attribution, ranked by the evidence behind it:
+
+- `exact` - it landed in bytes exactly one operation wrote, or in a file a tool wrote;
+- `strong` - it is in a file exactly one operation targeted;
+- `likely` - the analysis snapshot connects its file to exactly one operation;
+- `ambiguous` - several operations are equally plausible at the best available level;
+- `unattributed` - nothing supports a claim.
+
+A change a tool made - a formatter, a code action, a generator - is attributed to the tool
+and never handed to the nearest user operation. A region a later operation rewrote stops
+belonging to the earlier one.
+
+`baseline_complete: false` means the comparison could not be made: the workspace held no
+current evidence about those files, so nothing can be called new. Stale evidence does not
+count as a baseline, because stale means it describes other bytes. Silence is reported as
+silence rather than as "nothing was wrong before", which would present every pre-existing
+problem as something this change caused.
+
 ### Prepared revisions as somewhere to look (experimental)
 
 `read`, `navigate`, `diagnostics` and `code_actions` accept a revision selector in the

@@ -112,6 +112,14 @@ func (c *Conflict) Error() string {
 		return "modern mutation requires an explicit document revision"
 	default:
 		message := fmt.Sprintf("%s: %s changed from %s to %s", c.Code, c.Path, c.Expected, c.Current)
+		if c.Expected == c.Current && c.Expected != "" {
+			// The document did not change: the bytes this target named were
+			// rewritten by an earlier operation of the same plan. Printing
+			// one revision twice sent a reader looking for an external
+			// writer that does not exist.
+			message = fmt.Sprintf("%s: %s is still at %s, but the bytes this target named were replaced by an earlier operation in the same plan",
+				c.Code, c.Path, c.Expected)
+		}
 		if c.Detail != "" {
 			message += " (" + c.Detail + ")"
 		}
