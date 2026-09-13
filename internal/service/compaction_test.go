@@ -181,10 +181,15 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 			t.Fatalf("compact hit carries %s: %#v", key, hit)
 		}
 	}
-	// The default hit is path, line and text; the editable handle and the
+	// The default hit is path and line; the matched text is omitted when it
+	// is the literal query the caller sent, and the editable handle and the
 	// column come with include_handles or include_ranges.
-	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != "needle" || hit["handle"] != nil || hit["column"] != nil {
+	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != nil || hit["handle"] != nil || hit["column"] != nil {
 		t.Fatalf("compact hit = %#v", hit)
+	}
+	pattern := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "need..", "mode": "regex"})
+	if matched := pattern["data"].(map[string]any)["hits"].([]map[string]any)[0]["match"]; matched != "needle" {
+		t.Fatalf("a regular expression hit must carry the text it matched: %#v", matched)
 	}
 	anchored := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "needle", "include_ranges": true})
 	hit = anchored["data"].(map[string]any)["hits"].([]map[string]any)[0]

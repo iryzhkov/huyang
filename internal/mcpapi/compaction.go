@@ -84,8 +84,10 @@ func compactDiagnosticItem(item workspacecore.DiagnosticItem) map[string]any {
 
 // CompactSearchHits returns the bounded hit list. The default hit carries
 // path, line, column, match and the editable handle; the exact byte anchors
-// are added only with include_ranges.
-func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges, includeHandles bool) ([]map[string]any, bool) {
+// are added only with include_ranges. A hit whose matched text is the query
+// the caller just sent omits it: a literal search for one name answered that
+// name once per hit, fifty times for a fifty-hit reply.
+func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges, includeHandles bool, echoed string) ([]map[string]any, bool) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -95,7 +97,10 @@ func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges,
 	}
 	compact := make([]map[string]any, 0, len(returned))
 	for _, hit := range returned {
-		item := map[string]any{"path": hit.Path, "line": hit.Line, "match": hit.Match}
+		item := map[string]any{"path": hit.Path, "line": hit.Line}
+		if hit.Match != echoed {
+			item["match"] = hit.Match
+		}
 		// The column and the editable handle matter only to a caller that
 		// will edit by handle; replace_literal needs neither.
 		if includeHandles || includeRanges {
