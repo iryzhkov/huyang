@@ -328,8 +328,11 @@ func TestReadSymbolLocatorFallsBackToProviderDeclarations(t *testing.T) {
 	if !strings.HasPrefix(content, "type Shipment struct {") || strings.Contains(content, "func other") {
 		t.Fatalf("symbol content = %q", content)
 	}
-	if coverage := read["data"].(map[string]any)["coverage"].(workspacecore.Coverage); !coverage.Complete {
-		t.Fatalf("coverage = %#v", coverage)
+	// A declaration that was found and read in full is its own coverage; the
+	// block that used to ride along described every other file in the
+	// workspace and cost more than the declaration did.
+	if coverage, present := read["data"].(map[string]any)["coverage"]; present {
+		t.Fatalf("successful symbol read carried coverage: %#v", coverage)
 	}
 	missing := direct.call(context.Background(), "read", map[string]any{
 		"workspace_id": workspaceID,

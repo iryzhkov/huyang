@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
@@ -283,7 +284,10 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	rawPath, _ := request.Symbol["path"].(string)
 	rawName, _ := request.Symbol["name_path"].(string)
 	path, name := workspacePath(workspace, rawPath), canonicalNamePath(rawName)
-	matches, coverage, findErr := workspace.FindSymbols(name)
+	// The locator names one file, so only that file is parsed: the
+	// workspace-wide scan read every document in the repository and answered
+	// coverage about files this read never asked about.
+	matches, coverage, findErr := workspace.FindSymbolsInFile(path, name)
 	if findErr != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
 	}
@@ -303,7 +307,7 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 		}
 	}
 	if len(exact) != 1 {
-		return symbolReadMiss(requestID, workspace, coverage, exact, rawName, path)
+		return symbolReadMiss(requestID, workspace, coverage, exact, matches, rawName, path)
 	}
 	resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
 	if resolveErr != nil {
@@ -322,26 +326,61 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
 		"path": path, "name_path": name, "kind": current.Kind, "content": string(read.Content[current.ByteStart:current.ByteEnd]),
 		"revision_id": read.Snapshot.Revision, "handle": resolved.Handle, "start_line": startLine, "end_line": endLine,
-		"coverage": coverage,
 	})
 }
 
 // symbolReadMiss answers a locator that resolved to no or several
 // declarations, with the cheapest recovery for each case.
-func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact []workspacecore.HandleRecord, rawName, path string) map[string]any {
+// candidateNamePaths names the declarations the file does have that carry
+// the requested name, in file order and bounded, so a miss on a bare method
+// name answers the qualified locator that resolves instead of a dead end.
+func candidateNamePaths(nearby []workspacecore.HandleRecord, rawName string) []string {
+	const maxCandidates = 5
+	leaf := rawName
+	if index := strings.LastIndexAny(leaf, "/."); index >= 0 {
+		leaf = leaf[index+1:]
+	}
+	seen := make(map[string]bool, len(nearby))
+	candidates := make([]string, 0, maxCandidates)
+	for _, record := range nearby {
+		name := record.Locator.NamePath
+		if name == "" || name == rawName || seen[name] || !strings.Contains(name, leaf) {
+			continue
+		}
+		seen[name] = true
+		if candidates = append(candidates, name); len(candidates) == maxCandidates {
+			break
+		}
+	}
+	return candidates
+}
+
+func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact, nearby []workspacecore.HandleRecord, rawName, path string) map[string]any {
 	// A name that is not there and a name that is there twice are different
 	// mistakes with different repairs - use another name, or qualify the one
 	// you used - and "did not resolve uniquely" described both.
 	outcome, code := "conflict", "symbol_not_found"
 	summary := fmt.Sprintf("No declaration named %s in %s", rawName, path)
+	// A method is declared under its receiver, so the bare name of one never
+	// resolves. The scan already found those declarations; naming them here
+	// is the difference between a dead end and a locator the caller can
+	// retry in one call.
+	candidates := candidateNamePaths(nearby, rawName)
+	if len(exact) == 0 && len(candidates) > 0 {
+		summary = fmt.Sprintf("No declaration named %s in %s; the file declares %s", rawName, path, strings.Join(candidates, ", "))
+	}
 	if len(exact) > 1 {
 		summary = fmt.Sprintf("%d declarations named %s in %s; the locator selects none of them", len(exact), rawName, path)
 	}
 	if !coverage.Complete {
-		outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
+		outcome, code = "unavailable", "semantic_provider_unavailable"
+		summary = fmt.Sprintf("No parser covers %s, so a declaration in it cannot be located by name", path)
 	}
-	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary,
-		map[string]any{"coverage": coverage, "matches": exact, "match_count": len(exact)})
+	data := map[string]any{"coverage": coverage, "matches": exact, "match_count": len(exact)}
+	if len(candidates) > 0 {
+		data["candidates"] = candidates
+	}
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, data)
 	next := []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
 	if len(exact) == 0 && coverage.Complete {
 		// The outline is the list of names this file does declare, which is
