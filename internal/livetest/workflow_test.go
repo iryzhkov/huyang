@@ -289,6 +289,66 @@ func TestAnExternalWriteBeforeApplyIsRefused(t *testing.T) {
 	}
 }
 
+// Applying with the prepared revision of a preparation that has been
+// released is refused under its own code, not under the coarser one for a
+// changed commit precondition. The two mean different things to a caller
+// that switches on codes: canonical moved under this preparation, against
+// the handle you are holding is not the current one.
+func TestAReleasedPreparedRevisionIsRefusedUnderItsOwnCode(t *testing.T) {
+	instance := start(t)
+	session := instance.connect("experimental")
+	root := fixture(t, "go")
+	opened := call(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
+	workspaceID := workspaceIdentity(t, opened)
+
+	first := planAction(t, session, workspaceID, "stale-prepare", map[string]any{
+		"action": "prepare",
+		"operations": []any{map[string]any{
+			"op_id": "change-total", "kind": "replace_symbol",
+			"content": "// Total is the amount left in the ledger.\nfunc Total() int {\n\treturn 8\n}",
+			"target":  map[string]any{"symbol_locator": map[string]any{"path": "ledger.go", "name_path": "Total"}},
+		}},
+	})
+	plan, released, _ := preparedPlan(t, first)
+	// Editing a prepared plan reopens it and releases the preparation, so the
+	// revision above no longer names anything that can be committed.
+	edited := planAction(t, session, workspaceID, "stale-edit", map[string]any{
+		"action": "edit", "plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"],
+		"edit": map[string]any{"mode": "add", "operations": []any{map[string]any{
+			"op_id": "add-note", "kind": "create_file", "path": "note.txt", "content": "noted\n",
+		}}},
+	})
+	if outcome(edited) != "ok" {
+		t.Fatalf("edit = %s: %s", outcome(edited), summary(edited))
+	}
+	reopened, _ := data(edited)["plan"].(map[string]any)
+	again := planAction(t, session, workspaceID, "stale-reprepare", map[string]any{
+		"action": "prepare", "plan_id": reopened["plan_id"], "plan_revision": reopened["plan_revision"],
+	})
+	_, current, _ := preparedPlan(t, again)
+	if current == released || current == "" {
+		t.Fatalf("the second preparation reused the released revision %q", current)
+	}
+
+	applied := planAction(t, session, workspaceID, "stale-apply", map[string]any{
+		"action": "apply", "plan_id": reopened["plan_id"], "plan_revision": reopened["plan_revision"],
+		"prepared_revision": released, "accept_provisional": true,
+	})
+	if outcome(applied) == "ok" {
+		t.Fatalf("a released preparation was committed: %s", summary(applied))
+	}
+	if code, _ := applied["code"].(string); code != "prepared_revision_changed" {
+		t.Fatalf("stale prepared_revision code = %q, want prepared_revision_changed: %s", code, summary(applied))
+	}
+	if !strings.Contains(summary(applied), current) {
+		t.Fatalf("the refusal does not name the preparation to use instead: %s", summary(applied))
+	}
+	content, err := os.ReadFile(filepath.Join(root, "ledger.go"))
+	if err != nil || strings.Contains(string(content), "return 8") {
+		t.Fatalf("a refused apply wrote bytes: %v", err)
+	}
+}
+
 // A plan with no operations is refused at prepare, and the canonical
 // revision does not move. Committing it wrote no byte and still answered
 // canonical_changed with an empty changed-path list beside it, advancing the

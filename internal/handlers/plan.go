@@ -436,6 +436,10 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 		return []any{withPlan("inspect", nil), withPlan("edit", nil), withPlan("discard", nil)}
 	case code == workspacecore.CodePlanStateInvalid && plan.PlanID != "":
 		return planStateNext(plan)
+	case code == workspacecore.CodePreparedRevisionChanged && plan.PlanID != "":
+		// The plan is intact and its current preparation is the one to name,
+		// which is what its state already offers.
+		return planStateNext(plan)
 	case action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed":
 		return []any{withPlan("prepare", map[string]any{"use_new_idempotency_key": true}), withPlan("discard", nil)}
 	case action == "prepare" && plan.PlanID != "":
@@ -459,8 +463,12 @@ func classifyPlanError(err error, plan workspacecore.PlanRecord) (string, string
 		workspacecore.CodeWorkspaceEpochChanged, workspacecore.CodeProvisionalNotAccepted, workspacecore.CodePlanStateInvalid,
 		workspacecore.CodeInvariantNotProven:
 		return code, "conflict"
+	// A stale prepared revision keeps its own code. Both of these are
+	// conflicts refused before any write, and they ask for different
+	// recoveries: canonical moved under this preparation, against you are
+	// holding a handle to a preparation that no longer exists.
 	case workspacecore.CodeCommitPreconditionChanged, workspacecore.CodePreparedRevisionChanged:
-		return workspacecore.CodeCommitPreconditionChanged, "conflict"
+		return code, "conflict"
 	case workspacecore.CodeCommitRecoveryRequired:
 		return code, "failed"
 	case workspacecore.CodeProviderUnavailable:

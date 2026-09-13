@@ -632,8 +632,17 @@ func (w *Workspace) admitCommit(ctx context.Context, plan PlanRecord, expected u
 	if (plan.State != PlanReady && plan.State != PlanProvisional) || plan.Preparation == nil {
 		return nil, Codedf(CodePlanStateInvalid, "plan %s is %s; only a READY plan commits", plan.PlanID, plan.State)
 	}
-	if preparedRevision == "" || plan.Preparation.PreparedRevision != preparedRevision {
-		return nil, Coded(CodePreparedRevisionChanged, nil)
+	if preparedRevision == "" {
+		return nil, Codedf(CodePreparedRevisionChanged,
+			"apply names the preparation it commits; this plan's is %s", plan.Preparation.PreparedRevision)
+	}
+	if plan.Preparation.PreparedRevision != preparedRevision {
+		// Naming the current one is the whole recovery, and the caller cannot
+		// guess it: the preparation it is holding stopped existing when the
+		// plan was edited or prepared again.
+		return nil, Codedf(CodePreparedRevisionChanged,
+			"%s is not this plan's preparation; it holds %s, and the one you named was released when the plan was edited or prepared again",
+			preparedRevision, plan.Preparation.PreparedRevision)
 	}
 	durablePreparation := false
 	if source, ok := stager.(PreparedPlanStager); ok {
