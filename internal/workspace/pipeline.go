@@ -711,7 +711,7 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 	if err := auditToolDelta(delta, command, policy, mutating); err != nil {
 		_ = restoreTree(root, before)
 		stage.Status = VerificationFailed
-		return stage, delta, err
+		return stage, delta, fmt.Errorf("verification stage %s command %q: %w", name, command.Command, err)
 	}
 	if runErr != nil {
 		stage.Status = commandRunStatus(ctx, timed)

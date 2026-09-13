@@ -1,0 +1,6 @@
+version = 1
+
+[[check]]
+name = "environment-bootstrap-repro"
+command = ["sh", "-c", "mkdir .venv"]
+required = true

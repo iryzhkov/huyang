@@ -10,7 +10,7 @@ parser.add_argument("--socket", required=True)
 parser.add_argument("--binary", default="/tmp/huyang-5d244ad-workshop")
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument("--list", action="store_true")
-group.add_argument("--describe")
+group.add_argument("--describe", help="Exact wire tool name; returns one descriptor object (use --list for names)")
 group.add_argument("--call", help='JSON object with name and arguments')
 args = parser.parse_args()
 process = subprocess.Popen(
@@ -50,6 +50,12 @@ try:
         selected = [t for t in catalog if t["name"] == args.describe] if args.describe else [
             {"name": t["name"], "description": t["description"]} for t in catalog
         ]
+        if args.describe:
+            if not selected:
+                print(json.dumps({"error": "unknown_tool", "requested": args.describe,
+                                  "available": [t["name"] for t in catalog]}))
+                sys.exit(2)
+            selected = selected[0]
         print(json.dumps(selected, ensure_ascii=False, separators=(",", ":")))
 finally:
     process.terminate()

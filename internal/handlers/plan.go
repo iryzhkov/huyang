@@ -361,6 +361,9 @@ func planResult(requestID string, workspace *workspacecore.Workspace, summary st
 		data["canonical_changed"] = plan.Preparation.CanonicalChanged
 	}
 	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
+	if notes := renameCoverageNote(plan); len(notes) > 0 {
+		result["warnings"] = notes
+	}
 	result["transaction"] = map[string]any{"id": plan.PlanID, "state": plan.State}
 	if plan.Preparation != nil {
 		evidenceIDs := make([]string, 0)
@@ -469,13 +472,17 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 		return planStateNext(plan)
 	case action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed":
 		return []any{withPlan("prepare", map[string]any{"use_new_idempotency_key": true}), withPlan("discard", nil)}
+	case code == "undeclared_tool_write":
+		next := []any{map[string]any{
+			"action": "update_pipeline_command", "scope": ".huyang.toml",
+			"note": "The verification command wrote outside its allowed paths. Prepare its dependency environment separately and configure checks to use that existing environment without installing packages or writing caches in the source tree. Non-mutating checks must remain read-only; adding a writes pattern does not permit check-stage mutation. For an intended transform, review and declare only its required outputs. Then prepare again with a new idempotency key.",
+		}}
+		if plan.PlanID != "" {
+			next = append(next, withPlan("inspect", nil), withPlan("discard", nil))
+		}
+		return next
 	case action == "prepare" && plan.PlanID != "":
 		return []any{withPlan("inspect", nil), withPlan("discard", nil)}
-	case code == "undeclared_tool_write":
-		return []any{map[string]any{
-			"action": "update_pipeline_command", "scope": ".huyang.toml",
-			"note": "Declare the reported cache/output path in the command's writes list, or configure that tool to disable or redirect its cache, then prepare again with a new idempotency key.",
-		}}
 	case action == "apply" && code == "workspace_epoch_changed" && plan.PlanID != "":
 		return []any{withPlan("inspect", nil), withPlan("discard", nil)}
 	}
