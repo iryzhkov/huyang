@@ -1146,6 +1146,12 @@ compaction of a default result, or a new stable code. No mutation precondition w
   and the declaration position `navigate` sends to the language server no longer depend on
   the provider for those languages. Symbol coverage is incomplete only for other source
   languages (`parser_unavailable`), not for documentation and data files.
+- It also sections Markdown by heading (nested by level, so a section contains its
+  subsections) and TOML by table (`[tool.ruff]` becomes the name path `tool/ruff`), which
+  makes a long document outlinable and addressable by name without a language server.
+  These sections are navigation, not symbols: the extensions stay out of the semantic
+  source set, so an edit to prose or configuration still expects no semantic verdict, and
+  a document the sectioner read and found nothing in is not referred to the provider.
 - A range handle whose bytes and preceding anchor are unchanged at its original offset
   resolves there even when the bytes after it changed (`format_only_relocation`), so
   several handles from one search survive being applied in any order.

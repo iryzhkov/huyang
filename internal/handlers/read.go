@@ -374,7 +374,10 @@ func (h *Handlers) readOutline(ctx context.Context, requestID string, workspace 
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "read_failed", err)
 	}
-	if len(outline.Sections) == 0 {
+	// Only when the native sectioner did not understand the document: a file
+	// it parsed and found nothing in declares nothing, and asking a language
+	// server to confirm that costs a call and a buffer load.
+	if len(outline.Sections) == 0 && outline.Coverage.Semantic != "parser_sections" {
 		if sections, handles, ok := h.outlineViaProvider(ctx, requestID, workspace, outline.Path); ok {
 			outline.Sections, outline.Handles = sections, handles
 			outline.Fallback, outline.FallbackHandle = nil, nil

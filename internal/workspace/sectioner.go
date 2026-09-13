@@ -9,10 +9,11 @@ import (
 	"strings"
 )
 
-// NativeSectioner sections Go and Python documents without a semantic
-// provider: Go through the standard parser, Python through its indentation.
-// Other extensions have no sections, which FindSymbols and Outline treat as
-// "nothing declared here" rather than as a parser failure.
+// NativeSectioner sections documents without a semantic provider: Go through
+// the standard parser, Python through its indentation, Markdown by heading
+// and TOML by table. Other extensions have no sections, which FindSymbols
+// and Outline treat as "nothing declared here" rather than as a parser
+// failure.
 type NativeSectioner struct{}
 
 // Sections returns the top-level and nested declarations of a document with
@@ -24,6 +25,10 @@ func (NativeSectioner) Sections(path string, content []byte) ([]Section, error) 
 		return goSections(path, content)
 	case ".py", ".pyi":
 		return pythonSections(content), nil
+	case ".md", ".markdown":
+		return markdownSections(content), nil
+	case ".toml":
+		return tomlSections(content), nil
 	}
 	if otherSourceExtensions[strings.ToLower(filepath.Ext(path))] {
 		return nil, ErrNoNativeParser
@@ -53,7 +58,10 @@ func IsSemanticSource(path string) bool {
 	return (NativeSectioner{}).SupportsExtension(ext) || otherSourceExtensions[ext]
 }
 
-// SupportsExtension reports whether the native sectioner understands ext.
+// SupportsExtension reports whether ext is a language the native sectioner
+// parses as source. Markdown and TOML are sectioned too but are absent here
+// on purpose: their sections are navigation, and an edit to prose or
+// configuration expects no semantic verdict.
 func (NativeSectioner) SupportsExtension(ext string) bool {
 	switch strings.ToLower(ext) {
 	case ".go", ".py", ".pyi":

@@ -83,21 +83,53 @@ func TestOutlineOfUnparsedLanguageUsesProvider(t *testing.T) {
 	}
 }
 
-// A Go file still outlines natively, without asking the provider at all.
-func TestOutlineOfGoFileStaysNative(t *testing.T) {
+// Everything the native sectioner reads - Go, Python, Markdown, TOML -
+// outlines without asking the provider at all, and a document it read and
+// found nothing in does not ask either.
+func TestOutlineOfNativelySectionedFilesStaysNative(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ledger.go"), []byte("package p\n\nfunc Balance() int { return 0 }\n"), 0o600); err != nil {
-		t.Fatal(err)
+	files := map[string]string{
+		"ledger.go":   "package p\n\nfunc Balance() int { return 0 }\n",
+		"plan.md":     "# Plan\n\nwhy\n\n## Waves\n\none\n",
+		"config.toml": "[tool.ruff]\nline-length = 100\n",
+		"notes.txt":   "nothing to declare\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	backend := &outlineProvider{stubProvider: stubProvider{descriptor: provider.Descriptor{ID: "outline", Backend: "test", Epoch: 1, Root: root}}}
 	handlers := newTestHandlers(t, fixedFactory{backend: backend})
 	opened := handlers.Execute(context.Background(), "req_open", "workspace_open", map[string]any{"kind": "project", "root": root})
-	result := handlers.Execute(context.Background(), "req_outline", "read", map[string]any{
-		"workspace_id": string(opened["workspace"].(workspacecore.Identity).ID),
-		"view":         "outline", "target": map[string]any{"path": "ledger.go"},
-	})
-	sections := result["data"].(map[string]any)["sections"].([]map[string]any)
-	if len(sections) != 1 || sections[0]["name"] != "Balance" || len(backend.asked) != 0 {
-		t.Fatalf("native outline = %#v, provider calls = %#v", sections, backend.asked)
+	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
+	outline := func(path string) []map[string]any {
+		t.Helper()
+		result := handlers.Execute(context.Background(), "req_outline", "read", map[string]any{
+			"workspace_id": workspaceID, "view": "outline", "target": map[string]any{"path": path},
+		})
+		if result["outcome"] != "ok" {
+			t.Fatalf("outline of %s = %#v", path, result)
+		}
+		sections, _ := result["data"].(map[string]any)["sections"].([]map[string]any)
+		return sections
+	}
+	if sections := outline("ledger.go"); len(sections) != 1 || sections[0]["name"] != "Balance" {
+		t.Fatalf("Go outline = %#v", sections)
+	}
+	// A heading is addressed by its path through the document, and the
+	// section spans the lines a reader would edit.
+	sections := outline("plan.md")
+	if len(sections) != 2 || sections[1]["name"] != "Plan/Waves" || sections[1]["start_line"] != 5 || sections[1]["end_line"] != 7 {
+		t.Fatalf("Markdown outline = %#v", sections)
+	}
+	if sections := outline("config.toml"); len(sections) != 1 || sections[0]["name"] != "tool/ruff" {
+		t.Fatalf("TOML outline = %#v", sections)
+	}
+	if sections := outline("notes.txt"); len(sections) != 0 {
+		t.Fatalf("text outline = %#v", sections)
+	}
+	if len(backend.asked) != 0 {
+		t.Fatalf("the provider was asked about natively sectioned files: %#v", backend.asked)
 	}
 }

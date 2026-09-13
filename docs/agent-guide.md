@@ -77,7 +77,9 @@ existing workspace, because its handle comes from one.
   tabs-versus-spaces mismatch is refused with the exact document text in `data.actual`, so
   the retry is one call.
 - Need to see code: `read` with a path, a line window (`start_line`, `end_line`, no size
-  cap) or a `symbol_locator` (Go and Python resolve without a language server). Several
+  cap) or a `symbol_locator` (Go, Python, Markdown headings and TOML tables resolve
+  without a language server, so a section of a long document is one call:
+  `{path: "docs/plan.md", name_path: "Waves/Wave 2"}`). Several
   files: `targets`. `numbered: true` prefixes each line with its number when you need to
   cite or window lines afterwards.
 - A file over about 500 lines: `view: outline` first, then windows, or `max_lines` on
@@ -87,8 +89,9 @@ existing workspace, because its handle comes from one.
   single-target read works per target as well, so one call can outline one file and
   window another (`targets: [{path, view: outline}, {path, start_line, end_line}]`).
 - `view: outline` works in every language, not only the two the native parser reads:
-  Go and Python are sectioned natively, and any other file is outlined from the language
-  server's declarations. The reply is one entry per declaration with its name, kind,
+  Go, Python, Markdown (by heading, nested: `Rules of thumb/Indentation`) and TOML (by
+  table: `tool/ruff`) are sectioned natively, without a language server, and any other
+  file is outlined from the language server's declarations. The reply is one entry per declaration with its name, kind,
   line range and a handle, which `read {target:{handle}}` and `edit_apply replace_range`
   accept; a declaration can also be read by `symbol_locator` with the name the outline
   gave. A file neither can section answers a handle to the whole document and says
