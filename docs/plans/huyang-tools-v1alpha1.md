@@ -1220,6 +1220,18 @@ its kind needs under `scope`:
   the staged bytes. Answered by the language server that read them.
 - `symbol_exists`, `symbol_absent` - the declaration in `scope.symbol` is, or is not, in the
   staged file.
+- `api_compatible` - the change breaks nothing that was exported. Each affected file's
+  exported surface is read before and after by the adapter for its language: Go through the
+  language's own parser, TypeScript and JavaScript through a scanner over their export forms.
+  Removing an exported name, renaming one, changing a signature, changing a type's member set
+  and changing where a barrel re-exports a name from are all breaking; adding a declaration is
+  not, and neither is reformatting one. A file no adapter reads, one that does not parse, and
+  an export form the scanner does not know all count as gaps: they make the answer unknown,
+  and never turn a break that was found into a pass.
+- `path_unreachable` - nothing can still reach the declaration in `scope.symbol`. This one
+  can be refuted and not yet proved. One remaining reference is a path, so it answers
+  violated; agreeing needs a complete static execution graph, which this service does not
+  build, so the other answer is unknown and says exactly that.
 
 Every invariant is `pending` until a prepare evaluates it, and then `proven`, `violated` or
 `unknown`, beside the prepared revision it was evaluated against, the coverage of that

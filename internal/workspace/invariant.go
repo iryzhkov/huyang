@@ -48,6 +48,16 @@ const (
 	// is, or is not, in the staged file.
 	InvariantSymbolExists InvariantKind = "symbol_exists"
 	InvariantSymbolAbsent InvariantKind = "symbol_absent"
+	// InvariantAPICompatible: the proposal breaks nothing that was exported.
+	// Settled by reading each staged file's exported surface before and after
+	// with the adapter for its language, and unknown for a file no adapter
+	// covers.
+	InvariantAPICompatible InvariantKind = "api_compatible"
+	// InvariantPathUnreachable: nothing can still reach the named declaration
+	// after the change. This one can be refuted and not yet proved: refuting
+	// it takes one reference, proving it takes a complete static execution
+	// graph, which this service does not build.
+	InvariantPathUnreachable InvariantKind = "path_unreachable"
 )
 
 // InvariantEnforcement decides what an unproven invariant costs. Required is
@@ -153,9 +163,9 @@ func normalizeInvariants(invariants []PlanInvariant) ([]PlanInvariant, error) {
 // permanently unknown and blocks every prepare without saying why.
 func validateInvariantScope(invariant PlanInvariant) error {
 	switch invariant.Kind {
-	case InvariantNoNewDiagnostics, InvariantTestsPass:
+	case InvariantNoNewDiagnostics, InvariantTestsPass, InvariantAPICompatible:
 		return nil
-	case InvariantNoReferences, InvariantSymbolExists, InvariantSymbolAbsent:
+	case InvariantNoReferences, InvariantSymbolExists, InvariantSymbolAbsent, InvariantPathUnreachable:
 		symbol := invariant.Scope.Symbol
 		if symbol == nil || strings.TrimSpace(symbol.Path) == "" || strings.TrimSpace(symbol.NamePath) == "" {
 			return Codedf(CodePlanValidationConflicts,

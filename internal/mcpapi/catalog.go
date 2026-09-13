@@ -120,10 +120,10 @@ func invariantsSchema() map[string]any {
 	return map[string]any{
 		"type":        "array",
 		"maxItems":    16,
-		"description": "What the result must satisfy, checked against the prepared revision before anything is applied. A required invariant that is violated or that nobody could evaluate keeps the plan out of READY and has no accept flag; an advisory one leaves the plan PROVISIONAL. Editing the plan drops every proof.",
+		"description": "What the result must satisfy, checked against the prepared revision before anything is applied. A required invariant that is violated or that nobody could evaluate keeps the plan out of READY and has no accept flag; an advisory one leaves the plan PROVISIONAL. Editing the plan drops every proof. api_compatible reads each affected file's exported surface before and after (Go and TypeScript); path_unreachable can refute reachability from one remaining reference but cannot yet prove it, so it answers violated or unknown.",
 		"items": schemaObject(map[string]any{
 			"id":          stringSchema("Stable identifier, so the answer can be matched to the assertion. Assigned when omitted."),
-			"kind":        enumSchema("no_new_diagnostics", "tests_pass", "no_references", "symbol_exists", "symbol_absent"),
+			"kind":        enumSchema("no_new_diagnostics", "tests_pass", "no_references", "symbol_exists", "symbol_absent", "api_compatible", "path_unreachable"),
 			"enforcement": enumSchema("required", "advisory"),
 			"scope": schemaObject(map[string]any{
 				"paths":    map[string]any{"type": "array", "items": stringSchema("Workspace-relative path."), "description": "Narrows a diagnostic assertion to these files; every staged file when omitted."},

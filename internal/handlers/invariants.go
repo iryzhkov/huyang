@@ -74,6 +74,10 @@ func (e planInvariantEvaluator) evaluate(ctx context.Context, plan workspacecore
 		return e.noReferences(ctx, view, invariant)
 	case workspacecore.InvariantSymbolExists, workspacecore.InvariantSymbolAbsent:
 		return stagedSymbolInvariant(view, invariant)
+	case workspacecore.InvariantAPICompatible:
+		return e.apiCompatible(plan, view, invariant)
+	case workspacecore.InvariantPathUnreachable:
+		return e.pathUnreachable(ctx, view, invariant)
 	}
 	return invariantUnknown(invariant, fmt.Sprintf("%s is not evaluated by this service", invariant.Kind))
 }
@@ -181,27 +185,73 @@ func describeNewFinding(finding workspacecore.DeltaFinding) string {
 }
 
 // noReferences asks the language server that read the staged bytes whether
-// anything outside the declaration still refers to it. A server that reports
-// more references than it lists has not answered the question, so the answer
-// is unknown rather than a count.
+// anything outside the declaration still refers to it.
 func (e planInvariantEvaluator) noReferences(ctx context.Context, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
 	symbol := invariant.Scope.Symbol
+	path := workspacePath(e.workspace, symbol.Path)
+	outside, reason := e.stagedReferences(ctx, view, symbol)
+	if reason != "" {
+		return invariantUnknown(invariant, reason)
+	}
+	answer := invariant
+	answer.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+	if len(outside) > 0 {
+		answer.Status = workspacecore.InvariantViolated
+		answer.Detail = fmt.Sprintf("%d reference(s) remain: %s", len(outside), strings.Join(boundedDetails(outside), "; "))
+		return answer
+	}
+	answer.Status = workspacecore.InvariantProven
+	answer.Detail = fmt.Sprintf("nothing outside %s refers to %s", path, symbol.NamePath)
+	return answer
+}
+
+// pathUnreachable says whether anything can still reach the declaration after
+// the change.
+//
+// It can refuse and it cannot yet agree. One reference is a path, and a path
+// is a refutation; the other direction needs a complete static execution
+// graph, which this service does not build, and "no caller I could see" is
+// not "no caller". So the honest answers here are violated and unknown, and
+// the reason says what proving it would take.
+func (e planInvariantEvaluator) pathUnreachable(ctx context.Context, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	symbol := invariant.Scope.Symbol
+	outside, reason := e.stagedReferences(ctx, view, symbol)
+	if reason != "" {
+		return invariantUnknown(invariant, reason)
+	}
+	if len(outside) > 0 {
+		answer := invariant
+		answer.Status = workspacecore.InvariantViolated
+		answer.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+		answer.Detail = fmt.Sprintf("%s is still reached from %d place(s): %s",
+			symbol.NamePath, len(outside), strings.Join(boundedDetails(outside), "; "))
+		return answer
+	}
+	return invariantUnknown(invariant, fmt.Sprintf(
+		"no reference to %s remains, but proving nothing reaches it needs a complete static execution graph, which this service does not build",
+		symbol.NamePath))
+}
+
+// stagedReferences are the places outside the declaration that refer to it in
+// the staged bytes. A non-empty reason means the question was not answered: a
+// server that reports more references than it lists has not answered it
+// either, and a count that cannot be trusted is worse than no count.
+func (e planInvariantEvaluator) stagedReferences(ctx context.Context, view providerpool.PreparedView, symbol *workspacecore.PlanSymbolLocator) ([]string, string) {
 	path := workspacePath(e.workspace, symbol.Path)
 	arguments, err := preparedProviderTarget(view, e.workspace, map[string]any{
 		"symbol_locator": map[string]any{"path": path, "name_path": symbol.NamePath},
 	})
 	if err != nil {
-		return invariantUnknown(invariant, err.Error())
+		return nil, err.Error()
 	}
 	value, failure := e.handlers.callPrepared(ctx, e.requestID+"_references", e.workspace, view, "references", arguments)
 	if failure != nil {
-		return invariantUnknown(invariant, "no language server answered for the prepared revision")
+		return nil, "no language server answered for the prepared revision"
 	}
 	payload, _ := value.(map[string]any)
 	locations := referenceLocations(payload)
 	if total := argInt(payload, "count", len(locations)); total > len(locations) {
-		return invariantUnknown(invariant, fmt.Sprintf(
-			"the server reported %d references but listed %d", total, len(locations)))
+		return nil, fmt.Sprintf("the server reported %d references but listed %d", total, len(locations))
 	}
 	var outside []string
 	for _, location := range locations {
@@ -214,16 +264,103 @@ func (e planInvariantEvaluator) noReferences(ctx context.Context, view providerp
 		}
 		outside = append(outside, fmt.Sprintf("%s:%d", file, location.line))
 	}
-	answer := invariant
-	answer.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
-	if len(outside) > 0 {
-		answer.Status = workspacecore.InvariantViolated
-		answer.Detail = fmt.Sprintf("%d reference(s) remain: %s", len(outside), strings.Join(boundedDetails(outside), "; "))
-		return answer
+	return outside, ""
+}
+
+// apiCompatibleFileLimit bounds how many files one compatibility answer reads
+// on each side of the change.
+const apiCompatibleFileLimit = 20
+
+// apiCompatible reads each affected file's exported surface as the workspace
+// holds it and as the plan would leave it, and reports what the change breaks.
+//
+// A file no adapter reads is a gap, not a pass: the answer is unknown unless
+// something breaking was already found, because one proven break is not made
+// less true by a file nobody could read.
+func (e planInvariantEvaluator) apiCompatible(plan workspacecore.PlanRecord, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	files := invariant.Scope.Paths
+	if len(files) == 0 && plan.Preparation != nil {
+		// Every file the plan affects, which unlike the staged set includes
+		// the ones it deletes - and deleting a file removes everything it
+		// exported.
+		files = plan.Preparation.AffectedFiles
 	}
-	answer.Status = workspacecore.InvariantProven
-	answer.Detail = fmt.Sprintf("nothing outside %s refers to %s", path, symbol.NamePath)
+	if len(files) == 0 {
+		return invariantUnknown(invariant, "this preparation affects no file this invariant is about")
+	}
+	if len(files) > apiCompatibleFileLimit {
+		return invariantUnknown(invariant, fmt.Sprintf(
+			"the plan affects %d files and one answer reads %d", len(files), apiCompatibleFileLimit))
+	}
+	var breaking, gaps []string
+	for _, named := range files {
+		path := workspacePath(e.workspace, named)
+		before := e.canonicalSurface(path)
+		after, err := preparedSurface(view, path)
+		if err != nil {
+			return invariantUnknown(invariant, err.Error())
+		}
+		if !before.Covered || !after.Covered {
+			gaps = append(gaps, path+": "+firstReason(before.Reason, after.Reason))
+			continue
+		}
+		for _, change := range workspacecore.CompareAPISurfaces(before, after) {
+			if change.Breaking() {
+				breaking = append(breaking, change.Detail)
+			}
+		}
+	}
+	answer := invariant
+	answer.Coverage = workspacecore.Coverage{
+		Complete: len(gaps) == 0, FilesRead: len(files) - len(gaps), Semantic: "api_surface", Skipped: gaps,
+	}
+	switch {
+	case len(breaking) > 0:
+		answer.Status = workspacecore.InvariantViolated
+		answer.Detail = fmt.Sprintf("%d incompatible change(s): %s",
+			len(breaking), strings.Join(boundedDetails(breaking), "; "))
+	case len(gaps) > 0:
+		answer.Status = workspacecore.InvariantUnknown
+		answer.Detail = fmt.Sprintf("%d file(s) no adapter could read: %s",
+			len(gaps), strings.Join(boundedDetails(gaps), "; "))
+	default:
+		answer.Status = workspacecore.InvariantProven
+		answer.Detail = fmt.Sprintf("nothing exported by %d affected file(s) was removed or changed", len(files))
+	}
 	return answer
+}
+
+// canonicalSurface is what the workspace promises today. A path it cannot read
+// is a file the plan creates, which promised nothing before.
+func (e planInvariantEvaluator) canonicalSurface(path string) workspacecore.APISurface {
+	read, err := e.workspace.Read(path)
+	if err != nil {
+		return workspacecore.ReadAPISurface(path, nil, false)
+	}
+	return workspacecore.ReadAPISurface(path, read.Content, true)
+}
+
+// preparedSurface is what the plan would promise. A path that is not in the
+// prepared tree is a file the plan deletes.
+func preparedSurface(view providerpool.PreparedView, path string) (workspacecore.APISurface, error) {
+	absolute, err := preparedPath(view, path)
+	if err != nil {
+		return workspacecore.APISurface{}, err
+	}
+	content, readErr := os.ReadFile(absolute)
+	if readErr != nil {
+		return workspacecore.ReadAPISurface(path, nil, false), nil
+	}
+	return workspacecore.ReadAPISurface(path, content, true), nil
+}
+
+func firstReason(reasons ...string) string {
+	for _, reason := range reasons {
+		if strings.TrimSpace(reason) != "" {
+			return reason
+		}
+	}
+	return "no reason given"
 }
 
 // stagedSymbolInvariant reads the staged file itself. A file that is not there

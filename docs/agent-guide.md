@@ -147,9 +147,14 @@ existing workspace, because its handle comes from one.
 - State what the result must satisfy and let the prepare check it:
   `change_plan {action: prepare, operations, invariants: [{id: "clean", kind:
   "no_new_diagnostics"}]}` on the experimental profile. The kinds are
-  `no_new_diagnostics`, `tests_pass`, `no_references`, `symbol_exists` and
-  `symbol_absent`; the last three name their declaration in
-  `scope.symbol`. Each one is answered against the prepared revision and is
+  `no_new_diagnostics`, `tests_pass`, `api_compatible`, `no_references`,
+  `symbol_exists`, `symbol_absent` and `path_unreachable`; the ones about a
+  declaration name it in `scope.symbol`. `api_compatible` reads each affected
+  file's exported surface before and after (Go through the compiler's parser,
+  TypeScript through its export forms) and calls a removal, a rename, a changed
+  signature, a changed member set or a moved barrel export breaking.
+  `path_unreachable` can refute reachability from one remaining reference but
+  cannot yet prove it, so it answers violated or unknown. Each one is answered against the prepared revision and is
   `proven`, `violated` or `unknown`, and unknown is not a pass: a required
   invariant that nobody could evaluate keeps the plan out of READY exactly as a
   violated one does. A required invariant has no accept flag, so a plan that
