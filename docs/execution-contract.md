@@ -65,6 +65,22 @@ Trace capture uses external_job scheduling and explicit debugger initiation.
 Unresolved and external targets remain explicit; source handles must not leak
 sandbox paths.
 
+## Static acquisition (X22)
+
+execution_graph now acquires bounded call-hierarchy facts and method implementation
+alternatives, conservative parser candidates, and explicit import/unresolved
+boundaries. References remain data dependencies and are excluded from execution
+path traversal. Every internal provider location requires a buffer hash matching
+the captured source. Source handles are revision-bound in the existing registry.
+
+use_provider=false skips the embedded acquisition batch; native Go parser and
+import fallback remain. Non-Go syntax acquisition requires the embedded provider.
+All adapters currently report incomplete coverage: dynamic dispatch, callbacks,
+reflection and external targets cannot justify a negative reachability proof.
+The batch allows 32 files, 128 symbols, 1024 edges and 1024 references within
+1 MiB of facts, 16 hierarchy items and 1500 ms per server request. Provider
+acquisition uses at most six seconds of the twenty-second graph deadline.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

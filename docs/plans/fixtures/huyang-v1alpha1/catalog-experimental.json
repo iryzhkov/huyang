@@ -2381,6 +2381,10 @@
           "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
           "type": "string"
         },
+        "use_provider": {
+          "description": "Use the embedded batch contributor (default true); false retains native parser and source-boundary evidence.",
+          "type": "boolean"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"

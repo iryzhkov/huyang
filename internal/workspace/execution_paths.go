@@ -28,6 +28,9 @@ func ExecutionGraphPaths(ctx context.Context, graph ExecutionGraph, from, to str
 	}
 	adjacent := map[string][]ExecutionEdge{}
 	for _, edge := range graph.Edges {
+		if edge.Kind == "data_dependency" || edge.Kind == "mutates" {
+			continue
+		}
 		adjacent[edge.From] = append(adjacent[edge.From], edge)
 	}
 	for node := range adjacent {

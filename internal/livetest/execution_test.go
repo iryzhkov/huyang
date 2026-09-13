@@ -108,6 +108,95 @@ func TestExecutionGraphDisclosesUnresolvedBoundaries(t *testing.T) {
 	}
 }
 
+func TestExecutionAcquisitionMatrix(t *testing.T) {
+	instance := startWithLanguageServers(t)
+	session := instance.connect("experimental")
+	for _, language := range []string{"go", "typescript", "python", "lua"} {
+		t.Run(language, func(t *testing.T) {
+			root := fixture(t, filepath.Join("execution", language))
+			result := call(t, session, "execution_graph", map[string]any{"root": root})
+			if outcome(result) != "partial" {
+				t.Fatalf("%v", result)
+			}
+			snapshot := data(result)["snapshot"].(map[string]any)
+			graph := snapshot["execution"].(map[string]any)
+			edges, _ := graph["edges"].([]any)
+			t.Logf("%s edges=%d coverage=%v producers=%v", language, len(edges), graph["coverage"], snapshot["key"])
+			calls := 0
+			producerNames := map[string]bool{}
+			for _, raw := range edges {
+				for _, fact := range raw.(map[string]any)["evidence"].([]any) {
+					producerNames[fact.(map[string]any)["producer"].(map[string]any)["name"].(string)] = true
+				}
+			}
+			t.Logf("call producers: %v", producerNames)
+			if language == "go" && !producerNames["gopls"] {
+				t.Fatal("Go live gate acquired no gopls call facts")
+			}
+			for _, raw := range edges {
+				if raw.(map[string]any)["kind"] == "calls" {
+					calls++
+				}
+			}
+			if calls == 0 {
+				t.Fatal("no call candidates acquired")
+			}
+			if graph["coverage"].(map[string]any)["complete"] != false {
+				t.Fatal("dynamic coverage overstated")
+			}
+			for _, raw := range edges {
+				edge := raw.(map[string]any)
+				if len(edge["evidence"].([]any)) == 0 {
+					t.Fatal("call without provenance")
+				}
+			}
+		})
+	}
+}
+
+func TestExecutionProviderDisabledRetainsConservativeCalls(t *testing.T) {
+	instance := start(t)
+	session := instance.connect("experimental")
+	root := fixture(t, filepath.Join("execution", "go"))
+	before := hashTree(t, root)
+	result := call(t, session, "execution_graph", map[string]any{"root": root, "use_provider": false})
+	if outcome(result) != "partial" {
+		t.Fatalf("%v", result)
+	}
+	graph := data(result)["snapshot"].(map[string]any)["execution"].(map[string]any)
+	if graph["coverage"].(map[string]any)["complete"] != false {
+		t.Fatal("fallback claimed completeness")
+	}
+	calls := 0
+	handles := 0
+	for _, raw := range graph["edges"].([]any) {
+		edge := raw.(map[string]any)
+		if edge["kind"] == "calls" {
+			calls++
+		}
+		for _, rawFact := range edge["evidence"].([]any) {
+			fact := rawFact.(map[string]any)
+			if fact["confidence"] == "semantic" {
+				t.Fatal("disabled provider emitted semantic evidence")
+			}
+			sourceHandles, _ := fact["source_handles"].([]any)
+			for _, rawHandle := range sourceHandles {
+				result := call(t, session, "read", map[string]any{"root": root, "target": map[string]any{"handle": rawHandle}})
+				if outcome(result) != "ok" {
+					t.Fatalf("unreadable source evidence: %v", result)
+				}
+				handles++
+			}
+		}
+	}
+	if calls == 0 || handles == 0 {
+		t.Fatalf("calls=%d handles=%d", calls, handles)
+	}
+	if !reflect.DeepEqual(before, hashTree(t, root)) {
+		t.Fatal("fallback changed canonical bytes")
+	}
+}
+
 func TestExecutionGoFixtureHasKnownDivergence(t *testing.T) {
 	root := fixture(t, filepath.Join("execution", "go"))
 	binary := filepath.Join(t.TempDir(), "execution-fixture")

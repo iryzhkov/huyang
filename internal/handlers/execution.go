@@ -8,9 +8,8 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// executionGraph is deliberately experimental. Before an acquisition adapter
-// exists, source boundaries are explicit unresolved nodes, not an empty graph
-// that could be mistaken for proof that nothing calls anything.
+// executionGraph combines adapter claims about one captured revision. Source
+// boundaries remain explicit wherever call coverage is incomplete.
 func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
 	defer cancel()
@@ -28,7 +27,13 @@ func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspa
 			Profile: "execution/v1", ConfigHash: workspacecore.PipelineFingerprint(policy), ExecutionDomain: "canonical"},
 		Root: before.Root,
 	}
-	snapshot, err := workspacecore.BuildExecutionSnapshot(ctx, request, executionBoundary{sources, coverage})
+	withProvider := true
+	if enabled, ok := arguments["use_provider"].(bool); ok {
+		withProvider = enabled
+	}
+	contributors := h.acquireExecution(ctx, workspace, sources, revision, withProvider)
+	contributors = append(contributors, workspacecore.AcquireImportExecutionCalls(ctx, request, sources, policy), executionBoundary{sources, coverage})
+	snapshot, err := workspacecore.BuildExecutionSnapshot(ctx, request, contributors...)
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
 	}
@@ -37,7 +42,7 @@ func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspa
 		return mcpapi.Envelope(requestID, workspace, "conflict", "graph_source_changed", "Source changed during graph acquisition; retry against current content", map[string]any{})
 	}
 	result := mcpapi.Envelope(requestID, workspace, "partial", "execution_coverage_incomplete",
-		"Execution snapshot records source boundaries; call coverage is unavailable", map[string]any{
+		"Execution snapshot includes static candidates and unresolved frontiers; dynamic call coverage remains incomplete", map[string]any{
 			"snapshot": snapshot, "status": workspacecore.ExecutionUnknown,
 		})
 	result["api_version"] = mcpapi.APIVersionExperimental
@@ -60,12 +65,12 @@ func (c executionBoundary) ContributeExecution(ctx context.Context, request work
 			Producer:   workspacecore.ProducerVersion{Name: c.Name(), Version: c.Version()},
 			Confidence: "unknown", Classification: "static",
 			SourceHandles: []string{}, EvidenceIDs: []string{},
-			Coverage: workspacecore.ExecutionCoverage{Complete: false, Gaps: []string{"call_acquisition_unavailable"}, Limits: []string{}},
+			Coverage: workspacecore.ExecutionCoverage{Complete: false, Gaps: []string{"source_call_coverage_incomplete"}, Limits: []string{}},
 		}
 		if err := builder.Node(workspacecore.ExecutionNode{ID: "source:" + source.Path, Kind: "unresolved", Path: source.Path, Evidence: []workspacecore.ExecutionEvidence{evidence}}); err != nil {
 			return err
 		}
 	}
-	builder.Covered(workspacecore.ExecutionCoverage{Complete: false, Capped: c.coverage.Capped, Gaps: append([]string{"call_acquisition_unavailable"}, c.coverage.Skipped...)})
+	builder.Covered(workspacecore.ExecutionCoverage{Complete: false, Capped: c.coverage.Capped, Gaps: append([]string{"source_call_coverage_incomplete"}, c.coverage.Skipped...)})
 	return nil
 }

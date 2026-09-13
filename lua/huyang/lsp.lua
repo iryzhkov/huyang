@@ -533,6 +533,7 @@ local dispatch_table = {
     end,
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
+    huyang_execution_batch = function(args) return require("huyang.execution").batch(args) end,
     code_actions = code_actions,
     -- The bytes a server-owned refactor would change, for the coordinator to
     -- stage as ordinary guarded edits; it never applies anything itself.

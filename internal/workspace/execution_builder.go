@@ -220,6 +220,10 @@ func (b *ExecutionBuilder) Node(node ExecutionNode) error {
 func (b *ExecutionBuilder) Edge(edge ExecutionEdge) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if strings.HasPrefix(edge.SitePath, "/") || path.Clean(edge.SitePath) == ".." || strings.HasPrefix(path.Clean(edge.SitePath), "../") {
+		b.gap("invalid_call_site")
+		return Codedf("graph_source_invalid", "call-site paths must stay workspace-relative")
+	}
 	if err := b.validEvidence(edge.Evidence); err != nil {
 		b.gap("invalid_evidence")
 		return err

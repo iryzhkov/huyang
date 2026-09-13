@@ -40,6 +40,7 @@ type ExecutionEvidence struct {
 }
 
 type ExecutionNode struct {
+	Column   int                 `json:"column,omitempty"`
 	ID       string              `json:"id"`
 	Kind     string              `json:"kind"`
 	Path     string              `json:"path,omitempty"`
@@ -49,12 +50,15 @@ type ExecutionNode struct {
 }
 
 type ExecutionEdge struct {
-	ID        string              `json:"id"`
-	From      string              `json:"from"`
-	To        string              `json:"to"`
-	Kind      string              `json:"kind"`
-	Condition string              `json:"condition,omitempty"`
-	Evidence  []ExecutionEvidence `json:"evidence"`
+	SitePath   string              `json:"site_path,omitempty"`
+	SiteLine   int                 `json:"site_line,omitempty"`
+	SiteColumn int                 `json:"site_column,omitempty"`
+	ID         string              `json:"id"`
+	From       string              `json:"from"`
+	To         string              `json:"to"`
+	Kind       string              `json:"kind"`
+	Condition  string              `json:"condition,omitempty"`
+	Evidence   []ExecutionEvidence `json:"evidence"`
 }
 
 type GraphStep struct {
