@@ -99,6 +99,31 @@ func TestDeclaredNumericBoundsAreRefused(t *testing.T) {
 	}
 }
 
+// A property in the wrong place is the commonest first call against a tool:
+// read takes target.path, and {path: ...} is the natural guess. The refusal
+// names where the property belongs so the second attempt is the right one
+// instead of another guess.
+func TestAMisplacedPropertyIsToldWhereItBelongs(t *testing.T) {
+	var read map[string]any
+	for _, descriptor := range Tools {
+		if descriptor.Name == "read" {
+			read = descriptor.InputSchema
+		}
+	}
+	if read == nil {
+		t.Fatal("the catalog has no read tool")
+	}
+	err := ValidateToolArguments(read, map[string]any{
+		"workspace_id": "ws_test", "path": "go.mod",
+	})
+	if err == nil {
+		t.Fatal("read accepted a top-level path")
+	}
+	if !strings.Contains(err.Error(), "target.path") || !strings.Contains(err.Error(), "targets.path") {
+		t.Fatalf("the refusal does not say where path belongs: %v", err)
+	}
+}
+
 func TestEveryRegisteredToolDeclaresASchedulerClass(t *testing.T) {
 	if err := ValidateRegistry(); err != nil {
 		t.Fatal(err)

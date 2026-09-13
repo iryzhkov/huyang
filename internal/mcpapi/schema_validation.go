@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
+	"strings"
 )
 
 func ValidateToolArguments(schema map[string]any, arguments map[string]any) error {
@@ -101,9 +103,9 @@ func validateObject(schema map[string]any, value any, path string) error {
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if closed, present := schema["additionalProperties"].(bool); present && !closed {
-		for key := range object {
+		for _, key := range sortedKeys(object) {
 			if _, ok := properties[key]; !ok {
-				return fmt.Errorf("%s contains unknown property %q", path, key)
+				return fmt.Errorf("%s contains unknown property %q%s", path, key, whereItBelongs(properties, key))
 			}
 		}
 	}
@@ -123,6 +125,60 @@ func validateObject(schema map[string]any, value any, path string) error {
 		}
 	}
 	return nil
+}
+
+// whereItBelongs names the place a rejected property is accepted, when the
+// schema declares one with that name a level down. "read contains unknown
+// property path" is true and leaves the caller to re-read the schema for the
+// shape; naming target.path turns the second attempt into the right one.
+func whereItBelongs(properties map[string]any, key string) string {
+	var places []string
+	for _, parent := range sortedKeys(properties) {
+		if child, _ := properties[parent].(map[string]any); declaresProperty(child, key) {
+			places = append(places, parent+"."+key)
+		}
+	}
+	if len(places) == 0 {
+		return ""
+	}
+	return "; " + key + " belongs under " + strings.Join(places, " or ")
+}
+
+// declaresProperty reports whether a schema accepts a property with this
+// name, looking through the shapes the catalog uses: an object's properties,
+// the alternatives of a oneOf, and an array's items.
+func declaresProperty(schema map[string]any, key string) bool {
+	if schema == nil {
+		return false
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		if _, present := properties[key]; present {
+			return true
+		}
+	}
+	for _, raw := range mcpAlternatives(schema) {
+		if alternative, _ := raw.(map[string]any); declaresProperty(alternative, key) {
+			return true
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		return declaresProperty(items, key)
+	}
+	return false
+}
+
+func mcpAlternatives(schema map[string]any) []any {
+	alternatives, _ := schema["oneOf"].([]any)
+	return alternatives
+}
+
+func sortedKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func validateArray(schema map[string]any, value any, path string) error {
