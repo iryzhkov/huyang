@@ -144,13 +144,17 @@ func (h *Handlers) workspaceEditArguments(workspace *workspacecore.Workspace, op
 		}
 	}
 	if arguments["kind"] == "code_action" {
-		// A code action is asked for over the whole target range, so an
-		// action that applies to a call inside the statement is offered.
-		if path, _, endLine, err := declarationLines(workspace, operation); err == nil {
-			if read, readErr := workspace.Read(path); readErr == nil {
-				arguments["end_line"], arguments["end_col"] = endLine, lineWidth(read.Content, endLine)
-			}
+		// A code action is asked for over exactly the target range, so the
+		// server sees the call the caller named rather than the statement
+		// around it: gopls offers "Inline call to f" for a call and
+		// "Extract function" for a statement, and the difference is the end
+		// of the range.
+		span, err := targetSpan(workspace, operation)
+		if err != nil {
+			return nil, err
 		}
+		arguments["end_line"] = lineOf(span.content, span.end)
+		arguments["end_col"] = span.end - lineStartOffset(span.content, span.end) + 1
 	}
 	return arguments, nil
 }
@@ -306,56 +310,73 @@ func boundedReferences(outside []string) []string {
 		fmt.Sprintf("and %d more", len(outside)-maxReportedReferences))
 }
 
-// declarationLines is the file and the line span a plan target covers.
-func declarationLines(workspace *workspacecore.Workspace, operation workspacecore.PlanOperation) (string, int, int, error) {
+// planSpan is the exact bytes a plan target covers, with the document they
+// live in.
+type planSpan struct {
+	path    string
+	content []byte
+	start   int
+	end     int
+}
+
+// targetSpan resolves a plan target to exact bytes, whichever of the three
+// ways it was addressed.
+func targetSpan(workspace *workspacecore.Workspace, operation workspacecore.PlanOperation) (planSpan, error) {
 	if operation.Target == nil {
-		return "", 0, 0, fmt.Errorf("%s requires target", operation.Kind)
+		return planSpan{}, fmt.Errorf("%s requires target", operation.Kind)
 	}
-	var path string
-	var start, end int
+	span := planSpan{}
 	switch {
 	case operation.Target.SymbolLocator != nil:
 		record, err := workspace.ResolveSymbolLocator(operation.Target.SymbolLocator.Path, operation.Target.SymbolLocator.NamePath)
 		if err != nil {
-			return "", 0, 0, err
+			return planSpan{}, err
 		}
-		path, start, end = record.Locator.Path, record.Locator.ByteStart, record.Locator.ByteEnd
+		span.path, span.start, span.end = record.Locator.Path, record.Locator.ByteStart, record.Locator.ByteEnd
 	case operation.Target.Handle != "":
 		resolution, err := workspace.ResolveHandle(operation.Target.Handle)
 		if err != nil {
-			return "", 0, 0, err
+			return planSpan{}, err
 		}
 		handle, err := resolution.RangeHandle()
 		if err != nil {
-			return "", 0, 0, err
+			return planSpan{}, err
 		}
-		path, start, end = handle.Path, handle.ByteStart, handle.ByteEnd
+		span.path, span.start, span.end = handle.Path, handle.ByteStart, handle.ByteEnd
 	case operation.Target.FileRange != nil:
-		path, start, end = operation.Target.FileRange.Path, operation.Target.FileRange.ByteStart, operation.Target.FileRange.ByteEnd
+		span.path = operation.Target.FileRange.Path
+		span.start, span.end = operation.Target.FileRange.ByteStart, operation.Target.FileRange.ByteEnd
 	default:
-		return "", 0, 0, fmt.Errorf("%s requires target", operation.Kind)
+		return planSpan{}, fmt.Errorf("%s requires target", operation.Kind)
 	}
-	read, err := workspace.Read(path)
+	read, err := workspace.Read(span.path)
+	if err != nil {
+		return planSpan{}, err
+	}
+	if span.start < 0 || span.end > len(read.Content) || span.end < span.start {
+		return planSpan{}, fmt.Errorf("the target is outside the current document")
+	}
+	span.content = read.Content
+	return span, nil
+}
+
+// declarationLines is the file and the line span a plan target covers.
+func declarationLines(workspace *workspacecore.Workspace, operation workspacecore.PlanOperation) (string, int, int, error) {
+	span, err := targetSpan(workspace, operation)
 	if err != nil {
 		return "", 0, 0, err
 	}
-	if start < 0 || end > len(read.Content) || end < start {
-		return "", 0, 0, fmt.Errorf("the declaration is outside the current document")
-	}
-	return path, lineOf(read.Content, start), lineOf(read.Content, end), nil
+	return span.path, lineOf(span.content, span.start), lineOf(span.content, span.end), nil
 }
 
 func lineOf(content []byte, offset int) int {
 	return bytes.Count(content[:offset], []byte{'\n'}) + 1
 }
 
-// lineWidth is the 1-based column just past the end of a line.
-func lineWidth(content []byte, line int) int {
-	lines := bytes.Split(content, []byte{'\n'})
-	if line < 1 || line > len(lines) {
-		return 1
-	}
-	return len(lines[line-1]) + 1
+// lineStartOffset is the offset of the first byte of the line an offset falls
+// on.
+func lineStartOffset(content []byte, offset int) int {
+	return bytes.LastIndexByte(content[:offset], '\n') + 1
 }
 
 func editStart(raw any) int {
