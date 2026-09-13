@@ -1,0 +1,148 @@
+{
+  "command": "pull",
+  "controller": "normandy",
+  "desired_manifest_commit": "2349fdbc5b5ce44cd3adc0a10f5293ad968698d0",
+  "dry_run": false,
+  "exit_code": 0,
+  "hosts": [
+    {
+      "components": [
+        {
+          "actions": [
+            "fetched origin main",
+            "checked out 574539d881d3",
+            "built",
+            "restarted huyang.service",
+            "mcp probe tools=19 server=0.4.0"
+          ],
+          "after": {
+            "binary_sha256": "d70732991e9fbae2741bd73233d799862ff600fcf5a395a747ebfbdfd43b9592",
+            "commit": "574539d881d3ba4fadb3a8f1906b5a7ca5b858e4",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "before": {
+            "binary_sha256": "dc0e509ad39078206fce86d0424c05038faa8b7c88ec4952c95b1e3d595dfe8d",
+            "commit": "5d244adf13c978599a267ee6f35b446faf7430c5",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "name": "huyang",
+          "state": "updated"
+        }
+      ],
+      "dry_run": false,
+      "harness": {
+        "claude": true,
+        "codex": false,
+        "opencode": true
+      },
+      "host": "homelab",
+      "legacy_updater": {
+        "actions": [],
+        "state": "converged"
+      },
+      "reachable": true,
+      "result": "updated",
+      "run_id": "20260913T175244Z-1a4f064f",
+      "transport": "ssh"
+    },
+    {
+      "error": "converges through its local timer",
+      "host": "laptop",
+      "reachable": false,
+      "result": "skipped",
+      "self_managed": true
+    },
+    {
+      "components": [
+        {
+          "actions": [
+            "mcp probe tools=19"
+          ],
+          "after": {
+            "binary_sha256": "8f8fbab9eaee4cc2dc2833b2ac361d372f73f4a7c58cb69d99d4a9a6d4cd452b",
+            "commit": "574539d881d3ba4fadb3a8f1906b5a7ca5b858e4",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "before": {
+            "binary_sha256": "8f8fbab9eaee4cc2dc2833b2ac361d372f73f4a7c58cb69d99d4a9a6d4cd452b",
+            "commit": "574539d881d3ba4fadb3a8f1906b5a7ca5b858e4",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "name": "huyang",
+          "state": "converged"
+        }
+      ],
+      "dry_run": false,
+      "harness": {
+        "claude": true,
+        "codex": true,
+        "opencode": true
+      },
+      "host": "normandy",
+      "legacy_updater": {
+        "actions": [],
+        "state": "converged"
+      },
+      "reachable": true,
+      "result": "converged",
+      "run_id": "20260913T175244Z-1a4f064f",
+      "transport": "local"
+    },
+    {
+      "components": [
+        {
+          "actions": [
+            "fetched origin main",
+            "checked out 574539d881d3",
+            "built",
+            "restarted huyang.service",
+            "mcp probe tools=19 server=0.4.0"
+          ],
+          "after": {
+            "binary_sha256": "8f8fbab9eaee4cc2dc2833b2ac361d372f73f4a7c58cb69d99d4a9a6d4cd452b",
+            "commit": "574539d881d3ba4fadb3a8f1906b5a7ca5b858e4",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "before": {
+            "binary_sha256": "33ba67e368df6d8d08fc86394ceb17d7775ea0fdf15b603d8f0ee6c58d900eb6",
+            "commit": "5d244adf13c978599a267ee6f35b446faf7430c5",
+            "dirty": false,
+            "service_active": true,
+            "socket": true
+          },
+          "name": "huyang",
+          "state": "updated"
+        }
+      ],
+      "dry_run": false,
+      "harness": {
+        "claude": true,
+        "codex": false,
+        "opencode": true
+      },
+      "host": "omarchy-pc",
+      "legacy_updater": {
+        "actions": [],
+        "state": "converged"
+      },
+      "reachable": true,
+      "result": "updated",
+      "run_id": "20260913T175244Z-1a4f064f",
+      "transport": "ssh"
+    }
+  ],
+  "release_sha256": "3adef619e5df8344e61397f19223f702ce4ae7811a9b71852019583995672987",
+  "run_id": "20260913T175244Z-1a4f064f",
+  "schema_version": 1,
+  "self": false
+}
