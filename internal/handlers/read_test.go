@@ -8,6 +8,35 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+// A workspace_id this service does not hold is a refusal a caller cannot
+// repair from the id, so it names the two ways back rather than leaving the
+// agent to guess which of them exists.
+func TestUnknownWorkspaceIDOffersAWayBack(t *testing.T) {
+	handlers, _, root := literalFixture(t, map[string]string{"ledger.go": "package ledger\n"})
+	result := handlers.Execute(context.Background(), "req_unknown", "read", map[string]any{
+		"workspace_id": "ws_00000000000000000000000000000000",
+		"target":       map[string]any{"path": "ledger.go"},
+	})
+	if result["code"] != "workspace_not_found" {
+		t.Fatalf("unknown workspace = %#v", result)
+	}
+	next, _ := result["next"].([]any)
+	if len(next) == 0 {
+		t.Fatalf("the refusal leaves nothing to do next: %#v", result)
+	}
+	if first, _ := next[0].(map[string]any); first["tool"] != "workspace_open" {
+		t.Fatalf("the first way back is not opening the workspace: %#v", next)
+	}
+	// And the way it names works: the same read, given the root instead,
+	// answers.
+	retried := handlers.Execute(context.Background(), "req_root", "read", map[string]any{
+		"root": root, "target": map[string]any{"path": "ledger.go"},
+	})
+	if retried["outcome"] != "ok" {
+		t.Fatalf("the recovery the refusal names does not work: %#v", retried)
+	}
+}
+
 // A locator that matched nothing and one that matched twice are different
 // mistakes: the first needs another name, the second needs the name
 // qualified. Both used to answer "did not resolve uniquely", which describes

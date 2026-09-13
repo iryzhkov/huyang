@@ -159,7 +159,7 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	}
 	workspace := h.registry.Lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
-		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+		return mcpapi.WorkspaceNotFound(requestID, workspaceID)
 	}
 	// Provider-touching calls are serialised by the scheduler lanes in the
 	// service, and plans stage in isolated sandboxes with their own

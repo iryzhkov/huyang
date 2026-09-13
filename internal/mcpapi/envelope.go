@@ -217,6 +217,21 @@ func Failure(requestID string, workspace *workspacecore.Workspace, code string, 
 	return Envelope(requestID, workspace, "failed", code, err.Error(), map[string]any{})
 }
 
+// WorkspaceNotFound is the refusal for a workspace_id this service does not
+// hold: an id from another machine, from before a restart, or invented. The
+// caller cannot repair it from the id alone, so the reply names both ways
+// back - open the repository, or name it with root and let the call open it
+// - rather than leaving the agent to guess which of the two exists.
+func WorkspaceNotFound(requestID, workspaceID string) map[string]any {
+	result := Envelope(requestID, nil, "failed", "workspace_not_found",
+		"Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+	result["next"] = []any{
+		map[string]any{"tool": "workspace_open", "action": "open_the_repository_root", "kind": "project"},
+		map[string]any{"action": "name_the_repository_with_root_instead_of_workspace_id"},
+	}
+	return result
+}
+
 func Envelope(requestID string, workspace *workspacecore.Workspace, outcome, code, summary string, data any) map[string]any {
 	result := map[string]any{
 		"api_version": APIVersion, "request_id": requestID, "outcome": outcome,

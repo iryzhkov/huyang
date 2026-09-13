@@ -329,7 +329,7 @@ func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspa
 	}
 	workspace := d.registry.Lookup(workspacecore.ID(workspaceID))
 	if workspace == nil {
-		return mcpapi.Envelope(requestID, nil, "failed", "workspace_not_found", "Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+		return mcpapi.WorkspaceNotFound(requestID, workspaceID)
 	}
 	releaseLane, err := d.scheduler.acquire(ctx, workspaceID, mcpapi.ClassCanonicalWrite)
 	if err != nil {
