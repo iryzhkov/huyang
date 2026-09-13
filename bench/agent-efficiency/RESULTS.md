@@ -535,3 +535,69 @@ What the live E1 Huyang run spent: `workspace_open` 839 response tokens, `edit_a
 `verify_run` 375 (skipped, untrusted), then `go build` through bash. The edit itself is at
 the protocol cost; the open and the wasted verify are the overhead to attack next
 (`workspace_open` on a fresh clone carries the overview and the untrusted-commands text).
+
+## Efficiency session, 2026-09-13 (after the debugger, trace and recovery stages)
+
+The question this session asked was whether the features added since 2026-09-12 had cost
+efficiency or usability. The per-call protocol numbers had not moved: measured at commit
+`79ab180` (`runs/protocol-x30.json`) against the S20c run, every scenario was within two
+percent except `workspace_open`, which had grown 17 percent. What had regressed was not
+visible in the protocol measurement at all, because its fixtures are two small repositories
+and its calls name a workspace ID.
+
+### The benchmark itself was measuring a task that could not be done
+
+Both fixtures document a formatting gap that loses the sign of a negative amount below one
+major unit, and both `V1` and `E5` tell the agent that one test fails on purpose and must be
+named. `FormatAmount` and `format_amount` handled the sign correctly, every test passed, and
+the two scenarios had been asking three families of agents to report a failure that did not
+exist since the harness was committed. The fixtures now carry the documented gap, so exactly
+one test fails in each. `V1` and `E5` numbers from batch `after` and batch `haiku` measured
+the earlier, unsatisfiable task and are not comparable with later ones.
+
+Two scenarios were added for the surface the stages added: `D1` asks for the line of
+production code responsible for the failing test, and `D2` asks for a runtime value from
+inside a function, which is what the debugger tools exist for and what the shell family
+answers with `dlv` or temporary instrumentation.
+
+### What the real repository showed that the fixtures could not
+
+| Defect | What it cost |
+|---|---|
+| A symbol locator was resolved by the workspace-wide scan | Every document in the repository read and parsed for one declaration: 830 files here. The reply carried a coverage block listing twenty files with no native parser, none of them the file asked about. A found declaration answered 3,965 bytes, a missing one 3,516. |
+| A bare method name answered `semantic_provider_unavailable` | The file's own language was parsed; the name just needed its receiver. The reply blamed the parser and the agent fell back to `search` plus a second `read`. |
+| `root` was declared on 7 of 19 tools | The other twelve required `workspace_id` while their descriptions said "or omit it and pass root", so the documented call was refused by schema validation before the handler, which has resolved roots for every tool all along, saw it. |
+| A mutation receipt was filed under an empty workspace ID when the call named a root | `revision_diff` answered `diff_evidence_incomplete` and `verify_run test_scope=affected` refused with `changed_file_evidence_incomplete`, for every edit made through the call the guide recommends. |
+| Two sha256 per changed file on every edit reply | A third of an ordinary edit reply, for hashes the receipt keeps and no caller reads. |
+| The repeated operation schema carried its prose every time | 1,157 of `edit_apply`'s 1,589 catalog tokens and 1,565 of `change_plan`'s 1,938, paid once per session by every agent. |
+| A diagnostic notice named an id, a severity and a path | Nothing actionable: the delta that exists to save a `diagnostics` call cost one. |
+
+Measured through the stdio adapter against this repository, the symbol read fell from 3,965
+to 1,446 bytes when it resolves and from 3,516 to 1,236 when it does not, and the miss now
+names the declaration that does resolve (`Ledger/Balance`), so the retry is one call.
+
+### Protocol measurement after the fixes (`runs/protocol-x31.json`)
+
+Response tokens, Huyang family, `x30` (commit 79ab180) to `x31`:
+
+| Scenario | Go | Python |
+|---|---|---|
+| W0 open workspace | 618 -> 523 (-15%) | 697 -> 593 (-15%) |
+| R2 read a region by name | 414 -> 379 (-8%) | 369 -> 341 (-8%) |
+| E1 one-line edit | 356 -> 269 (-24%) | 374 -> 274 (-27%) |
+| E2 swap a block | 359 -> 272 (-24%) | 366 -> 271 (-26%) |
+| E3 rename x5 | 375 -> 302 (-19%) | 412 -> 314 (-24%) |
+| E4 new file | 343 -> 249 (-27%) | 350 -> 256 (-27%) |
+| E5 three files + tests | 2033 -> 1676 (-18%) | 2049 -> 1886 (-8%) |
+| E6 signature change | 4170 -> 3231 (-23%) | 4306 -> 3262 (-24%) |
+| E7 copy a file | 577 -> 481 (-17%) | 565 -> 465 (-18%) |
+| E8 move a file | 682 -> 597 (-12%) | 1077 -> 1117 (+4%) |
+| V1 run the tests | 190 -> 282 | 197 -> 504 |
+
+V1 grew because the fixture now has the failing test it always claimed to have: the reply
+carries the failure, which is the whole scenario. Call counts and request tokens are
+unchanged; the request differences in the raw records are the tokenizer's treatment of a
+different workspace ID, not a change in what is sent.
+
+The full catalog, loaded once per session, went from 9,306 to 9,035 cl100k tokens: the
+deduplicated operation schema saves 407 and `root` on the remaining twelve tools costs 136.
