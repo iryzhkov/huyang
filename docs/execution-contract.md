@@ -257,6 +257,28 @@ inspection, not ranked causal proofs. Concurrent schedules and omitted intervals
 can explain several alignments. Older traces without token fingerprints can
 still align on exact source, but cannot use relocation fallback.
 
+## Integrated hardening and release scope (X30)
+
+The integrated live flow acquires a graph, explains candidate paths, prepares a
+call removal, proves the narrow path_unreachable invariant, records canonical
+debugger traces, overlays and compares them, and inspects the semantic change
+summary without changing canonical source. Separate X29 live cases exercise
+actual passing/failing inputs; the closed proof grammar intentionally excludes
+runtime input processing.
+
+An active recording survives daemon replacement as an immutable interrupted
+trace. Static path reads and trace inspection coexist with a stopped debugger.
+Failed append, target update or finalization no longer publishes in-memory state
+ahead of durable trace storage. Recovery refuses directory enumeration errors
+and bounds the actual record read, including files that grow after stat.
+
+Execution APIs remain experimental. General dynamic/non-Go unreachability,
+complete branch history, causal origins, arbitrary mutation adapters and
+instrumentation are not graduated by these gates. Existing resource, source,
+epoch, preparation, provider-recovery and concurrency checks remain part of the
+full suite. The separate read byte-bound and verbose status defects remain
+deferred to the planned usability and bug investigation.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

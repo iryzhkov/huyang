@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,8 +64,8 @@ func (s *executionTraceStore) recover() error {
 	defer directory.Close()
 	// A bounded read refuses a corrupt/unbounded directory instead of loading it.
 	entries, err := directory.ReadDir(MaxExecutionTraces + 2)
-	if err != nil && len(entries) == 0 {
-		return nil
+	if err != nil && err != io.EOF {
+		return Codedf("trace_storage_failed", "trace directory enumeration failed")
 	}
 	if len(entries) > MaxExecutionTraces+1 {
 		return Codedf("trace_storage_invalid", "trace directory exceeds retention bounds")
@@ -78,7 +79,7 @@ func (s *executionTraceStore) recover() error {
 		if err != nil || info.Size() > MaxExecutionTraceBytes || info.Mode().Perm() != 0600 {
 			return Codedf("trace_storage_invalid", "trace size or permissions invalid")
 		}
-		content, err := os.ReadFile(filepath.Join(s.directory, entry.Name()))
+		content, err := readBoundedTrace(filepath.Join(s.directory, entry.Name()))
 		var trace ExecutionTrace
 		if err != nil || json.Unmarshal(content, &trace) != nil || trace.ID != id || len(trace.Events) > MaxExecutionTraceEvents || !s.validRecoveredTrace(trace) {
 			return Codedf("trace_storage_invalid", "trace record invalid")

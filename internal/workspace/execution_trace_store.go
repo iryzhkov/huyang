@@ -100,10 +100,12 @@ func (w *Workspace) AppendExecutionTrace(event ExecutionTraceEvent, gaps ...stri
 	store := w.traceStore()
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	trace := store.entries[store.active]
-	if trace == nil {
+	stored := store.entries[store.active]
+	if stored == nil {
 		return nil
 	}
+	copy := cloneExecution(*stored)
+	trace := &copy
 	for _, gap := range gaps {
 		if len(trace.Coverage.Gaps) < MaxExecutionTraceRedactions {
 			trace.Coverage.Gaps = uniqueSorted(append(trace.Coverage.Gaps, sanitizeText(gap, 128)))
@@ -111,7 +113,7 @@ func (w *Workspace) AppendExecutionTrace(event ExecutionTraceEvent, gaps ...stri
 	}
 	if event.Kind == "stopped" && event.Sequence > 0 {
 		if event.Sequence <= trace.LastStopSequence {
-			return store.persist(trace)
+			return store.commitTrace(trace)
 		}
 		if missed := event.Sequence - trace.LastStopSequence - 1; missed > 0 {
 			trace.Dropped += missed
@@ -129,23 +131,23 @@ func (w *Workspace) AppendExecutionTrace(event ExecutionTraceEvent, gaps ...stri
 	} else {
 		trace.Events = append(trace.Events, event)
 	}
-	return store.persist(trace)
+	return store.commitTrace(trace)
 }
 func (w *Workspace) FinishExecutionTrace(reason string) (string, error) {
 	store := w.traceStore()
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	trace := store.entries[store.active]
-	if trace == nil {
+	stored := store.entries[store.active]
+	if stored == nil {
 		return "", nil
 	}
+	copy := cloneExecution(*stored)
+	trace := &copy
 	now := time.Now().UTC()
 	trace.Finished = &now
 	trace.Completion = sanitizeText(reason, 128)
 	trace.Digest = hashBytes([]byte(executionJSON(trace)))
-	if err := store.persist(trace); err != nil {
-		trace.Finished = nil
-		trace.Digest = ""
+	if err := store.commitTrace(trace); err != nil {
 		return "", err
 	}
 	store.active = ""
@@ -155,13 +157,15 @@ func (w *Workspace) SetExecutionTraceTargets(targets []ExecutionTraceTarget) err
 	store := w.traceStore()
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	trace := store.entries[store.active]
-	if trace == nil {
+	stored := store.entries[store.active]
+	if stored == nil {
 		return Codedf("trace_unknown", "no active trace")
 	}
+	copy := cloneExecution(*stored)
+	trace := &copy
 	if len(targets) > MaxExecutionTraceTargets {
 		return Codedf("trace_policy_invalid", "too many targets")
 	}
 	trace.Targets = cloneExecution(targets)
-	return store.persist(trace)
+	return store.commitTrace(trace)
 }
