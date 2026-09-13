@@ -633,16 +633,16 @@ Protocol response tokens, Huyang family, `x30` (commit 79ab180) to `x32`:
 
 | Scenario | Go | Python |
 |---|---|---|
-| W0 open workspace | 618 -> 517 (-16%) | 697 -> 589 (-16%) |
-| R2 read a region by name | 414 -> 381 (-8%) | 369 -> 343 (-7%) |
-| E1 one-line edit | 356 -> 266 (-25%) | 374 -> 271 (-28%) |
-| E2 swap a block | 359 -> 218 (-39%) | 366 -> 218 (-40%) |
-| E3 rename x5 | 375 -> 254 (-32%) | 412 -> 265 (-36%) |
-| E4 new file | 343 -> 216 (-37%) | 350 -> 222 (-37%) |
-| E5 three files + tests | 2033 -> 1440 (-29%) | 2049 -> 1610 (-21%) |
-| E6 signature change | 4170 -> 2780 (-33%) | 4306 -> 2807 (-35%) |
-| E7 copy a file | 577 -> 431 (-25%) | 565 -> 417 (-26%) |
-| E8 move a file | 682 -> 558 (-18%) | 1077 -> 966 (-10%) |
+| W0 open workspace | 618 -> 517 (-16%) | 697 -> 591 (-15%) |
+| R2 read a region by name | 414 -> 381 (-8%) | 369 -> 344 (-7%) |
+| E1 one-line edit | 356 -> 266 (-25%) | 374 -> 276 (-26%) |
+| E2 swap a block | 359 -> 218 (-39%) | 366 -> 234 (-36%) |
+| E3 rename x5 | 375 -> 254 (-32%) | 412 -> 280 (-32%) |
+| E4 new file | 343 -> 216 (-37%) | 350 -> 219 (-37%) |
+| E5 three files + tests | 2033 -> 1440 (-29%) | 2049 -> 1671 (-18%) |
+| E6 signature change | 4170 -> 2780 (-33%) | 4306 -> 2852 (-34%) |
+| E7 copy a file | 577 -> 431 (-25%) | 565 -> 431 (-24%) |
+| E8 move a file | 682 -> 558 (-18%) | 1077 -> 1026 (-5%) |
 
 Against the modelled built-in tools on the Go fixture, Huyang now uses fewer or equal calls
 on every scenario and fewer response tokens on R3, E6, E7 and E8; E1 costs twice the
