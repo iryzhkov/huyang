@@ -648,3 +648,21 @@ Against the modelled built-in tools on the Go fixture, Huyang now uses fewer or 
 on every scenario and fewer response tokens on R3, E6, E7 and E8; E1 costs twice the
 built-in Edit echo (266 against 133) and carries the revision and the diagnostics instead.
 E5 is 1,440 against 970 and E6 is 2,780 against 2,577 with two fewer calls.
+
+### Call-count work and the final protocol state (`runs/protocol-x33.json`, commit 49e9ade)
+
+The spool also says what agents do with the calls, not only what the calls weigh. Four days
+hold 1,843 `read` -> `read` pairs, 1,099 `read` -> `read` -> `read` triples and 1,396
+`edit_apply` -> `edit_apply` pairs, while `read.targets` takes 32 targets and
+`edit_apply.operations` takes 64. Both are in the tool descriptions and in the session guide,
+which an agent reads before it has a reason to care. The second consecutive single-target
+read, and the second consecutive single-operation edit, now carry the one-call form under
+`next`, once per client and workspace, about twenty tokens each.
+
+`search` also stopped echoing the query: a literal search answered the matched text on every
+hit, which for a literal search is the query the caller sent. R3 falls 282 -> 226 response
+tokens on the fixture, and more on a real search: it is one line per hit.
+
+Between `x32` and `x33` every other scenario is flat within two percent, except E2, which
+gains 42 tokens: it is the second edit of the protocol session, so it carries the
+`operations` hint once.
