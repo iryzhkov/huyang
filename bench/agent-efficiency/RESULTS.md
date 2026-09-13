@@ -601,3 +601,50 @@ different workspace ID, not a change in what is sent.
 
 The full catalog, loaded once per session, went from 9,306 to 9,035 cl100k tokens: the
 deduplicated operation schema saves 407 and `root` on the remaining twelve tools costs 136.
+
+### After the spool-driven fixes (`runs/protocol-x32.json`, commit ef922ab)
+
+The second half of the session was driven by the friction spool rather than the fixture:
+four days of fleet spool, 14,414 agent calls across 144 sessions, say which replies agents
+actually pay for and which refusals they actually meet. Ranked by calls: `read` 3,936,
+`search` 3,732, `edit_apply` 2,840, `change_plan` 1,581, `workspace_open` 786. Ranked by
+refusal: 26 percent of `edit_apply` calls and 41 percent of `change_plan` calls did not
+answer `ok`.
+
+What that produced, in the order the spool ranked it:
+
+- **A repeated `workspace_open` answers what changed.** 786 opens across 99 sessions is
+  eight per session, each repeating the same tree, commands and capabilities: 2,429 bytes
+  to 464 for the second open of a workspace whose fingerprint has not changed.
+- **A prepared plan compacts its verification stages** the way `verify_run` has since the
+  first friction pass: 4,182 bytes to 3,030 for a one-operation prepare.
+- **An unchanged diagnostic unavailability is told once.** 555 of 2,843 edits answered
+  `provisional` with the same paragraph about a language server that is not there: 978
+  bytes to 685 for the second edit of such a session.
+- **`verify_run` names what passed and what did not run.** Its most frequent verdict, 91
+  calls across 33 sessions, was "Verification completed against exact sandbox bytes; 1
+  stage(s) unavailable", which names neither.
+- **A missing path answers with the paths that exist under that name**, the commonest read
+  failure at 63 calls across 30 sessions.
+- **The spool records the refusal code**, so the next pass can tell a language server that
+  never attached from a verdict that is merely corroborated.
+
+Protocol response tokens, Huyang family, `x30` (commit 79ab180) to `x32`:
+
+| Scenario | Go | Python |
+|---|---|---|
+| W0 open workspace | 618 -> 517 (-16%) | 697 -> 589 (-16%) |
+| R2 read a region by name | 414 -> 381 (-8%) | 369 -> 343 (-7%) |
+| E1 one-line edit | 356 -> 266 (-25%) | 374 -> 271 (-28%) |
+| E2 swap a block | 359 -> 218 (-39%) | 366 -> 218 (-40%) |
+| E3 rename x5 | 375 -> 254 (-32%) | 412 -> 265 (-36%) |
+| E4 new file | 343 -> 216 (-37%) | 350 -> 222 (-37%) |
+| E5 three files + tests | 2033 -> 1440 (-29%) | 2049 -> 1610 (-21%) |
+| E6 signature change | 4170 -> 2780 (-33%) | 4306 -> 2807 (-35%) |
+| E7 copy a file | 577 -> 431 (-25%) | 565 -> 417 (-26%) |
+| E8 move a file | 682 -> 558 (-18%) | 1077 -> 966 (-10%) |
+
+Against the modelled built-in tools on the Go fixture, Huyang now uses fewer or equal calls
+on every scenario and fewer response tokens on R3, E6, E7 and E8; E1 costs twice the
+built-in Edit echo (266 against 133) and carries the revision and the diagnostics instead.
+E5 is 1,440 against 970 and E6 is 2,780 against 2,577 with two fewer calls.
