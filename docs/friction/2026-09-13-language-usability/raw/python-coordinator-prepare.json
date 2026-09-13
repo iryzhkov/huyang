@@ -1,0 +1,389 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"api_version\":\"huyang.workspace/v1alpha1\",\"data\":{\"plan\":{\"base_state_seq\":1,\"created_at\":\"2026-09-13T17:16:10.282784238Z\",\"event_count\":4,\"operation_count\":6,\"operations\":[{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":null,\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_1\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"src/dev_fleet/cli.py\",\"revision_id\":\"docrev_6ae660dce671e069aeb7de71b42cbfce13f4c655b1248698173744edc274e057\"}},\"to\":\"\"},{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":[\"rename-redact_1\"],\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_2\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"src/dev_fleet/cli.py\",\"revision_id\":\"docrev_6ae660dce671e069aeb7de71b42cbfce13f4c655b1248698173744edc274e057\"}},\"to\":\"\"},{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":[\"rename-redact_2\"],\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_3\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"src/dev_fleet/redaction.py\",\"revision_id\":\"docrev_12c4d30b8ac1f13a41f200400d7557245bd022378927756166c9f110ecd77353\"}},\"to\":\"\"},{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":[\"rename-redact_3\"],\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_4\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"src/dev_fleet/redaction.py\",\"revision_id\":\"docrev_12c4d30b8ac1f13a41f200400d7557245bd022378927756166c9f110ecd77353\"}},\"to\":\"\"},{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":[\"rename-redact_4\"],\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_5\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"tests/test_redaction.py\",\"revision_id\":\"docrev_03e210ed2706c8084bbbf6b686c6d0f91fac2c82c51ef4bba88a3ab2e4b0d9a3\"}},\"to\":\"\"},{\"content_bytes\":13,\"content_sha256\":\"fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65\",\"depends_on\":[\"rename-redact_5\"],\"destination_revision_id\":\"\",\"from\":\"\",\"indentation\":\"exact\",\"kind\":\"replace_range\",\"op_id\":\"rename-redact_6\",\"path\":\"\",\"revision_id\":\"\",\"target\":{\"file_range\":{\"path\":\"tests/test_redaction.py\",\"revision_id\":\"docrev_03e210ed2706c8084bbbf6b686c6d0f91fac2c82c51ef4bba88a3ab2e4b0d9a3\"}},\"to\":\"\"}],\"plan_id\":\"plan_cbf8c248c90f00c757ce86be48b70970\",\"plan_revision\":1,\"preparation\":{\"prepared_revision\":\"prep_fabe3c5a0329242eb6cf4dd7872da8d11a78e32c41206b3876ffcfed95c17620\",\"provider_epoch\":1,\"affected_files\":[\"src/dev_fleet/cli.py\",\"src/dev_fleet/redaction.py\",\"tests/test_redaction.py\"],\"canonical_changed\":false,\"diagnostics\":\"provisional\",\"disk_checks\":\"sandbox_manifest_verified\",\"intermediate_reports\":false,\"sandbox_backend\":\"safe_copy\",\"base_revision\":\"wsrev_1\",\"evidence_paths\":\"canonical\",\"verification\":[{\"stage\":\"format_gate\",\"mode\":\"check\",\"started_revision\":\"wsrev_1\",\"exit\":-1,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"not_configured\"],\"capped\":false,\"semantic\":\"\"}},{\"stage\":\"parser\",\"mode\":\"check\",\"scope\":[\"src/dev_fleet/cli.py\",\"src/dev_fleet/redaction.py\",\"tests/test_redaction.py\"],\"started_revision\":\"wsrev_1\",\"exit\":-1,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":3,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"parser_unavailable:.py\"],\"capped\":false,\"semantic\":\"\"}},{\"stage\":\"check\",\"implementation\":[\"make\",\"lint\"],\"mode\":\"check\",\"started_revision\":\"wsrev_1\",\"exit\":-1,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"workspace_not_trusted\"],\"capped\":false,\"semantic\":\"\"}},{\"stage\":\"check\",\"implementation\":[\"uv\",\"run\",\"--no-sync\",\"python\",\"-B\",\"-c\",\"import ast, pathlib, sys\\nbad = 0\\nfor p in pathlib.Path('.').rglob('*.py'):\\n    if '.venv' in p.parts or 'venv' in p.parts or 'node_modules' in p.parts:\\n        continue\\n    try:\\n        ast.parse(p.read_text(), str(p))\\n    except SyntaxError as e:\\n        bad += 1\\n        print(f'{p}:{e.lineno}: {e.msg}')\\nsys.exit(1 if bad else 0)\"],\"mode\":\"check\",\"started_revision\":\"wsrev_1\",\"exit\":-1,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"workspace_not_trusted\"],\"capped\":false,\"semantic\":\"\"}},{\"stage\":\"tests\",\"implementation\":[\"make\",\"test\"],\"mode\":\"check\",\"started_revision\":\"wsrev_1\",\"exit\":-1,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"workspace_not_trusted\"],\"capped\":false,\"semantic\":\"\"},\"test_scope\":\"full\",\"test_verdict\":\"full_tests_unavailable\",\"executed_tests\":[\"make-test\"]},{\"stage\":\"diagnostics\",\"mode\":\"provider\",\"started_revision\":\"wsrev_1\",\"exit\":0,\"status\":\"unavailable\",\"duration_ms\":0,\"coverage\":{\"complete\":false,\"files_considered\":0,\"files_read\":0,\"bytes_read\":0,\"skipped\":[\"push_missing_current_document_proof\"],\"capped\":false,\"semantic\":\"provisional\"},\"evidence_ids\":[\"ev_79ac8168172e130d8f490b799cf5041e\"]}]},\"preview\":{\"affected_files\":[\"src/dev_fleet/cli.py\",\"src/dev_fleet/redaction.py\",\"tests/test_redaction.py\"],\"canonical_changed\":false,\"conflicts\":null,\"diffs\":[{\"after_bytes\":11402,\"after_sha256\":\"cab1ab0735ed851daad52de0e2d354d85e3d438f1ecd76c61823e2e300ff00e3\",\"before_bytes\":11398,\"before_sha256\":\"d1071bb162f35fccae068cf11c3fb9594196a5684b3a29f51a2ee6bf0f129b6c\",\"patch_bytes\":21550,\"path\":\"src/dev_fleet/cli.py\"},{\"after_bytes\":2435,\"after_sha256\":\"a0e49a92227c4acf36d0d02ff473e1d760d07a2b90c1cd08a3aed7911694a1e4\",\"before_bytes\":2431,\"before_sha256\":\"41471a1a5618b30870f553c4accc6a46e17a303374f40e72903f58161397a713\",\"patch_bytes\":1924,\"path\":\"src/dev_fleet/redaction.py\"},{\"after_bytes\":2529,\"after_sha256\":\"6b532dc0f189e760a7658fb7b2f4d85031b29bff9697c43e7428c39b5a48630e\",\"before_bytes\":2525,\"before_sha256\":\"ce616a0a537d4ade8aacd691ea1cd691c87c835b71ce7a084adfa28f82f40e1a\",\"patch_bytes\":2981,\"path\":\"tests/test_redaction.py\"}],\"normalized_order\":[\"rename-redact_1\",\"rename-redact_2\",\"rename-redact_3\",\"rename-redact_4\",\"rename-redact_5\",\"rename-redact_6\"],\"outcome\":\"ok\",\"plan_revision\":1,\"preview_revision\":\"preview_438ec6a056be94ec9101ae623259fe51\"},\"state\":\"PROVISIONAL\",\"updated_at\":\"2026-09-13T17:16:15.900078118Z\",\"workspace_id\":\"ws_57c0ffcee8dcd5646ff87670e2d3a350\"}},\"evidence\":{\"ids\":[\"ev_79ac8168172e130d8f490b799cf5041e\"],\"truncated\":false},\"idempotency\":\"created\",\"next\":[{\"accept_provisional\":true,\"action\":\"apply\",\"note\":\"Apply only if you explicitly accept the incomplete evidence for this exact prepared revision: diagnostics\",\"plan_id\":\"plan_cbf8c248c90f00c757ce86be48b70970\",\"plan_revision\":1,\"prepared_revision\":\"prep_fabe3c5a0329242eb6cf4dd7872da8d11a78e32c41206b3876ffcfed95c17620\",\"tool\":\"change_plan\",\"use_new_idempotency_key\":true}],\"outcome\":\"provisional\",\"request_id\":\"req_152\",\"summary\":\"Plan prepared in an isolated sandbox; canonical workspace unchanged\",\"transaction\":{\"id\":\"plan_cbf8c248c90f00c757ce86be48b70970\",\"state\":\"PROVISIONAL\"},\"warnings\":[],\"workspace\":{\"id\":\"ws_57c0ffcee8dcd5646ff87670e2d3a350\",\"revision\":\"wsrev_1\"}}"
+    }
+  ],
+  "structuredContent": {
+    "api_version": "huyang.workspace/v1alpha1",
+    "data": {
+      "plan": {
+        "base_state_seq": 1,
+        "created_at": "2026-09-13T17:16:10.282784238Z",
+        "event_count": 4,
+        "operation_count": 6,
+        "operations": [
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": null,
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_1",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "src/dev_fleet/cli.py",
+                "revision_id": "docrev_6ae660dce671e069aeb7de71b42cbfce13f4c655b1248698173744edc274e057"
+              }
+            },
+            "to": ""
+          },
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": [
+              "rename-redact_1"
+            ],
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_2",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "src/dev_fleet/cli.py",
+                "revision_id": "docrev_6ae660dce671e069aeb7de71b42cbfce13f4c655b1248698173744edc274e057"
+              }
+            },
+            "to": ""
+          },
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": [
+              "rename-redact_2"
+            ],
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_3",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "src/dev_fleet/redaction.py",
+                "revision_id": "docrev_12c4d30b8ac1f13a41f200400d7557245bd022378927756166c9f110ecd77353"
+              }
+            },
+            "to": ""
+          },
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": [
+              "rename-redact_3"
+            ],
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_4",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "src/dev_fleet/redaction.py",
+                "revision_id": "docrev_12c4d30b8ac1f13a41f200400d7557245bd022378927756166c9f110ecd77353"
+              }
+            },
+            "to": ""
+          },
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": [
+              "rename-redact_4"
+            ],
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_5",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "tests/test_redaction.py",
+                "revision_id": "docrev_03e210ed2706c8084bbbf6b686c6d0f91fac2c82c51ef4bba88a3ab2e4b0d9a3"
+              }
+            },
+            "to": ""
+          },
+          {
+            "content_bytes": 13,
+            "content_sha256": "fa2cc41d28736d072e0558b46f6dc6ccbfcfc916d76d7adfb75b4c0d69658c65",
+            "depends_on": [
+              "rename-redact_5"
+            ],
+            "destination_revision_id": "",
+            "from": "",
+            "indentation": "exact",
+            "kind": "replace_range",
+            "op_id": "rename-redact_6",
+            "path": "",
+            "revision_id": "",
+            "target": {
+              "file_range": {
+                "path": "tests/test_redaction.py",
+                "revision_id": "docrev_03e210ed2706c8084bbbf6b686c6d0f91fac2c82c51ef4bba88a3ab2e4b0d9a3"
+              }
+            },
+            "to": ""
+          }
+        ],
+        "plan_id": "plan_cbf8c248c90f00c757ce86be48b70970",
+        "plan_revision": 1,
+        "preparation": {
+          "prepared_revision": "prep_fabe3c5a0329242eb6cf4dd7872da8d11a78e32c41206b3876ffcfed95c17620",
+          "provider_epoch": 1,
+          "affected_files": [
+            "src/dev_fleet/cli.py",
+            "src/dev_fleet/redaction.py",
+            "tests/test_redaction.py"
+          ],
+          "canonical_changed": false,
+          "diagnostics": "provisional",
+          "disk_checks": "sandbox_manifest_verified",
+          "intermediate_reports": false,
+          "sandbox_backend": "safe_copy",
+          "base_revision": "wsrev_1",
+          "evidence_paths": "canonical",
+          "verification": [
+            {
+              "stage": "format_gate",
+              "mode": "check",
+              "started_revision": "wsrev_1",
+              "exit": -1,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 0,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "not_configured"
+                ],
+                "capped": false,
+                "semantic": ""
+              }
+            },
+            {
+              "stage": "parser",
+              "mode": "check",
+              "scope": [
+                "src/dev_fleet/cli.py",
+                "src/dev_fleet/redaction.py",
+                "tests/test_redaction.py"
+              ],
+              "started_revision": "wsrev_1",
+              "exit": -1,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 3,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "parser_unavailable:.py"
+                ],
+                "capped": false,
+                "semantic": ""
+              }
+            },
+            {
+              "stage": "check",
+              "implementation": [
+                "make",
+                "lint"
+              ],
+              "mode": "check",
+              "started_revision": "wsrev_1",
+              "exit": -1,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 0,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "workspace_not_trusted"
+                ],
+                "capped": false,
+                "semantic": ""
+              }
+            },
+            {
+              "stage": "check",
+              "implementation": [
+                "uv",
+                "run",
+                "--no-sync",
+                "python",
+                "-B",
+                "-c",
+                "import ast, pathlib, sys\nbad = 0\nfor p in pathlib.Path('.').rglob('*.py'):\n    if '.venv' in p.parts or 'venv' in p.parts or 'node_modules' in p.parts:\n        continue\n    try:\n        ast.parse(p.read_text(), str(p))\n    except SyntaxError as e:\n        bad += 1\n        print(f'{p}:{e.lineno}: {e.msg}')\nsys.exit(1 if bad else 0)"
+              ],
+              "mode": "check",
+              "started_revision": "wsrev_1",
+              "exit": -1,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 0,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "workspace_not_trusted"
+                ],
+                "capped": false,
+                "semantic": ""
+              }
+            },
+            {
+              "stage": "tests",
+              "implementation": [
+                "make",
+                "test"
+              ],
+              "mode": "check",
+              "started_revision": "wsrev_1",
+              "exit": -1,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 0,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "workspace_not_trusted"
+                ],
+                "capped": false,
+                "semantic": ""
+              },
+              "test_scope": "full",
+              "test_verdict": "full_tests_unavailable",
+              "executed_tests": [
+                "make-test"
+              ]
+            },
+            {
+              "stage": "diagnostics",
+              "mode": "provider",
+              "started_revision": "wsrev_1",
+              "exit": 0,
+              "status": "unavailable",
+              "duration_ms": 0,
+              "coverage": {
+                "complete": false,
+                "files_considered": 0,
+                "files_read": 0,
+                "bytes_read": 0,
+                "skipped": [
+                  "push_missing_current_document_proof"
+                ],
+                "capped": false,
+                "semantic": "provisional"
+              },
+              "evidence_ids": [
+                "ev_79ac8168172e130d8f490b799cf5041e"
+              ]
+            }
+          ]
+        },
+        "preview": {
+          "affected_files": [
+            "src/dev_fleet/cli.py",
+            "src/dev_fleet/redaction.py",
+            "tests/test_redaction.py"
+          ],
+          "canonical_changed": false,
+          "conflicts": null,
+          "diffs": [
+            {
+              "after_bytes": 11402,
+              "after_sha256": "cab1ab0735ed851daad52de0e2d354d85e3d438f1ecd76c61823e2e300ff00e3",
+              "before_bytes": 11398,
+              "before_sha256": "d1071bb162f35fccae068cf11c3fb9594196a5684b3a29f51a2ee6bf0f129b6c",
+              "patch_bytes": 21550,
+              "path": "src/dev_fleet/cli.py"
+            },
+            {
+              "after_bytes": 2435,
+              "after_sha256": "a0e49a92227c4acf36d0d02ff473e1d760d07a2b90c1cd08a3aed7911694a1e4",
+              "before_bytes": 2431,
+              "before_sha256": "41471a1a5618b30870f553c4accc6a46e17a303374f40e72903f58161397a713",
+              "patch_bytes": 1924,
+              "path": "src/dev_fleet/redaction.py"
+            },
+            {
+              "after_bytes": 2529,
+              "after_sha256": "6b532dc0f189e760a7658fb7b2f4d85031b29bff9697c43e7428c39b5a48630e",
+              "before_bytes": 2525,
+              "before_sha256": "ce616a0a537d4ade8aacd691ea1cd691c87c835b71ce7a084adfa28f82f40e1a",
+              "patch_bytes": 2981,
+              "path": "tests/test_redaction.py"
+            }
+          ],
+          "normalized_order": [
+            "rename-redact_1",
+            "rename-redact_2",
+            "rename-redact_3",
+            "rename-redact_4",
+            "rename-redact_5",
+            "rename-redact_6"
+          ],
+          "outcome": "ok",
+          "plan_revision": 1,
+          "preview_revision": "preview_438ec6a056be94ec9101ae623259fe51"
+        },
+        "state": "PROVISIONAL",
+        "updated_at": "2026-09-13T17:16:15.900078118Z",
+        "workspace_id": "ws_57c0ffcee8dcd5646ff87670e2d3a350"
+      }
+    },
+    "evidence": {
+      "ids": [
+        "ev_79ac8168172e130d8f490b799cf5041e"
+      ],
+      "truncated": false
+    },
+    "idempotency": "created",
+    "next": [
+      {
+        "accept_provisional": true,
+        "action": "apply",
+        "note": "Apply only if you explicitly accept the incomplete evidence for this exact prepared revision: diagnostics",
+        "plan_id": "plan_cbf8c248c90f00c757ce86be48b70970",
+        "plan_revision": 1,
+        "prepared_revision": "prep_fabe3c5a0329242eb6cf4dd7872da8d11a78e32c41206b3876ffcfed95c17620",
+        "tool": "change_plan",
+        "use_new_idempotency_key": true
+      }
+    ],
+    "outcome": "provisional",
+    "request_id": "req_152",
+    "summary": "Plan prepared in an isolated sandbox; canonical workspace unchanged",
+    "transaction": {
+      "id": "plan_cbf8c248c90f00c757ce86be48b70970",
+      "state": "PROVISIONAL"
+    },
+    "warnings": [],
+    "workspace": {
+      "id": "ws_57c0ffcee8dcd5646ff87670e2d3a350",
+      "revision": "wsrev_1"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [├─┤, 8, nil] -> "├─┤     "	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [├─┤, 8, nil] -> "├─┤  "	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [abcde, 8, true] -> "   abcde"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [abcde, 8, true] -> "   abcde"	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [アイウ, 8, true] -> "  アイウ"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [アイウ, 8, true] -> "  アイウ"	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [├─┤, 8, true] -> "     ├─┤"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [├─┤, 8, true] -> "  ├─┤"	
+[32mSuccess[0m	||	strings dedent tabstop = 8, empty string	
+[32mSuccess[0m	||	strings dedent tabstop = 8, in case tabs are longer than spaces	
+[32mSuccess[0m	||	strings dedent tabstop = 2, in case tabs are shorter than spaces	
+[32mSuccess[0m	||	strings dedent tabstop = 2, ignores empty lines	
+[32mSuccess[0m	||	strings dedent tabstop = 2, no indent	
+[32mSuccess[0m	||	strings dedent tabstop = 2, leave_indent = 4	
+[32mSuccess[0m	||	strings dedent tabstop = 4, typical usecase: <Tab> to 5 spaces	
+	
+[32mSuccess: [0m	126	
+[31mFailed : [0m	0	
+[31mErrors : [0m	0	
+========================================	

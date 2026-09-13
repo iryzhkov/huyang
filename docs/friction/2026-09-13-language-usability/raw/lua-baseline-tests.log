@@ -1,0 +1,134 @@
+Starting...Scheduling: tests/plenary/strings_spec.lua
+
+========================================	
+Testing: 	/home/igor/.local/share/nvim/lazy/plenary.nvim/tests/plenary/strings_spec.lua	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = single, "abcde" -> 5	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = single, "abcde" -> 5	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = double, "abcde" -> 5	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = double, "abcde" -> 5	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = single, "abc	de" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = single, "abc	de" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = double, "abc	de" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = double, "abc	de" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = single, "アイウエオ" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = single, "アイウエオ" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = double, "アイウエオ" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = double, "アイウエオ" -> 10	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = single, "├─┤" -> 3	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = single, "├─┤" -> 3	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = double, "├─┤" -> 6	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = double, "├─┤" -> 6	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = single, 123 -> 3	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = single, 123 -> 3	
+[32mSuccess[0m	||	strings strdisplaywidth lua: ambiwidth = double, 123 -> 3	
+[32mSuccess[0m	||	strings strdisplaywidth vim: ambiwidth = double, 123 -> 3	
+[32mSuccess[0m	||	strings strcharpart lua: ("abcde", 2, nil) -> "cde"	
+[32mSuccess[0m	||	strings strcharpart vim: ("abcde", 2, nil) -> "cde"	
+[32mSuccess[0m	||	strings strcharpart lua: ("abcde", 2, 2) -> "cd"	
+[32mSuccess[0m	||	strings strcharpart vim: ("abcde", 2, 2) -> "cd"	
+[32mSuccess[0m	||	strings strcharpart lua: ("アイウエオ", 2, 2) -> "ウエ"	
+[32mSuccess[0m	||	strings strcharpart vim: ("アイウエオ", 2, 2) -> "ウエ"	
+[32mSuccess[0m	||	strings strcharpart lua: ("├───┤", 2, 2) -> "──"	
+[32mSuccess[0m	||	strings strcharpart vim: ("├───┤", 2, 2) -> "──"	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [abcde, 4] -> abc…	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [abcde, 4] -> ab…	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [アイウエオ, 9] -> アイウエ…	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [アイウエオ, 9] -> アイウ…	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [アイウエオ, 8] -> アイウ…	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [アイウエオ, 8] -> アイウ…	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 5] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 5] -> ├…	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 4] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 4] -> ├…	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 3] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 3] -> …	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = right, [├─┤, 2] -> ├…	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = right, [├─┤, 2] -> …	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [abcde, 4] -> …cde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [abcde, 4] -> …de	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [アイウエオ, 9] -> …イウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [アイウエオ, 9] -> …ウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [アイウエオ, 8] -> …ウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [アイウエオ, 8] -> …ウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 5] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 5] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 4] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 4] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 3] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 3] -> …	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = left, [├─┤, 2] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = left, [├─┤, 2] -> …	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [abcde, 6] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [abcde, 5] -> abcde	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [abcde, 4] -> a…de	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [abcde, 4] -> a…e	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [アイウエオ, 11] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [アイウエオ, 10] -> アイウエオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [アイウエオ, 9] -> アイ…エオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [アイウエオ, 9] -> ア…エオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [アイウエオ, 8] -> ア…エオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [アイウエオ, 8] -> ア…エオ	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 7] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 6] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 5] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 5] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 4] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 4] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 3] -> ├─┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 3] -> …	
+[32mSuccess[0m	||	strings truncate ambiwidth = single, direction = middle, [├─┤, 2] -> …┤	
+[32mSuccess[0m	||	strings truncate ambiwidth = double, direction = middle, [├─┤, 2] -> …	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [abcde, 8, nil] -> "abcde   "	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [abcde, 8, nil] -> "abcde   "	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [アイウ, 8, nil] -> "アイウ  "	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [アイウ, 8, nil] -> "アイウ  "	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [├─┤, 8, nil] -> "├─┤     "	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [├─┤, 8, nil] -> "├─┤  "	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [abcde, 8, true] -> "   abcde"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [abcde, 8, true] -> "   abcde"	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [アイウ, 8, true] -> "  アイウ"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [アイウ, 8, true] -> "  アイウ"	
+[32mSuccess[0m	||	strings align_str ambiwidth = single, [├─┤, 8, true] -> "     ├─┤"	
+[32mSuccess[0m	||	strings align_str ambiwidth = double, [├─┤, 8, true] -> "  ├─┤"	
+[32mSuccess[0m	||	strings dedent tabstop = 8, empty string	
+[32mSuccess[0m	||	strings dedent tabstop = 8, in case tabs are longer than spaces	
+[32mSuccess[0m	||	strings dedent tabstop = 2, in case tabs are shorter than spaces	
+[32mSuccess[0m	||	strings dedent tabstop = 2, ignores empty lines	
+[32mSuccess[0m	||	strings dedent tabstop = 2, no indent	
+[32mSuccess[0m	||	strings dedent tabstop = 2, leave_indent = 4	
+[32mSuccess[0m	||	strings dedent tabstop = 4, typical usecase: <Tab> to 5 spaces	
+	
+[32mSuccess: [0m	125	
+[31mFailed : [0m	0	
+[31mErrors : [0m	0	
+========================================	

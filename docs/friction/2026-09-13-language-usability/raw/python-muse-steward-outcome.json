@@ -1,0 +1,321 @@
+{
+  "version": "backlog.admin/v1",
+  "kind": "workflow",
+  "generatedAt": "2026-09-13T17:14:52.644685544Z",
+  "workflow": {
+    "summary": {
+      "run": {
+        "graph": {
+          "runId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "revision": 2,
+          "parent": 1,
+          "actor": "local:1000",
+          "reason": "Bound live language workshop before normal admission",
+          "requestId": "language-timeout-run-c7edbeb9357b43cc300ca12b7111b2da",
+          "digest": "6264c186ec506d8be3a51920f7b990bd73db55c92eed92bf9b5ad11a6ed93602",
+          "createdAt": "2026-09-13T16:57:40.332560815Z",
+          "tasks": [
+            {
+              "definitionRevision": 2,
+              "timeout": 900000000000,
+              "id": "task-66337a1dc4b049e7983d5b318e53bef6",
+              "workflowId": "workflow-f84120f4e266edbfa02ba65246e39e99",
+              "name": "task",
+              "class": "surplus",
+              "promptArtifactId": "artifact-8938cc0e02b45d08ee88d13c2b82d03d",
+              "verification": [
+                "true"
+              ],
+              "placement": {
+                "hosts": [
+                  "normandy"
+                ]
+              },
+              "routes": [
+                {
+                  "workerId": "normandy",
+                  "providerInstanceId": "opencode",
+                  "model": "opencode/muse-spark-1.3-contributor-free"
+                }
+              ],
+              "importance": 3,
+              "difficulty": 3,
+              "maxTurns": 20,
+              "notBefore": "2026-09-13T09:59:05-07:00"
+            }
+          ]
+        },
+        "id": "run-c7edbeb9357b43cc300ca12b7111b2da",
+        "workflowId": "workflow-f84120f4e266edbfa02ba65246e39e99",
+        "graphRevision": 2,
+        "sink": {
+          "id": "sink:run-c7edbeb9357b43cc300ca12b7111b2da",
+          "name": "__sink",
+          "graphRevision": 2,
+          "needs": [
+            "task-66337a1dc4b049e7983d5b318e53bef6"
+          ],
+          "progress": "failed",
+          "result": {
+            "failedTaskIds": [
+              "task-66337a1dc4b049e7983d5b318e53bef6"
+            ],
+            "cancelledTaskIds": [],
+            "skippedTaskIds": []
+          },
+          "completedAt": "2026-09-13T17:14:31.000078415Z"
+        },
+        "progress": "failed",
+        "inputArtifactIds": [
+          "artifact-7ef3e2aa8290b5436004963c06f32eb5"
+        ],
+        "revision": 6,
+        "createdAt": "2026-09-13T16:57:15.906552409Z",
+        "updatedAt": "2026-09-13T17:14:31.000078415Z",
+        "completedAt": "2026-09-13T17:14:31.000078415Z"
+      },
+      "workflow": {
+        "id": "workflow-f84120f4e266edbfa02ba65246e39e99",
+        "version": 2,
+        "name": "legacy-single-task",
+        "project": "huyang",
+        "environment": {
+          "type": "git",
+          "scope": "task"
+        },
+        "class": "surplus",
+        "taskIds": [
+          "task-66337a1dc4b049e7983d5b318e53bef6"
+        ],
+        "inputArtifactIds": [
+          "artifact-7ef3e2aa8290b5436004963c06f32eb5"
+        ],
+        "createdAt": "2026-09-13T16:57:15.906552409Z"
+      },
+      "progress": {
+        "total": 1,
+        "queued": 0,
+        "blocked": 0,
+        "ready": 0,
+        "active": 0,
+        "needsInput": 0,
+        "verifying": 0,
+        "succeeded": 0,
+        "failed": 1,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "tasks": [
+      {
+        "task": {
+          "definitionRevision": 2,
+          "timeout": 900000000000,
+          "id": "task-66337a1dc4b049e7983d5b318e53bef6",
+          "workflowId": "workflow-f84120f4e266edbfa02ba65246e39e99",
+          "name": "task",
+          "class": "surplus",
+          "promptArtifactId": "artifact-8938cc0e02b45d08ee88d13c2b82d03d",
+          "verification": [
+            "true"
+          ],
+          "placement": {
+            "hosts": [
+              "normandy"
+            ]
+          },
+          "routes": [
+            {
+              "workerId": "normandy",
+              "providerInstanceId": "opencode",
+              "model": "opencode/muse-spark-1.3-contributor-free"
+            }
+          ],
+          "importance": 3,
+          "difficulty": 3,
+          "maxTurns": 20,
+          "notBefore": "2026-09-13T09:59:05-07:00"
+        },
+        "attempt": {
+          "id": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+          "number": 1,
+          "progress": "failed",
+          "control": "stopped",
+          "revision": 9,
+          "lastTurnOutcomeId": "outcome-310f7d5a244551ff492cb7b0cc4db437",
+          "lastTurnOutcomeMarker": "done",
+          "assignmentId": "assignment-5f0300e0ab60227fb8b207488d8f7758",
+          "threadId": "thread-360c86e7c5a4490846b8d5b31fe820e7",
+          "finalSummaryArtifactId": "final-message-attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "failure": "task timeout expired; execution stopped; missing verification evidence: verification/001.json",
+          "updatedAt": "2026-09-13T17:14:27.734345184Z",
+          "completedAt": "2026-09-13T17:14:13.948665669Z"
+        },
+        "assignment": {
+          "id": "assignment-5f0300e0ab60227fb8b207488d8f7758",
+          "attemptId": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "workerId": "normandy",
+          "route": {
+            "workerId": "normandy",
+            "providerInstanceId": "opencode",
+            "model": "opencode/muse-spark-1.3-contributor-free",
+            "quotaPoolId": "opencode-free"
+          },
+          "state": "completed",
+          "epoch": 1,
+          "leaseExpiresAt": "0001-01-01T00:00:00Z",
+          "threadId": "thread-360c86e7c5a4490846b8d5b31fe820e7",
+          "createdAt": "2026-09-13T16:59:05.833180469Z",
+          "updatedAt": "2026-09-13T17:14:25.179306448Z"
+        },
+        "artifacts": [
+          {
+            "metadata": {
+              "id": "artifact-8938cc0e02b45d08ee88d13c2b82d03d",
+              "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+              "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+              "kind": "input",
+              "name": "prompts/task.md",
+              "mediaType": "text/markdown; charset=utf-8",
+              "size": 4906,
+              "sha256": "d31ac5e43eb8bd0baee8b0657215cf95a140d86aae44be86c4ba7a9da4eb0b1e",
+              "producer": "submission",
+              "createdAt": "2026-09-13T16:57:15.906552409Z"
+            },
+            "download": "/backlog/artifacts/artifact-8938cc0e02b45d08ee88d13c2b82d03d"
+          },
+          {
+            "metadata": {
+              "id": "final-message-attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+              "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+              "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+              "attemptId": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+              "kind": "summary",
+              "name": "final-message.md",
+              "mediaType": "text/markdown",
+              "size": 63,
+              "sha256": "ad17e654b5b91ebd79f3b5ddd3eb225e163a2a44172db79618a4f499883c21c1",
+              "producer": "worker:normandy",
+              "createdAt": "2026-09-13T17:14:13.948665669Z"
+            },
+            "download": "/backlog/artifacts/final-message-attempt-ed34d0cc59be83f92b5ec2bad01519cd"
+          },
+          {
+            "metadata": {
+              "id": "thread-archive-attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+              "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+              "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+              "attemptId": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+              "kind": "log",
+              "name": "thread.json",
+              "mediaType": "application/json",
+              "size": 48937,
+              "sha256": "e1d713ecbf49f9f712baa09fc8895a67603822306d1ebc2b439c34ad9d3ad531",
+              "producer": "worker:normandy",
+              "createdAt": "2026-09-13T17:14:13.948665669Z"
+            },
+            "download": "/backlog/artifacts/thread-archive-attempt-ed34d0cc59be83f92b5ec2bad01519cd"
+          }
+        ]
+      },
+      {
+        "sink": {
+          "id": "sink:run-c7edbeb9357b43cc300ca12b7111b2da",
+          "name": "__sink",
+          "graphRevision": 2,
+          "needs": [
+            "task-66337a1dc4b049e7983d5b318e53bef6"
+          ],
+          "progress": "failed",
+          "result": {
+            "failedTaskIds": [
+              "task-66337a1dc4b049e7983d5b318e53bef6"
+            ],
+            "cancelledTaskIds": [],
+            "skippedTaskIds": []
+          },
+          "completedAt": "2026-09-13T17:14:31.000078415Z"
+        },
+        "task": {
+          "id": "sink:run-c7edbeb9357b43cc300ca12b7111b2da",
+          "workflowId": "workflow-f84120f4e266edbfa02ba65246e39e99",
+          "name": "__sink",
+          "class": "",
+          "needs": [
+            "task-66337a1dc4b049e7983d5b318e53bef6"
+          ],
+          "promptArtifactId": "",
+          "placement": {},
+          "importance": 0,
+          "difficulty": 0,
+          "maxTurns": 0
+        }
+      }
+    ],
+    "artifacts": [
+      {
+        "metadata": {
+          "id": "artifact-7ef3e2aa8290b5436004963c06f32eb5",
+          "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "kind": "input",
+          "name": "workflow.yaml",
+          "mediaType": "application/yaml",
+          "size": 814,
+          "sha256": "3c72b8436aa170f2a462ef23d6e021092f7a6f9c4c5c0d500ac6f55aba1464df",
+          "producer": "submission",
+          "createdAt": "2026-09-13T16:57:15.906552409Z"
+        },
+        "download": "/backlog/artifacts/artifact-7ef3e2aa8290b5436004963c06f32eb5"
+      },
+      {
+        "metadata": {
+          "id": "artifact-8938cc0e02b45d08ee88d13c2b82d03d",
+          "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+          "kind": "input",
+          "name": "prompts/task.md",
+          "mediaType": "text/markdown; charset=utf-8",
+          "size": 4906,
+          "sha256": "d31ac5e43eb8bd0baee8b0657215cf95a140d86aae44be86c4ba7a9da4eb0b1e",
+          "producer": "submission",
+          "createdAt": "2026-09-13T16:57:15.906552409Z"
+        },
+        "download": "/backlog/artifacts/artifact-8938cc0e02b45d08ee88d13c2b82d03d"
+      },
+      {
+        "metadata": {
+          "id": "final-message-attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+          "attemptId": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "kind": "summary",
+          "name": "final-message.md",
+          "mediaType": "text/markdown",
+          "size": 63,
+          "sha256": "ad17e654b5b91ebd79f3b5ddd3eb225e163a2a44172db79618a4f499883c21c1",
+          "producer": "worker:normandy",
+          "createdAt": "2026-09-13T17:14:13.948665669Z"
+        },
+        "download": "/backlog/artifacts/final-message-attempt-ed34d0cc59be83f92b5ec2bad01519cd"
+      },
+      {
+        "metadata": {
+          "id": "thread-archive-attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "workflowRunId": "run-c7edbeb9357b43cc300ca12b7111b2da",
+          "taskId": "task-66337a1dc4b049e7983d5b318e53bef6",
+          "attemptId": "attempt-ed34d0cc59be83f92b5ec2bad01519cd",
+          "kind": "log",
+          "name": "thread.json",
+          "mediaType": "application/json",
+          "size": 48937,
+          "sha256": "e1d713ecbf49f9f712baa09fc8895a67603822306d1ebc2b439c34ad9d3ad531",
+          "producer": "worker:normandy",
+          "createdAt": "2026-09-13T17:14:13.948665669Z"
+        },
+        "download": "/backlog/artifacts/thread-archive-attempt-ed34d0cc59be83f92b5ec2bad01519cd"
+      }
+    ]
+  }
+}

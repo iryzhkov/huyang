@@ -1,0 +1,114 @@
+diff --git a/scripts/run-captured b/scripts/run-captured
+index 8d61fb0..7c83387 100755
+--- a/scripts/run-captured
++++ b/scripts/run-captured
+@@ -14,7 +14,7 @@ from pathlib import Path
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "src"))
+ 
+-from dev_fleet.redaction import redact_text  # noqa: E402
++from dev_fleet.redaction import redact_string  # noqa: E402
+ 
+ ALLOWED = {"ansible-lint", "ansible-playbook"}
+ MAX_OUTPUT_BYTES = 1_000_000
+@@ -46,7 +46,7 @@ def main(argv: list[str]) -> int:
+             return 30
+         output.seek(0)
+         captured = output.read(MAX_OUTPUT_BYTES).decode("utf-8", errors="replace")
+-    sys.stdout.write(redact_text(captured))
++    sys.stdout.write(redact_string(captured))
+     if len(captured.encode("utf-8")) >= MAX_OUTPUT_BYTES:
+         print("\n<output truncated>")
+     return completed.returncode
+diff --git a/src/dev_fleet/cli.py b/src/dev_fleet/cli.py
+index 229b1b4..18c6a47 100644
+--- a/src/dev_fleet/cli.py
++++ b/src/dev_fleet/cli.py
+@@ -19,7 +19,7 @@ from .constants import EXIT_PREFLIGHT
+ from .probe import probe_fleet
+ from .pull import PullError, pull_fleet
+ from .push import PushError, configured_remotes, push_release
+-from .redaction import redact, redact_text
++from .redaction import redact, redact_string
+ from .release import COMPONENT_ORDER, CaptureError, load_release
+ from .reporting import _controller, _manifest_commit, build_doctor_report, build_status_report
+ from .rollback import load_historical_release
+@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
+             printer(report)
+         return exit_code
+     except (ValidationError, ValueError, CaptureError, PushError, PullError) as exc:
+-        message = redact_text(str(exc))
++        message = redact_string(str(exc))
+         if getattr(arguments, "as_json", False):
+             _print_json(
+                 {
+diff --git a/src/dev_fleet/redaction.py b/src/dev_fleet/redaction.py
+index 6d9feb9..e836f12 100644
+--- a/src/dev_fleet/redaction.py
++++ b/src/dev_fleet/redaction.py
+@@ -30,7 +30,7 @@ JWT_RE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.
+ URL_USERINFO_RE = re.compile(r"(?P<scheme>https?|ssh)://[^\s/@:]+:[^\s/@]+@")
+ 
+ 
+-def redact_text(value: str) -> str:
++def redact_string(value: str) -> str:
+     value = PRIVATE_KEY_RE.sub(REDACTED, value)
+     value = URL_USERINFO_RE.sub(lambda match: f"{match.group('scheme')}://{REDACTED}@", value)
+     value = AUTH_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", value)
+@@ -40,6 +40,10 @@ def redact_text(value: str) -> str:
+     return JWT_RE.sub(REDACTED, value)
+ 
+ 
++# Backward-compatible alias; redact_text is the same function object.
++redact_text = redact_string
++
++
+ def redact(value: Any, key: str | None = None) -> Any:
+     if (
+         key == "secret_refs"
+@@ -50,7 +54,7 @@ def redact(value: Any, key: str | None = None) -> Any:
+     if key is not None and SECRET_KEY_RE.search(key):
+         return REDACTED
+     if isinstance(value, str):
+-        return redact_text(value)
++        return redact_string(value)
+     if isinstance(value, Mapping):
+         return {
+             str(item_key): redact(item_value, str(item_key))
+diff --git a/tests/test_redaction.py b/tests/test_redaction.py
+index dfab761..a7adfce 100644
+--- a/tests/test_redaction.py
++++ b/tests/test_redaction.py
+@@ -3,7 +3,7 @@ from dataclasses import replace
+ from datetime import UTC, datetime
+ 
+ from dev_fleet.records import RunRecord, RunRecordStore
+-from dev_fleet.redaction import REDACTED, redact, redact_text
++from dev_fleet.redaction import REDACTED, redact, redact_string, redact_text
+ from dev_fleet.run_ids import new_run_id
+ 
+ 
+@@ -39,7 +39,7 @@ def test_redacts_representative_secret_shapes() -> None:
+         "-----BEGIN PRIVATE KEY-----\nsecret material\n-----END PRIVATE KEY-----",
+     ]
+     for sample in samples:
+-        redacted = redact_text(sample)
++        redacted = redact_string(sample)
+         assert "abcdefghijklmnopqrstuvwxyz" not in redacted
+         assert REDACTED in redacted
+ 
+@@ -69,3 +69,14 @@ def test_run_record_is_redacted_before_disk(tmp_path) -> None:
+     assert "also-secret" not in text
+     assert parsed["details"]["safe"] == "preserved"
+     assert target.stat().st_mode & 0o777 == 0o600
++
++
++def test_redact_text_alias_matches_redact_string() -> None:
++    assert redact_text is redact_string
++    secret_sample = "token=synthetic-secret-value-98765"
++    safe_sample = "all systems nominal, nothing to hide"
++    assert redact_text(secret_sample) == redact_string(secret_sample)
++    assert "synthetic-secret-value-98765" not in redact_string(secret_sample)
++    assert REDACTED in redact_string(secret_sample)
++    assert redact_text(safe_sample) == safe_sample
++    assert redact_string(safe_sample) == safe_sample
