@@ -268,7 +268,51 @@ func verificationOutcome(result workspacecore.VerificationResult) (string, strin
 	if ran == 0 && skipped["not_configured"] > 0 {
 		return "partial", "No stage ran: no command is declared or detected for the requested stages; write .huyang.toml at the workspace root"
 	}
-	return "partial", fmt.Sprintf("Verification completed against exact sandbox bytes; %d stage(s) unavailable", len(result.Stages)-ran)
+	// "Verification completed ... ; 1 stage(s) unavailable" is the most
+	// common verdict an agent sees from this tool, and it says neither what
+	// passed nor what did not run. Naming both is the difference between a
+	// verdict an agent acts on and one it re-runs in a shell to see for
+	// itself.
+	return "partial", fmt.Sprintf("%s; %s", passedStages(result), unavailableStages(result))
+}
+
+// passedStages names the stages that ran and how they ended.
+func passedStages(result workspacecore.VerificationResult) string {
+	var passed, other []string
+	for _, stage := range result.Stages {
+		switch stage.Status {
+		case workspacecore.VerificationSkipped:
+		case workspacecore.VerificationPassed:
+			passed = append(passed, stage.Stage)
+		default:
+			other = append(other, stage.Stage+" "+string(stage.Status))
+		}
+	}
+	switch {
+	case len(passed) == 0 && len(other) == 0:
+		return "No stage ran"
+	case len(other) > 0:
+		return strings.Join(append(passed, other...), ", ")
+	default:
+		return strings.Join(passed, " and ") + " passed against exact sandbox bytes"
+	}
+}
+
+// unavailableStages names the stages that did not run and why, once per
+// reason.
+func unavailableStages(result workspacecore.VerificationResult) string {
+	var parts []string
+	for _, stage := range result.Stages {
+		if stage.Status != workspacecore.VerificationSkipped {
+			continue
+		}
+		reason := strings.Join(stage.Coverage.Skipped, ", ")
+		if reason == "" {
+			reason = "unavailable"
+		}
+		parts = append(parts, stage.Stage+" did not run ("+reason+")")
+	}
+	return strings.Join(parts, "; ")
 }
 
 // verifyCanonical materialises a throwaway sandbox of the canonical tree,
