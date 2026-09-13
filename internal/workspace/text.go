@@ -864,6 +864,22 @@ func (w *Workspace) Outline(path string) (Outline, error) {
 		}
 		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, FallbackHandle: &record, Coverage: coverage}, nil
 	}
+	coverage.Semantic = "parser_sections"
+	if len(sections) == 0 {
+		// The parser read the document and found nothing to declare, which is
+		// an answer rather than a gap - and it still leaves the caller with a
+		// document and no handle to address it by, the same position a file
+		// no parser understands is in.
+		fallback, handleErr := rangeHandle(read, 0, len(read.Content), defaultAnchorBytes)
+		if handleErr != nil {
+			return Outline{}, handleErr
+		}
+		record, registerErr := w.RegisterRangeHandle(fallback, HandleRange, fmt.Sprintf("%s whole document", read.Path))
+		if registerErr != nil {
+			return Outline{}, registerErr
+		}
+		return Outline{Workspace: read.Workspace, Path: read.Path, Fallback: &fallback, FallbackHandle: &record, Coverage: coverage}, nil
+	}
 	handles := make([]HandleRecord, 0, len(sections))
 	for _, section := range sections {
 		record, registerErr := w.registerSymbol(read, section)
@@ -872,7 +888,6 @@ func (w *Workspace) Outline(path string) (Outline, error) {
 		}
 		handles = append(handles, record)
 	}
-	coverage.Semantic = "parser_sections"
 	return Outline{Workspace: read.Workspace, Path: read.Path, Sections: sections, Handles: handles, Coverage: coverage}, nil
 }
 

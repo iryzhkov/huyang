@@ -176,6 +176,15 @@ func TestOutlineOfNativelySectionedFilesStaysNative(t *testing.T) {
 	if sections := outline("notes.txt"); len(sections) != 0 {
 		t.Fatalf("text outline = %#v", sections)
 	}
+	// A document the parser read and found nothing in still answers the
+	// handle that addresses the whole of it, which is the only way to edit a
+	// file whose outline is empty.
+	empty := handlers.Execute(context.Background(), "req_empty_outline", "read", map[string]any{
+		"workspace_id": workspaceID, "view": "outline", "target": map[string]any{"path": "notes.txt"},
+	})
+	if empty["data"].(map[string]any)["fallback_handle"] == nil {
+		t.Fatalf("an outline with no declarations offered no handle to the document: %#v", empty["data"])
+	}
 	if len(backend.asked) != 0 {
 		t.Fatalf("the provider was asked about natively sectioned files: %#v", backend.asked)
 	}
