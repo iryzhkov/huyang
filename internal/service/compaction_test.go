@@ -206,6 +206,27 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 	}
 }
 
+// A relative root is refused rather than resolved against the service's own
+// working directory, which is a different repository than the caller's.
+func TestRelativeRootIsRefused(t *testing.T) {
+	direct := newDirectWorkspaces(t.TempDir())
+	defer direct.closeProviders()
+	for _, arguments := range []map[string]any{
+		{"kind": "project", "root": "bench/agent-efficiency/fixtures/go"},
+	} {
+		opened := direct.call(context.Background(), "workspace_open", arguments)
+		if opened["outcome"] != "failed" || opened["code"] != "root_not_absolute" {
+			t.Fatalf("relative root was not refused: %#v", opened)
+		}
+	}
+	read := direct.call(context.Background(), "read", map[string]any{
+		"root": "bench/agent-efficiency/fixtures/go", "target": map[string]any{"path": "ledger.go"},
+	})
+	if read["outcome"] != "failed" || read["code"] != "root_not_absolute" {
+		t.Fatalf("a relative root on another tool was not refused: %#v", read)
+	}
+}
+
 func TestWorkspaceOpenOverviewIsCompactByDefault(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "pkg", "sub"), 0o755); err != nil {
