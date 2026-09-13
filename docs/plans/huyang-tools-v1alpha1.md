@@ -1157,6 +1157,27 @@ compaction of a default result, or a new stable code. No mutation precondition w
   text, and `data.locations`), `literal_count_mismatch` (with `expected_count`, `found`,
   `locations`) and `create_target_exists`: all `conflict` outcomes that changed nothing.
 
+### Analysis snapshots
+
+The impact answer in a verification result is derived from an immutable analysis snapshot
+rather than computed by one reader. A snapshot is keyed by workspace, provider epoch,
+revision, analysis profile, the part of the project configuration that can change a
+conclusion, and the version of every contributor, so nothing is ever invalidated: a changed
+input is a different snapshot, and a canonical and a prepared revision cannot share one.
+
+Contributors are named. The import reader (`native_imports`) claims `provisional` facts,
+because a regular expression cannot see a dynamic import or a build tag. The language
+server (`embedded_nvim`) claims `authoritative` ones, and contributes only for the
+canonical revision, because a sandbox holds bytes it has never read. Identical claims merge
+and keep both names; contributors that describe the same pair of files differently keep
+both facts and leave a conflict behind, because a disagreement between a regular expression
+and a language server is information rather than a tie to break.
+
+The impact block therefore carries `snapshot` and `producers`. A contributor that was
+consulted is named even when it found nothing, so "nobody looked" and "looked and saw no
+relation" stay distinguishable, and a contributor that failed appears as a named gap in
+coverage rather than as a thinner graph.
+
 ### Behaviour changes
 
 - The native sectioner covers Go and Python, so `read` by `symbol_locator`, `symbol_find`

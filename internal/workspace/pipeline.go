@@ -95,7 +95,16 @@ type VerificationRequest struct {
 	TestScope                string
 	TestHistoryPath          string
 	ApplyConfiguredTransform bool
-	DiagnosticVerifier       func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
+	// WorkspaceID and ProviderEpoch identify the analysis snapshot the
+	// affected-test selection reads, so two workspaces or two provider
+	// generations can never be served each other's analysis.
+	WorkspaceID   ID
+	ProviderEpoch uint64
+	// Contributors are the analysis contributors the caller can supply
+	// beyond the native import reader; the workspace core does not speak to
+	// providers itself.
+	Contributors       []AnalysisContributor                                                     `json:"-"`
+	DiagnosticVerifier func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
 }
 
 type VerificationStage struct {

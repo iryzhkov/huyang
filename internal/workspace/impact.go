@@ -54,8 +54,12 @@ type ImpactRisk struct {
 }
 
 type ImpactGraph struct {
-	Revision      string       `json:"revision"`
-	Changed       []string     `json:"changed"`
+	Revision string   `json:"revision"`
+	Changed  []string `json:"changed"`
+	// Snapshot and Producers name where these relations came from: which
+	// immutable analysis of which revision, and who contributed to it.
+	Snapshot      string       `json:"snapshot,omitempty"`
+	Producers     []string     `json:"producers,omitempty"`
 	Nodes         []ImpactNode `json:"nodes"`
 	Edges         []ImpactEdge `json:"edges"`
 	Affected      []string     `json:"affected"`
@@ -292,7 +296,16 @@ func SelectAffectedTests(graph ImpactGraph, tests []CommandPolicy, history []Tes
 }
 
 func runAffectedTests(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, affected []string) ([]VerificationStage, *TargetedTestResult, error) {
-	graph, err := BuildImpactGraph(sandbox.Tree, request.Revision, affected, policy.Impact, policy.Variants)
+	// The impact model is now derived from a snapshot: the import reader is
+	// one contributor to it, and the graph carries the snapshot it came from
+	// so a later answer can say which analysis it trusted.
+	_, graph, err := AnalyzeImpact(ctx, AnalysisRequest{
+		Key: AnalysisKey{
+			WorkspaceID: request.WorkspaceID, Epoch: request.ProviderEpoch, Revision: request.Revision,
+			Profile: "impact/v1", ConfigHash: pipelineFingerprint(policy),
+		},
+		Root: sandbox.Tree, Changed: affected,
+	}, policy.Impact, policy.Variants, request.Contributors...)
 	if err != nil {
 		return nil, nil, err
 	}

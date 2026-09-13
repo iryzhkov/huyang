@@ -162,6 +162,8 @@ func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspac
 		request: workspacecore.VerificationRequest{
 			Stages: request.stages, Revision: request.revision, TestScope: request.testScope,
 			TestHistoryPath: filepath.Join(h.stateDir, "test-history", string(identity.ID)+".json"),
+			WorkspaceID:     identity.ID, ProviderEpoch: identity.Epoch,
+			Contributors: h.analysisContributors(ctx, workspace, request.revision),
 		},
 		stages: request.stages, testScope: request.testScope, revision: request.revision, identity: identity,
 		cacheKey: strings.Join([]string{

@@ -424,7 +424,12 @@ func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any
 		len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Risks) > 0
 	return map[string]any{
 		"revision": graph.Revision,
-		"changed":  changed, "changed_count": len(graph.Changed), "changed_truncated": changedTruncated,
+		// Which analysis this answer came from and who contributed to it: an
+		// impact claim is only as good as the snapshot beneath it, and a
+		// caller cannot weigh it without knowing whether a language server
+		// was one of the voices.
+		"snapshot": graph.Snapshot, "producers": NonNilStrings(graph.Producers),
+		"changed": changed, "changed_count": len(graph.Changed), "changed_truncated": changedTruncated,
 		"affected": affected, "affected_count": len(graph.Affected), "affected_truncated": affectedTruncated,
 		"affected_without_tests": untested, "affected_without_tests_count": len(graph.Untested),
 		"affected_without_tests_truncated": untestedTruncated,
