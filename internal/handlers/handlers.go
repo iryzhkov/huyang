@@ -199,7 +199,7 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	case "verify_run":
 		return h.verify(ctx, requestID, workspace, arguments)
 	case "revision_diff":
-		return h.revisionDiff(requestID, workspace, arguments)
+		return h.revisionDiff(ctx, requestID, workspace, arguments)
 	case "language_server_status":
 		return h.languageServerStatus(ctx, requestID, workspace)
 	case "language_server_setup":

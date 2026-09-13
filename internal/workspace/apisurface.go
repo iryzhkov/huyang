@@ -80,6 +80,27 @@ func (c APIChange) Breaking() bool { return c.Kind != "added" }
 // ReadAPISurface reads one file's exported surface with the adapter for its
 // language. A language no adapter covers is reported as such.
 func ReadAPISurface(path string, content []byte, exists bool) APISurface {
+	return readSurface(path, content, exists, true)
+}
+
+// ReadDeclarationSurface reads every declaration the adapter can see, not only
+// the exported ones. The TypeScript adapter reads export forms, so for that
+// language the two surfaces are the same and the difference is a gap the
+// caller is told about rather than a silence.
+func ReadDeclarationSurface(path string, content []byte, exists bool) APISurface {
+	return readSurface(path, content, exists, false)
+}
+
+// DeclarationCoverageGap names what a language's adapter cannot see at the
+// declaration level, or is empty when it sees everything.
+func DeclarationCoverageGap(path string) string {
+	if apiAdapterFor(path) == "typescript" {
+		return path + ": the TypeScript adapter reads exported declarations only"
+	}
+	return ""
+}
+
+func readSurface(path string, content []byte, exists, exportedOnly bool) APISurface {
 	surface := APISurface{Path: path, Symbols: map[string]APISymbol{}, Exists: exists}
 	if !exists {
 		// A file that is not there has no surface, and that is a fact rather
@@ -92,7 +113,7 @@ func ReadAPISurface(path string, content []byte, exists bool) APISurface {
 	}
 	switch apiAdapterFor(path) {
 	case "go":
-		return goAPISurface(surface, content)
+		return goAPISurface(surface, content, exportedOnly)
 	case "typescript":
 		return typescriptAPISurface(surface, content)
 	}
@@ -174,7 +195,7 @@ func memberDelta(before, after []string) (added, removed []string) {
 
 // goAPISurface reads the exported surface with the language's own parser, so
 // what it reports is what a compiler would see.
-func goAPISurface(surface APISurface, content []byte) APISurface {
+func goAPISurface(surface APISurface, content []byte, exportedOnly bool) APISurface {
 	fileSet := token.NewFileSet()
 	file, err := parser.ParseFile(fileSet, surface.Path, content, parser.SkipObjectResolution)
 	if err != nil {
@@ -184,11 +205,11 @@ func goAPISurface(surface APISurface, content []byte) APISurface {
 	for _, declaration := range file.Decls {
 		switch typed := declaration.(type) {
 		case *ast.FuncDecl:
-			if symbol, ok := goFunctionSymbol(fileSet, typed); ok {
+			if symbol, ok := goFunctionSymbol(fileSet, typed, exportedOnly); ok {
 				surface.Symbols[symbol.Name] = symbol
 			}
 		case *ast.GenDecl:
-			for _, symbol := range goDeclarationSymbols(fileSet, typed) {
+			for _, symbol := range goDeclarationSymbols(fileSet, typed, exportedOnly) {
 				surface.Symbols[symbol.Name] = symbol
 			}
 		}
@@ -204,15 +225,15 @@ func goAPISurface(surface APISurface, content []byte) APISurface {
 
 // goFunctionSymbol names a function by itself and a method by its receiver, so
 // two types with the same method name stay two promises.
-func goFunctionSymbol(fileSet *token.FileSet, declaration *ast.FuncDecl) (APISymbol, bool) {
+func goFunctionSymbol(fileSet *token.FileSet, declaration *ast.FuncDecl, exportedOnly bool) (APISymbol, bool) {
 	name := declaration.Name.Name
-	if !ast.IsExported(name) {
+	if exportedOnly && !ast.IsExported(name) {
 		return APISymbol{}, false
 	}
 	kind := "func"
 	if declaration.Recv != nil && len(declaration.Recv.List) == 1 {
 		receiver := strings.TrimPrefix(goNodeText(fileSet, declaration.Recv.List[0].Type), "*")
-		if !ast.IsExported(receiver) {
+		if exportedOnly && !ast.IsExported(receiver) {
 			// A method on an unexported type is not part of the surface.
 			return APISymbol{}, false
 		}
@@ -221,12 +242,12 @@ func goFunctionSymbol(fileSet *token.FileSet, declaration *ast.FuncDecl) (APISym
 	return APISymbol{Name: name, Kind: kind, Signature: goNodeText(fileSet, declaration.Type)}, true
 }
 
-func goDeclarationSymbols(fileSet *token.FileSet, declaration *ast.GenDecl) []APISymbol {
+func goDeclarationSymbols(fileSet *token.FileSet, declaration *ast.GenDecl, exportedOnly bool) []APISymbol {
 	var symbols []APISymbol
 	for _, spec := range declaration.Specs {
 		switch typed := spec.(type) {
 		case *ast.TypeSpec:
-			if !ast.IsExported(typed.Name.Name) {
+			if exportedOnly && !ast.IsExported(typed.Name.Name) {
 				continue
 			}
 			symbols = append(symbols, goTypeSymbol(fileSet, typed))
@@ -236,7 +257,7 @@ func goDeclarationSymbols(fileSet *token.FileSet, declaration *ast.GenDecl) []AP
 				kind = "const"
 			}
 			for _, name := range typed.Names {
-				if !ast.IsExported(name.Name) {
+				if exportedOnly && !ast.IsExported(name.Name) {
 					continue
 				}
 				symbols = append(symbols, APISymbol{

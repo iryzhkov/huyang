@@ -96,13 +96,13 @@ func (h *Handlers) changePlan(ctx context.Context, requestID string, workspace *
 		outcome = h.planEdit(ctx, requestID, workspace, request)
 	case "preview":
 		outcome = planPreview(workspace, request)
-		if impact := h.impactView(ctx, requestID, workspace, request, outcome); impact != nil {
-			return impact
+		if view := h.planView(ctx, requestID, workspace, request, outcome); view != nil {
+			return view
 		}
 	case "inspect":
 		outcome = planInspect(workspace, request)
-		if impact := h.impactView(ctx, requestID, workspace, request, outcome); impact != nil {
-			return impact
+		if view := h.planView(ctx, requestID, workspace, request, outcome); view != nil {
+			return view
 		}
 	case "prepare":
 		outcome = h.planPrepare(ctx, requestID, workspace, request)
@@ -144,14 +144,21 @@ func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *wo
 	return planOutcome{summary: "Plan intent updated; canonical workspace unchanged", plan: plan, err: err}
 }
 
-// impactView answers preview and inspect as impact when the caller asked for
-// that view, which only the experimental catalog offers. A plan that could not
-// be read has no impact to report, so the ordinary failure is returned.
-func (h *Handlers) impactView(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest, outcome planOutcome) map[string]any {
-	if request.View != "impact" || outcome.err != nil {
+// planView answers preview and inspect as something other than the plan record
+// when the caller asked for it, which only the experimental catalog offers. A
+// plan that could not be read has neither impact nor meaning to report, so the
+// ordinary failure is returned.
+func (h *Handlers) planView(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest, outcome planOutcome) map[string]any {
+	if outcome.err != nil {
 		return nil
 	}
-	return h.planImpact(ctx, requestID, workspace, outcome.plan)
+	switch request.View {
+	case "impact":
+		return h.planImpact(ctx, requestID, workspace, outcome.plan)
+	case "semantic":
+		return h.planSemantic(ctx, requestID, workspace, outcome.plan)
+	}
+	return nil
 }
 
 func planPreview(workspace *workspacecore.Workspace, request planRequest) planOutcome {

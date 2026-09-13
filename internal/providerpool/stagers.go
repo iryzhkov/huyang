@@ -379,6 +379,16 @@ func (s *SandboxStager) reusable(planRevision uint64) bool {
 	return !s.done && s.planRevision == planRevision
 }
 
+// finished reports that this stager's sandbox is gone: it was rolled back,
+// applied or discarded. A stager in that state is not a revision mismatch with
+// anything, and saying it is sends a caller looking for a plan revision that
+// never existed.
+func (s *SandboxStager) finished() bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.done
+}
+
 // release finishes the provider transaction, closes the provider and removes
 // the sandbox. It runs under opMu so it cannot interleave with Stage or Verify.
 func (s *SandboxStager) release(ctx context.Context, planID string, commit bool) error {
@@ -483,10 +493,16 @@ func (p *Pool) PlanStager(workspace *workspacecore.Workspace, planID string, pla
 		if existing.reusable(planRevision) {
 			return existing, nil
 		}
-		if !create {
+		if !create && !existing.finished() {
 			// A lookup with the wrong plan revision must not destroy the
 			// sandbox another caller prepared; report the mismatch instead.
+			// A stager whose sandbox is already gone is a different answer,
+			// given below: there is nothing to mismatch with.
 			return nil, workspacecore.Codedf(workspacecore.CodePlanRevisionChanged, "prepared sandbox belongs to plan revision %d, not %d", existing.planRevision, planRevision)
+		}
+		if !create {
+			return nil, workspacecore.Coded(workspacecore.CodeProviderUnavailable,
+				errors.New("the prepared sandbox for this plan is gone; it was rolled back, applied or discarded"))
 		}
 		// The stale stager is rolled back outside p.mu because the
 		// rollback closes a provider and removes a sandbox tree.

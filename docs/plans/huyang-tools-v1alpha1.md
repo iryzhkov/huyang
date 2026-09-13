@@ -1250,6 +1250,38 @@ A plan that declares nothing asserts nothing. Plan records written before invari
 (record version 2) are read as they are, so an older plan can never gain a requirement by
 being loaded.
 
+### What a change means (experimental)
+
+`change_plan` accepts `view: "semantic"` on `preview` and `inspect`, and `revision_diff`
+accepts the same view, both in the experimental catalog. One builder answers all of them from
+the exact bytes on each side of the change, so a plan that has only been previewed, one that
+has been prepared and one that has been applied cannot give three different accounts of the
+same change. What differs between them is the evidence available, and that is reported rather
+than smoothed over.
+
+The summary carries an index of every affected file - including the ones no adapter could read,
+because a file missing from a summary reads as a file with nothing to say - and then:
+declarations added, removed, renamed, moved or changed in shape; the exported-surface changes
+from the same adapters `api_compatible` uses; the imports each file gained or lost; the
+prepared diagnostic delta when a preparation is still there to ask; what the tests did; the
+plan's invariants; the gaps; and recommendations derived from all of it.
+
+A rename is reported as a rename: a declaration that disappears and one that appears with the
+same shape are the same declaration under a new name, and in another file it is a move. Two
+candidates with the same shape are left unpaired, because a guess between them is not evidence.
+
+"No semantic change" is a claim about coverage as much as about code, and the summary makes it
+only when every dimension it reports on was covered. Otherwise it says that no semantic change
+was seen and that the coverage behind that is incomplete. The standing gaps are named every
+time: call and implementation edges need the analysis snapshot rather than the file's own
+import lines, new error paths and side effects need the static execution graph that does not
+exist yet, and no adapter reads schema formats.
+
+`revision_diff view="semantic"` answers from the plans applied inside the range, which are the
+only place the bytes of both sides of a past change are kept. A revision step made by a direct
+edit is reported as a gap: its receipt holds hashes and byte counts, which prove what changed
+without saying what it meant.
+
 ### Evidence about staged bytes stays out of the ledger
 
 Preparing a plan records what the language server made of the sandbox. That evidence is now

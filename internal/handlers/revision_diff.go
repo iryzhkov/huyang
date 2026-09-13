@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -24,7 +25,7 @@ type revisionCoverage struct {
 	gaps     []any
 }
 
-func (h *Handlers) revisionDiff(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func (h *Handlers) revisionDiff(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	if err := workspace.PrimeDocuments(); err != nil {
 		return mcpapi.Failure(requestID, workspace, "workspace_refresh_failed", err)
 	}
@@ -37,6 +38,9 @@ func (h *Handlers) revisionDiff(requestID string, workspace *workspacecore.Works
 	span, failure := decodeRevisionRange(requestID, workspace, arguments)
 	if failure != nil {
 		return failure
+	}
+	if view, _ := arguments["view"].(string); view == "semantic" {
+		return h.revisionDiffSemantic(ctx, requestID, workspace, span)
 	}
 	recorded := h.provenance.RecordedRevisionDiffs(string(workspace.Identity().ID), span.fromSeq, span.toSeq)
 	coverage := coverRevisionRange(recorded, span)

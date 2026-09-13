@@ -162,6 +162,17 @@ existing workspace, because its handle comes from one.
   apply; declare `enforcement: "advisory"` for an assertion that should be
   reported and acknowledged rather than enforced. Editing the plan drops every
   answer, because they were answers about other bytes.
+- What a change means rather than which lines moved: `change_plan {action:
+  inspect, plan_id, view: "semantic"}` on the experimental profile, for a plan
+  that is previewed, prepared or already applied. It answers with an index of
+  every affected file, the declarations added, removed, renamed, moved or
+  changed in shape, the exported-surface breaks, the imports gained and lost,
+  the prepared diagnostic delta, what the tests did, the plan's invariants, the
+  gaps and what to do about them. It says "no semantic change" only when the
+  coverage behind that claim is complete. `revision_diff {view: "semantic"}`
+  answers the same way for a canonical revision range, from the plans applied
+  inside it; a step made by a direct edit is a gap, because its receipt keeps
+  hashes rather than content.
 - Before changing a declaration, ask what it reaches: `change_plan {action: preview,
   plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
   exported, which tests are associated with the files, what generated or configuration
