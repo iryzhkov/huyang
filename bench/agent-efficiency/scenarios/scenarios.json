@@ -1,8 +1,8 @@
 {
   "families": {
-    "huyang": "Use only the huyang MCP tools (workspace_open, search, read, edit_apply, change_plan, verify_run, navigate, symbol_find, diagnostics) for reading, searching and editing files. Do not use the built-in read, edit, write, grep, glob or list tools and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task, and only if verify_run cannot run it.",
+    "huyang": "Use only the huyang MCP tools (workspace_open, search, read, edit_apply, change_plan, verify_run, navigate, symbol_find, diagnostics, code_actions, debug_session, debug_breakpoints, debug_control, debug_inspect) for reading, searching and editing files. Do not use the built-in read, edit, write, grep, glob or list tools and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task, and only if verify_run cannot run it.",
     "builtin": "Use only the built-in file tools of this harness (read, edit, write, grep, glob, list). Do not call any huyang tool and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task.",
-    "bash": "Use only the bash tool (cat, sed, grep, python3, go and similar). Do not call any huyang tool and do not use the built-in read, edit, write, grep or glob tools."
+    "bash": "Use only the bash tool (cat, sed, grep, python3, go, dlv, pdb and similar). Do not call any huyang tool and do not use the built-in read, edit, write, grep or glob tools."
   },
   "languages": {
     "go": {"dir": "bench/agent-efficiency/fixtures/go", "build": "go build ./...", "test": "go test ./..."},
@@ -57,6 +57,14 @@
       "go": "Rename store.go to storage.go, keeping its content exactly as it is so that Git can later record the change as a rename. If the tool you use suggests a git command to stage the rename, report the command in your final message but do not run git.",
       "python": "Rename ledger/store.py to ledger/storage.py, keeping its content exactly as it is so that Git can later record the change as a rename, and update the import in tests/test_ledger.py so the tests still import it. If the tool you use suggests a git command to stage the rename, report the command in your final message but do not run git."},
       "done": "The file exists under the new name with unchanged content, the old name is gone, and the verification command passes.", "verify": "test"},
+    {"id": "D1", "title": "diagnose a failing test down to the responsible line", "task": {
+      "go": "The package test suite has exactly one failing test. Run it, then find the line of production code that produces the wrong value. Report the file and line, the expression on it, and the value it produces for the input the test uses. Do not change any file.",
+      "python": "The test suite has exactly one failing test. Run it, then find the line of production code that produces the wrong value. Report the file and line, the expression on it, and the value it produces for the input the test uses. Do not change any file."},
+      "done": "The report names the amount-formatting line that drops the sign of a negative amount below one major unit, and the value it produces for -5.", "verify": "test"},
+    {"id": "D2", "title": "report a runtime value from inside a function", "task": {
+      "go": "Report the running value of the accumulator total inside the Balance method of Ledger after each entry it adds, for the account \"cash\" in the ledger the test helper sample() builds, and then the value Balance returns. Give the values in order. You may add temporary instrumentation only if the fixture is byte for byte unchanged when you finish.",
+      "python": "Report the running value of the accumulator total inside the function balance in ledger/ledger.py after each entry it adds, for the account \"cash\" in the ledger the test helper sample() builds, and then the value balance returns. Give the values in order. You may add temporary instrumentation only if the fixture is byte for byte unchanged when you finish."},
+      "done": "The values 10000 and 7500 are reported in that order, the returned value is 7500, and no fixture file is left changed.", "verify": "test"},
     {"id": "V1", "title": "run the test suite and report failures", "task": {
       "go": "Run the package test suite and report which tests fail and why, quoting the failure message.",
       "python": "Run the test suite (python3 -m unittest from the fixture directory) and report which tests fail and why, quoting the failure message."},

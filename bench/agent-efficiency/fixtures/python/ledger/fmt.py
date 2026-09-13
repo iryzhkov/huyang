@@ -6,11 +6,10 @@ from .ledger import DEFAULT_CURRENCY, Entry, Ledger, balance
 
 def format_amount(amount: int, currency: str) -> str:
     """Render minor units as a decimal string with the currency code."""
-    sign = ""
-    if amount < 0:
-        sign = "-"
-        amount = -amount
-    return f"{sign}{amount // 100}.{amount % 100:02d} {currency}"
+    # Known gap: a negative amount below one major unit loses its sign,
+    # because the whole part truncates to zero and the sign lives there.
+    whole = int(amount / 100)
+    return f"{whole}.{abs(amount) % 100:02d} {currency}"
 
 
 def format_entry(entry: Entry) -> str:

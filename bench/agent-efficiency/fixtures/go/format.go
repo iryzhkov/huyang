@@ -7,12 +7,13 @@ import (
 
 // FormatAmount renders minor units as a decimal string with the currency code.
 func FormatAmount(amount int64, currency string) string {
-	sign := ""
-	if amount < 0 {
-		sign = "-"
-		amount = -amount
+	// Known gap: a negative amount below one major unit loses its sign,
+	// because the whole part truncates to zero and the sign lives there.
+	fraction := amount % 100
+	if fraction < 0 {
+		fraction = -fraction
 	}
-	return fmt.Sprintf("%s%d.%02d %s", sign, amount/100, amount%100, currency)
+	return fmt.Sprintf("%d.%02d %s", amount/100, fraction, currency)
 }
 
 // FormatEntry renders one entry on a single line.
