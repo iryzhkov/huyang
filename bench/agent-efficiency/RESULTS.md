@@ -666,3 +666,56 @@ tokens on the fixture, and more on a real search: it is one line per hit.
 Between `x32` and `x33` every other scenario is flat within two percent, except E2, which
 gains 42 tokens: it is the second edit of the protocol session, so it carries the
 `operations` hint once.
+
+### Agent scores, batch `x30` (Claude Haiku 4.5, Go fixture, pre-fix build 574539d)
+
+135 runs on normandy through the steward backlog, four at a time, against the service as it
+stood at the start of the session. 134 produced a thread. Per run, averaged over the 15
+scenarios: Huyang 5.4 calls, 604 request and 2,890 response tokens; the built-in tools 5.8
+calls, 933 and 2,742; Bash 7.6 calls, 696 and 2,033.
+
+Against the 2026-09-12 `haiku` batch (Huyang 5.3 calls, 631 request, 3,576 response) nothing
+regressed: the response cost per run fell by a fifth, because the benchmark prompt now tells
+the Huyang family to name the repository with `root` instead of opening it first.
+
+| Scenario | Family | Calls | Req | Resp | | Scenario | Family | Calls | Req | Resp |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R1 | huyang | 1.0 | 22 | 1444 | | E4 | huyang | 5.3 | 515 | 2803 |
+| R1 | builtin | 1.0 | 111 | 1290 | | E4 | builtin | 6.7 | 798 | 2213 |
+| R1 | bash | 1.0 | 87 | 1030 | | E4 | bash | 7.0 | 511 | 1495 |
+| R2 | huyang | 2.3 | 175 | 1332 | | E5 | huyang | 13.0 | 2384 | 6854 |
+| R2 | builtin | 2.3 | 218 | 1000 | | E5 | builtin | 8.7 | 2394 | 2950 |
+| R2 | bash | 2.0 | 146 | 188 | | E5 | bash | 15.3 | 2332 | 6381 |
+| R3 | huyang | 1.7 | 141 | 1331 | | E6 | huyang | 9.3 | 2078 | 5878 |
+| R3 | builtin | 4.0 | 389 | 5333 | | E6 | builtin | 17.7 | 3310 | 7772 |
+| R3 | bash | 6.0 | 326 | 1862 | | E6 | bash | 24.3 | 2090 | 4701 |
+| R4 | huyang | 2.0 | 163 | 3249 | | E7 | huyang | 4.3 | 203 | 1113 |
+| R4 | builtin | 3.0 | 325 | 2191 | | E7 | builtin | 6.0 | 720 | 701 |
+| R4 | bash | 3.0 | 112 | 1780 | | E7 | bash | 6.3 | 224 | 621 |
+| E1 | huyang | 4.3 | 183 | 1646 | | E8 | huyang | 6.7 | 341 | 2428 |
+| E1 | builtin | 3.0 | 393 | 1424 | | E8 | builtin | 7.7 | 1418 | 1588 |
+| E1 | bash | 5.3 | 262 | 495 | | E8 | bash | 7.7 | 601 | 961 |
+| E2 | huyang | 6.7 | 746 | 2523 | | D1 | huyang | 5.7 | 284 | 3214 |
+| E2 | builtin | 3.7 | 720 | 6282 | | D1 | builtin | 6.0 | 476 | 2044 |
+| E2 | bash | 7.3 | 862 | 5298 | | D1 | bash | 7.3 | 1040 | 1547 |
+| E3 | huyang | 7.3 | 596 | 3901 | | D2 | huyang | 9.7 | 1077 | 4515 |
+| E3 | builtin | 3.3 | 671 | 1472 | | D2 | builtin | 8.7 | 1458 | 3318 |
+| E3 | bash | 7.7 | 279 | 1543 | | D2 | bash | 12.0 | 1433 | 2466 |
+| V1 | huyang | 2.0 | 150 | 1111 | | V1 | builtin | 3.7 | 317 | 1068 |
+| V1 | bash | 1.3 | 139 | 128 | | | | | | |
+
+Huyang leads on calls and request tokens in most scenarios and wins outright on E6 (9.3 calls
+against 17.7 and 24.3), R3, E2, E7 and E8. It loses on E5 and E3, where agents applied five
+literal edits one at a time instead of one `operations` list, and on the read scenarios, where
+its replies carry the same content inside JSON.
+
+**Where the Huyang response tokens went**, over the whole batch: `read` 52 percent,
+`workspace_open` 24 percent (10 of 15 read-scenario runs opened a workspace they did not need,
+mean 837 tokens), `search` 9, `verify_run` 8, `edit_apply` 5.
+
+**Two cells of this batch measure a Huyang bug rather than a scenario.** Six huyang runs (all
+three of R1 and E1, two of E4, two of E7, one of E8) named the fixture with a relative `root`,
+which the service resolved against its own working directory: they read and edited the
+deployed checkout of Huyang itself, where the first of them applied the E1 edit and the rest
+found the literal already changed. That is fixed (a relative root is refused) and the prompt
+that taught it is fixed; the stray files were removed from the deployed checkout.
