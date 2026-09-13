@@ -46,11 +46,11 @@ func TestPreparedRevisionIsReadable(t *testing.T) {
 	}
 
 	canonical := call(t, session, "read", map[string]any{
-		"workspace_id": workspaceID, "target": map[string]any{"path": "ledger.go"},
+		"workspace_id": workspaceID, "target": ledgerTarget(),
 	})
 	staged := call(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "revision": preparedRevision,
-		"target": map[string]any{"path": "ledger.go"},
+		"target": ledgerTarget(),
 	})
 	if outcome(staged) != "ok" {
 		t.Fatalf("prepared read = %#v", staged)
@@ -140,7 +140,7 @@ func TestPreparedRevisionIsRefusedOnceItIsGone(t *testing.T) {
 
 	gone := call(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "revision": preparedRevision,
-		"target": map[string]any{"path": "ledger.go"},
+		"target": ledgerTarget(),
 	})
 	if outcome(gone) == "ok" {
 		t.Fatalf("a discarded revision still answered: %#v", gone)
@@ -165,7 +165,7 @@ func TestThePreparedSelectorIsExperimentalOnly(t *testing.T) {
 	workspaceID := workspaceIdentity(t, opened)
 	refusal := callRefused(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "revision": "prep_whatever",
-		"target": map[string]any{"path": "ledger.go"},
+		"target": ledgerTarget(),
 	})
 	if !strings.Contains(refusal.Error(), "revision") {
 		t.Fatalf("the refusal does not name the argument: %v", refusal)
