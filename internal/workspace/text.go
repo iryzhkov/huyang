@@ -55,9 +55,14 @@ type Coverage struct {
 	Skipped         []string `json:"skipped,omitempty"`
 	// SkippedCount is how many documents were skipped, which is what the
 	// bounded Skipped list is a sample of.
-	SkippedCount int    `json:"skipped_count,omitempty"`
-	Capped       bool   `json:"capped"`
-	Semantic     string `json:"semantic"`
+	SkippedCount int `json:"skipped_count,omitempty"`
+	// SymlinksSkipped counts the symlinks that were passed over. They are
+	// not skipped documents: a symlink has no text of its own, and its
+	// target is either listed separately or outside the workspace, so it
+	// does not make an answer incomplete.
+	SymlinksSkipped int    `json:"symlinks_skipped,omitempty"`
+	Capped          bool   `json:"capped"`
+	Semantic        string `json:"semantic"`
 }
 
 // maxCoverageSkipped bounds the paths one coverage block names. A repository
@@ -788,6 +793,18 @@ func searchExpression(request SearchRequest) (SearchMode, *regexp.Regexp, error)
 // binary, unreadable or over-budget document was skipped.
 func (w *Workspace) readSearchable(name string, coverage *Coverage) (TextRead, bool) {
 	disk, _, inspectErr := inspectPath(name)
+	if inspectErr == nil && disk.Kind == ObjectSymlink {
+		// A symlink holds a path, not text of its own. When it points inside
+		// the workspace the target is listed and searched under its own name,
+		// and when it points outside it, confinement is the reason it is not
+		// searched rather than a gap in this answer. Counting it as an
+		// unreadable document made every search of a checkout with scaffolding
+		// symlinks in it incomplete, and an incomplete search cannot back an
+		// all-match replacement, so two of them vetoed the feature repository
+		// wide.
+		coverage.SymlinksSkipped++
+		return TextRead{}, false
+	}
 	if inspectErr == nil && disk.Kind == ObjectBinary {
 		// A file the search never opened is not a file with no matches in it,
 		// and nothing else in the reply tells the two apart: a search that

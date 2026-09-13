@@ -340,6 +340,34 @@ func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
 	}
 }
 
+// A symlink is not an unreadable document. Every worker checkout carries a
+// couple of scaffolding symlinks, and treating them as gaps made every search
+// in it incomplete, which in turn made every all-match replacement ineligible.
+func TestSymlinksDoNotMakeASearchIncomplete(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "source.txt"), "needle\n")
+	if err := os.Symlink("/somewhere/outside", filepath.Join(root, "scaffolding")); err != nil {
+		t.Fatal(err)
+	}
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	result, err := ws.Search(SearchRequest{Query: "needle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %+v", result.Hits)
+	}
+	if !result.Coverage.Complete || result.Coverage.SkippedCount != 0 {
+		t.Fatalf("a symlink was counted as an unreadable document: %+v", result.Coverage)
+	}
+	if result.Coverage.SymlinksSkipped != 1 {
+		t.Fatalf("the symlink was passed over without being counted: %+v", result.Coverage)
+	}
+	if !result.ResultSet.AllMatchesEligible {
+		t.Fatalf("a symlink made an all-match replacement ineligible: %+v", result.ResultSet)
+	}
+}
+
 // The skipped list is a bounded sample and the count next to it is exact, so
 // a tree full of binaries cannot turn one coverage block into a listing of
 // the tree.
