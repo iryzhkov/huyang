@@ -387,6 +387,43 @@ func (w *Workspace) RollbackPlan(ctx context.Context, planID string, expected ui
 	return result, err
 }
 
+// ReopenPlan rolls a preparation back and returns the plan to OPEN so it can be changed and
+// prepared again.
+//
+// It is the same rollback a discard performs, with a different destination: the sandbox is
+// released, the prepared revision stops existing and every handle into it is refused, and the
+// plan keeps its identity and its operations. A reviewed preparation is still never edited in
+// place - it is replaced - and the proofs of its invariants go with it, because they were
+// proofs about bytes nobody proposes any more. The plan revision does not change here; the
+// edit that follows is what makes it a new proposal.
+func (w *Workspace) ReopenPlan(ctx context.Context, planID string, expected uint64, stager PlanStager) (PlanRecord, error) {
+	if stager == nil {
+		return PlanRecord{}, Coded(CodeProviderUnavailable, errors.New("reopening a prepared plan requires a provider"))
+	}
+	plan, err := w.InspectPlan(planID, expected)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	if !canTransition(plan.State, PlanRollingBack) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanRollingBack)
+	}
+	if _, err := w.transitionPlan(planID, expected, PlanRollingBack, "reopen_started", "pending", plan.Preparation); err != nil {
+		return PlanRecord{}, err
+	}
+	if err := stager.Rollback(ctx, planID); err != nil {
+		_, _ = w.transitionPlan(planID, expected, PlanFailed, "reopen_failed", err.Error(), nil)
+		return PlanRecord{}, err
+	}
+	if err := w.recordInvariants(planID, expected, resetInvariantProofs(plan.Invariants)); err != nil {
+		return PlanRecord{}, err
+	}
+	result, err := w.transitionPlan(planID, expected, PlanOpen, "reopen", "ok", nil)
+	w.prepareMu.Lock()
+	delete(w.activePlans, planID)
+	w.prepareMu.Unlock()
+	return result, err
+}
+
 // transitionPlan moves one plan to a new state under the plan state machine, replaces its
 // preparation evidence, records the event and persists the record. An edge the state
 // machine does not allow is refused with plan_state_invalid. A persistence failure leaves

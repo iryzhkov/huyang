@@ -72,15 +72,24 @@ const (
 // recoverCommitJournals uses the same table to reconcile the persisted state of a plan whose
 // process died mid-transition.
 var planTransitions = map[PlanState][]PlanState{
-	PlanOpen:             {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
-	PlanPreviewed:        {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
-	PlanPreparing:        {PlanConflicted, PlanFailed, PlanProvisional, PlanReady},
-	PlanConflicted:       {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
-	PlanFailed:           {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
-	PlanProvisional:      {PlanCommitting, PlanRollingBack, PlanFailed},
-	PlanReady:            {PlanCommitting, PlanRollingBack, PlanFailed},
-	PlanCommitting:       {PlanCommitted, PlanRecoveryRequired, PlanConflicted, PlanFailed},
-	PlanRollingBack:      {PlanRolledBack, PlanFailed},
+	PlanOpen:       {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
+	PlanPreviewed:  {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
+	PlanPreparing:  {PlanConflicted, PlanFailed, PlanProvisional, PlanReady},
+	PlanConflicted: {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
+	PlanFailed:     {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
+	// READY and PROVISIONAL reach CONFLICTED because a commit can be refused
+	// before it is admitted - the canonical bytes moved under the preparation -
+	// and that is a conflict, not a failure of the plan. Without the edge the
+	// refusal was correct but carried an internal "cannot move from PROVISIONAL
+	// to CONFLICTED" behind it, and the plan stayed in a state that claimed it
+	// was still applicable.
+	PlanProvisional: {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted},
+	PlanReady:       {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted},
+	PlanCommitting:  {PlanCommitted, PlanRecoveryRequired, PlanConflicted, PlanFailed},
+	// ROLLING_BACK -> OPEN is how a prepared plan is revised: the preparation is
+	// released and the plan returns to being an intent, rather than ending as a
+	// rolled-back plan its author has to recreate by hand.
+	PlanRollingBack:      {PlanRolledBack, PlanFailed, PlanOpen},
 	PlanRecoveryRequired: {PlanRolledBack, PlanCommitted},
 	PlanCommitted:        {},
 	PlanRolledBack:       {},
@@ -387,6 +396,14 @@ func (w *Workspace) loadLegacyPlans() ([]PlanRecord, error) {
 	return state.Plans, nil
 }
 
+// loadPlanRecords reads the durable plans of one workspace.
+//
+// A record this build cannot read is skipped, named in the log and left on
+// disk untouched. It used to be a fatal error, and the consequence was out of
+// all proportion: one plan file written by a newer build stopped its workspace
+// from opening at all, and the service crash-looped because every restart
+// failed on the same file. A plan is one proposal; it is never worth an entire
+// workspace, let alone the service.
 func (w *Workspace) loadPlanRecords() error {
 	entries, err := os.ReadDir(w.planStateDir())
 	if errors.Is(err, os.ErrNotExist) {
@@ -401,14 +418,18 @@ func (w *Workspace) loadPlanRecords() error {
 		}
 		content, err := os.ReadFile(filepath.Join(w.planStateDir(), entry.Name()))
 		if err != nil {
-			return fmt.Errorf("read plan record %s: %w", entry.Name(), err)
+			log.Printf("huyang: plan record %s could not be read and is ignored: %v", entry.Name(), err)
+			continue
 		}
 		var record persistedPlan
 		if err := json.Unmarshal(content, &record); err != nil {
-			return fmt.Errorf("decode plan record %s: %w", entry.Name(), err)
+			log.Printf("huyang: plan record %s could not be decoded and is ignored: %v", entry.Name(), err)
+			continue
 		}
 		if record.Version != planRecordVersion && record.Version != planRecordVersionLegacy {
-			return fmt.Errorf("unsupported plan record version %d in %s", record.Version, entry.Name())
+			log.Printf("huyang: plan record %s is version %d, which this build does not read; it is ignored and left on disk",
+				entry.Name(), record.Version)
+			continue
 		}
 		if record.Plan.WorkspaceID != w.Identity().ID {
 			return fmt.Errorf("plan %s belongs to workspace %s", record.Plan.PlanID, record.Plan.WorkspaceID)

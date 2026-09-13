@@ -45,8 +45,16 @@ func indentedCatalog(t *testing.T, profile Profile) []byte {
 	return append(indented, '\n')
 }
 
+// frozenProfiles are the four frozen catalogs and the experimental one. The
+// experimental catalog is not a contract with anybody yet, which is the reason
+// to freeze it rather than a reason not to: it is where the next contract is
+// being written, and a change to it should be a diff somebody read.
+func frozenProfiles() []Profile {
+	return append(append([]Profile(nil), ProfileOrder...), ProfileExperimental)
+}
+
 func TestFrozenCatalogIsUnchanged(t *testing.T) {
-	for _, profile := range ProfileOrder {
+	for _, profile := range frozenProfiles() {
 		current := indentedCatalog(t, profile)
 		path := catalogFixturePath(profile)
 		if *updateCatalogFixtures {

@@ -173,6 +173,11 @@ existing workspace, because its handle comes from one.
   answers the same way for a canonical revision range, from the plans applied
   inside it; a step made by a direct edit is a gap, because its receipt keeps
   hashes rather than content.
+- Revising a prepared plan: `change_plan {action: edit, plan_id, plan_revision,
+  edit}` releases the preparation and returns the plan to OPEN, then prepare it
+  again. The prepared revision stops existing at that moment and every handle
+  into it is refused, which is the point: what you reviewed is replaced rather
+  than changed underneath you. The invariant proofs go with it.
 - Before changing a declaration, ask what it reaches: `change_plan {action: preview,
   plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
   exported, which tests are associated with the files, what generated or configuration

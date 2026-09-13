@@ -132,6 +132,9 @@ func (h *Handlers) planCreate(ctx context.Context, requestID string, workspace *
 }
 
 func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest) planOutcome {
+	if err := h.reopenForEdit(ctx, workspace, request); err != nil {
+		return planOutcome{err: err}
+	}
 	if err := h.resolvePlanSymbolLocators(ctx, requestID, workspace, request.Edit.Operations); err != nil {
 		return planOutcome{err: err}
 	}
@@ -142,6 +145,33 @@ func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *wo
 	request.Edit.Operations = expanded
 	plan, err := workspace.EditPlan(request.PlanID, request.PlanRevision, request.Edit)
 	return planOutcome{summary: "Plan intent updated; canonical workspace unchanged", plan: plan, err: err}
+}
+
+// reopenForEdit releases a preparation before its plan is changed.
+//
+// Editing a prepared plan is how a review turns into a revision - it is what a
+// prepared code action leads to - and a plan that has been prepared holds a
+// sandbox and the provider lease. So the preparation is rolled back first and
+// the plan returns to being an intent. The prepared revision stops existing at
+// that moment, which is the point: what somebody reviewed is replaced, never
+// quietly edited underneath them.
+func (h *Handlers) reopenForEdit(ctx context.Context, workspace *workspacecore.Workspace, request planRequest) error {
+	current, err := workspace.InspectPlan(request.PlanID, request.PlanRevision)
+	if err != nil {
+		// The edit itself will report an unknown plan or a stale revision.
+		return nil
+	}
+	switch current.State {
+	case workspacecore.PlanReady, workspacecore.PlanProvisional:
+	default:
+		return nil
+	}
+	stager, stagerErr := h.pool.PlanStager(workspace, request.PlanID, current.PlanRevision, false)
+	if stagerErr != nil {
+		return stagerErr
+	}
+	_, err = workspace.ReopenPlan(ctx, request.PlanID, current.PlanRevision, stager)
+	return err
 }
 
 // planView answers preview and inspect as something other than the plan record
@@ -401,9 +431,9 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 		}
 	case code == workspacecore.CodeInvariantNotProven && plan.PlanID != "":
 		// Nothing here offers apply again: a required invariant has no accept
-		// flag, and a prepared plan cannot be edited, so the way forward is to
-		// discard this one and plan the change that satisfies it.
-		return []any{withPlan("inspect", nil), withPlan("discard", nil)}
+		// flag. The way forward is to change the plan until it holds, or to
+		// change what the plan requires; editing it releases the preparation.
+		return []any{withPlan("inspect", nil), withPlan("edit", nil), withPlan("discard", nil)}
 	case code == workspacecore.CodePlanStateInvalid && plan.PlanID != "":
 		return planStateNext(plan)
 	case action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed":
@@ -479,7 +509,7 @@ func planStateNext(plan workspacecore.PlanRecord) []any {
 		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanProvisional:
 		if len(workspacecore.UnprovenRequiredInvariants(plan)) > 0 {
-			return []any{with("inspect", nil), with("discard", nil)}
+			return []any{with("inspect", nil), with("edit", nil), with("discard", nil)}
 		}
 		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "accept_provisional": true, "use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanConflicted, workspacecore.PlanFailed:

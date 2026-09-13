@@ -1282,6 +1282,32 @@ only place the bytes of both sides of a past change are kept. A revision step ma
 edit is reported as a gap: its receipt holds hashes and byte counts, which prove what changed
 without saying what it meant.
 
+### Revising a prepared plan
+
+`change_plan action="edit"` on a READY or PROVISIONAL plan now releases its preparation first
+and returns the plan to OPEN, so a review can turn into a revision without recreating the plan
+by hand. This is the step the code-action reply points at, and until now it was refused: a
+prepared plan could only be applied or discarded.
+
+What a reviewer saw is still never edited underneath them. The sandbox is rolled back, the
+prepared revision stops existing, every handle into it is refused with
+`prepared_revision_unavailable`, and the proofs of the plan's invariants are dropped, because
+they were proofs about bytes nobody proposes any more. The plan keeps its identity and its
+operations; the edit that follows is what makes it a new proposal.
+
+Two state-machine edges came with it. ROLLING_BACK can reach OPEN, which is that revision path.
+READY and PROVISIONAL can reach CONFLICTED, which is what a commit refused before admission
+always meant - the canonical bytes moved under the preparation - and which previously left an
+internal "cannot move from PROVISIONAL to CONFLICTED" inside an otherwise correct refusal.
+
+### A plan record this build cannot read is skipped
+
+Restoring a workspace no longer fails on one unreadable plan file. A record written by a newer
+build, or one that does not decode, is logged, left on disk untouched, and skipped. The
+previous behaviour took the whole workspace down, and because the service restores workspaces
+at startup, one such file crash-looped the service: every restart failed on it again. A plan is
+one proposal, and it is never worth a workspace.
+
 ### Evidence about staged bytes stays out of the ledger
 
 Preparing a plan records what the language server made of the sandbox. That evidence is now
