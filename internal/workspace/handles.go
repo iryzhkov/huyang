@@ -378,14 +378,12 @@ func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) 
 	for _, path := range files {
 		read, readErr := w.Read(path)
 		if readErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, path)+": "+sanitizeText(readErr.Error(), 256))
+			coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(readErr.Error(), 256))
 			continue
 		}
 		sections, sectionErr := w.sectioner.Sections(read.Path, read.Content)
 		if sectionErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, path)+": "+sanitizeText(sectionErr.Error(), 256))
+			coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(sectionErr.Error(), 256))
 			continue
 		}
 		for _, section := range sections {

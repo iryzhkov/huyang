@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -157,7 +158,11 @@ func TestNativeSearchLiteralRegexAndUnicodeCoordinates(t *testing.T) {
 	}
 }
 
-func TestNativeSearchIgnoresBinaryFilesWithoutLosingCoverage(t *testing.T) {
+// A binary file costs the text search nothing and is not searched, and the
+// reply says which file that was. The two facts belong together: skipping it
+// is right, and a caller that cannot see the skip has no way to tell "no
+// match in artifact.bin" from "artifact.bin was never opened".
+func TestNativeSearchNamesTheBinaryFilesItDidNotSearch(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "source.txt"), "needle\n")
 	if err := os.WriteFile(filepath.Join(root, "artifact.bin"), []byte{0, 1, 2, 3}, 0o600); err != nil {
@@ -168,8 +173,12 @@ func TestNativeSearchIgnoresBinaryFilesWithoutLosingCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Hits) != 1 || !result.Coverage.Complete || len(result.Coverage.Skipped) != 0 {
-		t.Fatalf("binary file degraded text search coverage: %+v", result)
+	if len(result.Hits) != 1 || result.Coverage.BytesRead != int64(len("needle\n")) {
+		t.Fatalf("binary file cost the text search: %+v", result)
+	}
+	if result.Coverage.Complete || result.Coverage.SkippedCount != 1 ||
+		len(result.Coverage.Skipped) != 1 || !strings.Contains(result.Coverage.Skipped[0], "artifact.bin") {
+		t.Fatalf("the skipped binary is invisible in coverage: %+v", result.Coverage)
 	}
 }
 
@@ -319,6 +328,38 @@ func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
 	}
 	if len(result.Hits) != 1 || result.Hits[0].Path != "z-source.go" {
 		t.Fatalf("binary consumed searchable text budget: %+v", result)
+	}
+	// Not spending the budget on it is right; saying nothing about it is not.
+	// "No matches in a-binary" and "a-binary was never opened" are different
+	// answers, and only coverage can tell them apart.
+	if result.Coverage.Complete || result.Coverage.SkippedCount != 1 {
+		t.Fatalf("a search that skipped a binary reported complete coverage: %+v", result.Coverage)
+	}
+	if len(result.Coverage.Skipped) != 1 || !strings.Contains(result.Coverage.Skipped[0], "a-binary") {
+		t.Fatalf("coverage does not name the skipped binary: %+v", result.Coverage)
+	}
+}
+
+// The skipped list is a bounded sample and the count next to it is exact, so
+// a tree full of binaries cannot turn one coverage block into a listing of
+// the tree.
+func TestCoverageSkippedListIsBounded(t *testing.T) {
+	root := t.TempDir()
+	binaries := maxCoverageSkipped + 5
+	for index := range binaries {
+		name := filepath.Join(root, fmt.Sprintf("blob-%02d.bin", index))
+		if err := os.WriteFile(name, bytes.Repeat([]byte{0}, 64), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(root, "source.go"), "package fixture\nfunc needle() {}\n")
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{MaxFiles: 100, MaxDepth: 4, MaxBytes: 1 << 20, MaxMatches: 20})
+	result, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.SkippedCount != binaries || len(result.Coverage.Skipped) != maxCoverageSkipped {
+		t.Fatalf("skipped list is not a bounded sample of an exact count: %+v", result.Coverage)
 	}
 }
 

@@ -53,8 +53,28 @@ type Coverage struct {
 	FilesRead       int      `json:"files_read"`
 	BytesRead       int64    `json:"bytes_read"`
 	Skipped         []string `json:"skipped,omitempty"`
-	Capped          bool     `json:"capped"`
-	Semantic        string   `json:"semantic"`
+	// SkippedCount is how many documents were skipped, which is what the
+	// bounded Skipped list is a sample of.
+	SkippedCount int    `json:"skipped_count,omitempty"`
+	Capped       bool   `json:"capped"`
+	Semantic     string `json:"semantic"`
+}
+
+// maxCoverageSkipped bounds the paths one coverage block names. A repository
+// of binaries or unreadable files would otherwise answer a list as long as
+// the tree; the count next to it stays exact whatever the list holds.
+const maxCoverageSkipped = 20
+
+// noteSkipped records one document the answer does not cover. Coverage stops
+// being complete the moment anything is skipped, which is the whole point of
+// the field: a reply that looked at less than it was asked about must not
+// read like one that looked at everything.
+func (c *Coverage) noteSkipped(path, reason string) {
+	c.Complete = false
+	c.SkippedCount++
+	if len(c.Skipped) < maxCoverageSkipped {
+		c.Skipped = append(c.Skipped, path+": "+reason)
+	}
 }
 
 type Entry struct {
@@ -465,8 +485,7 @@ func (w *Workspace) Orient() (Orientation, error) {
 	for _, name := range files {
 		disk, _, inspectErr := inspectPath(name)
 		if inspectErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(inspectErr.Error(), 256))
+			coverage.noteSkipped(displayPath(w.identity.Root, name), sanitizeText(inspectErr.Error(), 256))
 			continue
 		}
 		entries = append(entries, Entry{Path: displayPath(w.identity.Root, name), Kind: disk.Kind, Size: disk.Size})
@@ -517,8 +536,7 @@ func (w *Workspace) collectAllowlisted(coverage *Coverage) []string {
 			continue
 		}
 		if err != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(err.Error(), 256))
+			coverage.noteSkipped(displayPath(w.identity.Root, name), sanitizeText(err.Error(), 256))
 			continue
 		}
 		files = append(files, name)
@@ -537,9 +555,8 @@ func (w *Workspace) collectListedFiles(output string, coverage *Coverage) []stri
 		coverage.FilesConsidered++
 		depth := len(strings.Split(filepath.Clean(relative), string(filepath.Separator)))
 		if depth > w.limits.MaxDepth {
-			coverage.Complete = false
 			coverage.Capped = true
-			coverage.Skipped = append(coverage.Skipped, relative+": depth limit")
+			coverage.noteSkipped(relative, "depth limit")
 			continue
 		}
 		if len(files) >= w.limits.MaxFiles {
@@ -558,8 +575,7 @@ func (w *Workspace) walkFiles(coverage *Coverage) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(w.identity.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			coverage.Complete = false
-			coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, path)+": "+sanitizeText(walkErr.Error(), 256))
+			coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(walkErr.Error(), 256))
 			return nil
 		}
 		if path == w.identity.Root {
@@ -573,9 +589,8 @@ func (w *Workspace) walkFiles(coverage *Coverage) ([]string, error) {
 		if entry.IsDir() {
 			if entry.Name() == ".git" || entry.Name() == "node_modules" || depth > w.limits.MaxDepth {
 				if depth > w.limits.MaxDepth {
-					coverage.Complete = false
 					coverage.Capped = true
-					coverage.Skipped = append(coverage.Skipped, rel+": depth limit")
+					coverage.noteSkipped(rel, "depth limit")
 				}
 				return filepath.SkipDir
 			}
@@ -701,18 +716,20 @@ func searchExpression(request SearchRequest) (SearchMode, *regexp.Regexp, error)
 func (w *Workspace) readSearchable(name string, coverage *Coverage) (TextRead, bool) {
 	disk, _, inspectErr := inspectPath(name)
 	if inspectErr == nil && disk.Kind == ObjectBinary {
+		// A file the search never opened is not a file with no matches in it,
+		// and nothing else in the reply tells the two apart: a search that
+		// skipped a binary looked exactly like one that read the whole tree.
+		coverage.noteSkipped(displayPath(w.identity.Root, name), "binary, not searched")
 		return TextRead{}, false
 	}
 	read, readErr := w.Read(name)
 	if readErr != nil {
-		coverage.Complete = false
-		coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": "+sanitizeText(readErr.Error(), 256))
+		coverage.noteSkipped(displayPath(w.identity.Root, name), sanitizeText(readErr.Error(), 256))
 		return TextRead{}, false
 	}
 	if coverage.BytesRead+int64(len(read.Content)) > w.limits.MaxBytes {
-		coverage.Complete = false
 		coverage.Capped = true
-		coverage.Skipped = append(coverage.Skipped, displayPath(w.identity.Root, name)+": byte limit")
+		coverage.noteSkipped(displayPath(w.identity.Root, name), "byte limit")
 		return TextRead{}, false
 	}
 	coverage.FilesRead++
