@@ -57,6 +57,7 @@ func (h *Handlers) recordDebugTrace(ctx context.Context, requestID string, w *wo
 	delete(data, "trace_frames")
 	delete(data, "trace_sequence")
 	delete(data, "trace_capture")
+	delete(data, "trace_mutation")
 	if payload != nil {
 		payload["trace_id"] = id
 	}
@@ -124,6 +125,9 @@ func debugTraceEvent(ctx context.Context, w *workspacecore.Workspace, id string,
 			value, _ := local["value"].(string)
 			event.Values = append(event.Values, workspacecore.ExecutionTraceValue{Name: name, Value: value, Type: fmt.Sprint(local["type"])})
 		}
+	}
+	if raw, ok := data["trace_mutation"].(map[string]any); ok {
+		event.Mutations = []workspacecore.ExecutionMutation{workspacecore.ExecutionWatchMutation(trace, raw)}
 	}
 	return event, gaps
 }

@@ -2159,10 +2159,11 @@
       "properties": {
         "action": {
           "enum": [
-            "clear",
             "list",
+            "set",
             "remove",
-            "set"
+            "clear",
+            "watch"
           ],
           "type": "string"
         },
@@ -2277,6 +2278,10 @@
           "type": "object"
         },
         "transaction_id": {
+          "type": "string"
+        },
+        "value_name": {
+          "description": "Exact scalar local name for a native write watchpoint in an active value-enabled trace.",
           "type": "string"
         },
         "workspace_id": {
@@ -2449,7 +2454,9 @@
             "scopes",
             "variables",
             "evaluate",
-            "trace"
+            "trace",
+            "mutation_capabilities",
+            "value_origin"
           ],
           "type": "string"
         },
@@ -2507,6 +2514,10 @@
           "type": "string"
         },
         "transaction_id": {
+          "type": "string"
+        },
+        "value_name": {
+          "description": "Exact captured local name; no evaluation is performed.",
           "type": "string"
         },
         "workspace_id": {

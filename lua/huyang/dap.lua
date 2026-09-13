@@ -1798,6 +1798,24 @@ local function stop_reply(session, root)
         reply.locals = frame_locals(session, top, LOCALS_MAX)
     end
     if state.trace_enabled and state.trace_values then reply.trace_values=frame_locals(session,top,128,true) end
+    if state.trace_watch and state.trace_enabled then
+        local watch=state.trace_watch
+        local hit_ids=stop.hitBreakpointIds or {}
+        if #hit_ids==0 and stop.reason=="data breakpoint" then hit_ids={watch.id} end
+        for _,id in ipairs(hit_ids) do
+            if id==watch.id then
+                local current=nil
+                if top.name==watch.frame_name and thread_id==watch.thread then
+                    for _,v in ipairs(reply.trace_values or {}) do
+                        if v.name==watch.name and v.type==watch.type then current=v.value end
+                    end
+                end
+                reply.trace_mutation={name=watch.name,type=watch.type,data_id=watch.data_id,
+                    old=watch.old,new=current,old_known=watch.old~=nil,new_known=current~=nil}
+                watch.old=current
+            end
+        end
+    end
     reply.stack = format_stack(frames, root, STACK_MAX, false)
     if stop.hitBreakpointIds and #stop.hitBreakpointIds > 0 then
         reply.hit = { id = stop.hitBreakpointIds[1], file = info.file, line = top.line }
@@ -2584,7 +2602,13 @@ local function debug_breakpoints(args)
             end
         end
         local session=state.session
-        if session and not session.closed then sync_breakpoints(session) end
+        if session and not session.closed then
+            sync_breakpoints(session)
+            if state.trace_watch and state.trace_watch.owner==args.trace_owner then
+                local e=try_request(session,"setDataBreakpoints",{breakpoints={}})
+                if e then changed=changed+1 else state.trace_watch=nil end
+            end
+        else state.trace_watch=nil end
         return {cleared=cleared,changed=changed}
     end
     if args.clear then
@@ -2612,11 +2636,66 @@ local function frame_for(s, args)
     return frame, nil, frames, thread, st.totalFrames
 end
 
+local function set_trace_watch(s, args)
+    if not state.trace_enabled or not state.trace_values or not state.stop then
+        return {watch={available=false,reason="stopped_value_enabled_trace_required"}}
+    end
+    if (s.config or {}).type~="agent99_delve" or not (s.capabilities or {}).supportsDataBreakpoints then
+        return {watch={available=false,reason="data_breakpoints_unavailable"}}
+    end
+    if state.trace_watch or next(s.data_breakpoints or {}) then
+        return {watch={available=false,reason="existing_watchpoints_preserved"}}
+    end
+    local name=args.value_name
+    if type(name)~="string" or #name==0 or #name>128 then return {watch={available=false,reason="invalid_local_name"}} end
+    local frame, reply=frame_for(s,{})
+    if not frame then return reply end
+    local scopes=request(s,"scopes",{frameId=frame.id})
+    local candidate=nil
+    for _,scope in ipairs(scopes.scopes or {}) do
+        if not scope.expensive then
+            local vars=request(s,"variables",{variablesReference=scope.variablesReference})
+            for _,v in ipairs(vars.variables or {}) do
+                if v.name==name then
+                    if candidate then return {watch={available=false,reason="ambiguous_local"}} end
+                    candidate={variable=v,reference=scope.variablesReference}
+                end
+            end
+        end
+    end
+    if not candidate then return {watch={available=false,reason="local_not_found"}} end
+    local scalar={int=true,int8=true,int16=true,int32=true,int64=true,uint=true,uint8=true,uint16=true,uint32=true,uint64=true,bool=true}
+    if not scalar[candidate.variable.type] then return {watch={available=false,reason="scalar_local_required"}} end
+    local info=request(s,"dataBreakpointInfo",{name=name,variablesReference=candidate.reference,frameId=frame.id})
+    if not info.dataId then return {watch={available=false,reason="local_not_addressable"}} end
+    local result=request(s,"setDataBreakpoints",{breakpoints={{dataId=info.dataId,accessType="write"}}})
+    local bp=(result.breakpoints or {})[1]
+    if not bp or not bp.verified then return {watch={available=false,reason="watchpoint_not_verified"}} end
+    state.trace_watch={owner=args.trace_owner,id=bp.id,data_id=info.dataId,name=name,type=candidate.variable.type,
+        frame_name=frame.name,thread=state.stop.threadId,old=tostring(candidate.variable.value or ""):sub(1,1025)}
+    return {watch={available=true,verified=true,breakpoint_id=bp.id,access_type="write",value_name=name}}
+end
+
 local function debug_threads(args)
     local dap = need_dap()
     local root = args.root or vim.fn.getcwd()
     local s, reply = need_session(dap, root)
     if not s then return reply end
+    if args.watch_set then return set_trace_watch(s,args) end
+    if args.mutation_capabilities then
+        local capabilities = s.capabilities or {}
+        return { mutation_capabilities = {
+            protocol = "dap",
+            adapter = tostring((s.config or {}).type or "unknown"),
+            supports_data_breakpoints = capabilities.supportsDataBreakpoints == true,
+            validated_capture = (s.config or {}).type=="agent99_delve",
+            available = (s.config or {}).type=="agent99_delve" and capabilities.supportsDataBreakpoints == true,
+            runtime_trace = false,
+            sandbox_instrumentation = false,
+            reason = (s.config or {}).type=="agent99_delve" and "stopped_scalar_write_watchpoint_only" or "adapter_watchpoint_capture_not_validated",
+            next = "Use opt-in bounded stop values for sampled comparisons; exact mutation origin remains unavailable.",
+        } }
+    end
     local payload = request(s, "threads", {})
     local threads = {}
     for _, thread in ipairs(payload.threads or {}) do

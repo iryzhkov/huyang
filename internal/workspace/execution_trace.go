@@ -30,13 +30,14 @@ type ExecutionTraceValue struct {
 	Truncated bool   `json:"truncated"`
 }
 type ExecutionTraceEvent struct {
-	Sequence int                   `json:"sequence"`
-	At       time.Time             `json:"at"`
-	Kind     string                `json:"kind"`
-	Thread   int                   `json:"thread,omitempty"`
-	Reason   string                `json:"reason,omitempty"`
-	Frames   []ExecutionTraceFrame `json:"frames"`
-	Values   []ExecutionTraceValue `json:"values,omitempty"`
+	Mutations []ExecutionMutation   `json:"mutations,omitempty"`
+	Sequence  int                   `json:"sequence"`
+	At        time.Time             `json:"at"`
+	Kind      string                `json:"kind"`
+	Thread    int                   `json:"thread,omitempty"`
+	Reason    string                `json:"reason,omitempty"`
+	Frames    []ExecutionTraceFrame `json:"frames"`
+	Values    []ExecutionTraceValue `json:"values,omitempty"`
 }
 type ExecutionTraceTarget struct {
 	Path     string `json:"path"`
@@ -93,7 +94,7 @@ func NormalizeExecutionTracePolicy(policy ExecutionTracePolicy) (ExecutionTraceP
 	switch policy.Mode {
 	case "stops", "path", "conditions":
 	case "mutations":
-		return policy, Codedf("trace_capability_unavailable", "mutation tracing requires a validated watchpoint or instrumentation adapter")
+		return policy, Codedf("trace_capability_unavailable", "start a value-enabled conditions trace at a local scope, inspect mutation_capabilities, then use debug_breakpoints action=watch; automatic launch-time watchpoint resolution is unavailable")
 	default:
 		return policy, Codedf("trace_policy_invalid", "unknown trace policy")
 	}

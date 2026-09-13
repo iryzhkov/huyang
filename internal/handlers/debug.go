@@ -113,6 +113,9 @@ func (h *Handlers) debugOperation(workspace *workspacecore.Workspace, name, acti
 		}
 	case "debug_breakpoints":
 		switch action {
+		case "watch":
+			copied["watch_set"] = true
+			return "debug_threads", copied, nil
 		case "list":
 			return "debug_breakpoints", copied, nil
 		case "clear":
@@ -156,6 +159,9 @@ func (h *Handlers) debugOperation(workspace *workspacecore.Workspace, name, acti
 		}
 	case "debug_inspect":
 		switch action {
+		case "mutation_capabilities":
+			copied["mutation_capabilities"] = true
+			return "debug_threads", copied, nil
 		case "threads":
 			return "debug_threads", copied, nil
 		case "stack":

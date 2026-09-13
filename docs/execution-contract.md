@@ -198,6 +198,37 @@ with a separately capped 128 boundary candidates. All ceilings disclose coverage
 limits. Source ambiguity, uninstrumented callbacks, interrupted capture and
 schedule uncertainty prevent general negative or causal claims.
 
+## Native mutation facts and value-origin limits (X28)
+
+debug_inspect action=mutation_capabilities reports the active adapter's DAP
+advertisement and Huyang's validated capture scope. The built-in Delve adapter
+supports one native scalar write watchpoint after a value-enabled trace stops
+in the local's scope. debug_breakpoints action=watch takes an exact value_name,
+resolves it through scopes/variables and dataBreakpointInfo, and requires a
+verified setDataBreakpoints response. It never evaluates arbitrary expressions.
+Other adapters and runtime/sandbox instrumentation remain unavailable.
+
+Automatic trace_policy mode=mutations launch is still refused with instructions
+for the explicit two-step flow: start a conditions trace with capture_values,
+then install watch at the stopped scope. Existing watchpoints are preserved.
+Owned watchpoints are cleared with trace cleanup or debugger termination.
+
+Native hit facts retain an opaque trace-scoped watched-address identity, stop
+sequence, thread and stack/source mapping, with bounded scalar old/new hashes
+when available and permitted by redaction. A reported location may follow the
+write instruction. Delve omits hit IDs; its data-breakpoint reason is attributed
+only within the one-watchpoint scope. Coincident line breakpoints may hide a hit,
+so unobserved intervals remain explicit. At most 128 mutation facts are retained.
+
+debug_inspect action=value_origin requires a completed trace_id and exact
+value_name, with optional thread filtering. It returns sampled values and native
+write facts separately. Same-name locals, repeated activations, aliases and
+object lifetimes remain unresolved. The last retained native hit is not proof of
+the final write in all executions. Argument/return transfers and a complete
+backward slice remain unknown. Values-disabled traces explain that limitation;
+redacted values never acquire revealing hashes. No instrumentation modifies
+canonical source or runs implicitly.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

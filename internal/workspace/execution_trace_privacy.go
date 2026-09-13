@@ -16,6 +16,7 @@ func traceRedacted(name string, policy ExecutionTracePolicy) bool {
 	return false
 }
 func sanitizeTraceEvent(trace *ExecutionTrace, event *ExecutionTraceEvent) {
+	sanitizeTraceMutations(trace, event)
 	event.At = time.Now().UTC()
 	event.Kind = sanitizeText(event.Kind, 32)
 	event.Reason = sanitizeText(event.Reason, 128)

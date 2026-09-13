@@ -104,7 +104,8 @@ func modernDebugBreakpointsTool(profiles []Profile) ToolDescriptor {
 		properties[key] = value
 	}
 	return ToolDescriptor{
-		Class: ClassProviderRead, Name: "debug_breakpoints", Description: "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
+		ExperimentalProperties: map[string]any{"action": enumSchema("list", "set", "remove", "clear", "watch"), "value_name": stringSchema("Exact scalar local name for a native write watchpoint in an active value-enabled trace.")},
+		Class:                  ClassProviderRead, Name: "debug_breakpoints", Description: "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
 		Profiles: profiles, Destructive: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
 			"list", "set", "remove", "clear"),
@@ -142,7 +143,7 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 		properties[key] = value
 	}
 	return ToolDescriptor{
-		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace"), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
+		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace", "mutation_capabilities", "value_origin"), "value_name": stringSchema("Exact captured local name; no evaluation is performed."), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
 		Class:                  ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
 		Profiles: profiles, ReadOnly: true,
 		InputSchema: debugActionSchema(properties, []string{"workspace_id", "action"},
@@ -205,6 +206,11 @@ func debugSessionExtras(action string, arguments map[string]any) ([]string, erro
 
 func debugBreakpointsExtras(action string, arguments map[string]any) ([]string, error) {
 	switch action {
+	case "watch":
+		if arguments["value_name"] == nil {
+			return nil, errors.New("watch requires value_name")
+		}
+		return []string{"value_name"}, nil
 	case "set", "remove":
 		if arguments["target"] == nil {
 			return nil, fmt.Errorf("debug_breakpoints %s requires target", action)
@@ -235,6 +241,13 @@ func debugControlExtras(action string, arguments map[string]any) ([]string, erro
 
 func debugInspectExtras(action string, arguments map[string]any) ([]string, error) {
 	switch action {
+	case "value_origin":
+		if arguments["trace_id"] == nil || arguments["value_name"] == nil {
+			return nil, errors.New("value_origin requires trace_id and value_name")
+		}
+		return []string{"trace_id", "value_name", "thread"}, nil
+	case "mutation_capabilities":
+		return nil, nil
 	case "trace":
 		return []string{"trace_id"}, nil
 	case "threads":

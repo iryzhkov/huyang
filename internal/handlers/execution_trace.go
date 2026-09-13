@@ -13,6 +13,9 @@ import (
 
 func (h *Handlers) debug(ctx context.Context, requestID, name string, w *workspacecore.Workspace, args map[string]any) map[string]any {
 	action, _ := args["action"].(string)
+	if name == "debug_inspect" && action == "value_origin" {
+		return h.traceValueOrigin(requestID, w, args)
+	}
 	if name == "debug_inspect" && action == "trace" {
 		id, _ := args["trace_id"].(string)
 		trace, err := w.ExecutionTrace(id)
@@ -24,6 +27,13 @@ func (h *Handlers) debug(ctx context.Context, requestID, name string, w *workspa
 		return result
 	}
 	active := w.ActiveExecutionTrace()
+	if name == "debug_breakpoints" && action == "watch" {
+		if active == "" {
+			return mcpapi.Failure(requestID, w, "trace_incomplete", workspacecore.Codedf("trace_incomplete", "watch requires an active value-enabled trace"))
+		}
+		args = cloneDebugMap(args)
+		args["trace_owner"] = active
+	}
 	if name == "debug_session" && (action == "start" || action == "attach" || action == "restart") && active != "" {
 		return mcpapi.Failure(requestID, w, "trace_active", workspacecore.Codedf("trace_active", "stop the traced session before starting or restarting"))
 	}

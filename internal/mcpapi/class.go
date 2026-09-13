@@ -42,10 +42,14 @@ func ClassForCall(name string, arguments map[string]any) SchedulerClass {
 		if arguments["trace_policy"] != nil {
 			class = ClassExternalJob
 		}
+	case "debug_breakpoints":
+		if arguments["action"] == "watch" {
+			class = ClassExternalJob
+		}
 	case "debug_control":
 		class = ClassExternalJob
 	case "debug_inspect":
-		if arguments["action"] == "trace" {
+		if arguments["action"] == "trace" || arguments["action"] == "value_origin" {
 			class = ClassPureRead
 		}
 	case "change_plan":

@@ -12,10 +12,16 @@ func (s *executionTraceStore) validRecoveredTrace(trace ExecutionTrace) bool {
 	if _, err := NormalizeExecutionTracePolicy(trace.Policy); err != nil {
 		return false
 	}
-	values, bytes := 0, 0
+	values, bytes, mutations := 0, 0, 0
 	for _, event := range trace.Events {
 		if len(event.Frames) > MaxExecutionTraceFrames {
 			return false
+		}
+		mutations += len(event.Mutations)
+		for _, mutation := range event.Mutations {
+			if len(mutation.Name) > 128 || len(mutation.ObjectID) > 80 || len(mutation.OldHash) > 64 || len(mutation.NewHash) > 64 {
+				return false
+			}
 		}
 		for _, value := range event.Values {
 			values++
@@ -25,7 +31,7 @@ func (s *executionTraceStore) validRecoveredTrace(trace ExecutionTrace) bool {
 			}
 		}
 	}
-	if values > MaxExecutionValues || bytes > MaxExecutionRetainedValueBytes {
+	if values > MaxExecutionValues || mutations > MaxExecutionValues || bytes > MaxExecutionRetainedValueBytes {
 		return false
 	}
 	if trace.Finished != nil {
