@@ -19,7 +19,7 @@ const preparedDiagnosticBudget = 10
 // so rather than quietly answering about the wrong bytes.
 func preparedCapableTool(name string) bool {
 	switch name {
-	case "read", "navigate", "diagnostics", "code_actions":
+	case "read", "navigate", "diagnostics", "code_actions", "path_explain", "execution_graph":
 		return true
 	}
 	return false
@@ -32,6 +32,8 @@ func (h *Handlers) routePrepared(ctx context.Context, requestID, name string, wo
 		return failure
 	}
 	switch name {
+	case "path_explain", "execution_graph":
+		return h.executionPrepared(ctx, requestID, name, workspace, view, arguments)
 	case "read":
 		request, ok := decodeReadRequest(arguments)
 		if !ok {

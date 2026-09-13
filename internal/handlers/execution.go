@@ -13,46 +13,20 @@ import (
 func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
 	defer cancel()
-	selected, err := executionFlowSelection(arguments)
+	q, err := h.captureExecution(ctx, workspace, arguments, nil)
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
 	}
-	before := workspace.Identity()
-	sources, revision, coverage, err := workspace.ExecutionSources(ctx)
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
+	return executionGraphEnvelope(requestID, workspace, q)
+}
+func executionGraphEnvelope(requestID string, w *workspacecore.Workspace, q *executionQuery) map[string]any {
+	data := map[string]any{"snapshot": q.snapshot, "status": workspacecore.ExecutionUnknown}
+	if q.prepared != nil {
+		data["revision"] = q.prepared.PreparedRevision
+		data["plan_id"] = q.prepared.PlanID
 	}
-	policy, err := workspacecore.LoadPipelinePolicy(before.Root, "")
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "workspace_policy_invalid", err)
-	}
-	request := workspacecore.ExecutionRequest{
-		Key: workspacecore.AnalysisKey{WorkspaceID: before.ID, Epoch: before.Epoch, Revision: revision,
-			Profile: "execution/v1", ConfigHash: workspacecore.PipelineFingerprint(policy), ExecutionDomain: "canonical"},
-		Root: before.Root,
-	}
-	withProvider := true
-	if enabled, ok := arguments["use_provider"].(bool); ok {
-		withProvider = enabled
-	}
-	contributors := h.acquireExecution(ctx, workspace, sources, revision, withProvider)
-	contributors = append(contributors, workspacecore.AcquireImportExecutionCalls(ctx, request, sources, policy), executionBoundary{sources, coverage})
-	contributors, err = h.expandExecutionFlow(ctx, workspace, sources, &request, contributors, selected, withProvider)
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
-	}
-	snapshot, err := workspacecore.BuildExecutionSnapshot(ctx, request, contributors...)
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, workspacecore.ErrorCode(err), err)
-	}
-	_, afterRevision, _, err := workspace.ExecutionSources(ctx)
-	if err != nil || afterRevision != revision || workspace.Identity().Epoch != before.Epoch {
-		return mcpapi.Envelope(requestID, workspace, "conflict", "graph_source_changed", "Source changed during graph acquisition; retry against current content", map[string]any{})
-	}
-	result := mcpapi.Envelope(requestID, workspace, "partial", "execution_coverage_incomplete",
-		"Execution snapshot includes static candidates and unresolved frontiers; dynamic call coverage remains incomplete", map[string]any{
-			"snapshot": snapshot, "status": workspacecore.ExecutionUnknown,
-		})
+	result := mcpapi.Envelope(requestID, w, "partial", "execution_coverage_incomplete",
+		"Execution snapshot includes static candidates and unresolved frontiers; dynamic coverage remains incomplete", data)
 	result["api_version"] = mcpapi.APIVersionExperimental
 	return result
 }

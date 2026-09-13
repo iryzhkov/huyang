@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -205,31 +206,57 @@ func (e planInvariantEvaluator) noReferences(ctx context.Context, view providerp
 	return answer
 }
 
-// pathUnreachable says whether anything can still reach the declaration after
-// the change.
-//
-// It can refuse and it cannot yet agree. One reference is a path, and a path
-// is a refutation; the other direction needs a complete static execution
-// graph, which this service does not build, and "no caller I could see" is
-// not "no caller". So the honest answers here are violated and unknown, and
-// the reason says what proving it would take.
+// pathUnreachable uses call evidence, never a non-call reference. Complete
+// absence is available only inside the closed Go adapter's declared grammar.
 func (e planInvariantEvaluator) pathUnreachable(ctx context.Context, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
-	symbol := invariant.Scope.Symbol
-	outside, reason := e.stagedReferences(ctx, view, symbol)
-	if reason != "" {
-		return invariantUnknown(invariant, reason)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
+	defer cancel()
+	q, err := e.handlers.captureExecution(ctx, e.workspace, map[string]any{"use_provider": false}, &view)
+	if err != nil {
+		return invariantUnknown(invariant, "prepared execution evidence could not be acquired")
 	}
-	if len(outside) > 0 {
-		answer := invariant
-		answer.Status = workspacecore.InvariantViolated
-		answer.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
-		answer.Detail = fmt.Sprintf("%s is still reached from %d place(s): %s",
-			symbol.NamePath, len(outside), strings.Join(boundedDetails(outside), "; "))
-		return answer
+	target, err := executionEndpoint(*q.snapshot.Execution, map[string]any{"path": invariant.Scope.Symbol.Path, "name_path": invariant.Scope.Symbol.NamePath})
+	if err != nil {
+		return invariantUnknown(invariant, "the target is not uniquely represented in the prepared execution graph")
 	}
-	return invariantUnknown(invariant, fmt.Sprintf(
-		"no reference to %s remains, but proving nothing reaches it needs a complete static execution graph, which this service does not build",
-		symbol.NamePath))
+	for _, edge := range q.snapshot.Execution.Edges {
+		if edge.To == target.ID && edge.From != target.ID && (edge.Kind == "calls" || edge.Kind == "dynamic_dispatch") {
+			invariant.Status = workspacecore.InvariantViolated
+			invariant.Detail = "A static call candidate still reaches " + target.Name
+			invariant.Coverage = workspacecore.Coverage{Complete: false, Semantic: "go_parser_calls", Skipped: []string{"dynamic coverage remains incomplete"}}
+			invariant.EvidenceIDs = []string{q.snapshot.ID, edge.ID}
+			return invariant
+		}
+	}
+	if !workspacecore.ClosedGoMainTarget(q.sources, target) {
+		return invariantUnknown(invariant, "absence requires an unexported non-entry target in the closed Go main-package model")
+	}
+	q.closedProof(ctx, target, target)
+	graph := q.snapshot.Execution
+	if q.closedDirectory == nil || !graph.Coverage.Complete || graph.Coverage.Capped || len(graph.Coverage.Gaps) > 0 || len(graph.Coverage.Limits) > 0 {
+		return invariantUnknown(invariant, "no call remains, but the relevant graph is not complete and uncapped")
+	}
+	mainFound, targetFound := false, false
+	for _, node := range graph.Nodes {
+		mainFound = mainFound || node.Name == "main"
+		targetFound = targetFound || node.ID == target.ID
+	}
+	if !mainFound || !targetFound {
+		return invariantUnknown(invariant, "closed proof lacks a main entry or exact target")
+	}
+	for _, edge := range graph.Edges {
+		if edge.To == target.ID && edge.From != target.ID {
+			return invariantUnknown(invariant, "complete graph retains an incoming call")
+		}
+	}
+	if err = q.validate(ctx, e.handlers); err != nil {
+		return invariantUnknown(invariant, "prepared source changed during proof")
+	}
+	invariant.Status = workspacecore.InvariantProven
+	invariant.Detail = "No other function in this closed Go main package can invoke " + target.Name + "; the target is not externally exported or a runtime entry"
+	invariant.Coverage = workspacecore.Coverage{Complete: true, Semantic: "closed_go_calls"}
+	invariant.EvidenceIDs = []string{q.snapshot.ID}
+	return invariant
 }
 
 // stagedReferences are the places outside the declaration that refer to it in

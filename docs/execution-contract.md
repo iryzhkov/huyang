@@ -97,6 +97,30 @@ Provider buffer hashes and source handles follow the X22 source contract.
 The selected-body expansion is broader than a minimal call-site slice and
 does not replace the interprocedural call summary.
 
+## Static path explanation (X24)
+
+path_explain accepts function names/IDs or path/name locators and bounded
+max_paths/max_depth. It automatically expands selected functions and returns
+ordered paths with the supporting snapshot. Ranking applies to the bounded
+candidates; it cannot guarantee globally optimal paths after a cap. Path IDs
+are stable identities supplied with their evidence, not registry lookup handles.
+Combined mode is unavailable until trace overlays exist.
+
+A statically_unreachable answer requires the closed Go adapter: an import-free
+package containing only nullary functions, direct calls, bare returns and
+constant-boolean branches. Values, callbacks, channels, methods, imports,
+compiler/line directives, assembly, omitted inputs and all caps refuse proof.
+The response names this narrow package scope. Both branch alternatives remain
+in the overapproximation. General dynamic absence stays unknown.
+
+revision/plan_id routes execution queries into the held prepared tree using
+native Go/import fallback. Prepared psrc_ source handles share normal bounded
+retention but require read with that prepared revision; canonical resolution
+refuses them. Source hashes, epoch and held preparation are rechecked.
+path_unreachable can prove an unexported non-entry target in a closed Go main
+package; other cases retain conservative call refutation or unknown.
+The frozen v1alpha1 descriptor's older invariant prose is unchanged.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

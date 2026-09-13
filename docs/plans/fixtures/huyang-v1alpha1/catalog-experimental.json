@@ -2385,6 +2385,18 @@
           "maxItems": 16,
           "type": "array"
         },
+        "plan_id": {
+          "description": "Read the prepared sandbox for this plan.",
+          "type": "string"
+        },
+        "plan_revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "revision": {
+          "description": "Current content revision or a prepared revision.",
+          "type": "string"
+        },
         "root": {
           "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
           "type": "string"
@@ -2401,5 +2413,116 @@
       "type": "object"
     },
     "name": "execution_graph"
+  },
+  {
+    "description": "Explain bounded static candidate paths between functions, including source evidence, selected flow, uncertainty and narrowly proven absence. Never launches a program.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "name_path": {
+                  "description": "Function name.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Workspace-relative declaration file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "name_path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "max_depth": {
+          "maximum": 64,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_paths": {
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "static",
+            "combined"
+          ],
+          "type": "string"
+        },
+        "plan_id": {
+          "description": "Read this plan's prepared revision.",
+          "type": "string"
+        },
+        "plan_revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "revision": {
+          "description": "Current content revision or a prepared revision.",
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
+        "to": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "name_path": {
+                  "description": "Function name.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Workspace-relative declaration file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "name_path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "trace_id": {
+          "description": "Reserved for combined trace overlays.",
+          "type": "string"
+        },
+        "use_provider": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "name": "path_explain"
   }
 ]

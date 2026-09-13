@@ -170,12 +170,14 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	// same plan is already preparing.
 	// A call that names a prepared revision is answered from the sandbox
 	// that holds it, never from canonical source.
-	if selector := decodePreparedSelector(arguments); selector.wantsPrepared(workspace) && preparedCapableTool(name) {
+	if selector := decodePreparedSelector(arguments); selector.wantsPrepared(workspace) && preparedCapableTool(name) && !executionContentSelector(name, selector) {
 		return h.routePrepared(ctx, requestID, name, workspace, selector, arguments)
 	}
 	switch name {
 	case "execution_graph":
 		return h.executionGraph(ctx, requestID, workspace, arguments)
+	case "path_explain":
+		return h.pathExplain(ctx, requestID, workspace, arguments, nil)
 	case "workspace_inspect":
 		return h.inspect(ctx, requestID, workspace, arguments)
 	case "search":

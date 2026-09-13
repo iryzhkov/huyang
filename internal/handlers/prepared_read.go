@@ -20,6 +20,9 @@ import (
 // prepared revision it read, so an agent cannot mistake a proposal for the
 // repository.
 func (h *Handlers) readPrepared(requestID string, workspace *workspacecore.Workspace, view providerpool.PreparedView, request readRequest) map[string]any {
+	if strings.HasPrefix(request.Handle, "psrc_") {
+		return h.readPreparedExecutionHandle(requestID, workspace, view, request)
+	}
 	if request.Symbol != nil || request.Handle != "" || request.View == "history" || request.View == "changes" {
 		return mcpapi.Envelope(requestID, workspace, "unavailable", "prepared_target_unsupported",
 			"a prepared revision is read by path; symbol, handle, history and changes views read the canonical workspace",

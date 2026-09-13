@@ -54,9 +54,9 @@ const (
 	// covers.
 	InvariantAPICompatible InvariantKind = "api_compatible"
 	// InvariantPathUnreachable: nothing can still reach the named declaration
-	// after the change. This one can be refuted and not yet proved: refuting
-	// it takes one reference, proving it takes a complete static execution
-	// graph, which this service does not build.
+	// after the change. A static call candidate can refute it. Proof needs
+	// complete uncapped execution coverage; the closed Go adapter supports
+	// only unexported non-entry declarations in its narrow main-package model.
 	InvariantPathUnreachable InvariantKind = "path_unreachable"
 )
 
