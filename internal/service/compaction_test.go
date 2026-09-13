@@ -239,8 +239,13 @@ func TestWorkspaceOpenOverviewIsCompactByDefault(t *testing.T) {
 		t.Fatal("compact overview still lists entries")
 	}
 	commits := data["recent_commits"].(map[string]any)["commits"].([]map[string]any)
-	if len(commits) != 3 || commits[0]["subject"] != "commit 4" || commits[0]["handle"] == nil {
+	// The opaque handle is not here: read view=history hands out the same
+	// handles for the file the caller is actually interested in.
+	if len(commits) != 3 || commits[0]["subject"] != "commit 4" || commits[0]["abbreviated_id"] == nil {
 		t.Fatalf("recent commits = %#v", commits)
+	}
+	if _, present := commits[0]["handle"]; present {
+		t.Fatalf("compact commit carries an opaque handle: %#v", commits[0])
 	}
 	if _, present := commits[0]["author_name"]; present {
 		t.Fatalf("compact commit carries author metadata: %#v", commits[0])

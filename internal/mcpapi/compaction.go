@@ -175,20 +175,29 @@ func CompactOrientation(orientation workspacecore.Orientation) map[string]any {
 		}
 		topLevel = append(topLevel, record)
 	}
-	return map[string]any{
-		"workspace": orientation.Workspace, "coverage": orientation.Coverage,
+	// The workspace identity is already the envelope's, and coverage that is
+	// complete says only that the walk finished, which the entry count says
+	// too: both were a repeat in every reply that opens a workspace.
+	compact := map[string]any{
 		"entry_count": len(orientation.Entries), "top_level": topLevel,
 		"top_level_count": len(byName), "top_level_truncated": truncated,
 	}
+	if !orientation.Coverage.Complete {
+		compact["coverage"] = orientation.Coverage
+	}
+	return compact
 }
 
-// CompactRecentCommits keeps the handle, abbreviated ID and subject of each
-// commit; the full summary is available through read view=changes.
+// CompactRecentCommits keeps the abbreviated ID and subject of each commit.
+// The opaque handle that read view=changes needs is not here: it is 32 hex
+// characters per commit in a reply that opens a workspace, for a call an
+// agent rarely makes, and read view=history hands out the same handles when
+// it does.
 func CompactRecentCommits(list workspacecore.CommitList, limit int) map[string]any {
 	commits := make([]map[string]any, 0, min(len(list.Commits), limit))
 	for _, commit := range list.Commits[:min(len(list.Commits), limit)] {
 		commits = append(commits, map[string]any{
-			"handle": commit.Handle, "abbreviated_id": commit.AbbreviatedID, "subject": commit.Subject,
+			"abbreviated_id": commit.AbbreviatedID, "subject": commit.Subject,
 		})
 	}
 	compact := map[string]any{"commits": commits}

@@ -100,7 +100,6 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"overview":          overview,
 		"recent_commits":    mcpapi.CompactRecentCommits(recent, 3),
 		"commands":          commands,
-		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
 	return result
 }

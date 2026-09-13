@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,7 +87,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		"kind": "documents", "files": []string{document},
 	})
 	if reopened["workspace"].(map[string]any)["id"] != workspaceID ||
-		reopened["data"].(map[string]any)["registry"].(map[string]any)["reused"] != true {
+		!strings.HasPrefix(fmt.Sprint(reopened["summary"]), "Reopened") {
 		t.Fatalf("repeated open = %#v after %#v", reopened, opened)
 	}
 	searched := callModern(t, firstSession, "search", map[string]any{
