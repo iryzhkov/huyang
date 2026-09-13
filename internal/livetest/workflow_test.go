@@ -91,7 +91,7 @@ func TestTheWholeWorkflowFromOpenToApplied(t *testing.T) {
 	// The staged bytes are somewhere to look, and they say so.
 	read := call(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "revision": revision,
-		"target": map[string]any{"path": "ledger.go"},
+		"target": ledgerTarget(),
 	})
 	if outcome(read) != "ok" || !strings.Contains(fieldString(data(read), "content"), "Pending") {
 		t.Fatalf("prepared read = %s: %s", outcome(read), summary(read))
@@ -136,7 +136,7 @@ func TestTheWholeWorkflowFromOpenToApplied(t *testing.T) {
 	}
 	// The preparation the revision replaced is gone, and reading it says so.
 	gone := call(t, session, "read", map[string]any{
-		"workspace_id": workspaceID, "revision": revision, "target": map[string]any{"path": "ledger.go"},
+		"workspace_id": workspaceID, "revision": revision, "target": ledgerTarget(),
 	})
 	if gone["code"] != "prepared_revision_unavailable" {
 		t.Fatalf("the replaced preparation still answers: %s/%v", outcome(gone), gone["code"])
