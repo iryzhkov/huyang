@@ -55,9 +55,12 @@ def render(spec: dict, scenario_id: str, language: str, family: str) -> str:
     ]
     if family == "huyang":
         parts += [
-            "Name the fixture directory with the root argument on your first huyang call",
-            "and pass the workspace_id the reply carries to every later call. Call",
-            "workspace_open only when you want its overview and verification commands.",
+            "Name the fixture directory with the root argument on your first huyang call,",
+            "as an absolute path (your working directory is the repository root, so it is",
+            f"<working directory>/{lang['dir']}), and pass the workspace_id the reply",
+            "carries to every later call. A relative root is refused: the service would",
+            "resolve it in its own directory, not yours. Call workspace_open only when you",
+            "want its overview and verification commands.",
         ]
     parts += ["", f"Task ({scenario['id']}: {scenario['title']}):", scenario["task"][language], ""]
     if command:
