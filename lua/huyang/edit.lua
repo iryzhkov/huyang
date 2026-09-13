@@ -4402,14 +4402,24 @@ end
 local function code_action_workspace_edit(bufnr, args)
     local client = get_client(bufnr, "textDocument/codeAction")
     local position = make_position(bufnr, client, args.line, args.symbol, args.col)
+    -- Over the whole target range, not a point: an action that applies to a
+    -- call is offered for the call, and a caller that addressed the statement
+    -- containing it would otherwise be told there is nothing here.
+    local finish = position
+    if args.end_line then
+        finish = make_position(bufnr, client, args.end_line, nil, args.end_col)
+    end
     local lsp_diags = {}
     pcall(function()
         lsp_diags = vim.lsp.diagnostic.from(vim.diagnostic.get(bufnr, { lnum = position.line }))
     end)
+    -- Asked for without `only`, then filtered here: a server that answers an
+    -- `only` request with nothing leaves the caller unable to say what it
+    -- could have had instead.
     local actions = request(client, bufnr, "textDocument/codeAction", {
         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-        range = { start = position, ["end"] = position },
-        context = { diagnostics = lsp_diags, triggerKind = 1, only = args.only },
+        range = { start = position, ["end"] = finish },
+        context = { diagnostics = lsp_diags, triggerKind = 1 },
     }) or {}
     local action, offered = select_code_action(actions, args.only, args.title)
     if not action then

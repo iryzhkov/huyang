@@ -143,6 +143,15 @@ func (h *Handlers) workspaceEditArguments(workspace *workspacecore.Workspace, op
 			arguments["title"] = title
 		}
 	}
+	if arguments["kind"] == "code_action" {
+		// A code action is asked for over the whole target range, so an
+		// action that applies to a call inside the statement is offered.
+		if path, _, endLine, err := declarationLines(workspace, operation); err == nil {
+			if read, readErr := workspace.Read(path); readErr == nil {
+				arguments["end_line"], arguments["end_col"] = endLine, lineWidth(read.Content, endLine)
+			}
+		}
+	}
 	return arguments, nil
 }
 
@@ -338,6 +347,15 @@ func declarationLines(workspace *workspacecore.Workspace, operation workspacecor
 
 func lineOf(content []byte, offset int) int {
 	return bytes.Count(content[:offset], []byte{'\n'}) + 1
+}
+
+// lineWidth is the 1-based column just past the end of a line.
+func lineWidth(content []byte, line int) int {
+	lines := bytes.Split(content, []byte{'\n'})
+	if line < 1 || line > len(lines) {
+		return 1
+	}
+	return len(lines[line-1]) + 1
 }
 
 func editStart(raw any) int {
