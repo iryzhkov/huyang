@@ -76,6 +76,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 
 func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
 	envelope = mcpapi.CompactReceipt(tool, arguments, envelope)
+	envelope = mcpapi.TrimWireDiffs(tool, envelope)
 	pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))
 	if renderErr != nil {
 		return nil, renderErr

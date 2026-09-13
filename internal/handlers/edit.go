@@ -312,6 +312,10 @@ func compactEditData(workspace *workspacecore.Workspace, request editRequest, ap
 	for _, file := range applied.files {
 		changed = append(changed, file.Path)
 	}
+	// The diffs stay in the receipt this data becomes: revision_diff and the
+	// affected-test coverage read the content hashes back out of it. The
+	// wire copy drops them unless the caller asked, which is where they cost
+	// a third of an ordinary edit reply and buy the agent nothing.
 	data := map[string]any{
 		"changed_paths": changed, "canonical_changed": !request.Preview,
 		"diffs":         editDiffs(applied, request.Verbose || request.Preview),
