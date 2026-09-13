@@ -94,8 +94,11 @@ existing workspace, because its handle comes from one.
   file is outlined from the language server's declarations. The reply is one entry per declaration with its name, kind,
   line range and a handle, which `read {target:{handle}}` and `edit_apply replace_range`
   accept; a declaration can also be read by `symbol_locator` with the name the outline
-  gave. A file neither can section answers a handle to the whole document and says
-  `text_only`.
+  gave. A file neither can section, and a file a parser read and found nothing in,
+  answer a handle to the whole document. An outline is bounded: `declaration_count` is
+  what the file declares, `listed_count` is what the reply carries, and
+  `sections_truncated` says a generated file's list was cut, with `search` scoped to
+  that path as the way to the rest.
 - Need locations: `search` (literal by default; multi-line queries must match whitespace
   exactly). `paths: ["*.go", "internal/"]` scopes the hits and `context_lines: 2` adds the
   numbered lines around each hit, so one search replaces `grep -rn -C2` and the read that
@@ -114,6 +117,12 @@ existing workspace, because its handle comes from one.
   no language server answers, `search` falls back to literal matches and says so.
 - Search hits are path, line and text. Add `include_handles: true` only when you will edit
   a hit with `replace_range`.
+- A search that hit its match bound says `total_is_lower_bound` with the bound in
+  `match_limit`, and its summary counts "at least N": the hits it holds are where it
+  stopped, not what the workspace contains, so narrow the query or scope it with `paths`
+  rather than refining a set that is already a truncation. Files the search could not
+  read, binaries included, are named in `coverage.skipped` with an exact
+  `skipped_count`, because a file that was never opened is not a file with no matches.
 - New file: `create_file`; it refuses an existing path and names that file's
   `revision_id`, and `replace: true` with that revision overwrites the file in one call.
   Several files that must change atomically or not at all: `change_plan` (prepare, then

@@ -1005,7 +1005,12 @@ counts, and every descriptor must declare a scheduler class.
 
 - `provisional_not_accepted`: apply of a `PROVISIONAL` plan without `accept_provisional`.
 - `plan_state_invalid`: an action that the plan state machine does not permit from the
-  plan's current state, including an edit of a plan that retention compacted.
+  plan's current state, including an edit of a plan that retention compacted, a prepare of
+  a plan that declares no operations, and an apply of a plan that holds no preparation
+  because it was never prepared or has already been applied.
+- `plan_not_found`: a `plan_id` this workspace does not hold, because it was never created
+  or was discarded and collected. The follow-up is to create a plan; nothing that names
+  the missing one can succeed.
 - `idempotency_receipt_evicted`: the receipt for this idempotency key was evicted by the
   retention caps; the call is neither replayed nor re-executed.
 - `request_cancelled`: the request's context was cancelled, including by the client.
@@ -1017,9 +1022,16 @@ counts, and every descriptor must declare a scheduler class.
 
 The workspace lifecycle codes `commit_precondition_changed`, `commit_recovery_required`,
 `workspace_epoch_changed`, `prepared_revision_changed`, `plan_revision_changed`,
-`plan_validation_conflicts` and `provider_unavailable` are now typed (`CodedError` in
-`internal/workspace/errors.go`) and classified by the bridge with `errors.As`, never by
-substring; their text keeps the `code: detail` shape.
+`plan_state_invalid`, `plan_not_found`, `plan_validation_conflicts` and
+`provider_unavailable` are now typed (`CodedError` in `internal/workspace/errors.go`) and
+classified by the bridge with `errors.As`, never by substring; their text keeps the
+`code: detail` shape. Each reaches the caller under its own name:
+`prepared_revision_changed` is no longer reported as `commit_precondition_changed`, which
+asks for a different recovery.
+
+The numeric bounds the catalog declares are enforced on the way in. An integer argument
+outside its schema's `minimum` or `maximum` is refused with the bound named, the way an
+oversized array and an oversized string already were.
 
 ### Not implemented
 
