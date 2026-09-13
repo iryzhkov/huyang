@@ -144,6 +144,19 @@ existing workspace, because its handle comes from one.
   finding the formatter caused is attributed to the formatter. `baseline_complete: false`
   means the comparison could not be made at all: the workspace held no current evidence
   about those files, so nothing in the report can be called new.
+- State what the result must satisfy and let the prepare check it:
+  `change_plan {action: prepare, operations, invariants: [{id: "clean", kind:
+  "no_new_diagnostics"}]}` on the experimental profile. The kinds are
+  `no_new_diagnostics`, `tests_pass`, `no_references`, `symbol_exists` and
+  `symbol_absent`; the last three name their declaration in
+  `scope.symbol`. Each one is answered against the prepared revision and is
+  `proven`, `violated` or `unknown`, and unknown is not a pass: a required
+  invariant that nobody could evaluate keeps the plan out of READY exactly as a
+  violated one does. A required invariant has no accept flag, so a plan that
+  fails one is not applied and the reply offers inspect and discard rather than
+  apply; declare `enforcement: "advisory"` for an assertion that should be
+  reported and acknowledged rather than enforced. Editing the plan drops every
+  answer, because they were answers about other bytes.
 - Before changing a declaration, ask what it reaches: `change_plan {action: preview,
   plan_id, plan_revision, view: "impact"}` answers who calls it today, whether it is
   exported, which tests are associated with the files, what generated or configuration

@@ -121,7 +121,11 @@ func (h *Handlers) diagnosticsPrepared(ctx context.Context, requestID string, wo
 	// What the proposal did, rather than what is wrong with the code: the
 	// findings that are new against the canonical report, who caused each,
 	// and what it resolved.
-	if delta := h.preparedDelta(ctx, requestID, workspace, view, findings, files); delta != nil {
+	var delta *workspacecore.DiagnosticDelta
+	if plan, planErr := workspace.InspectPlan(view.PlanID, view.PlanRevision); planErr == nil {
+		delta = h.preparedDelta(ctx, requestID, workspace, plan, view, findings, files)
+	}
+	if delta != nil {
 		data["delta"] = delta
 		summary = fmt.Sprintf("%d new, %d resolved, %d unchanged at %s",
 			len(delta.New), len(delta.Resolved), delta.UnchangedCount, view.PreparedRevision)

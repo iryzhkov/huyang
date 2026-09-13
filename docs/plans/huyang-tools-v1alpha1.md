@@ -1204,6 +1204,52 @@ count as a baseline, because stale means it describes other bytes. Silence is re
 silence rather than as "nothing was wrong before", which would present every pre-existing
 problem as something this change caused.
 
+### What the result must satisfy (experimental)
+
+`change_plan` accepts `invariants` on `create`, `edit` and `prepare` in the experimental
+catalog. Each one is a durable assertion about the plan's result, with a stable `id`, a
+`kind`, an `enforcement` of `required` (the default) or `advisory`, and the typed parameters
+its kind needs under `scope`:
+
+- `no_new_diagnostics` - the proposal introduces no finding the workspace did not already
+  have. Answered from the prepared diagnostic delta, and narrowed by `scope.paths` and
+  `scope.severity`.
+- `tests_pass` - the preparation's test stage passed. Answered from the verification the
+  sandbox pipeline already ran.
+- `no_references` - nothing outside the declaration in `scope.symbol` still refers to it in
+  the staged bytes. Answered by the language server that read them.
+- `symbol_exists`, `symbol_absent` - the declaration in `scope.symbol` is, or is not, in the
+  staged file.
+
+Every invariant is `pending` until a prepare evaluates it, and then `proven`, `violated` or
+`unknown`, beside the prepared revision it was evaluated against, the coverage of that
+evidence and its evidence IDs. Unknown is not a pass. A required invariant that is violated
+or unknown keeps the plan out of READY and refuses `apply` with `invariant_not_proven`,
+which no `accept_provisional` covers: the reply offers `inspect` and `discard` rather than
+`apply`. An advisory one leaves the plan PROVISIONAL and is accepted with the same explicit
+acceptance as any other incomplete dimension, under `invariant:<id>`.
+
+A proof names the prepared revision it was made about, and apply revalidates that: a proof
+of an earlier preparation of the same plan is not a proof of this one. Editing a plan drops
+every answer and keeps every declaration, and `edit.invariants` replaces the declarations
+wholesale, which is how a required assertion becomes advisory.
+
+A plan that declares nothing asserts nothing. Plan records written before invariants existed
+(record version 2) are read as they are, so an older plan can never gain a requirement by
+being loaded.
+
+### Evidence about staged bytes stays out of the ledger
+
+Preparing a plan records what the language server made of the sandbox. That evidence is now
+marked staged: the record is kept, so a preparation can point at it, and the workspace's
+current diagnostic set is left alone.
+
+Before this, a preparation wrote its findings into the canonical ledger under the canonical
+paths. A proposal that fixed an error marked the canonical file clean while it was still
+broken, and a proposal that introduced one put that error into the ledger as something that
+was already there - which would let the next comparison call it unchanged. Both directions
+corrupt the baseline every diagnostic delta and the `no_new_diagnostics` invariant rest on.
+
 ### Prepared revisions as somewhere to look (experimental)
 
 `read`, `navigate`, `diagnostics` and `code_actions` accept a revision selector in the

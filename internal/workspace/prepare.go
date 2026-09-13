@@ -105,16 +105,70 @@ func verificationGaps(stages []VerificationStage) []VerificationGap {
 	return gaps
 }
 
+// PreparationGaps lists every dimension of one prepared plan whose evidence is incomplete:
+// the verification stages that fell short, and the advisory invariants that were not proven.
+// A committer must accept each of them by name, so this is also the list a caller needs in
+// order to know what it is accepting.
+func PreparationGaps(plan PlanRecord) []VerificationGap {
+	if plan.Preparation == nil {
+		return nil
+	}
+	return append(verificationGaps(plan.Preparation.Verification),
+		invariantGaps(plan.Invariants, plan.Preparation.PreparedRevision)...)
+}
+
+// UnprovenRequiredInvariants lists the required invariants that are not proven for this
+// plan's prepared revision. It is what stops a prepared plan being applied, and what a
+// refusal names.
+func UnprovenRequiredInvariants(plan PlanRecord) []PlanInvariant {
+	prepared := ""
+	if plan.Preparation != nil {
+		prepared = plan.Preparation.PreparedRevision
+	}
+	required, _ := unprovenInvariants(plan.Invariants, prepared)
+	return required
+}
+
+// InvariantDescription is what one invariant says about itself, for a reply that has to
+// explain why a plan cannot be applied.
+func InvariantDescription(invariant PlanInvariant) string { return invariant.describe() }
+
 // CheckProviderAccess prevents a provider-backed call from observing an unlabeled staged view.
 func (w *Workspace) CheckProviderAccess(transactionID string) error {
 	return nil
 }
 
+// InvariantEvaluator answers what the staged bytes make of each invariant a plan declares.
+// It runs after the sandbox holds the prepared bytes and before the plan reaches a state
+// anything can be applied from. An evaluator that cannot answer one invariant returns it
+// unknown; leaving it out entirely means the same thing.
+type InvariantEvaluator interface {
+	EvaluateInvariants(ctx context.Context, plan PlanRecord, preparation PlanPreparation) []PlanInvariant
+}
+
+// PrepareOption adjusts one PreparePlan call.
+type PrepareOption func(*prepareOptions)
+
+type prepareOptions struct {
+	evaluator InvariantEvaluator
+}
+
+// WithInvariantEvaluator supplies what evaluates a plan's declared invariants. Without one
+// every declared invariant is unknown, which is what a plan with required invariants
+// deserves from a service that cannot check them.
+func WithInvariantEvaluator(evaluator InvariantEvaluator) PrepareOption {
+	return func(options *prepareOptions) { options.evaluator = evaluator }
+}
+
 // PreparePlan validates the entire plan, acquires the exclusive provider lease, and stages
 // exact predicted bytes without writing canonical files.
-func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uint64, stager PlanStager) (PlanRecord, error) {
+func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uint64, stager PlanStager, options ...PrepareOption) (PlanRecord, error) {
 	if stager == nil {
 		return PlanRecord{}, Coded(CodeProviderUnavailable, errors.New("prepare requires a provider"))
+	}
+	var settings prepareOptions
+	for _, option := range options {
+		option(&settings)
 	}
 	if prepared, err := w.acquirePrepareLease(planID, expected); err != nil {
 		return PlanRecord{}, err
@@ -152,6 +206,19 @@ func (w *Workspace) PreparePlan(ctx context.Context, planID string, expected uin
 	prepared, targetState := preparationFor(plan, request, stager)
 	if target, ok := stager.(PreparedRevisionStager); ok {
 		target.SetPreparedRevision(prepared.PreparedRevision)
+	}
+	// The invariants are evaluated against the bytes that are now staged, and
+	// recorded before the plan reaches a state anything can be applied from, so
+	// a proof never arrives after the decision it was meant to inform.
+	if len(plan.Invariants) > 0 {
+		evaluated, err := w.evaluateInvariants(ctx, settings.evaluator, planID, expected, plan, *prepared)
+		if err != nil {
+			_, _ = w.transitionPlan(planID, expected, PlanFailed, "prepare_failed", err.Error(), nil)
+			return PlanRecord{}, err
+		}
+		if required, advisory := unprovenInvariants(evaluated, prepared.PreparedRevision); len(required)+len(advisory) > 0 {
+			targetState = PlanProvisional
+		}
 	}
 	result, err := w.transitionPlan(planID, expected, targetState, "prepare", prepared.Diagnostics, prepared)
 	if err != nil {
@@ -204,6 +271,42 @@ func (w *Workspace) previewedPlan(planID string, expected uint64) (PlanRecord, e
 		return plan, Coded(CodePlanValidationConflicts, errors.New("preview must succeed before prepare"))
 	}
 	return plan, nil
+}
+
+// evaluateInvariants asks the evaluator about every declared invariant and stores the
+// answers on the plan record, each bound to the prepared revision it describes.
+func (w *Workspace) evaluateInvariants(ctx context.Context, evaluator InvariantEvaluator, planID string, expected uint64, plan PlanRecord, preparation PlanPreparation) ([]PlanInvariant, error) {
+	var answers []PlanInvariant
+	if evaluator != nil {
+		answers = evaluator.EvaluateInvariants(ctx, plan, preparation)
+	}
+	merged := mergeInvariantResults(plan.Invariants, answers, preparation.PreparedRevision, time.Now().UTC())
+	if err := w.recordInvariants(planID, expected, merged); err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+// recordInvariants stores evaluated invariants without moving the plan or changing its
+// revision: an answer about a plan is not an edit of it.
+func (w *Workspace) recordInvariants(planID string, expected uint64, invariants []PlanInvariant) error {
+	w.plansMu.Lock()
+	defer w.plansMu.Unlock()
+	previous, ok := w.plans[planID]
+	if !ok {
+		return errors.New("unknown plan")
+	}
+	if expected == 0 || previous.PlanRevision != expected {
+		return planRevisionChanged(expected, previous.PlanRevision)
+	}
+	plan := clonePlan(previous)
+	plan.Invariants = cloneInvariants(invariants)
+	w.plans[planID] = plan
+	if err := w.persistPlanLocked(planID); err != nil {
+		w.plans[planID] = previous
+		return err
+	}
+	return nil
 }
 
 // rollbackStager rolls the provider's staged view back with a bounded timeout.

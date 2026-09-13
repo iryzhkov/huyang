@@ -188,13 +188,13 @@ func (s *SandboxStager) Verify(ctx context.Context, request workspacecore.Verifi
 	}
 	var diagnosticReport *workspacecore.DiagnosticReport
 	request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, files []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-		report, evidenceErr := RecordDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
+		report, evidenceErr := RecordStagedDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
 		diagnosticReport = &report
 		return DiagnosticVerificationStage(revision, report), evidenceErr
 	}
 	result, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, prepared.Files)
 	if err == nil && diagnosticReport != nil {
-		if report, evidenceErr := CorroborateWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
+		if report, evidenceErr := CorroborateStagedWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
 			ReplaceDiagnosticVerificationStage(&result, request.Revision, report)
 		}
 	}
@@ -339,11 +339,11 @@ func (s *SandboxStager) recordStagedDiagnostics(ctx context.Context, sandbox *wo
 	_, _ = Call(ctx, s.workspace, replacement, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
 	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": VerificationAttachWaitMS})
-	diagnosticReport, err := RecordDiagnostics(ctx, s.workspace, replacement, files, s.baseRevision, s.planID)
+	diagnosticReport, err := RecordStagedDiagnostics(ctx, s.workspace, replacement, files, s.baseRevision, s.planID)
 	if err != nil {
 		return verification, err
 	}
-	diagnosticReport, err = CorroborateWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
+	diagnosticReport, err = CorroborateStagedWithProjectCheck(s.workspace, s.baseRevision, s.planID, verification.Stages, diagnosticReport)
 	if err != nil {
 		return verification, err
 	}

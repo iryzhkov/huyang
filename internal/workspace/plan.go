@@ -16,8 +16,12 @@ import (
 )
 
 const (
-	planStateVersion  = 1
-	planRecordVersion = 2
+	planStateVersion = 1
+	// planRecordVersion 3 added declared invariants. Version 2 records are
+	// still read: they carry no invariants, and a plan with no invariants has
+	// no requirements, so an older record can never gain one by being loaded.
+	planRecordVersion       = 3
+	planRecordVersionLegacy = 2
 )
 
 type OperationKind string
@@ -153,6 +157,10 @@ type PlanEdit struct {
 	Mode       string          `json:"mode"`
 	Operations []PlanOperation `json:"operations,omitempty"`
 	OpIDs      []string        `json:"op_ids,omitempty"`
+	// Invariants, when present, replaces the plan's declarations wholesale.
+	// A pointer rather than a slice so that leaving it out and clearing it
+	// are different requests.
+	Invariants *[]PlanInvariant `json:"invariants,omitempty"`
 }
 
 type PlanConflict struct {
@@ -193,16 +201,19 @@ type PlanHunk struct {
 }
 
 type PlanRecord struct {
-	PlanID       string              `json:"plan_id"`
-	WorkspaceID  ID                  `json:"workspace_id"`
-	State        PlanState           `json:"state"`
-	PlanRevision uint64              `json:"plan_revision"`
-	BaseStateSeq uint64              `json:"base_state_seq"`
-	Operations   []PlanOperation     `json:"operations"`
-	Preview      *PlanPreview        `json:"preview,omitempty"`
-	Preparation  *PlanPreparation    `json:"preparation,omitempty"`
-	Conflict     *PlanConflictReason `json:"conflict,omitempty"`
-	Events       []PlanEvent         `json:"events"`
+	PlanID       string          `json:"plan_id"`
+	WorkspaceID  ID              `json:"workspace_id"`
+	State        PlanState       `json:"state"`
+	PlanRevision uint64          `json:"plan_revision"`
+	BaseStateSeq uint64          `json:"base_state_seq"`
+	Operations   []PlanOperation `json:"operations"`
+	// Invariants are what this plan's result must satisfy. An empty list is
+	// the normal case and means the plan asserts nothing.
+	Invariants  []PlanInvariant     `json:"invariants,omitempty"`
+	Preview     *PlanPreview        `json:"preview,omitempty"`
+	Preparation *PlanPreparation    `json:"preparation,omitempty"`
+	Conflict    *PlanConflictReason `json:"conflict,omitempty"`
+	Events      []PlanEvent         `json:"events"`
 	// DroppedEvents counts events removed from the middle of Events by retention.
 	DroppedEvents int `json:"dropped_events,omitempty"`
 	// Compacted marks a terminal plan whose bulky payloads retention has stripped.
@@ -398,7 +409,7 @@ func (w *Workspace) loadPlanRecords() error {
 		if err := json.Unmarshal(content, &record); err != nil {
 			return fmt.Errorf("decode plan record %s: %w", entry.Name(), err)
 		}
-		if record.Version != planRecordVersion {
+		if record.Version != planRecordVersion && record.Version != planRecordVersionLegacy {
 			return fmt.Errorf("unsupported plan record version %d in %s", record.Version, entry.Name())
 		}
 		if record.Plan.WorkspaceID != w.Identity().ID {
@@ -539,7 +550,18 @@ func newPlanID() (string, error) {
 }
 
 func (w *Workspace) CreatePlan(operations []PlanOperation) (PlanRecord, error) {
+	return w.CreatePlanWithInvariants(operations, nil)
+}
+
+// CreatePlanWithInvariants creates a plan that also declares what its result
+// must satisfy. The invariants are stored pending: nothing is proven until a
+// prepare evaluates them against staged bytes.
+func (w *Workspace) CreatePlanWithInvariants(operations []PlanOperation, invariants []PlanInvariant) (PlanRecord, error) {
 	normalized, err := w.normalizeOperations(operations)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	declared, err := normalizeInvariants(invariants)
 	if err != nil {
 		return PlanRecord{}, err
 	}
@@ -550,7 +572,8 @@ func (w *Workspace) CreatePlan(operations []PlanOperation) (PlanRecord, error) {
 	now := time.Now().UTC()
 	plan := PlanRecord{
 		PlanID: id, WorkspaceID: w.Identity().ID, State: PlanOpen, PlanRevision: 1,
-		BaseStateSeq: w.Identity().StateSeq, Operations: normalized, CreatedAt: now, UpdatedAt: now,
+		BaseStateSeq: w.Identity().StateSeq, Operations: normalized, Invariants: declared,
+		CreatedAt: now, UpdatedAt: now,
 		Events: []PlanEvent{{Action: "create", PlanRevision: 1, Outcome: "ok", At: now}},
 	}
 	w.plansMu.Lock()
@@ -609,7 +632,17 @@ func (w *Workspace) EditPlan(planID string, expected uint64, edit PlanEdit) (Pla
 	if err != nil {
 		return PlanRecord{}, err
 	}
+	invariants := plan.Invariants
+	if edit.Invariants != nil {
+		if invariants, err = normalizeInvariants(*edit.Invariants); err != nil {
+			return PlanRecord{}, err
+		}
+	}
 	plan.Operations = normalized
+	// An edit changes the bytes every answer was about, so the proofs go with
+	// them. The declarations stay: what the plan must satisfy did not change
+	// unless the caller said so.
+	plan.Invariants = resetInvariantProofs(invariants)
 	plan.State = PlanOpen
 	plan.PlanRevision++
 	plan.Preview = nil

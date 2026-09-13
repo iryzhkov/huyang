@@ -334,6 +334,11 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 		"operations": operations, "operation_count": len(plan.Operations),
 		"event_count": len(plan.Events), "created_at": plan.CreatedAt, "updated_at": plan.UpdatedAt,
 	}
+	// The invariants are why a prepared plan may not be applicable, so they
+	// travel with the record rather than being summarised away.
+	if len(plan.Invariants) > 0 {
+		result["invariants"] = plan.Invariants
+	}
 	if plan.Preview != nil {
 		diffs := make([]map[string]any, 0, len(plan.Preview.Diffs))
 		for _, diff := range plan.Preview.Diffs {

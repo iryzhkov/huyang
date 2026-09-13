@@ -22,6 +22,10 @@ type planRequest struct {
 	Operations        []workspacecore.PlanOperation
 	HasOperations     bool
 	Edit              workspacecore.PlanEdit
+	// Invariants are what the plan's result must satisfy. Only the
+	// experimental catalog advertises them.
+	Invariants    []workspacecore.PlanInvariant
+	HasInvariants bool
 	// View selects what a preview or inspection answers with: the plan
 	// record, or the impact the plan would have. Only the experimental
 	// catalog advertises it.
@@ -56,6 +60,16 @@ func decodePlanRequest(arguments map[string]any) (planRequest, error) {
 		if err := decodeJSON(raw, &request.Edit); err != nil {
 			return request, err
 		}
+	}
+	if raw, present := arguments["invariants"]; present {
+		request.HasInvariants = true
+		if err := decodeJSON(raw, &request.Invariants); err != nil {
+			return request, err
+		}
+		// On an edit the invariants belong to the edit, which replaces the
+		// plan's declarations wholesale rather than adding to them.
+		invariants := request.Invariants
+		request.Edit.Invariants = &invariants
 	}
 	return request, nil
 }
@@ -113,7 +127,7 @@ func (h *Handlers) planCreate(ctx context.Context, requestID string, workspace *
 	if err != nil {
 		return planOutcome{err: err}
 	}
-	plan, err := workspace.CreatePlan(operations)
+	plan, err := workspace.CreatePlanWithInvariants(operations, request.Invariants)
 	return planOutcome{summary: "Plan intent created; canonical workspace unchanged", plan: plan, err: err}
 }
 
@@ -165,7 +179,8 @@ func (h *Handlers) planPrepare(ctx context.Context, requestID string, workspace 
 	var plan workspacecore.PlanRecord
 	stager, err := h.pool.PlanStager(workspace, planID, revision, true)
 	if err == nil {
-		plan, err = workspace.PreparePlan(ctx, planID, revision, stager)
+		plan, err = workspace.PreparePlan(ctx, planID, revision, stager,
+			workspacecore.WithInvariantEvaluator(h.invariantEvaluator(requestID, workspace, stager)))
 	}
 	if err != nil && planID != "" {
 		if failed, inspectErr := workspace.InspectPlan(planID, revision); inspectErr == nil {
@@ -227,7 +242,12 @@ func (h *Handlers) planApply(ctx context.Context, requestID string, workspace *w
 	if err == nil {
 		var options []workspacecore.CommitOption
 		if request.AcceptProvisional {
-			options = append(options, workspacecore.AcceptProvisional("diagnostics"))
+			// One flag accepts the dimensions this plan actually lacks, each
+			// named in the reply. A required invariant is not among them: it
+			// has no accept flag at all.
+			for _, gap := range acceptableGaps(plan) {
+				options = append(options, workspacecore.AcceptProvisional(gap))
+			}
 		}
 		committed, commitErr := workspace.CommitPlan(ctx, request.PlanID, request.PlanRevision, request.PreparedRevision, stager, options...)
 		if commitErr == nil || committed.PlanID != "" {
@@ -291,12 +311,22 @@ func planResult(requestID string, workspace *workspacecore.Workspace, summary st
 	}
 	if plan.State == workspacecore.PlanProvisional {
 		result["outcome"] = "provisional"
-		if plan.Preparation != nil {
+		unproven := workspacecore.UnprovenRequiredInvariants(plan)
+		switch {
+		case len(unproven) > 0:
+			// A required invariant has no accept flag, so the follow-up is
+			// never apply: it is look, change the plan, or drop it.
+			result["code"] = workspacecore.CodeInvariantNotProven
+			result["summary"] = fmt.Sprintf("Plan prepared, but %d required invariant(s) are not proven: %s",
+				len(unproven), strings.Join(describeInvariants(unproven), "; "))
+			data["unproven_invariants"] = unproven
+			result["next"] = planStateNext(plan)
+		case plan.Preparation != nil:
 			result["next"] = []any{map[string]any{
 				"tool": "change_plan", "action": "apply", "plan_id": plan.PlanID,
 				"plan_revision": plan.PlanRevision, "prepared_revision": plan.Preparation.PreparedRevision,
-				"use_new_idempotency_key": true,
-				"note":                    "Apply only if you explicitly accept the incomplete verification evidence for this exact prepared revision.",
+				"accept_provisional": true, "use_new_idempotency_key": true,
+				"note": "Apply only if you explicitly accept the incomplete evidence for this exact prepared revision: " + strings.Join(acceptableGaps(plan), ", "),
 			}}
 		}
 	}
@@ -362,6 +392,11 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 			}),
 			withPlan("discard", nil),
 		}
+	case code == workspacecore.CodeInvariantNotProven && plan.PlanID != "":
+		// Nothing here offers apply again: a required invariant has no accept
+		// flag, and a prepared plan cannot be edited, so the way forward is to
+		// discard this one and plan the change that satisfies it.
+		return []any{withPlan("inspect", nil), withPlan("discard", nil)}
 	case code == workspacecore.CodePlanStateInvalid && plan.PlanID != "":
 		return planStateNext(plan)
 	case action == "apply" && plan.PlanID != "" && code != "workspace_epoch_changed":
@@ -384,7 +419,8 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 func classifyPlanError(err error, plan workspacecore.PlanRecord) (string, string) {
 	switch code := workspacecore.ErrorCode(err); code {
 	case workspacecore.CodePlanRevisionChanged, workspacecore.CodeWorkspaceBusy, workspacecore.CodePlanValidationConflicts,
-		workspacecore.CodeWorkspaceEpochChanged, workspacecore.CodeProvisionalNotAccepted, workspacecore.CodePlanStateInvalid:
+		workspacecore.CodeWorkspaceEpochChanged, workspacecore.CodeProvisionalNotAccepted, workspacecore.CodePlanStateInvalid,
+		workspacecore.CodeInvariantNotProven:
 		return code, "conflict"
 	case workspacecore.CodeCommitPreconditionChanged, workspacecore.CodePreparedRevisionChanged:
 		return workspacecore.CodeCommitPreconditionChanged, "conflict"
@@ -400,6 +436,16 @@ func classifyPlanError(err error, plan workspacecore.PlanRecord) (string, string
 		return "undeclared_tool_write", "failed"
 	}
 	return "plan_action_failed", "failed"
+}
+
+// describeInvariants is what a list of invariants says about itself in a
+// summary.
+func describeInvariants(invariants []workspacecore.PlanInvariant) []string {
+	descriptions := make([]string, 0, len(invariants))
+	for _, invariant := range invariants {
+		descriptions = append(descriptions, workspacecore.InvariantDescription(invariant))
+	}
+	return descriptions
 }
 
 func preparedRevisionOf(plan workspacecore.PlanRecord) string {
@@ -425,6 +471,9 @@ func planStateNext(plan workspacecore.PlanRecord) []any {
 	case workspacecore.PlanReady:
 		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanProvisional:
+		if len(workspacecore.UnprovenRequiredInvariants(plan)) > 0 {
+			return []any{with("inspect", nil), with("discard", nil)}
+		}
 		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "accept_provisional": true, "use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanConflicted, workspacecore.PlanFailed:
 		return []any{with("inspect", nil), with("discard", nil)}

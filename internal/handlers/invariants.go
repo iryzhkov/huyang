@@ -1,0 +1,322 @@
+package handlers
+
+// Evaluating what a plan declared its result must satisfy.
+//
+// Each kind is answered by the strongest evidence available for it and by
+// nothing weaker. The diagnostic assertion reads the prepared delta, so it
+// inherits that comparison's honesty about an incomplete baseline. The test
+// assertion reads the verification the sandbox pipeline already ran. The
+// symbol assertions read the staged bytes, and the reference assertion asks
+// the language server that read them.
+//
+// Every one of them can answer "unknown", and unknown is not a pass: a
+// required invariant nobody could evaluate keeps the plan out of READY
+// exactly as a violated one does.
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/iryzhkov/huyang/internal/providerpool"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
+)
+
+// planInvariantEvaluator answers a plan's invariants against the sandbox its
+// prepare has just staged.
+type planInvariantEvaluator struct {
+	handlers  *Handlers
+	requestID string
+	workspace *workspacecore.Workspace
+	stager    workspacecore.PlanStager
+}
+
+func (h *Handlers) invariantEvaluator(requestID string, workspace *workspacecore.Workspace, stager workspacecore.PlanStager) workspacecore.InvariantEvaluator {
+	return planInvariantEvaluator{handlers: h, requestID: requestID, workspace: workspace, stager: stager}
+}
+
+// preparedViewer is the part of a stager that knows where its staged bytes
+// live. A stager without one - a plain buffer-backed stager in a test - can
+// still answer the invariants that read verification evidence.
+type preparedViewer interface {
+	Prepared() (providerpool.PreparedView, bool)
+}
+
+func (e planInvariantEvaluator) EvaluateInvariants(ctx context.Context, plan workspacecore.PlanRecord, preparation workspacecore.PlanPreparation) []workspacecore.PlanInvariant {
+	// The plan record does not carry this preparation yet - it is being
+	// decided right now - and the attribution reads it for the files a tool
+	// wrote, so it is attached to the copy this evaluation works from.
+	plan.Preparation = &preparation
+	var view providerpool.PreparedView
+	staged := false
+	if viewer, ok := e.stager.(preparedViewer); ok {
+		view, staged = viewer.Prepared()
+	}
+	answers := make([]workspacecore.PlanInvariant, 0, len(plan.Invariants))
+	for _, invariant := range plan.Invariants {
+		answers = append(answers, e.evaluate(ctx, plan, preparation, view, staged, invariant))
+	}
+	return answers
+}
+
+func (e planInvariantEvaluator) evaluate(ctx context.Context, plan workspacecore.PlanRecord, preparation workspacecore.PlanPreparation, view providerpool.PreparedView, staged bool, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	if invariant.Kind == workspacecore.InvariantTestsPass {
+		return testsPassInvariant(invariant, preparation)
+	}
+	if !staged {
+		return invariantUnknown(invariant, "the prepared revision is not readable, so this could not be evaluated")
+	}
+	switch invariant.Kind {
+	case workspacecore.InvariantNoNewDiagnostics:
+		return e.noNewDiagnostics(ctx, plan, view, invariant)
+	case workspacecore.InvariantNoReferences:
+		return e.noReferences(ctx, view, invariant)
+	case workspacecore.InvariantSymbolExists, workspacecore.InvariantSymbolAbsent:
+		return stagedSymbolInvariant(view, invariant)
+	}
+	return invariantUnknown(invariant, fmt.Sprintf("%s is not evaluated by this service", invariant.Kind))
+}
+
+// testsPassInvariant reads the test stage of the verification the prepare
+// already ran. A stage that did not run is unknown: a test suite nobody
+// executed proves nothing about the code.
+func testsPassInvariant(invariant workspacecore.PlanInvariant, preparation workspacecore.PlanPreparation) workspacecore.PlanInvariant {
+	for _, stage := range preparation.Verification {
+		if stage.Stage != "tests" {
+			continue
+		}
+		answer := invariant
+		answer.EvidenceIDs = append([]string(nil), stage.EvidenceIDs...)
+		answer.Coverage = stage.Coverage
+		switch stage.Status {
+		case workspacecore.VerificationPassed:
+			answer.Status = workspacecore.InvariantProven
+			answer.Detail = fmt.Sprintf("the tests stage passed over %s", testScopeOf(stage))
+		case workspacecore.VerificationFailed:
+			answer.Status = workspacecore.InvariantViolated
+			answer.Detail = fmt.Sprintf("the tests stage failed (exit %d)", stage.Exit)
+		default:
+			answer.Status = workspacecore.InvariantUnknown
+			answer.Detail = fmt.Sprintf("the tests stage was %s", stage.Status)
+		}
+		return answer
+	}
+	return invariantUnknown(invariant, "this preparation ran no tests stage")
+}
+
+func testScopeOf(stage workspacecore.VerificationStage) string {
+	if stage.TestScope == "" {
+		return "the configured tests"
+	}
+	return stage.TestScope + " tests"
+}
+
+// noNewDiagnostics is proven only by a complete comparison. An incomplete
+// baseline, a file the server could not answer about, and more staged files
+// than one call diagnoses all mean the same thing: this was not established.
+func (e planInvariantEvaluator) noNewDiagnostics(ctx context.Context, plan workspacecore.PlanRecord, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	files := e.invariantFiles(view, invariant)
+	if len(files) == 0 {
+		return invariantUnknown(invariant, "this preparation staged no file this invariant is about")
+	}
+	if len(files) > preparedDiagnosticBudget {
+		return invariantUnknown(invariant, fmt.Sprintf(
+			"the plan stages %d files and one call diagnoses %d, so no complete comparison was made",
+			len(files), preparedDiagnosticBudget))
+	}
+	var findings []workspacecore.ComparableFinding
+	for _, path := range files {
+		absolute, err := preparedPath(view, path)
+		if err != nil {
+			return invariantUnknown(invariant, err.Error())
+		}
+		value, failure := e.handlers.callPrepared(ctx, e.requestID+"_"+path, e.workspace, view, "diagnostics", map[string]any{
+			"root": view.Tree, "file": absolute,
+		})
+		if failure != nil {
+			return invariantUnknown(invariant, fmt.Sprintf("no diagnostics could be read for %s", path))
+		}
+		findings = append(findings, comparableFindings(path, value)...)
+	}
+	delta := e.handlers.preparedDelta(ctx, e.requestID, e.workspace, plan, view, findings, files)
+	if delta == nil {
+		return invariantUnknown(invariant, "the prepared findings could not be compared with the canonical ones")
+	}
+	if !delta.BaselineComplete {
+		return invariantUnknown(invariant,
+			"the workspace held no current evidence about these files, so nothing in the report can be called new")
+	}
+	threshold := severityThreshold(invariant.Scope.Severity)
+	var introduced []string
+	for _, finding := range delta.New {
+		if finding.Severity == 0 || finding.Severity > threshold {
+			continue
+		}
+		introduced = append(introduced, describeNewFinding(finding))
+	}
+	answer := invariant
+	answer.Coverage = workspacecore.Coverage{Complete: true, FilesRead: len(files), Semantic: "embedded_nvim"}
+	if len(introduced) > 0 {
+		answer.Status = workspacecore.InvariantViolated
+		answer.Detail = fmt.Sprintf("%d new finding(s): %s", len(introduced), strings.Join(boundedDetails(introduced), "; "))
+		return answer
+	}
+	answer.Status = workspacecore.InvariantProven
+	answer.Detail = fmt.Sprintf("no new finding in %d staged file(s); %d resolved", len(files), len(delta.Resolved))
+	return answer
+}
+
+// describeNewFinding names one finding and who in the plan caused it, because
+// a violated invariant is only useful if it says what to go and look at.
+func describeNewFinding(finding workspacecore.DeltaFinding) string {
+	description := fmt.Sprintf("%s:%d %s", finding.Path, finding.Line, finding.Message)
+	switch {
+	case finding.Attribution.Tool != "":
+		return description + " (" + finding.Attribution.Tool + ")"
+	case len(finding.Attribution.Operations) > 0:
+		return description + " (" + strings.Join(finding.Attribution.Operations, ", ") + ")"
+	}
+	return description
+}
+
+// noReferences asks the language server that read the staged bytes whether
+// anything outside the declaration still refers to it. A server that reports
+// more references than it lists has not answered the question, so the answer
+// is unknown rather than a count.
+func (e planInvariantEvaluator) noReferences(ctx context.Context, view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	symbol := invariant.Scope.Symbol
+	path := workspacePath(e.workspace, symbol.Path)
+	arguments, err := preparedProviderTarget(view, e.workspace, map[string]any{
+		"symbol_locator": map[string]any{"path": path, "name_path": symbol.NamePath},
+	})
+	if err != nil {
+		return invariantUnknown(invariant, err.Error())
+	}
+	value, failure := e.handlers.callPrepared(ctx, e.requestID+"_references", e.workspace, view, "references", arguments)
+	if failure != nil {
+		return invariantUnknown(invariant, "no language server answered for the prepared revision")
+	}
+	payload, _ := value.(map[string]any)
+	locations := referenceLocations(payload)
+	if total := argInt(payload, "count", len(locations)); total > len(locations) {
+		return invariantUnknown(invariant, fmt.Sprintf(
+			"the server reported %d references but listed %d", total, len(locations)))
+	}
+	var outside []string
+	for _, location := range locations {
+		file, ok := canonicalFacing(view, location.file)
+		if !ok {
+			file = workspacePath(e.workspace, location.file)
+		}
+		if file == path {
+			continue
+		}
+		outside = append(outside, fmt.Sprintf("%s:%d", file, location.line))
+	}
+	answer := invariant
+	answer.Coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+	if len(outside) > 0 {
+		answer.Status = workspacecore.InvariantViolated
+		answer.Detail = fmt.Sprintf("%d reference(s) remain: %s", len(outside), strings.Join(boundedDetails(outside), "; "))
+		return answer
+	}
+	answer.Status = workspacecore.InvariantProven
+	answer.Detail = fmt.Sprintf("nothing outside %s refers to %s", path, symbol.NamePath)
+	return answer
+}
+
+// stagedSymbolInvariant reads the staged file itself. A file that is not there
+// settles both assertions: a declaration in a file that does not exist is
+// absent.
+func stagedSymbolInvariant(view providerpool.PreparedView, invariant workspacecore.PlanInvariant) workspacecore.PlanInvariant {
+	symbol := invariant.Scope.Symbol
+	absolute, err := preparedPath(view, symbol.Path)
+	if err != nil {
+		return invariantUnknown(invariant, err.Error())
+	}
+	leaf := symbol.NamePath
+	if index := strings.LastIndexAny(leaf, "/"); index >= 0 {
+		leaf = leaf[index+1:]
+	}
+	present := false
+	if _, err := os.Stat(absolute); err == nil {
+		_, present = declarationLine(absolute, leaf)
+	} else if !os.IsNotExist(err) {
+		return invariantUnknown(invariant, fmt.Sprintf("%s could not be read in the prepared revision", symbol.Path))
+	}
+	answer := invariant
+	answer.Coverage = workspacecore.Coverage{Complete: true, FilesRead: 1, Semantic: "parser_sections"}
+	wanted := invariant.Kind == workspacecore.InvariantSymbolExists
+	answer.Status = workspacecore.InvariantViolated
+	if present == wanted {
+		answer.Status = workspacecore.InvariantProven
+	}
+	state := "is not declared in"
+	if present {
+		state = "is declared in"
+	}
+	answer.Detail = fmt.Sprintf("%s %s %s at %s", symbol.NamePath, state, symbol.Path, view.PreparedRevision)
+	return answer
+}
+
+// invariantFiles are the staged paths one invariant is about: the ones it
+// named, or every file the plan stages.
+func (e planInvariantEvaluator) invariantFiles(view providerpool.PreparedView, invariant workspacecore.PlanInvariant) []string {
+	if len(invariant.Scope.Paths) == 0 {
+		return view.Files
+	}
+	wanted := map[string]bool{}
+	for _, path := range invariant.Scope.Paths {
+		wanted[workspacePath(e.workspace, path)] = true
+	}
+	var files []string
+	for _, path := range view.Files {
+		if wanted[path] {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
+// severityThreshold is the weakest finding a diagnostic invariant counts.
+// Severity 1 is an error, and an empty setting counts everything.
+func severityThreshold(name string) int {
+	if rank := severityRank(name); rank > 0 {
+		return rank
+	}
+	return 4
+}
+
+// boundedDetails keeps a refusal readable: the first few items, then how many
+// more there are.
+func boundedDetails(items []string) []string {
+	if len(items) <= maxReportedReferences {
+		return items
+	}
+	bounded := append([]string(nil), items[:maxReportedReferences]...)
+	return append(bounded, fmt.Sprintf("and %d more", len(items)-maxReportedReferences))
+}
+
+func invariantUnknown(invariant workspacecore.PlanInvariant, detail string) workspacecore.PlanInvariant {
+	invariant.Status = workspacecore.InvariantUnknown
+	invariant.Detail = detail
+	invariant.Coverage = workspacecore.Coverage{Complete: false, Skipped: []string{detail}}
+	return invariant
+}
+
+// acceptableGaps are the dimensions of a prepared plan that one accept_provisional
+// covers. A required invariant is deliberately not among them.
+func acceptableGaps(plan workspacecore.PlanRecord) []string {
+	gaps := workspacecore.PreparationGaps(plan)
+	dimensions := make([]string, 0, len(gaps)+1)
+	for _, gap := range gaps {
+		dimensions = append(dimensions, gap.Dimension)
+	}
+	if len(dimensions) == 0 {
+		// A plan that is PROVISIONAL without a named gap is provisional about
+		// its diagnostics, which is what the committer synthesises too.
+		dimensions = append(dimensions, "diagnostics")
+	}
+	return dimensions
+}

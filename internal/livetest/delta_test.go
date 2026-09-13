@@ -40,9 +40,9 @@ func preparedDelta(t *testing.T, instance *live, session sessionHandle, workspac
 
 // waitForCanonicalFinding polls the canonical report until the workspace has
 // a current finding, bounded, and reports whether one arrived.
-func waitForCanonicalFinding(t *testing.T, session sessionHandle, workspaceID string) bool {
+func waitForCanonicalFinding(t *testing.T, session sessionHandle, workspaceID string, within time.Duration) bool {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
 		report := call(t, session, "diagnostics", map[string]any{"workspace_id": workspaceID})
 		inner, _ := data(report)["diagnostics"].(map[string]any)
@@ -127,7 +127,7 @@ func TestAResolvedFindingIsReportedAsResolved(t *testing.T) {
 	// cold workspace answers the edit before it has finished indexing, and a
 	// baseline taken too early is the "nothing was wrong before" this stage
 	// exists to avoid claiming.
-	seeded := waitForCanonicalFinding(t, session, workspaceID)
+	seeded := waitForCanonicalFinding(t, session, workspaceID, 15*time.Second)
 	delta := preparedDelta(t, instance, session, workspaceID, []any{map[string]any{
 		"op_id": "fix-unused", "kind": "replace_symbol",
 		"content": "// Unused is called from nowhere.\nfunc Unused() int {\n\treturn 0\n}\n",

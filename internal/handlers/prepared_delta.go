@@ -22,13 +22,9 @@ import (
 // preparedDelta compares the prepared findings with the canonical ones and
 // attributes what is new. A comparison it cannot make honestly is reported as
 // such rather than guessed.
-func (h *Handlers) preparedDelta(ctx context.Context, requestID string, workspace *workspacecore.Workspace, view providerpool.PreparedView, prepared []workspacecore.ComparableFinding, paths []string) *workspacecore.DiagnosticDelta {
+func (h *Handlers) preparedDelta(ctx context.Context, requestID string, workspace *workspacecore.Workspace, plan workspacecore.PlanRecord, view providerpool.PreparedView, prepared []workspacecore.ComparableFinding, paths []string) *workspacecore.DiagnosticDelta {
 	identity := workspace.Identity()
 	base, complete := h.canonicalFindings(workspace, paths)
-	plan, err := workspace.InspectPlan(view.PlanID, view.PlanRevision)
-	if err != nil {
-		return nil
-	}
 	input := workspacecore.AttributionInput{
 		ToolPaths: toolPaths(plan),
 		Targets:   operationTargets(workspace, plan),

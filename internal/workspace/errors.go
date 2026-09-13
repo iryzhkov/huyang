@@ -17,6 +17,7 @@ const (
 	CodePlanStateInvalid          = "plan_state_invalid"
 	CodePlanValidationConflicts   = "plan_validation_conflicts"
 	CodeProvisionalNotAccepted    = "provisional_not_accepted"
+	CodeInvariantNotProven        = "invariant_not_proven"
 	CodeProviderUnavailable       = "provider_unavailable"
 	CodeWorkspaceBusy             = "workspace_busy"
 )

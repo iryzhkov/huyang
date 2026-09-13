@@ -642,9 +642,22 @@ func (w *Workspace) admitCommit(ctx context.Context, plan PlanRecord, expected u
 	if plan.Preparation.ProviderEpoch != stager.Epoch() && !durablePreparation {
 		return nil, Coded(CodeWorkspaceEpochChanged, nil)
 	}
+	// A required invariant is not a dimension a committer can accept. Its proof
+	// must exist and must name this exact prepared revision: a proof from an
+	// earlier preparation of the same plan describes bytes that are no longer
+	// the ones being applied.
+	if unproven, _ := unprovenInvariants(plan.Invariants, preparedRevision); len(unproven) > 0 {
+		descriptions := make([]string, 0, len(unproven))
+		for _, invariant := range unproven {
+			descriptions = append(descriptions, invariant.describe())
+		}
+		return nil, Codedf(CodeInvariantNotProven,
+			"plan %s requires %d invariant(s) that are not proven for %s: %s",
+			plan.PlanID, len(unproven), preparedRevision, strings.Join(descriptions, "; "))
+	}
 	preparation := *plan.Preparation
 	if plan.State == PlanProvisional {
-		if err := acceptProvisionalGaps(plan.PlanID, &preparation, settings); err != nil {
+		if err := acceptProvisionalGaps(plan.PlanID, &preparation, plan.Invariants, preparedRevision, settings); err != nil {
 			return nil, err
 		}
 	}
@@ -653,8 +666,8 @@ func (w *Workspace) admitCommit(ctx context.Context, plan PlanRecord, expected u
 
 // acceptProvisionalGaps requires every missing verification dimension to be accepted
 // explicitly and records both the gaps and the acceptance on the preparation.
-func acceptProvisionalGaps(planID string, preparation *PlanPreparation, settings commitOptions) error {
-	gaps := verificationGaps(preparation.Verification)
+func acceptProvisionalGaps(planID string, preparation *PlanPreparation, invariants []PlanInvariant, preparedRevision string, settings commitOptions) error {
+	gaps := append(verificationGaps(preparation.Verification), invariantGaps(invariants, preparedRevision)...)
 	if len(gaps) == 0 {
 		gaps = []VerificationGap{{Dimension: "diagnostics", Detail: "semantic coverage " + preparation.Diagnostics}}
 	}

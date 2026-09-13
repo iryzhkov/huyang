@@ -23,6 +23,18 @@ func diagnosticSourcePath(path string) bool {
 }
 
 func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
+	return recordDiagnostics(ctx, workspace, backend, files, revision, transactionID, false, settleWait...)
+}
+
+// RecordStagedDiagnostics records what a language server made of bytes that
+// exist only inside a preparation. The caller gets the same report, and the
+// workspace's ledger is left describing the workspace: a proposal nobody
+// applied is not evidence about the files on disk.
+func RecordStagedDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
+	return recordDiagnostics(ctx, workspace, backend, files, revision, transactionID, true, settleWait...)
+}
+
+func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, staged bool, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
 	if backend == nil {
 		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
 	}
@@ -41,7 +53,7 @@ func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidenceProjectCheck, ProviderID: "not_applicable", Producer: "diagnostic_scope",
 			Document: workspace.Identity().Root, DocumentRevision: revision, TransactionID: transactionID,
-			Complete: true, Selected: true, Dimension: "no_lsp_applicable_edited_documents",
+			Complete: true, Selected: true, Staged: staged, Dimension: "no_lsp_applicable_edited_documents",
 		})
 	}
 	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
@@ -54,7 +66,7 @@ func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidencePush, ProviderID: string(descriptor.ID), Producer: descriptor.Backend, ProducerVersion: err.Error(),
 			Document: workspace.Identity().Root, DocumentRevision: revision, TransactionID: transactionID,
-			TimedOut: true, Selected: true, Dimension: "edited_documents",
+			TimedOut: true, Selected: true, Staged: staged, Dimension: "edited_documents",
 		})
 	}
 	payload, err := diagnosticPayload(result)
@@ -65,12 +77,13 @@ func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidencePush, ProviderID: string(descriptor.ID), Producer: descriptor.Backend,
 			Document: workspace.Identity().Root, DocumentRevision: revision, TransactionID: transactionID,
-			TimedOut: true, Selected: true, Dimension: "edited_documents",
+			TimedOut: true, Selected: true, Staged: staged, Dimension: "edited_documents",
 		})
 	}
 	var report workspacecore.DiagnosticReport
 	for _, batch := range payload.Batches {
 		batch.Selected = true
+		batch.Staged = staged
 		batch.TransactionID = transactionID
 		batch.DocumentRevision = revision
 		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
@@ -186,6 +199,17 @@ func DiagnosticVerificationStage(revision string, report workspacecore.Diagnosti
 }
 
 func CorroborateWithProjectCheck(workspace *workspacecore.Workspace, revision, transactionID string, stages []workspacecore.VerificationStage, report workspacecore.DiagnosticReport) (workspacecore.DiagnosticReport, error) {
+	return corroborateWithProjectCheck(workspace, revision, transactionID, stages, report, false)
+}
+
+// CorroborateStagedWithProjectCheck is the same corroboration for a
+// preparation: the project check ran inside the sandbox, so what it proves is
+// proved about the staged bytes and recorded as such.
+func CorroborateStagedWithProjectCheck(workspace *workspacecore.Workspace, revision, transactionID string, stages []workspacecore.VerificationStage, report workspacecore.DiagnosticReport) (workspacecore.DiagnosticReport, error) {
+	return corroborateWithProjectCheck(workspace, revision, transactionID, stages, report, true)
+}
+
+func corroborateWithProjectCheck(workspace *workspacecore.Workspace, revision, transactionID string, stages []workspacecore.VerificationStage, report workspacecore.DiagnosticReport, staged bool) (workspacecore.DiagnosticReport, error) {
 	if report.Confidence != workspacecore.ConfidenceProvisional && report.Confidence != workspacecore.ConfidenceUnavailable {
 		return report, nil
 	}
@@ -208,7 +232,7 @@ func CorroborateWithProjectCheck(workspace *workspacecore.Workspace, revision, t
 			return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 				Kind: workspacecore.EvidenceProjectCheck, ProviderID: "project_check", Producer: "configured_project_check",
 				Document: workspace.Identity().Root, DocumentRevision: revision, TransactionID: transactionID,
-				Complete: true, Selected: true, Dimension: "edited_documents",
+				Complete: true, Selected: true, Staged: staged, Dimension: "edited_documents",
 			})
 		}
 	}

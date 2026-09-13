@@ -83,10 +83,15 @@ type DiagnosticBatch struct {
 	ProgressPending  bool                   `json:"progress_pending,omitempty"`
 	ChangeBarrier    bool                   `json:"change_barrier,omitempty"`
 	Selected         bool                   `json:"selected"`
-	Dimension        string                 `json:"dimension,omitempty"`
-	Findings         []DiagnosticFinding    `json:"findings,omitempty"`
-	Candidates       []CulpritCandidate     `json:"candidates,omitempty"`
-	ObservedAt       time.Time              `json:"observed_at,omitempty"`
+	// Staged marks evidence about bytes that only exist inside a preparation.
+	// It is recorded as evidence and kept out of the ledger's current set: a
+	// proposal nobody applied must not change what the workspace believes
+	// about its own files, in either direction.
+	Staged     bool                `json:"staged,omitempty"`
+	Dimension  string              `json:"dimension,omitempty"`
+	Findings   []DiagnosticFinding `json:"findings,omitempty"`
+	Candidates []CulpritCandidate  `json:"candidates,omitempty"`
+	ObservedAt time.Time           `json:"observed_at,omitempty"`
 }
 
 type DiagnosticItem struct {
@@ -409,6 +414,9 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	}
 	batch.Document = filepath.ToSlash(filepath.Clean(batch.Document))
 	confidence, reasons := confidenceFor(batch)
+	if batch.Staged {
+		return s.recordStagedLocked(batch, confidence, reasons)
+	}
 	evID := s.recordEvidenceLocked(batch, confidence, reasons)
 	key := batch.ProviderID + "\x00" + batch.Document
 	previous := append([]string(nil), s.state.Active[key]...)
@@ -441,6 +449,60 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 
 // recordEvidenceLocked stores the batch as an evidence record and folds its confidence
 // into the coverage dimension it reports on. It returns the new evidence ID.
+// recordStagedLocked keeps an observation of staged bytes out of the ledger.
+//
+// The findings are real and the caller needs them - they are how a preparation
+// knows whether it is applicable - but they describe a revision the workspace
+// does not hold. Letting them into the current set corrupts the baseline in
+// both directions: a proposal that fixes an error would mark the canonical
+// file clean while it is still broken, and a proposal that introduces one
+// would put it in the ledger as something that was already there. The evidence
+// record is still written, so the preparation can point at it.
+func (s *diagnosticStore) recordStagedLocked(batch DiagnosticBatch, confidence DiagnosticConfidence, reasons []string) (DiagnosticReport, error) {
+	s.state.Sequence++
+	evID := evidenceID(batch, s.state.Sequence)
+	payload, _ := json.Marshal(batch)
+	s.state.Evidence[evID] = DiagnosticEvidence{ID: evID, Kind: string(batch.Kind), RecordedAt: batch.ObservedAt, Payload: payload}
+	s.pruneLocked(batch.ObservedAt)
+	if err := s.save(); err != nil {
+		return DiagnosticReport{}, err
+	}
+	current := stagedItems(batch, evID)
+	return DiagnosticReport{
+		Confidence: confidence, Coverage: cloneDimensions(s.state.Dimensions),
+		New: current, Current: current, CurrentCount: len(current),
+		ProvisionalReasons: append([]string(nil), reasons...),
+		EvidenceIDs:        []string{evID}, Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence),
+	}, nil
+}
+
+// stagedItems are one staged batch's findings as items, built for the caller
+// and stored nowhere.
+func stagedItems(batch DiagnosticBatch, evID string) []DiagnosticItem {
+	seen := map[string]bool{}
+	occurrences := map[string]int{}
+	var items []DiagnosticItem
+	for _, finding := range batch.Findings {
+		finding = normalizeFinding(finding)
+		identity := findingIdentity(finding)
+		id := "diag_" + diagnosticFingerprint(batch.ProviderID, batch.Document, finding, occurrences[identity])
+		occurrences[identity]++
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		items = append(items, DiagnosticItem{
+			ID: id, ProviderID: batch.ProviderID, Producer: batch.Producer, ProducerVersion: batch.ProducerVersion,
+			Document: batch.Document, DocumentRevision: batch.DocumentRevision, DocumentVersion: batch.DocumentVersion,
+			TransactionID: batch.TransactionID, StateSeq: batch.StateSeq, Finding: finding,
+			EvidenceKinds: []DiagnosticEvidenceKind{batch.Kind}, EvidenceIDs: []string{evID},
+			Status: DiagnosticStatusCurrent, FirstSeen: batch.ObservedAt, LastSeen: batch.ObservedAt,
+			Attribution: rankCulprit(batch.Candidates),
+		})
+	}
+	return items
+}
+
 func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence DiagnosticConfidence, reasons []string) string {
 	dimension := batch.Dimension
 	if dimension == "" {
