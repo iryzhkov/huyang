@@ -240,6 +240,19 @@ make -C ~/.local/share/huyang build
 systemctl --user restart huyang.service
 ```
 
+The restart is hot: sessions connected through `huyang mcp` stay connected. The adapter is
+a process of its own, and when the service goes away it retries the socket for thirty
+seconds, replays the client's initialize handshake and resends the requests that were in
+flight, so a client sees a pause rather than a disconnection. `TestASessionSurvivesTheServiceBeingRedeployed`
+in `internal/livetest` restarts the daemon under a live session and keeps using it.
+
+Two things do not survive, and both are visible in the reply rather than silent. Handles
+(`rng_`, `sym_`, `set_`) live in a bounded in-memory store, so one taken before the restart
+is refused afterwards as `handle_unknown`, with taking a fresh one offered as the next
+step. And a build that does not come up within the adapter's thirty seconds - a crash loop,
+for instance - is a disconnection like any other, so run `make live` against the new build
+before restarting the service that agents are using.
+
 Wait for `$XDG_RUNTIME_DIR/huyang/control.sock` to reappear, then confirm with a
 `workspace_open` and a `language_server_status` call. On the first start after an upgrade
 from a pre-S20b build the service migrates the receipts out of `registry.json` and splits
