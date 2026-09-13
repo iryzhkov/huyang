@@ -407,7 +407,7 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	}
 	read, err := workspace.Read(request.Path)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+		return missingPathFailure(requestID, workspace, request.Path, err)
 	}
 	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, request.StartLine, request.EndLine)
 	if rangeErr != nil {
@@ -442,6 +442,62 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 		}
 	}
 	return result
+}
+
+// missingPathFailure answers a read of a path the workspace does not hold
+// with the paths it does hold under that name. A file an agent expected in
+// one directory and found in another is the commonest read failure in the
+// friction spool, and "<path> is missing" ends the line of enquiry where the
+// path that does exist would continue it.
+func missingPathFailure(requestID string, workspace *workspacecore.Workspace, path string, err error) map[string]any {
+	result := mcpapi.Failure(requestID, workspace, "read_failed", err)
+	if !strings.Contains(err.Error(), "is missing") {
+		return result
+	}
+	data, _ := result["data"].(map[string]any)
+	if data == nil {
+		data = map[string]any{}
+		result["data"] = data
+	}
+	if candidates := pathsNamed(workspace, path); len(candidates) > 0 {
+		data["candidates"] = candidates
+		result["summary"] = fmt.Sprintf("No file at %s; the workspace holds %s", path, strings.Join(candidates, ", "))
+		return result
+	}
+	result["summary"] = fmt.Sprintf("No file at %s, and no file of that name anywhere in the workspace", path)
+	result["next"] = []any{map[string]any{"tool": "search", "action": "locate_the_file_by_name", "query": pathBase(path)}}
+	return result
+}
+
+// pathsNamed are the workspace paths whose base name is the base name of
+// path, bounded, in path order.
+func pathsNamed(workspace *workspacecore.Workspace, path string) []string {
+	const maxPathCandidates = 5
+	base := pathBase(path)
+	if base == "" {
+		return nil
+	}
+	orientation, err := workspace.Orient()
+	if err != nil {
+		return nil
+	}
+	candidates := make([]string, 0, maxPathCandidates)
+	for _, entry := range orientation.Entries {
+		if pathBase(entry.Path) != base || entry.Path == path {
+			continue
+		}
+		if candidates = append(candidates, entry.Path); len(candidates) == maxPathCandidates {
+			break
+		}
+	}
+	return candidates
+}
+
+func pathBase(path string) string {
+	if index := strings.LastIndexByte(path, '/'); index >= 0 {
+		return path[index+1:]
+	}
+	return path
 }
 
 // numberLines prefixes every line with its 1-based number and a tab, so an
