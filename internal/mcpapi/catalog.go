@@ -14,6 +14,8 @@ const (
 	ProfileOrient Profile = "orient"
 	ProfileEdit   Profile = "edit"
 	ProfileDebug  Profile = "debug"
+	// ProfileDebugger carries the four debugger tools and nothing else.
+	ProfileDebugger Profile = "debugger"
 	// ProfileExperimental is the frozen surface plus whatever input shape is
 	// being designed. A caller opts into it knowingly and loses nothing by
 	// doing so; the four profiles above never acquire an unfinished tool,
@@ -50,9 +52,9 @@ const (
 	MaxPlanContentBytes  = 4 << 20
 )
 
-// ProfileOrder is the frozen catalog: these four are compared byte for byte
+// ProfileOrder is the frozen catalog: these are compared byte for byte
 // against their fixtures. ProfileExperimental is deliberately absent.
-var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug}
+var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug, ProfileDebugger}
 
 var modernProfileNames = map[Profile][]string{
 	ProfileFull: {
@@ -69,6 +71,13 @@ var modernProfileNames = map[Profile][]string{
 	},
 	ProfileDebug: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
+		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
+	},
+	// ProfileDebugger is the debugger on its own, for a session that already
+	// has the edit profile loaded and wants the debugger beside it rather
+	// than a second copy of every reading tool. It is what a harness that
+	// defers a server's tools until they are searched for should point at.
+	ProfileDebugger: {
 		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
 	},
 }
@@ -408,7 +417,7 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"view":       enumSchema("plan", "impact", "semantic"),
 			"invariants": invariantsSchema(),
 		}},
-		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files. A failing test is usually explained by its output and the source; when it is not, this server also offers a debugger (breakpoints, stepping, variables, watchpoints) under its debugger profile, which a harness loads on request rather than in every session.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
 			"verbose":                 map[string]any{"type": "boolean", "description": "Full per-stage record (mode, revision, coverage, scopes, test lists). Default: verdict, output of stages that did not pass, skip reasons and counts."},
 			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
@@ -550,7 +559,7 @@ func ValidateRegistry() error {
 			return fmt.Errorf("tool %s declares no scheduler class", descriptor.Name)
 		}
 	}
-	expected := map[Profile]int{ProfileFull: 19, ProfileOrient: 8, ProfileEdit: 13, ProfileDebug: 12}
+	expected := map[Profile]int{ProfileFull: 19, ProfileOrient: 8, ProfileEdit: 13, ProfileDebug: 12, ProfileDebugger: 4}
 	for _, profile := range ProfileOrder {
 		if len(Catalog(profile)) != expected[profile] {
 			return fmt.Errorf("profile %s has %d tools, want %d", profile, len(Catalog(profile)), expected[profile])

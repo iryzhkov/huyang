@@ -1796,7 +1796,7 @@
     "name": "change_plan"
   },
   {
-    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.",
+    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files. A failing test is usually explained by its output and the source; when it is not, this server also offers a debugger (breakpoints, stepping, variables, watchpoints) under its debugger profile, which a harness loads on request rather than in every session.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
