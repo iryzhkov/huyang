@@ -83,10 +83,14 @@ the outcome this benchmark exists to catch. Compare `read`, `read view=skeleton`
 
 ## Relation to the execution tools
 
-`execution_graph` and `path_explain` already answer a related question from static analysis,
-and the fleet spool has them failing in all 14 calls they have ever received. Before this
-stage adds another way to look at a function, those two should either be fixed or removed:
-two overlapping answers, one of which never works, is worse than one.
+`execution_graph` and `path_explain` already answer a related question from static analysis.
+The fleet spool has 14 calls between them and 10 that did not answer `ok`, but they are not
+one failure: five are `graph_source_changed` (the source digest moved while the analysis was
+acquiring it, which any unrelated save in the tree causes), three are cancellations or
+deadlines on a large workspace, and five are `partial` replies that are the tool being
+honest that static paths are candidates. The first two are defects; the third is the
+contract. Before this stage adds a third way to look at a function, those defects are worth
+fixing, because a skeleton view and a static path answer overlapping questions.
 
 ## Open questions
 

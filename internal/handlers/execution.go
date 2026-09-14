@@ -19,8 +19,50 @@ func (h *Handlers) executionGraph(ctx context.Context, requestID string, workspa
 	}
 	return executionGraphEnvelope(requestID, workspace, q)
 }
+
+// maxGraphNodes bounds the function list of a graph reply. The whole list
+// of this repository is 205 nodes and 132 KB, about 32,000 tokens, which is
+// the largest reply this server can produce and more than a light model can
+// hold: the reply is for orienting, and expand_functions is for detail.
+const maxGraphNodes = 60
+
+// compactExecutionGraph keeps what names a function and where it is. The
+// per-node evidence repeats the same source revision on every node, and that
+// revision is already beside the graph.
+func compactExecutionGraph(graph *workspacecore.ExecutionGraph) map[string]any {
+	if graph == nil {
+		return nil
+	}
+	nodes := make([]map[string]any, 0, min(len(graph.Nodes), maxGraphNodes))
+	for _, node := range graph.Nodes {
+		if len(nodes) == maxGraphNodes {
+			break
+		}
+		compact := map[string]any{"id": node.ID, "kind": node.Kind}
+		for key, value := range map[string]string{"path": node.Path, "name": node.Name, "owner": node.Owner} {
+			if value != "" {
+				compact[key] = value
+			}
+		}
+		if node.Line != 0 {
+			compact["line"] = node.Line
+		}
+		nodes = append(nodes, compact)
+	}
+	return map[string]any{
+		"id": graph.ID, "revision": graph.Revision, "coverage": graph.Coverage,
+		"nodes": nodes, "node_count": len(graph.Nodes), "nodes_truncated": len(graph.Nodes) > len(nodes),
+		"edges": graph.Edges, "edge_count": len(graph.Edges), "risks": graph.Risks,
+	}
+}
+
 func executionGraphEnvelope(requestID string, w *workspacecore.Workspace, q *executionQuery) map[string]any {
-	data := map[string]any{"snapshot": q.snapshot, "status": workspacecore.ExecutionUnknown}
+	snapshot := map[string]any{
+		"id": q.snapshot.ID, "key": q.snapshot.Key, "coverage": q.snapshot.Coverage,
+		"built_at": q.snapshot.BuiltAt, "execution": compactExecutionGraph(q.snapshot.Execution),
+		"fact_count": len(q.snapshot.Facts), "conflicts": q.snapshot.Conflicts,
+	}
+	data := map[string]any{"snapshot": snapshot, "status": workspacecore.ExecutionUnknown}
 	if q.prepared != nil {
 		data["revision"] = q.prepared.PreparedRevision
 		data["plan_id"] = q.prepared.PlanID
