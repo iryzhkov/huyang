@@ -719,3 +719,49 @@ which the service resolved against its own working directory: they read and edit
 deployed checkout of Huyang itself, where the first of them applied the E1 edit and the rest
 found the literal already changed. That is fixed (a relative root is refused) and the prompt
 that taught it is fixed; the stray files were removed from the deployed checkout.
+
+### Agent scores, batch `x33` (Claude Haiku 4.5, Go fixture, fixed build fdf077b)
+
+The same 135 runs against the service after the session's fixes, on the same host with the
+same model. Per run, over the runs that ended with the done marker:
+
+| Family | Calls | Request tokens | Response tokens |
+|---|---|---|---|
+| huyang, before (`x30`) | 5.5 | 614 | 2906 |
+| huyang, after (`x33`) | 4.6 | 596 | 2400 |
+| built-in, before / after | 5.8 / 5.9 | 933 / 940 | 2742 / 2855 |
+| bash, before / after | 7.6 / 8.3 | 696 / 475 | 2033 / 2027 |
+
+The two shell families are the control and they did not move; the Huyang family did. After
+the session it uses 22 percent fewer calls, 37 percent fewer request tokens and 16 percent
+fewer response tokens than the built-in tools on the same tasks. Before it, the response
+column was the other way round.
+
+Per scenario, Huyang family, `x30` -> `x33`:
+
+| Scenario | Calls | Req | Resp | | Scenario | Calls | Req | Resp |
+|---|---|---|---|---|---|---|---|---|
+| R1 | 1.0 -> 1.3 | 22 -> 127 | 1444 -> 1710 | | E4 | 5.3 -> 5.3 | 515 -> 662 | 2803 -> 2733 |
+| R2 | 2.3 -> 1.7 | 175 -> 184 | 1332 -> 806 | | E5 | 13.0 -> 5.3 | 2384 -> 1029 | 6854 -> 3663 |
+| R3 | 1.7 -> 1.0 | 141 -> 119 | 1331 -> 670 | | E6 | 9.3 -> 12.3 | 2078 -> 2019 | 5878 -> 7515 |
+| R4 | 2.0 -> 1.7 | 163 -> 205 | 3249 -> 2543 | | E7 | 4.3 -> 2.0 | 203 -> 246 | 1113 -> 507 |
+| E1 | 4.3 -> 2.0 | 183 -> 234 | 1646 -> 435 | | E8 | 6.7 -> 3.7 | 341 -> 395 | 2428 -> 1579 |
+| E2 | 6.7 -> 5.7 | 746 -> 714 | 2523 -> 1867 | | D1 | 5.7 -> 6.0 | 284 -> 388 | 3214 -> 2020 |
+| E3 | 7.3 -> 10.0 | 596 -> 1263 | 3901 -> 4971 | | D2 | 9.7 -> 8.3 | 1077 -> 1079 | 4515 -> 4635 |
+| V1 | 2.0 -> 1.3 | 150 -> 133 | 1111 -> 548 | | | | | |
+
+Read honestly, three reps to a cell:
+
+- **E5 is the operations list being used.** 13.0 calls to 5.3 and the request cost more than
+  halved: the agents that applied five literal edits one at a time now send one call.
+- **V1 is the verification summary.** 2.0 calls to 1.3: the agents that re-ran the suite in
+  a shell to see what passed now read it in the reply.
+- **E1, E7, E8 lost the workspace_open** they never needed, and E1 lost the search-then-read
+  that preceded an edit whose text the task had already given.
+- **R1's request tokens are the relative-root fix, not a regression.** The 22 tokens of the
+  baseline were a four-word relative path that the service resolved against its own working
+  directory; the 127 are the steward's clone path, which is 180 characters. A normal
+  repository root is about eight tokens.
+- **E3 and E6 moved the wrong way and are not claimed as either.** E6's baseline average
+  included a run that stopped after two calls, and E3 swings between 4 and 12 calls inside
+  one batch. At three reps that is the model's variance, not a measurement.
