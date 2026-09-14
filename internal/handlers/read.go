@@ -311,6 +311,21 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 		}
 	}
 	if len(exact) != 1 {
+		// A language the native sectioner does not parse still has an
+		// outline, through the language server that is attached to it. Its
+		// declarations are what this file does have, so a name that is not
+		// among them is a name that is not there -- not a parser that is
+		// missing, which is what the reply used to say about every miss in
+		// a TypeScript or a Java file on a machine whose servers were all
+		// attached.
+		if len(matches) == 0 {
+			if sections, _, ok := h.outlineViaProvider(ctx, requestID, workspace, path); ok {
+				coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+				for _, section := range sections {
+					matches = append(matches, workspacecore.HandleRecord{Locator: workspacecore.SemanticLocator{Path: path, NamePath: section.Name}})
+				}
+			}
+		}
 		return symbolReadMiss(requestID, workspace, coverage, exact, matches, rawName, path)
 	}
 	resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
@@ -335,9 +350,12 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 
 // symbolReadMiss answers a locator that resolved to no or several
 // declarations, with the cheapest recovery for each case.
-// candidateNamePaths names the declarations the file does have that carry
-// the requested name, in file order and bounded, so a miss on a bare method
-// name answers the qualified locator that resolves instead of a dead end.
+// candidateNamePaths names the declarations the file does have, in file
+// order and bounded, so a miss on a bare method name answers the qualified
+// locator that resolves instead of a dead end. Declarations that carry the
+// requested name come first, because "Balance" wanting "Ledger/Balance" is
+// the common case; the rest of the file's declarations follow, because a
+// name that is simply not there is answered by what is.
 func candidateNamePaths(nearby []workspacecore.HandleRecord, rawName string) []string {
 	const maxCandidates = 5
 	leaf := rawName
@@ -345,16 +363,23 @@ func candidateNamePaths(nearby []workspacecore.HandleRecord, rawName string) []s
 		leaf = leaf[index+1:]
 	}
 	seen := make(map[string]bool, len(nearby))
-	candidates := make([]string, 0, maxCandidates)
+	named := make([]string, 0, maxCandidates)
+	others := make([]string, 0, maxCandidates)
 	for _, record := range nearby {
 		name := record.Locator.NamePath
-		if name == "" || name == rawName || seen[name] || !strings.Contains(name, leaf) {
+		if name == "" || name == rawName || seen[name] {
 			continue
 		}
 		seen[name] = true
-		if candidates = append(candidates, name); len(candidates) == maxCandidates {
-			break
+		if strings.Contains(name, leaf) {
+			named = append(named, name)
+			continue
 		}
+		others = append(others, name)
+	}
+	candidates := append(named, others...)
+	if len(candidates) > maxCandidates {
+		candidates = candidates[:maxCandidates]
 	}
 	return candidates
 }
