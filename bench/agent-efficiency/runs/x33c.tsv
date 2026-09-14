@@ -1,0 +1,19 @@
+scenario	language	family	rep	title	task_file
+R2	go	huyang	1	bench x33c R2 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R2-go-huyang-r1-20260913-174152.md
+R2	go	builtin	1	bench x33c R2 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R2-go-builtin-r1-20260913-174153.md
+R2	go	bash	1	bench x33c R2 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R2-go-bash-r1-20260913-174154.md
+R3	go	huyang	1	bench x33c R3 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R3-go-huyang-r1-20260913-174155.md
+R3	go	builtin	1	bench x33c R3 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R3-go-builtin-r1-20260913-174156.md
+R3	go	bash	1	bench x33c R3 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-R3-go-bash-r1-20260913-174158.md
+E1	go	huyang	1	bench x33c E1 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E1-go-huyang-r1-20260913-174159.md
+E1	go	builtin	1	bench x33c E1 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E1-go-builtin-r1-20260913-174200.md
+E1	go	bash	1	bench x33c E1 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E1-go-bash-r1-20260913-174201.md
+E5	go	huyang	1	bench x33c E5 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E5-go-huyang-r1-20260913-174202.md
+E5	go	builtin	1	bench x33c E5 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E5-go-builtin-r1-20260913-174203.md
+E5	go	bash	1	bench x33c E5 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E5-go-bash-r1-20260913-174205.md
+E6	go	huyang	1	bench x33c E6 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E6-go-huyang-r1-20260913-174207.md
+E6	go	builtin	1	bench x33c E6 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E6-go-builtin-r1-20260913-174209.md
+E6	go	bash	1	bench x33c E6 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-E6-go-bash-r1-20260913-174211.md
+V1	go	huyang	1	bench x33c V1 go huyang r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-V1-go-huyang-r1-20260913-174213.md
+V1	go	builtin	1	bench x33c V1 go builtin r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-V1-go-builtin-r1-20260913-174215.md
+V1	go	bash	1	bench x33c V1 go bash r1	/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33c-V1-go-bash-r1-20260913-174216.md

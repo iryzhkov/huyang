@@ -765,3 +765,40 @@ Read honestly, three reps to a cell:
 - **E3 and E6 moved the wrong way and are not claimed as either.** E6's baseline average
   included a run that stopped after two calls, and E3 swings between 4 and 12 calls inside
   one batch. At three reps that is the model's variance, not a measurement.
+
+### Cross-model batches `x33c` (codex, gpt-5.6-sol) and `x33m` (Muse free), fixed build
+
+Six scenarios (R2, R3, E1, E5, E6, V1) times three families, one repetition, on the same
+host and the same service as `x33`. 17 of 18 runs scored in each; 16 and 17 of them ended
+with the done marker.
+
+| Model | Family | Calls | Req | Resp |
+|---|---|---|---|---|
+| Haiku 4.5 (`x33`, same six scenarios) | huyang | 3.9 | 620 | 2273 |
+| | builtin | 7.2 | 1235 | 3278 |
+| | bash | 8.7 | 598 | 1915 |
+| Muse free (`x33m`) | huyang | 3.2 | 423 | 3692 |
+| | builtin | 7.2 | 927 | 4744 |
+| | bash | 4.7 | 478 | 3025 |
+| codex gpt-5.6-sol (`x33c`) | huyang | 3.3 | 653 | 2673 |
+| | builtin | 3.3 | 16 | 151 |
+| | bash | 3.0 | 82 | 1339 |
+
+The Huyang column is stable across three models of very different sizes, 3.2 to 3.9 calls a
+run, and beats the built-in family on calls and on both token columns for Haiku and for
+Muse. **The codex control columns measure nothing**: 16 request tokens a run is the codex
+CLI using its own file tools, which the T3 projection does not record as tool calls. Only
+that model's Huyang column, which goes through MCP, is comparable.
+
+`gpt-5.6-luna` was requested for this batch and is not what ran. Adding it to the worker's
+codex model list changed the worker configuration digest, and after the coordinator restart
+every backlog task failed in preparation with `execution package catalog revision is stale`
+-- Haiku failed identically, so it was the configuration change and not the model. The
+worker configuration was restored from its backup, the steward restarted, and a probe
+confirmed backlog execution works again. Publishing a new execution-package catalog belongs
+to the S5a managed-catalog work that is in flight.
+
+Both batches were scored with `score.py --provider`, added in this session: two batches of
+the same scenarios render the same prompt, and the prompt is how a benchmark thread is
+recognised, so scoring them without it gave codex and Muse identical tables -- one batch's
+threads counted twice.
