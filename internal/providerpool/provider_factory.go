@@ -15,6 +15,7 @@ type OpenConfig struct {
 	InitFile    string
 	RuntimePath string
 	Debug       bool
+	AfterEpoch  uint64
 }
 
 type Factory interface {
@@ -33,7 +34,7 @@ func (f ConfiguredFactory) Open(config OpenConfig) (provider.Provider, error) {
 	case "", "embed":
 		return embedprovider.Open(embedprovider.Config{
 			Root: config.Root, InitFile: config.InitFile,
-			RuntimePath: config.RuntimePath, Debug: config.Debug,
+			RuntimePath: config.RuntimePath, Debug: config.Debug, AfterEpoch: config.AfterEpoch,
 		})
 	default:
 		return nil, fmt.Errorf(

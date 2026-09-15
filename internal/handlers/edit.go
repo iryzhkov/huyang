@@ -397,7 +397,8 @@ func (h *Handlers) checkpointEdit(ctx context.Context, requestID string, workspa
 // for the summary, and the evidence IDs.
 func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string, workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, data map[string]any) (string, string, []string) {
 	revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
-	backend, err := h.pool.Resync(ctx, workspace)
+	backend, release, err := h.pool.Resync(ctx, workspace)
+	defer release()
 	var report workspacecore.DiagnosticReport
 	if err == nil {
 		// Findings a server published after an earlier verdict went out

@@ -386,7 +386,8 @@ func editStart(raw any) int {
 
 // callProvider runs one canonical provider operation for the workspace.
 func (h *Handlers) callProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, operation string, arguments map[string]any) (any, error) {
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		return nil, err
 	}

@@ -594,7 +594,8 @@ func (h *Handlers) outlineViaProvider(ctx context.Context, requestID string, wor
 	if workspace.Identity().Kind != workspacecore.KindProject {
 		return nil, nil, false
 	}
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		return nil, nil, false
 	}

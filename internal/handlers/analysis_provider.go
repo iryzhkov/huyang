@@ -174,7 +174,8 @@ func (h *Handlers) analysisContributors(ctx context.Context, workspace *workspac
 	if revision != fmt.Sprintf("wsrev_%d", identity.StateSeq) {
 		return nil
 	}
-	backend := h.pool.Existing(workspace)
+	backend, release := h.pool.Existing(workspace)
+	defer release()
 	if backend == nil {
 		return nil
 	}

@@ -254,7 +254,8 @@ func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *
 	providerEvidence := any(nil)
 	providerWarning := ""
 	if !coverage.Complete {
-		backend, providerErr := h.pool.Canonical(ctx, workspace)
+		backend, release, providerErr := h.pool.Canonical(ctx, workspace)
+		defer release()
 		if providerErr == nil {
 			providerEvidence, providerErr = providerpool.CallCanonical(ctx, requestID, workspace, backend, "find_symbol", map[string]any{
 				"root": workspace.Identity().Root, "name": query, "include_body": false,

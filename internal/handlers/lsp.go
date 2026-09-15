@@ -98,7 +98,8 @@ func summariseLanguageSupport(support map[string]any) languageSupport {
 }
 
 func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		result := mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
@@ -190,7 +191,8 @@ func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, wo
 func (h *Handlers) restartLanguageServers(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
 	before := h.languageServerStatus(ctx, requestID, workspace)
 	previouslyAttached := attachedServerNames(before)
-	backend, err := h.pool.Restart(ctx, workspace)
+	backend, release, err := h.pool.Restart(ctx, workspace)
+	defer release()
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_provider_restart_failed", err)
 	}
@@ -238,7 +240,8 @@ func (h *Handlers) installLanguageServer(ctx context.Context, requestID string, 
 	if strings.TrimSpace(language) == "" {
 		return mcpapi.Envelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
 	}
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
@@ -327,7 +330,8 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
 	}
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}
@@ -397,7 +401,8 @@ func (h *Handlers) codeActionsProvider(ctx context.Context, requestID string, wo
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
 	}
-	backend, err := h.pool.Canonical(ctx, workspace)
+	backend, release, err := h.pool.Canonical(ctx, workspace)
+	defer release()
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
 	}

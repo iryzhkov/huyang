@@ -88,7 +88,9 @@ func TestDiagnosticsCollectsLateEvidenceFromARunningProvider(t *testing.T) {
 	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
 	// A provider is running for the workspace, as it would be after any
 	// edit; the diagnostics tool must not start one itself.
-	if _, err := handlers.pool.Canonical(context.Background(), handlers.registry.Lookup(workspacecore.ID(workspaceID))); err != nil {
+	_, release, err := handlers.pool.Canonical(context.Background(), handlers.registry.Lookup(workspacecore.ID(workspaceID)))
+	defer release()
+	if err != nil {
 		t.Fatal(err)
 	}
 	backend.mu.Lock()

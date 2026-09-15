@@ -192,7 +192,8 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 		// A server that attached after an earlier verdict may hold findings
 		// for it; they are recorded before the ledger is read, never by
 		// starting a provider for the purpose.
-		if backend := h.pool.Existing(workspace); backend != nil {
+		if backend, release := h.pool.Existing(workspace); backend != nil {
+			defer release()
 			_, _ = providerpool.CollectLateEvidence(ctx, workspace, backend)
 		}
 		return diagnostics(requestID, workspace, arguments)

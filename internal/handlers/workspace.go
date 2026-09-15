@@ -75,11 +75,8 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	// Opening is where a client first meets a workspace; from here on it is
 	// told what changes, not what was already there.
 	h.notices.Register(opened.Identity().ID, clientIdentity(ctx), opened.DiagnosticNoticeHead())
-	var canonicalBackend provider.Provider
-	if opened.Identity().Kind == workspacecore.KindProject && providerpool.ShippedRuntimePath() != "" {
-		canonicalBackend, _ = h.pool.Canonical(ctx, opened)
-		h.warmLanguageServers(opened, canonicalBackend)
-	}
+	canonicalBackend, release := h.openProvider(ctx, opened)
+	defer release()
 	orientation, err := opened.Orient()
 	if err != nil {
 		return mcpapi.Failure(requestID, opened, "workspace_overview_failed", err)
@@ -148,6 +145,15 @@ var cheapestCallRules = []string{
 	"A file over 500 lines: read view=outline or max_lines before the whole file.",
 }
 
+func (h *Handlers) openProvider(ctx context.Context, w *workspacecore.Workspace) (provider.Provider, func()) {
+	if w.Identity().Kind != workspacecore.KindProject || providerpool.ShippedRuntimePath() == "" {
+		return nil, func() {}
+	}
+	backend, release, _ := h.pool.Canonical(ctx, w)
+	h.warmLanguageServers(w, backend)
+	return backend, release
+}
+
 // warmAttachWait is the per-language attach wait the background probe
 // allows itself; the servers it starts keep starting after it returns.
 const warmAttachWait = 250
@@ -167,7 +173,14 @@ func (h *Handlers) warmLanguageServers(workspace *workspacecore.Workspace, backe
 	if _, done := h.warmed.LoadOrStore(key, true); done {
 		return
 	}
+	// Take a separate lease before handing the provider to the goroutine.
+	backend, release := h.pool.Existing(workspace)
+	if backend == nil {
+		release()
+		return
+	}
 	go func() {
+		defer release()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_, _ = providerpool.Call(ctx, workspace, backend, providerpool.CallSpec{RequestID: "warm_" + string(workspace.Identity().ID)},
@@ -241,7 +254,8 @@ func (h *Handlers) inspect(ctx context.Context, requestID string, workspace *wor
 	}
 	inspection := workspace.Inspect()
 	var semanticProvider map[string]any
-	if backend, providerErr := h.pool.Canonical(ctx, workspace); providerErr == nil {
+	if backend, release, providerErr := h.pool.Canonical(ctx, workspace); providerErr == nil {
+		defer release()
 		inspection.Optional["provider"] = "available"
 		inspection.Optional["lsp"] = "probe_with_language_server_status"
 		semanticProvider = providerpool.Status(ctx, backend)

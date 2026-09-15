@@ -302,7 +302,9 @@ func (h *Handlers) planApply(ctx context.Context, requestID string, workspace *w
 	if wasProvisional {
 		markAppliedFromProvisional(result, plan)
 	}
-	if _, resyncErr := h.pool.Resync(ctx, workspace); resyncErr != nil {
+	_, release, resyncErr := h.pool.Resync(ctx, workspace)
+	defer release()
+	if resyncErr != nil {
 		result["outcome"] = "provisional"
 		result["code"] = "provider_resync_failed"
 		result["summary"] = "Prepared plan applied, but canonical provider resynchronization failed"

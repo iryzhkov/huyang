@@ -35,7 +35,8 @@ func (h *Handlers) debugWithoutTrace(ctx context.Context, requestID, name string
 			return result
 		}
 	}
-	backend, err := h.pool.Debug(ctx, workspace)
+	backend, release, err := h.pool.Debug(ctx, workspace)
+	defer release()
 	if err != nil {
 		result := debugUnavailable(requestID, workspace, "debug_provider_unavailable", err)
 		result["next"] = debugFailureNext(name, action)

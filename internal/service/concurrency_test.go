@@ -110,12 +110,16 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 		}
 	}
 	promptly("canonicalProvider(B)", func() {
-		if _, err := direct.handlers.ProviderPool().Canonical(context.Background(), workspaceBRecord); err != nil {
+		_, release, err := direct.handlers.ProviderPool().Canonical(context.Background(), workspaceBRecord)
+		defer release()
+		if err != nil {
 			t.Errorf("canonicalProvider(B): %v", err)
 		}
 	})
 	promptly("restartCanonicalProvider(B)", func() {
-		if _, err := direct.handlers.ProviderPool().Restart(context.Background(), workspaceBRecord); err != nil {
+		_, release, err := direct.handlers.ProviderPool().Restart(context.Background(), workspaceBRecord)
+		defer release()
+		if err != nil {
 			t.Errorf("restartCanonicalProvider(B): %v", err)
 		}
 	})

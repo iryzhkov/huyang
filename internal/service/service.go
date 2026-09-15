@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/providerpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -172,6 +173,7 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	service := &huyangService{
 		config: config, direct: direct, unixListener: listener, socketInfo: socketInfo,
 	}
+	direct.handlers.ProviderPool().StartReaper(providerpool.DefaultReapInterval)
 	if config.HTTPAddress != "" {
 		if err := service.prepareHTTP(); err != nil {
 			service.Close()

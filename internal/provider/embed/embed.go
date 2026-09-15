@@ -76,6 +76,8 @@ type Config struct {
 	// to acknowledge before the generation is replaced. Zero means the
 	// default.
 	CancelGrace time.Duration
+	// AfterEpoch preserves generation ordering when the pool replaces a backend.
+	AfterEpoch uint64
 }
 
 // DapRuntime is the outcome of the nvim-dap discovery the kernel runs during
@@ -169,6 +171,7 @@ func Open(config Config) (*Backend, error) {
 		descriptor: provider.Descriptor{
 			ID:           provider.ID("embed_" + hex.EncodeToString(sum[:8])),
 			Backend:      "embed",
+			Epoch:        config.AfterEpoch,
 			Root:         config.Root,
 			Cancellation: provider.CancellationCooperative,
 			Languages:    []string{"*"},

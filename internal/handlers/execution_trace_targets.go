@@ -11,7 +11,8 @@ func (h *Handlers) installTraceTargets(ctx context.Context, requestID string, w 
 	if len(targets) == 0 {
 		return nil
 	}
-	backend, err := h.pool.Debug(ctx, w)
+	backend, release, err := h.pool.Debug(ctx, w)
+	defer release()
 	if err != nil {
 		return workspacecore.Codedf("trace_provider_unavailable", "debugger provider unavailable")
 	}
@@ -45,7 +46,8 @@ func (h *Handlers) installTraceTargets(ctx context.Context, requestID string, w 
 func (h *Handlers) cleanupTraceTargets(w *workspacecore.Workspace, id string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	backend, err := h.pool.Debug(ctx, w)
+	backend, release, err := h.pool.Debug(ctx, w)
+	defer release()
 	if err != nil {
 		return false
 	}
@@ -64,7 +66,8 @@ func (h *Handlers) verifyTraceTargets(ctx context.Context, w *workspacecore.Work
 	if len(trace.Targets) == 0 {
 		return true
 	}
-	backend, err := h.pool.Debug(ctx, w)
+	backend, release, err := h.pool.Debug(ctx, w)
+	defer release()
 	if err != nil {
 		return false
 	}
