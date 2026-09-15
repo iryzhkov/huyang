@@ -12,6 +12,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install Neovim 0.11.5
+        run: |
+          curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.5/nvim-linux-x86_64.tar.gz -o "$RUNNER_TEMP/nvim.tar.gz"
+          echo "b2f91117be5b5ea39edd7297156dc2a4a8df4add6c95a90809a8df19e7ab6f52  $RUNNER_TEMP/nvim.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nvim.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
       - name: Formatting
         run: test -z "$(gofmt -l cmd internal)"
       - name: Vet
@@ -20,3 +26,5 @@ jobs:
         run: go test ./...
       - name: Provider and caller race checks
         run: go test -race ./internal/providerpool ./internal/provider/embed ./internal/handlers ./internal/service
+      - name: Real Neovim reaping
+        run: go test -tags live -race ./internal/providerpool -run TestReapRealNeovimAndReopen

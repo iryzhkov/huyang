@@ -190,6 +190,13 @@ func TestMutationDetectsDeleteAndRecreate(t *testing.T) {
 	ws, root := testWorkspace(t)
 	path := filepath.Join(root, "recreated.txt")
 	writeFile(t, path, "same")
+	// Keep the unlinked inode allocated: ext4 may otherwise immediately reuse
+	// its number, making the new-identity assertion filesystem-dependent.
+	original, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer original.Close()
 	initial, err := ws.Snapshot(path, ProviderLayer{})
 	if err != nil {
 		t.Fatal(err)
