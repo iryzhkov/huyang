@@ -535,8 +535,6 @@ func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
 	if len(commits) != 1 {
 		t.Fatalf("recent commits = %#v", recent)
 	}
-	commitHandle := commits[0].(map[string]any)["handle"].(string)
-
 	history := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "view": "history", "limit": 10,
 		"target": map[string]any{"file_range": map[string]any{
@@ -547,6 +545,13 @@ func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
 	if history["outcome"] != "ok" || len(history["data"].(map[string]any)["spans"].([]any)) == 0 {
 		t.Fatalf("history = %#v", history)
 	}
+	// The commit handle comes from the history of the file, which is where a
+	// caller that wants a commit's changes has just been looking.
+	historic := history["data"].(map[string]any)["recent_commits"].([]any)
+	if len(historic) == 0 {
+		t.Fatalf("file history carries no commit to read changes from: %#v", history)
+	}
+	commitHandle := historic[0].(map[string]any)["handle"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID,
 		"git_history":  map[string]any{"query": "needle", "fields": []string{"message", "diff"}, "limit": 10},

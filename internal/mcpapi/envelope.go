@@ -224,7 +224,7 @@ func Failure(requestID string, workspace *workspacecore.Workspace, code string, 
 // - rather than leaving the agent to guess which of the two exists.
 func WorkspaceNotFound(requestID, workspaceID string) map[string]any {
 	result := Envelope(requestID, nil, "failed", "workspace_not_found",
-		"Unknown or missing workspace_id", map[string]any{"workspace_id": workspaceID})
+		"Unknown or missing workspace_id; name the repository with root instead and the workspace is opened for you", map[string]any{"workspace_id": workspaceID})
 	result["next"] = []any{
 		map[string]any{"tool": "workspace_open", "action": "open_the_repository_root", "kind": "project"},
 		map[string]any{"action": "name_the_repository_with_root_instead_of_workspace_id"},

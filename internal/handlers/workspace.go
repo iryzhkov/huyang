@@ -22,6 +22,18 @@ func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any)
 	switch kind {
 	case "project":
 		options.Root, _ = arguments["root"].(string)
+		// A relative root would be resolved in this process, whose working
+		// directory no caller can see: benchmark agents that named
+		// "bench/agent-efficiency/fixtures/go" opened and edited that path
+		// under the service's own directory, in a different repository,
+		// and were told the literal they were replacing was not there.
+		if options.Root != "" && !filepath.IsAbs(options.Root) {
+			result := mcpapi.Envelope(requestID, nil, "failed", "root_not_absolute",
+				fmt.Sprintf("root must be an absolute path; %q would be resolved against the service's own working directory, not yours", options.Root),
+				map[string]any{"root": options.Root})
+			result["next"] = []any{map[string]any{"action": "name_the_repository_root_by_its_absolute_path"}}
+			return options, result
+		}
 	case "documents":
 		for _, value := range mcpapi.AnySlice(arguments["files"]) {
 			if name, ok := value.(string); ok {
@@ -39,7 +51,11 @@ func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any)
 	return options, nil
 }
 
-func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+// open answers workspace_open. delivered says whether the reply reaches the
+// client: the same function opens a workspace on the way in when a call
+// named a root, and that reply is discarded, so it must not count as having
+// shown anybody the overview.
+func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any, delivered bool) map[string]any {
 	kind, _ := arguments["kind"].(string)
 	options, failure := h.decodeOpenOptions(requestID, arguments)
 	if failure != nil {
@@ -88,8 +104,23 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 	if !created {
 		action = "Reopened"
 	}
+	mode, _ := arguments["overview"].(string)
+	// Agents open a workspace they already hold several times a session:
+	// 786 opens across 99 sessions in four days of fleet spool. The second
+	// answer is the tree, the commands and the capabilities the client was
+	// already shown. When none of it has changed, say that instead.
+	fingerprint := fmt.Sprintf("%s|%d|%d|%v", mode, opened.Identity().StateSeq, len(orientation.Entries), commands)
+	if delivered && mode != "full" && h.notices.TakeOverview(opened.Identity().ID, clientIdentity(ctx), fingerprint) {
+		return mcpapi.Envelope(requestID, opened, "ok", "",
+			fmt.Sprintf("Reopened %s workspace with %d entries; overview, commands and capabilities unchanged since this session first opened it", kind, len(orientation.Entries)),
+			map[string]any{
+				"revision":          fmt.Sprintf("wsrev_%d", opened.Identity().StateSeq),
+				"entry_count":       len(orientation.Entries),
+				"overview_repeated": true,
+			})
+	}
 	var overview any = mcpapi.CompactOrientation(orientation)
-	if mode, _ := arguments["overview"].(string); mode == "full" {
+	if mode == "full" {
 		overview = orientation
 	}
 	result := mcpapi.Envelope(requestID, opened, "ok", "", fmt.Sprintf("%s %s workspace with %d entries", action, kind, len(orientation.Entries)), map[string]any{
@@ -100,7 +131,6 @@ func (h *Handlers) open(ctx context.Context, requestID string, arguments map[str
 		"overview":          overview,
 		"recent_commits":    mcpapi.CompactRecentCommits(recent, 3),
 		"commands":          commands,
-		"registry":          map[string]any{"persistent": true, "reused": !created},
 	})
 	return result
 }

@@ -535,3 +535,270 @@ What the live E1 Huyang run spent: `workspace_open` 839 response tokens, `edit_a
 `verify_run` 375 (skipped, untrusted), then `go build` through bash. The edit itself is at
 the protocol cost; the open and the wasted verify are the overhead to attack next
 (`workspace_open` on a fresh clone carries the overview and the untrusted-commands text).
+
+## Efficiency session, 2026-09-13 (after the debugger, trace and recovery stages)
+
+The question this session asked was whether the features added since 2026-09-12 had cost
+efficiency or usability. The per-call protocol numbers had not moved: measured at commit
+`79ab180` (`runs/protocol-x30.json`) against the S20c run, every scenario was within two
+percent except `workspace_open`, which had grown 17 percent. What had regressed was not
+visible in the protocol measurement at all, because its fixtures are two small repositories
+and its calls name a workspace ID.
+
+### The benchmark itself was measuring a task that could not be done
+
+Both fixtures document a formatting gap that loses the sign of a negative amount below one
+major unit, and both `V1` and `E5` tell the agent that one test fails on purpose and must be
+named. `FormatAmount` and `format_amount` handled the sign correctly, every test passed, and
+the two scenarios had been asking three families of agents to report a failure that did not
+exist since the harness was committed. The fixtures now carry the documented gap, so exactly
+one test fails in each. `V1` and `E5` numbers from batch `after` and batch `haiku` measured
+the earlier, unsatisfiable task and are not comparable with later ones.
+
+Two scenarios were added for the surface the stages added: `D1` asks for the line of
+production code responsible for the failing test, and `D2` asks for a runtime value from
+inside a function, which is what the debugger tools exist for and what the shell family
+answers with `dlv` or temporary instrumentation.
+
+### What the real repository showed that the fixtures could not
+
+| Defect | What it cost |
+|---|---|
+| A symbol locator was resolved by the workspace-wide scan | Every document in the repository read and parsed for one declaration: 830 files here. The reply carried a coverage block listing twenty files with no native parser, none of them the file asked about. A found declaration answered 3,965 bytes, a missing one 3,516. |
+| A bare method name answered `semantic_provider_unavailable` | The file's own language was parsed; the name just needed its receiver. The reply blamed the parser and the agent fell back to `search` plus a second `read`. |
+| `root` was declared on 7 of 19 tools | The other twelve required `workspace_id` while their descriptions said "or omit it and pass root", so the documented call was refused by schema validation before the handler, which has resolved roots for every tool all along, saw it. |
+| A mutation receipt was filed under an empty workspace ID when the call named a root | `revision_diff` answered `diff_evidence_incomplete` and `verify_run test_scope=affected` refused with `changed_file_evidence_incomplete`, for every edit made through the call the guide recommends. |
+| Two sha256 per changed file on every edit reply | A third of an ordinary edit reply, for hashes the receipt keeps and no caller reads. |
+| The repeated operation schema carried its prose every time | 1,157 of `edit_apply`'s 1,589 catalog tokens and 1,565 of `change_plan`'s 1,938, paid once per session by every agent. |
+| A diagnostic notice named an id, a severity and a path | Nothing actionable: the delta that exists to save a `diagnostics` call cost one. |
+
+Measured through the stdio adapter against this repository, the symbol read fell from 3,965
+to 1,446 bytes when it resolves and from 3,516 to 1,236 when it does not, and the miss now
+names the declaration that does resolve (`Ledger/Balance`), so the retry is one call.
+
+### Protocol measurement after the fixes (`runs/protocol-x31.json`)
+
+Response tokens, Huyang family, `x30` (commit 79ab180) to `x31`:
+
+| Scenario | Go | Python |
+|---|---|---|
+| W0 open workspace | 618 -> 523 (-15%) | 697 -> 593 (-15%) |
+| R2 read a region by name | 414 -> 379 (-8%) | 369 -> 341 (-8%) |
+| E1 one-line edit | 356 -> 269 (-24%) | 374 -> 274 (-27%) |
+| E2 swap a block | 359 -> 272 (-24%) | 366 -> 271 (-26%) |
+| E3 rename x5 | 375 -> 302 (-19%) | 412 -> 314 (-24%) |
+| E4 new file | 343 -> 249 (-27%) | 350 -> 256 (-27%) |
+| E5 three files + tests | 2033 -> 1676 (-18%) | 2049 -> 1886 (-8%) |
+| E6 signature change | 4170 -> 3231 (-23%) | 4306 -> 3262 (-24%) |
+| E7 copy a file | 577 -> 481 (-17%) | 565 -> 465 (-18%) |
+| E8 move a file | 682 -> 597 (-12%) | 1077 -> 1117 (+4%) |
+| V1 run the tests | 190 -> 282 | 197 -> 504 |
+
+V1 grew because the fixture now has the failing test it always claimed to have: the reply
+carries the failure, which is the whole scenario. Call counts and request tokens are
+unchanged; the request differences in the raw records are the tokenizer's treatment of a
+different workspace ID, not a change in what is sent.
+
+The full catalog, loaded once per session, went from 9,306 to 9,035 cl100k tokens: the
+deduplicated operation schema saves 407 and `root` on the remaining twelve tools costs 136.
+
+### After the spool-driven fixes (`runs/protocol-x32.json`, commit ef922ab)
+
+The second half of the session was driven by the friction spool rather than the fixture:
+four days of fleet spool, 14,414 agent calls across 144 sessions, say which replies agents
+actually pay for and which refusals they actually meet. Ranked by calls: `read` 3,936,
+`search` 3,732, `edit_apply` 2,840, `change_plan` 1,581, `workspace_open` 786. Ranked by
+refusal: 26 percent of `edit_apply` calls and 41 percent of `change_plan` calls did not
+answer `ok`.
+
+What that produced, in the order the spool ranked it:
+
+- **A repeated `workspace_open` answers what changed.** 786 opens across 99 sessions is
+  eight per session, each repeating the same tree, commands and capabilities: 2,429 bytes
+  to 464 for the second open of a workspace whose fingerprint has not changed.
+- **A prepared plan compacts its verification stages** the way `verify_run` has since the
+  first friction pass: 4,182 bytes to 3,030 for a one-operation prepare.
+- **An unchanged diagnostic unavailability is told once.** 555 of 2,843 edits answered
+  `provisional` with the same paragraph about a language server that is not there: 978
+  bytes to 685 for the second edit of such a session.
+- **`verify_run` names what passed and what did not run.** Its most frequent verdict, 91
+  calls across 33 sessions, was "Verification completed against exact sandbox bytes; 1
+  stage(s) unavailable", which names neither.
+- **A missing path answers with the paths that exist under that name**, the commonest read
+  failure at 63 calls across 30 sessions.
+- **The spool records the refusal code**, so the next pass can tell a language server that
+  never attached from a verdict that is merely corroborated.
+
+Protocol response tokens, Huyang family, `x30` (commit 79ab180) to `x32`:
+
+| Scenario | Go | Python |
+|---|---|---|
+| W0 open workspace | 618 -> 517 (-16%) | 697 -> 591 (-15%) |
+| R2 read a region by name | 414 -> 381 (-8%) | 369 -> 344 (-7%) |
+| E1 one-line edit | 356 -> 266 (-25%) | 374 -> 276 (-26%) |
+| E2 swap a block | 359 -> 218 (-39%) | 366 -> 234 (-36%) |
+| E3 rename x5 | 375 -> 254 (-32%) | 412 -> 280 (-32%) |
+| E4 new file | 343 -> 216 (-37%) | 350 -> 219 (-37%) |
+| E5 three files + tests | 2033 -> 1440 (-29%) | 2049 -> 1671 (-18%) |
+| E6 signature change | 4170 -> 2780 (-33%) | 4306 -> 2852 (-34%) |
+| E7 copy a file | 577 -> 431 (-25%) | 565 -> 431 (-24%) |
+| E8 move a file | 682 -> 558 (-18%) | 1077 -> 1026 (-5%) |
+
+Against the modelled built-in tools on the Go fixture, Huyang now uses fewer or equal calls
+on every scenario and fewer response tokens on R3, E6, E7 and E8; E1 costs twice the
+built-in Edit echo (266 against 133) and carries the revision and the diagnostics instead.
+E5 is 1,440 against 970 and E6 is 2,780 against 2,577 with two fewer calls.
+
+### Call-count work and the final protocol state (`runs/protocol-x33.json`, commit 49e9ade)
+
+The spool also says what agents do with the calls, not only what the calls weigh. Four days
+hold 1,843 `read` -> `read` pairs, 1,099 `read` -> `read` -> `read` triples and 1,396
+`edit_apply` -> `edit_apply` pairs, while `read.targets` takes 32 targets and
+`edit_apply.operations` takes 64. Both are in the tool descriptions and in the session guide,
+which an agent reads before it has a reason to care. The second consecutive single-target
+read, and the second consecutive single-operation edit, now carry the one-call form under
+`next`, once per client and workspace, about twenty tokens each.
+
+`search` also stopped echoing the query: a literal search answered the matched text on every
+hit, which for a literal search is the query the caller sent. R3 falls 282 -> 226 response
+tokens on the fixture, and more on a real search: it is one line per hit.
+
+Between `x32` and `x33` every other scenario is flat within two percent, except E2, which
+gains 42 tokens: it is the second edit of the protocol session, so it carries the
+`operations` hint once.
+
+### Agent scores, batch `x30` (Claude Haiku 4.5, Go fixture, pre-fix build 574539d)
+
+135 runs on normandy through the steward backlog, four at a time, against the service as it
+stood at the start of the session. 134 produced a thread. Per run, averaged over the 15
+scenarios: Huyang 5.4 calls, 604 request and 2,890 response tokens; the built-in tools 5.8
+calls, 933 and 2,742; Bash 7.6 calls, 696 and 2,033.
+
+Against the 2026-09-12 `haiku` batch (Huyang 5.3 calls, 631 request, 3,576 response) nothing
+regressed: the response cost per run fell by a fifth, because the benchmark prompt now tells
+the Huyang family to name the repository with `root` instead of opening it first.
+
+| Scenario | Family | Calls | Req | Resp | | Scenario | Family | Calls | Req | Resp |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R1 | huyang | 1.0 | 22 | 1444 | | E4 | huyang | 5.3 | 515 | 2803 |
+| R1 | builtin | 1.0 | 111 | 1290 | | E4 | builtin | 6.7 | 798 | 2213 |
+| R1 | bash | 1.0 | 87 | 1030 | | E4 | bash | 7.0 | 511 | 1495 |
+| R2 | huyang | 2.3 | 175 | 1332 | | E5 | huyang | 13.0 | 2384 | 6854 |
+| R2 | builtin | 2.3 | 218 | 1000 | | E5 | builtin | 8.7 | 2394 | 2950 |
+| R2 | bash | 2.0 | 146 | 188 | | E5 | bash | 15.3 | 2332 | 6381 |
+| R3 | huyang | 1.7 | 141 | 1331 | | E6 | huyang | 9.3 | 2078 | 5878 |
+| R3 | builtin | 4.0 | 389 | 5333 | | E6 | builtin | 17.7 | 3310 | 7772 |
+| R3 | bash | 6.0 | 326 | 1862 | | E6 | bash | 24.3 | 2090 | 4701 |
+| R4 | huyang | 2.0 | 163 | 3249 | | E7 | huyang | 4.3 | 203 | 1113 |
+| R4 | builtin | 3.0 | 325 | 2191 | | E7 | builtin | 6.0 | 720 | 701 |
+| R4 | bash | 3.0 | 112 | 1780 | | E7 | bash | 6.3 | 224 | 621 |
+| E1 | huyang | 4.3 | 183 | 1646 | | E8 | huyang | 6.7 | 341 | 2428 |
+| E1 | builtin | 3.0 | 393 | 1424 | | E8 | builtin | 7.7 | 1418 | 1588 |
+| E1 | bash | 5.3 | 262 | 495 | | E8 | bash | 7.7 | 601 | 961 |
+| E2 | huyang | 6.7 | 746 | 2523 | | D1 | huyang | 5.7 | 284 | 3214 |
+| E2 | builtin | 3.7 | 720 | 6282 | | D1 | builtin | 6.0 | 476 | 2044 |
+| E2 | bash | 7.3 | 862 | 5298 | | D1 | bash | 7.3 | 1040 | 1547 |
+| E3 | huyang | 7.3 | 596 | 3901 | | D2 | huyang | 9.7 | 1077 | 4515 |
+| E3 | builtin | 3.3 | 671 | 1472 | | D2 | builtin | 8.7 | 1458 | 3318 |
+| E3 | bash | 7.7 | 279 | 1543 | | D2 | bash | 12.0 | 1433 | 2466 |
+| V1 | huyang | 2.0 | 150 | 1111 | | V1 | builtin | 3.7 | 317 | 1068 |
+| V1 | bash | 1.3 | 139 | 128 | | | | | | |
+
+Huyang leads on calls and request tokens in most scenarios and wins outright on E6 (9.3 calls
+against 17.7 and 24.3), R3, E2, E7 and E8. It loses on E5 and E3, where agents applied five
+literal edits one at a time instead of one `operations` list, and on the read scenarios, where
+its replies carry the same content inside JSON.
+
+**Where the Huyang response tokens went**, over the whole batch: `read` 52 percent,
+`workspace_open` 24 percent (10 of 15 read-scenario runs opened a workspace they did not need,
+mean 837 tokens), `search` 9, `verify_run` 8, `edit_apply` 5.
+
+**Two cells of this batch measure a Huyang bug rather than a scenario.** Six huyang runs (all
+three of R1 and E1, two of E4, two of E7, one of E8) named the fixture with a relative `root`,
+which the service resolved against its own working directory: they read and edited the
+deployed checkout of Huyang itself, where the first of them applied the E1 edit and the rest
+found the literal already changed. That is fixed (a relative root is refused) and the prompt
+that taught it is fixed; the stray files were removed from the deployed checkout.
+
+### Agent scores, batch `x33` (Claude Haiku 4.5, Go fixture, fixed build fdf077b)
+
+The same 135 runs against the service after the session's fixes, on the same host with the
+same model. Per run, over the runs that ended with the done marker:
+
+| Family | Calls | Request tokens | Response tokens |
+|---|---|---|---|
+| huyang, before (`x30`) | 5.5 | 614 | 2906 |
+| huyang, after (`x33`) | 4.6 | 596 | 2400 |
+| built-in, before / after | 5.8 / 5.9 | 933 / 940 | 2742 / 2855 |
+| bash, before / after | 7.6 / 8.3 | 696 / 475 | 2033 / 2027 |
+
+The two shell families are the control and they did not move; the Huyang family did. After
+the session it uses 22 percent fewer calls, 37 percent fewer request tokens and 16 percent
+fewer response tokens than the built-in tools on the same tasks. Before it, the response
+column was the other way round.
+
+Per scenario, Huyang family, `x30` -> `x33`:
+
+| Scenario | Calls | Req | Resp | | Scenario | Calls | Req | Resp |
+|---|---|---|---|---|---|---|---|---|
+| R1 | 1.0 -> 1.3 | 22 -> 127 | 1444 -> 1710 | | E4 | 5.3 -> 5.3 | 515 -> 662 | 2803 -> 2733 |
+| R2 | 2.3 -> 1.7 | 175 -> 184 | 1332 -> 806 | | E5 | 13.0 -> 5.3 | 2384 -> 1029 | 6854 -> 3663 |
+| R3 | 1.7 -> 1.0 | 141 -> 119 | 1331 -> 670 | | E6 | 9.3 -> 12.3 | 2078 -> 2019 | 5878 -> 7515 |
+| R4 | 2.0 -> 1.7 | 163 -> 205 | 3249 -> 2543 | | E7 | 4.3 -> 2.0 | 203 -> 246 | 1113 -> 507 |
+| E1 | 4.3 -> 2.0 | 183 -> 234 | 1646 -> 435 | | E8 | 6.7 -> 3.7 | 341 -> 395 | 2428 -> 1579 |
+| E2 | 6.7 -> 5.7 | 746 -> 714 | 2523 -> 1867 | | D1 | 5.7 -> 6.0 | 284 -> 388 | 3214 -> 2020 |
+| E3 | 7.3 -> 10.0 | 596 -> 1263 | 3901 -> 4971 | | D2 | 9.7 -> 8.3 | 1077 -> 1079 | 4515 -> 4635 |
+| V1 | 2.0 -> 1.3 | 150 -> 133 | 1111 -> 548 | | | | | |
+
+Read honestly, three reps to a cell:
+
+- **E5 is the operations list being used.** 13.0 calls to 5.3 and the request cost more than
+  halved: the agents that applied five literal edits one at a time now send one call.
+- **V1 is the verification summary.** 2.0 calls to 1.3: the agents that re-ran the suite in
+  a shell to see what passed now read it in the reply.
+- **E1, E7, E8 lost the workspace_open** they never needed, and E1 lost the search-then-read
+  that preceded an edit whose text the task had already given.
+- **R1's request tokens are the relative-root fix, not a regression.** The 22 tokens of the
+  baseline were a four-word relative path that the service resolved against its own working
+  directory; the 127 are the steward's clone path, which is 180 characters. A normal
+  repository root is about eight tokens.
+- **E3 and E6 moved the wrong way and are not claimed as either.** E6's baseline average
+  included a run that stopped after two calls, and E3 swings between 4 and 12 calls inside
+  one batch. At three reps that is the model's variance, not a measurement.
+
+### Cross-model batches `x33c` (codex, gpt-5.6-sol) and `x33m` (Muse free), fixed build
+
+Six scenarios (R2, R3, E1, E5, E6, V1) times three families, one repetition, on the same
+host and the same service as `x33`. 17 of 18 runs scored in each; 16 and 17 of them ended
+with the done marker.
+
+| Model | Family | Calls | Req | Resp |
+|---|---|---|---|---|
+| Haiku 4.5 (`x33`, same six scenarios) | huyang | 3.9 | 620 | 2273 |
+| | builtin | 7.2 | 1235 | 3278 |
+| | bash | 8.7 | 598 | 1915 |
+| Muse free (`x33m`) | huyang | 3.2 | 423 | 3692 |
+| | builtin | 7.2 | 927 | 4744 |
+| | bash | 4.7 | 478 | 3025 |
+| codex gpt-5.6-sol (`x33c`) | huyang | 3.3 | 653 | 2673 |
+| | builtin | 3.3 | 16 | 151 |
+| | bash | 3.0 | 82 | 1339 |
+
+The Huyang column is stable across three models of very different sizes, 3.2 to 3.9 calls a
+run, and beats the built-in family on calls and on both token columns for Haiku and for
+Muse. **The codex control columns measure nothing**: 16 request tokens a run is the codex
+CLI using its own file tools, which the T3 projection does not record as tool calls. Only
+that model's Huyang column, which goes through MCP, is comparable.
+
+`gpt-5.6-luna` was requested for this batch and is not what ran. Adding it to the worker's
+codex model list changed the worker configuration digest, and after the coordinator restart
+every backlog task failed in preparation with `execution package catalog revision is stale`
+-- Haiku failed identically, so it was the configuration change and not the model. The
+worker configuration was restored from its backup, the steward restarted, and a probe
+confirmed backlog execution works again. Publishing a new execution-package catalog belongs
+to the S5a managed-catalog work that is in flight.
+
+Both batches were scored with `score.py --provider`, added in this session: two batches of
+the same scenarios render the same prompt, and the prompt is how a benchmark thread is
+recognised, so scoring them without it gave codex and Muse identical tables -- one batch's
+threads counted twice.

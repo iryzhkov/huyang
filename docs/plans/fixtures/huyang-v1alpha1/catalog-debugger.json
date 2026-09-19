@@ -1,0 +1,600 @@
+[
+  {
+    "description": "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "attach",
+            "restart",
+            "start",
+            "stop"
+          ],
+          "type": "string"
+        },
+        "adapter": {
+          "enum": [
+            "delve",
+            "debugpy",
+            "codelldb",
+            "lldb-dap",
+            "gdb",
+            "js-debug",
+            "java"
+          ],
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "file": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "host": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "initial_breakpoints": {
+          "items": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "condition": {
+                "type": "string"
+              },
+              "hit_condition": {
+                "type": "string"
+              },
+              "line_offset": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "log_message": {
+                "type": "string"
+              },
+              "target": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "additionalProperties": true,
+                    "required": [
+                      "handle"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "required": [
+                      "file_range"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "required": [
+                      "symbol_locator"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "properties": {
+                  "file_range": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "additionalProperties": false,
+                    "properties": {
+                      "after_sha256": {
+                        "type": "string"
+                      },
+                      "anchor_bytes": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "before_sha256": {
+                        "type": "string"
+                      },
+                      "byte_end": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "byte_start": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "expected_sha256": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "revision_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "revision_id",
+                      "byte_start",
+                      "byte_end",
+                      "expected_sha256",
+                      "before_sha256",
+                      "after_sha256",
+                      "anchor_bytes"
+                    ],
+                    "type": "object"
+                  },
+                  "handle": {
+                    "type": "string"
+                  },
+                  "symbol_locator": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "target"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "program": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "stop_on_entry": {
+          "type": "boolean"
+        },
+        "track": {
+          "items": {
+            "description": "Expression tracked at each stop.",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transaction_id": {
+          "type": "string"
+        },
+        "variables": {
+          "enum": [
+            "summary",
+            "names",
+            "none"
+          ],
+          "type": "string"
+        },
+        "wait_ms": {
+          "maximum": 240000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "name": "debug_session"
+  },
+  {
+    "description": "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "clear",
+            "list",
+            "remove",
+            "set"
+          ],
+          "type": "string"
+        },
+        "condition": {
+          "type": "string"
+        },
+        "hit_condition": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "line_offset": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "log_message": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "target": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "additionalProperties": true,
+              "required": [
+                "handle"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "required": [
+                "file_range"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "required": [
+                "symbol_locator"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "file_range": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "after_sha256": {
+                  "type": "string"
+                },
+                "anchor_bytes": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "before_sha256": {
+                  "type": "string"
+                },
+                "byte_end": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "byte_start": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_sha256": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "revision_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "revision_id",
+                "byte_start",
+                "byte_end",
+                "expected_sha256",
+                "before_sha256",
+                "after_sha256",
+                "anchor_bytes"
+              ],
+              "type": "object"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "symbol_locator": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "name_path": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "name_path"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "transaction_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "name": "debug_breakpoints"
+  },
+  {
+    "description": "Continue, pause, step, or run to a revision-bound source target.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "continue",
+            "pause",
+            "run_to",
+            "step_into",
+            "step_out",
+            "step_over"
+          ],
+          "type": "string"
+        },
+        "count": {
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "line_offset": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "root": {
+          "type": "string"
+        },
+        "target": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "additionalProperties": true,
+              "required": [
+                "handle"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "required": [
+                "file_range"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "required": [
+                "symbol_locator"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "file_range": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "after_sha256": {
+                  "type": "string"
+                },
+                "anchor_bytes": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "before_sha256": {
+                  "type": "string"
+                },
+                "byte_end": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "byte_start": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_sha256": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "revision_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "revision_id",
+                "byte_start",
+                "byte_end",
+                "expected_sha256",
+                "before_sha256",
+                "after_sha256",
+                "anchor_bytes"
+              ],
+              "type": "object"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "symbol_locator": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "additionalProperties": false,
+              "properties": {
+                "name_path": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "name_path"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "transaction_id": {
+          "type": "string"
+        },
+        "wait_ms": {
+          "maximum": 240000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "name": "debug_control"
+  },
+  {
+    "description": "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "evaluate",
+            "scopes",
+            "stack",
+            "threads",
+            "variables"
+          ],
+          "type": "string"
+        },
+        "all_frames": {
+          "type": "boolean"
+        },
+        "context": {
+          "enum": [
+            "repl",
+            "watch",
+            "hover"
+          ],
+          "type": "string"
+        },
+        "depth": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expand": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string"
+        },
+        "frame": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "policy": {
+          "enum": [
+            "read_only",
+            "allow_side_effects"
+          ],
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "locals",
+            "globals",
+            "all"
+          ],
+          "type": "string"
+        },
+        "thread": {
+          "type": "integer"
+        },
+        "transaction_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "name": "debug_inspect"
+  }
+]

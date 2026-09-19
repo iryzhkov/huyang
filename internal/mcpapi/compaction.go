@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -83,8 +84,10 @@ func compactDiagnosticItem(item workspacecore.DiagnosticItem) map[string]any {
 
 // CompactSearchHits returns the bounded hit list. The default hit carries
 // path, line, column, match and the editable handle; the exact byte anchors
-// are added only with include_ranges.
-func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges, includeHandles bool) ([]map[string]any, bool) {
+// are added only with include_ranges. A hit whose matched text is the query
+// the caller just sent omits it: a literal search for one name answered that
+// name once per hit, fifty times for a fifty-hit reply.
+func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges, includeHandles bool, echoed string) ([]map[string]any, bool) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -94,7 +97,10 @@ func CompactSearchHits(hits []workspacecore.SearchHit, limit int, includeRanges,
 	}
 	compact := make([]map[string]any, 0, len(returned))
 	for _, hit := range returned {
-		item := map[string]any{"path": hit.Path, "line": hit.Line, "match": hit.Match}
+		item := map[string]any{"path": hit.Path, "line": hit.Line}
+		if hit.Match != echoed {
+			item["match"] = hit.Match
+		}
 		// The column and the editable handle matter only to a caller that
 		// will edit by handle; replace_literal needs neither.
 		if includeHandles || includeRanges {
@@ -175,20 +181,29 @@ func CompactOrientation(orientation workspacecore.Orientation) map[string]any {
 		}
 		topLevel = append(topLevel, record)
 	}
-	return map[string]any{
-		"workspace": orientation.Workspace, "coverage": orientation.Coverage,
+	// The workspace identity is already the envelope's, and coverage that is
+	// complete says only that the walk finished, which the entry count says
+	// too: both were a repeat in every reply that opens a workspace.
+	compact := map[string]any{
 		"entry_count": len(orientation.Entries), "top_level": topLevel,
 		"top_level_count": len(byName), "top_level_truncated": truncated,
 	}
+	if !orientation.Coverage.Complete {
+		compact["coverage"] = orientation.Coverage
+	}
+	return compact
 }
 
-// CompactRecentCommits keeps the handle, abbreviated ID and subject of each
-// commit; the full summary is available through read view=changes.
+// CompactRecentCommits keeps the abbreviated ID and subject of each commit.
+// The opaque handle that read view=changes needs is not here: it is 32 hex
+// characters per commit in a reply that opens a workspace, for a call an
+// agent rarely makes, and read view=history hands out the same handles when
+// it does.
 func CompactRecentCommits(list workspacecore.CommitList, limit int) map[string]any {
 	commits := make([]map[string]any, 0, min(len(list.Commits), limit))
 	for _, commit := range list.Commits[:min(len(list.Commits), limit)] {
 		commits = append(commits, map[string]any{
-			"handle": commit.Handle, "abbreviated_id": commit.AbbreviatedID, "subject": commit.Subject,
+			"abbreviated_id": commit.AbbreviatedID, "subject": commit.Subject,
 		})
 	}
 	compact := map[string]any{"commits": commits}
@@ -370,9 +385,39 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 			preparation.ToolDelta[index].Before = nil
 			preparation.ToolDelta[index].After = nil
 		}
-		result["preparation"] = preparation
+		result["preparation"] = compactPreparation(preparation)
 	}
 	return result
+}
+
+// compactPreparation renders a preparation with its verification stages
+// compacted the way verify_run compacts them. A prepared plan carried the
+// verbose record of every stage -- the command argv, the mode, the started
+// revision and a coverage object of zeros for each -- which was two
+// thirds of a prepare reply and none of it the answer to "did it prepare".
+func compactPreparation(preparation workspacecore.PlanPreparation) map[string]any {
+	stages := preparation.Verification
+	preparation.Verification = nil
+	encoded, err := json.Marshal(preparation)
+	if err != nil {
+		preparation.Verification = stages
+		return map[string]any{"preparation": preparation}
+	}
+	var compact map[string]any
+	if err := json.Unmarshal(encoded, &compact); err != nil {
+		preparation.Verification = stages
+		return map[string]any{"preparation": preparation}
+	}
+	if len(stages) == 0 {
+		return compact
+	}
+	records := make([]any, 0, len(stages))
+	for _, stage := range stages {
+		record, _ := compactVerificationStage(stage, false)
+		records = append(records, record)
+	}
+	compact["verification"] = records
+	return compact
 }
 
 // CompactRevisionDiff keeps the default revision history response bounded by

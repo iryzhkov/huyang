@@ -411,13 +411,55 @@ func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) 
 	return records, coverage, nil
 }
 
+// FindSymbolsInFile resolves a query inside one document. A symbol locator
+// names the file it means, so the answer needs that one file parsed and
+// nothing else: resolving it through the workspace-wide scan reads every
+// document in the repository and reports coverage about files the caller
+// never asked about.
+func (w *Workspace) FindSymbolsInFile(path, query string) ([]HandleRecord, Coverage, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, Coverage{}, errors.New("symbol query is required")
+	}
+	if w.sectioner == nil {
+		return nil, Coverage{Complete: false, Semantic: "text_only", Skipped: []string{"semantic parser unavailable"}}, nil
+	}
+	coverage := Coverage{Complete: true, Semantic: w.semanticCoverage(), FilesConsidered: 1}
+	read, readErr := w.Read(path)
+	if readErr != nil {
+		coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(readErr.Error(), 256))
+		return nil, coverage, nil
+	}
+	coverage.FilesRead, coverage.BytesRead = 1, int64(len(read.Content))
+	sections, sectionErr := w.sectioner.Sections(read.Path, read.Content)
+	if sectionErr != nil {
+		coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(sectionErr.Error(), 256))
+		return nil, coverage, nil
+	}
+	var records []HandleRecord
+	for _, section := range sections {
+		if !strings.Contains(section.Name, query) {
+			continue
+		}
+		record, registerErr := w.registerSymbol(read, section)
+		if registerErr != nil {
+			return nil, coverage, registerErr
+		}
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].Locator.ByteStart < records[j].Locator.ByteStart })
+	return records, coverage, nil
+}
+
 // ResolveSymbolLocator resolves an exact declaration locator from either the
 // built-in sectioner or declarations previously registered by a semantic
 // provider. Provider-backed symbol_find calls register durable opaque handles;
 // plans using the human-readable locator must be able to select the same
 // declaration without requiring callers to substitute the opaque handle.
 func (w *Workspace) ResolveSymbolLocator(path, namePath string) (HandleRecord, error) {
-	records, _, err := w.FindSymbols(namePath)
+	// Only declarations in path survive the filter below, so only path is
+	// parsed: the workspace-wide scan read every document to discard all but
+	// one file's sections.
+	records, _, err := w.FindSymbolsInFile(path, namePath)
 	if err != nil {
 		return HandleRecord{}, err
 	}

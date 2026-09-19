@@ -14,6 +14,8 @@ const (
 	ProfileOrient Profile = "orient"
 	ProfileEdit   Profile = "edit"
 	ProfileDebug  Profile = "debug"
+	// ProfileDebugger carries the four debugger tools and nothing else.
+	ProfileDebugger Profile = "debugger"
 	// ProfileExperimental is the frozen surface plus whatever input shape is
 	// being designed. A caller opts into it knowingly and loses nothing by
 	// doing so; the four profiles above never acquire an unfinished tool,
@@ -50,9 +52,9 @@ const (
 	MaxPlanContentBytes  = 4 << 20
 )
 
-// ProfileOrder is the frozen catalog: these four are compared byte for byte
+// ProfileOrder is the frozen catalog: these are compared byte for byte
 // against their fixtures. ProfileExperimental is deliberately absent.
-var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug}
+var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit, ProfileDebug, ProfileDebugger}
 
 var modernProfileNames = map[Profile][]string{
 	ProfileFull: {
@@ -69,6 +71,13 @@ var modernProfileNames = map[Profile][]string{
 	},
 	ProfileDebug: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
+		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
+	},
+	// ProfileDebugger is the debugger on its own, for a session that already
+	// has the edit profile loaded and wants the debugger beside it rather
+	// than a second copy of every reading tool. It is what a harness that
+	// defers a server's tools until they are searched for should point at.
+	ProfileDebugger: {
 		"debug_session", "debug_breakpoints", "debug_control", "debug_inspect",
 	},
 }
@@ -211,6 +220,34 @@ func planOperationSchema(operationKinds []string) map[string]any {
 	}, "op_id", "kind")
 }
 
+// undescribed is the same schema with its property descriptions removed. A
+// tool that offers one operation and a list of the same operations sends
+// that shape twice, and the second copy is a few hundred tokens of prose the
+// reader has already been given on the same page; the names, the types and
+// the enum of kinds, which is where the meaning is, stay.
+func undescribed(schema map[string]any) map[string]any {
+	copied := CloneEnvelope(schema)
+	delete(copied, "description")
+	if items, ok := schema["items"].(map[string]any); ok {
+		copied["items"] = undescribed(items)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return copied
+	}
+	stripped := make(map[string]any, len(properties))
+	for name, value := range properties {
+		property, isObject := value.(map[string]any)
+		if !isObject {
+			stripped[name] = value
+			continue
+		}
+		stripped[name] = undescribed(property)
+	}
+	copied["properties"] = stripped
+	return copied
+}
+
 // editOperationSchema is one edit_apply operation. replace_range needs a
 // handle from a workspace that exists, so it is offered only for the
 // single operation, not in the list.
@@ -243,10 +280,10 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	operation := planOperationSchema(operationKinds)
 	operations := map[string]any{
 		"type": "array", "items": operation, "maxItems": MaxPlanOperations,
-		"description": "At most 8 operations per request. Build larger plans incrementally with action=edit and edit.mode=add.",
+		"description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
 	}
 	return schemaObject(map[string]any{
-		"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
+		"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
 		"action":             enumSchema("create", "edit", "preview", "inspect", "prepare", "apply", "discard"),
 		"operations":         operations,
 		"plan_id":            stringSchema("Required after creation unless prepare supplies operations inline."),
@@ -254,10 +291,10 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 		"prepared_revision":  stringSchema("Required when action=apply."),
 		"accept_provisional": map[string]any{"type": "boolean", "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence."},
 		"edit": schemaObject(map[string]any{
-			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": operations,
+			"mode": enumSchema("add", "update", "remove", "reorder", "replace_all"), "operations": undescribed(operations),
 			"op_ids": map[string]any{"type": "array", "items": stringSchema("Operation identifier.")},
 		}, "mode"),
-	}, "workspace_id", "idempotency_key", "action")
+	}, "action")
 }
 
 // buildModernTools assembles the catalog from its tool families; the
@@ -311,15 +348,15 @@ func searchSchema() map[string]any {
 // orientationTools are the read-only tools every profile carries.
 func orientationTools(orient []Profile) []ToolDescriptor {
 	return []ToolDescriptor{
-		{Class: ClassProviderRead, Name: "workspace_open", Description: "Open a project (or an exact list of documents) and get its workspace_id, revision, capabilities, the verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), a top-level overview and recent commits. Call it once per repository root and pass the workspace_id to every other tool. Cheapest calls afterwards: read (path, line window, symbol_locator or several targets), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassProviderRead, Name: "workspace_open", Description: "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":     enumSchema("project", "documents"),
 			"root":     stringSchema("Project root; required for kind=project."),
 			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
 			"overview": enumSchema("compact", "full"),
 		}, "kind")},
 		{Class: ClassProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "view": enumSchema("status", "overview", "map"),
-		}, "workspace_id")},
+			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "view": enumSchema("status", "overview", "map"),
+		})},
 		{Class: ClassPureRead, Name: "search", Description: "Find text or symbols in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex; mode=references, definition, implementation, type_definition, incoming_calls or outgoing_calls asks the language server about the symbol named by query and falls back to literal matches when no server answers. paths scopes the hits, context_lines adds the surrounding lines; refine a large result set instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: searchSchema()},
 		{Class: ClassProviderRead, Name: "symbol_find", Description: "Find declarations by name (substring match) and return handles that read and edit_apply accept. Go and Python resolve natively without a language server; other languages go through the semantic provider and merge into the native results.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "query": stringSchema("Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name."), "include_source": map[string]any{"type": "boolean"},
@@ -343,44 +380,44 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 			"limit":     map[string]any{"type": "integer", "minimum": 1, "description": "history and changes views: number of entries."},
 		}), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(),
-		}, "workspace_id")},
+			"workspace_id": workspaceIDProperty(), "root": rootProperty(),
+		})},
 		{Class: ClassPureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "since": stringSchema("Optional diagnostic cursor."),
+			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "since": stringSchema("Optional diagnostic cursor."),
 			"full": map[string]any{"type": "boolean", "description": "Return the complete report including finding bodies and per-dimension evidence IDs."},
-		}, "workspace_id"), ExperimentalProperties: preparedSelectorProperties()},
+		}), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassPureRead, Name: "evidence_get", Description: "Page pending or final diff, diagnostic, command, or provenance evidence.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
-		}, "workspace_id", "evidence_id")},
+			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "evidence_id": stringSchema("Evidence identifier."), "cursor": stringSchema("Optional page cursor."),
+		}, "evidence_id")},
 	}
 }
 
 // editTools are the mutating and verification tools of the edit profile.
 func editTools(edit []Profile) []ToolDescriptor {
-	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "target": targetSchema()}
+	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": targetSchema()}
 	stateful := statefulProperties()
 	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "copy_file", "delete_file", "rename_symbol", "safe_delete_symbol", "inline_symbol", "replace_matches", "apply_code_action"}
 	return []ToolDescriptor{
 		{Class: ClassCanonicalWrite, Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "idempotency_key": stateful["idempotency_key"],
+			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
 			"action": enumSchema("install", "restart"), "language": stringSchema("Filetype or extension, required for install."),
 			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
 			"parser": map[string]any{"type": "boolean"},
-		}, "workspace_id", "idempotency_key", "action")},
-		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "workspace_id", "target"), ExperimentalProperties: preparedSelectorProperties()},
+		}, "action")},
+		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "target"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
 			"verbose":      map[string]any{"type": "boolean", "description": "Add the full change record, hashes and handle resolution to the response."},
 			"format":       map[string]any{"type": "boolean", "description": "Run the language's formatter on the edited files after the edit (gofmt for Go, natively) and report what it changed. Default true; false keeps the bytes exactly as written. Moved, copied and deleted files are never formatted."},
 			"operation":    editOperationSchema(true),
-			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many.", "items": editOperationSchema(false)},
+			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many. Each item takes the fields of operation above, which describes them.", "items": undescribed(editOperationSchema(false))},
 		})},
 		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Profiles: edit, Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds), ExperimentalProperties: map[string]any{
 			"view":       enumSchema("plan", "impact", "semantic"),
 			"invariants": invariantsSchema(),
 		}},
-		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files. A failing test is usually explained by its output and the source; when it is not, this server also offers a debugger (breakpoints, stepping, variables, watchpoints) under its debugger profile, which a harness loads on request rather than in every session.", Profiles: edit, Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
 			"verbose":                 map[string]any{"type": "boolean", "description": "Full per-stage record (mode, revision, coverage, scopes, test lists). Default: verdict, output of stages that did not pass, skip reasons and counts."},
 			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
@@ -388,8 +425,8 @@ func editTools(edit []Profile) []ToolDescriptor {
 			"test_scope":              enumSchema("affected", "full"),
 		}, "stages", "revision_or_transaction")},
 		{Class: ClassCanonicalWrite, Name: "revision_diff", Description: "Explain changes between two revisions or a stale mutation refusal.", Profiles: edit, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": workspaceIDProperty(), "from_revision": stringSchema("Earlier revision."), "to_revision_or_current": stringSchema("Later revision or current."),
-		}, "workspace_id", "from_revision", "to_revision_or_current"), ExperimentalProperties: map[string]any{
+			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "from_revision": stringSchema("Earlier revision."), "to_revision_or_current": stringSchema("Later revision or current."),
+		}, "from_revision", "to_revision_or_current"), ExperimentalProperties: map[string]any{
 			"view": enumSchema("exact", "semantic"),
 		}},
 	}
@@ -474,6 +511,7 @@ func OutputEnvelopeSchema() map[string]any {
 		"diagnostic_updates": map[string]any{"type": "array", "items": schemaObject(map[string]any{
 			"id": stringSchema("Stable diagnostic ID."), "kind": enumSchema("new", "resolved"),
 			"severity": map[string]any{"type": "integer"}, "path": stringSchema("Affected document, workspace-relative."),
+			"line": map[string]any{"type": "integer"}, "message": stringSchema("What the finding says, bounded."),
 			"attribution": map[string]any{"type": "object"},
 		}, "id", "kind")},
 		"diagnostic_updates_truncated": map[string]any{"type": "boolean"},
@@ -521,7 +559,7 @@ func ValidateRegistry() error {
 			return fmt.Errorf("tool %s declares no scheduler class", descriptor.Name)
 		}
 	}
-	expected := map[Profile]int{ProfileFull: 19, ProfileOrient: 8, ProfileEdit: 13, ProfileDebug: 12}
+	expected := map[Profile]int{ProfileFull: 19, ProfileOrient: 8, ProfileEdit: 13, ProfileDebug: 12, ProfileDebugger: 4}
 	for _, profile := range ProfileOrder {
 		if len(Catalog(profile)) != expected[profile] {
 			return fmt.Errorf("profile %s has %d tools, want %d", profile, len(Catalog(profile)), expected[profile])

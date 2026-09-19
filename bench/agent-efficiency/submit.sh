@@ -6,7 +6,12 @@
 #
 # Usage: submit.sh BATCH [--scenarios "R1 E1"] [--languages "go python"]
 #                        [--families "huyang builtin bash"] [--reps 3]
-#                        [--model ID] [--instance ID] [--max-turns N] [--dry-run]
+#                        [--model ID] [--instance ID] [--max-turns N] [--host NAME]
+#                        [--dry-run]
+#
+# --host names the machine whose T3 server runs the tasks (an SSH alias the
+# steward knows). A benchmark measures wall time as well as tokens, so run a
+# batch on an idle machine and keep the host constant for every family of it.
 #
 # Every started run is recorded in runs/BATCH.tsv (scenario, language, family, repetition,
 # title, run id, and the UTC instant the row was started). score.py and wait-check.sh both
@@ -46,6 +51,7 @@ languages="go"
 families="huyang builtin bash"
 reps=3
 max_turns=4
+host=""
 dry_run=false
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -56,6 +62,7 @@ while [ $# -gt 0 ]; do
         --model) MODEL="$2"; shift 2 ;;
         --instance) INSTANCE="$2"; shift 2 ;;
         --max-turns) max_turns="$2"; shift 2 ;;
+        --host) host="$2"; shift 2 ;;
         --dry-run) dry_run=true; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -112,10 +119,13 @@ for scenario in $scenarios; do
                 # wins, so only the slug is passed; $title stays the human label in the log.
                 # The slug is also the idempotency key, which is what makes this repetition
                 # a start of its own rather than a replay of repetition 1.
+                host_option=()
+                [ -n "$host" ] && host_option=(--host "$host")
                 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
                 record="$(printf '%s\n' "$prompt" | t3-backlog --project "$PROJECT" --name "$name" \
                     --model "$model_option" --max-turns "$max_turns" \
-                    --idempotency-key "$name" --no-notify --json)"
+                    --idempotency-key "$name" --no-notify --json \
+                    "${host_option[@]}")"
                 run="$(run_id_from_record "$record")"
                 if [ -z "$run" ]; then
                     echo "no run id in the record for $title; the record was: $record" >&2

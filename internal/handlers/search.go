@@ -71,7 +71,7 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges, includeHandles)
+	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges, includeHandles, literal)
 	data := map[string]any{
 		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": mcpapi.CompactResultSet(&result),
 	}
@@ -112,7 +112,7 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	limit := argInt(arguments, "limit", 50)
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges, includeHandles)
+	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges, includeHandles, literalEcho(arguments, query))
 	if context := argInt(arguments, "context_lines", 0); context > 0 {
 		attachSearchContext(workspace, hits, context)
 	}
@@ -187,6 +187,19 @@ func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspa
 }
 
 // argStrings reads an array-of-strings argument.
+// literalEcho is the text every hit of this search will have matched, which
+// is the query itself for a literal search and nothing for a regular
+// expression or a semantic mode, where the matched text is what the caller
+// does not know yet.
+func literalEcho(arguments map[string]any, query string) string {
+	switch mode, _ := arguments["mode"].(string); mode {
+	case "", "literal":
+		return query
+	default:
+		return ""
+	}
+}
+
 func argStrings(value any) []string {
 	var out []string
 	for _, raw := range mcpapi.AnySlice(value) {

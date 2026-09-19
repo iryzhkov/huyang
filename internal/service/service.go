@@ -113,13 +113,18 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		flags.SetOutput(stderr)
 		profileName := "full"
 		socketPath := defaultHuyangSocket()
-		flags.StringVar(&profileName, "profile", "full", "fixed catalog: full, orient, edit, debug, or experimental")
+		// edit is the default because it is what a coding session uses: the
+		// four debugger tools are 1,654 of the full catalog's 9,035 tokens,
+		// paid by every session, and the fleet spool has them called in 27 of
+		// 144 sessions. A session that wants them loads the debugger profile
+		// beside this one, or asks for full.
+		flags.StringVar(&profileName, "profile", "edit", "fixed catalog: edit (default), full, orient, debug, debugger, or experimental")
 		flags.StringVar(&socketPath, "socket", socketPath, "Huyang Unix control socket")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang mcp [--profile full|orient|edit|debug|experimental] [--socket PATH]")
+			return errors.New("usage: huyang mcp [--profile edit|full|orient|debug|debugger|experimental] [--socket PATH]")
 		}
 		profile, err := modernOnlyProfile(profileName)
 		if err != nil {

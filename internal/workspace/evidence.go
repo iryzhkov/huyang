@@ -809,6 +809,19 @@ func dropOldest(ids []string, excess int, at func(string) time.Time, drop func(s
 	}
 }
 
+// findings looks up the named findings under the store's lock.
+func (s *diagnosticStore) findings(ids []string) map[string]DiagnosticFinding {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := make(map[string]DiagnosticFinding, len(ids))
+	for _, id := range ids {
+		if item, ok := s.state.Items[id]; ok {
+			found[id] = item.Finding
+		}
+	}
+	return found
+}
+
 func (s *diagnosticStore) countsLocked() (current, stale int) {
 	for _, ids := range s.state.Active {
 		current += len(ids)
@@ -1070,6 +1083,18 @@ func (w *Workspace) RecordDiagnosticEvidence(batch DiagnosticBatch) (DiagnosticR
 func (w *Workspace) Diagnostics(since string) (DiagnosticReport, error) {
 	return w.diagnostics.query(since)
 }
+
+// DiagnosticFindings returns the recorded finding of each id that is still
+// known. A notice delta names ids, and an id alone is not something an agent
+// can act on: with the line and the message beside it the reply says what
+// broke, instead of costing a diagnostics call to find out.
+func (w *Workspace) DiagnosticFindings(ids []string) map[string]DiagnosticFinding {
+	if w.diagnostics == nil || len(ids) == 0 {
+		return nil
+	}
+	return w.diagnostics.findings(ids)
+}
+
 func (w *Workspace) DiagnosticNotices(limit int) []DiagnosticNotice {
 	return w.diagnostics.pendingNotices(limit)
 }

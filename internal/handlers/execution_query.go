@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -23,7 +24,35 @@ type executionQuery struct {
 	epoch           uint64
 }
 
+// minExecutionRetryBudget is the time that must be left before the analysis
+// is worth doing again. Below it the caller gets the honest refusal rather
+// than a deadline in the middle of a second attempt.
+const minExecutionRetryBudget = 20 * time.Second
+
+// captureExecution acquires the execution snapshot, once more when the
+// source moved underneath the first attempt. The revision it guards against
+// is a digest over every source file in the tree, so any save anywhere --
+// another agent, a formatter, a build writing into the workspace -- threw
+// away an analysis that had already been computed: five of the fourteen
+// calls these tools have taken on the fleet failed exactly that way, and
+// nothing was wrong with the answer they had. Acquisition only reads, so
+// doing it again is safe; a caller that pinned an explicit revision is not
+// retried, because for that caller the changed source is the answer.
 func (h *Handlers) captureExecution(ctx context.Context, w *workspacecore.Workspace, args map[string]any, view *providerpool.PreparedView) (*executionQuery, error) {
+	q, err := h.captureExecutionOnce(ctx, w, args, view)
+	if err == nil || workspacecore.ErrorCode(err) != "graph_source_changed" {
+		return q, err
+	}
+	if pinned, _ := args["revision"].(string); strings.HasPrefix(pinned, "content_") {
+		return q, err
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < minExecutionRetryBudget {
+		return q, err
+	}
+	return h.captureExecutionOnce(ctx, w, args, view)
+}
+
+func (h *Handlers) captureExecutionOnce(ctx context.Context, w *workspacecore.Workspace, args map[string]any, view *providerpool.PreparedView) (*executionQuery, error) {
 	q := &executionQuery{workspace: w, sourceWorkspace: w, prepared: view, epoch: w.Identity().Epoch}
 	var err error
 	if view != nil {

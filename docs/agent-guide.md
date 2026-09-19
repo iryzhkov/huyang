@@ -3,14 +3,15 @@
 Huyang is the editor an agent should reach for by default, including for a one-line change
 in a file it already knows. This page names the call to make for each common operation and
 what it costs, so no experimenting is needed. Costs are `cl100k_base` tokens measured by
-`bench/agent-efficiency` on the Go fixture after the usability changes of 2026-09-12; the
+`bench/agent-efficiency` on the Go fixture after the efficiency session of 2026-09-13; the
 built-in column models the harness's Read/Edit/Write/Grep tools on the same fixture. The
 full tables, the Python fixture and the pre-change numbers are in
 [bench/agent-efficiency/RESULTS.md](../bench/agent-efficiency/RESULTS.md).
 
-Every tool below accepts `root` (the repository root) in place of `workspace_id`: the
-workspace is opened on the first call and reused afterwards, so a task in a known
-repository needs no `workspace_open` at all. Call `workspace_open {kind: project, root}`
+Every tool that names a workspace accepts `root` (the repository root) in place of
+`workspace_id`, including `change_plan`, `revision_diff`, `diagnostics`, `code_actions`,
+`language_server_*` and the four debugger tools: the workspace is opened on the first call
+and reused afterwards, so a task in a known repository needs no `workspace_open` at all. Call `workspace_open {kind: project, root}`
 only when you want its answer: the top-level overview, the verification commands and
 whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
 every mutating call; pass one only when you intend to retry the same call.
@@ -19,21 +20,29 @@ The first reply a session gets for a workspace carries a `guide` array: the hand
 rules from this page that decide what a session costs. It is sent once, on whatever call
 first reached the workspace, and never repeated for it.
 
+Three replies answer a mistake with the call that fixes it, so the retry is one call. A
+`symbol_locator` whose `name_path` does not resolve names the declarations the file does
+have under that name, which is how the bare name of a method answers `Ledger/Balance`. A
+`read` of a path the workspace does not hold names the paths it holds under that file name.
+And the second consecutive single-target `read`, or single-operation `edit_apply`, carries
+the `targets` or `operations` form under `next`: reading three files or applying five edits
+is one call, not three or five.
+
 | Operation | Call | Calls | Request tokens | Response tokens | Built-in (modelled) |
 |---|---|---|---|---|---|
-| Read a whole file (150 lines) | `read {target:{path}}` | 1 | 35 | 1375 | Read: 1 call, 13 / 1584 |
-| Read a region by function name in a 900-line file | `read {target:{symbol_locator:{path, name_path}}}` | 1 | 47 | 440 | Grep + Read: 2 calls, 53 / 284 |
-| Find every call site of a function | `search {query, mode: literal}` | 1 | 37 | 661 | Grep: 1 call, 24 / 358 |
-| Read three related files | `read {targets:[{path},{path},{path}]}` | 1 | 46 | 2382 | Read x3: 3 calls, 39 / 2632 |
-| Change one line in a known file | `edit_apply {operation:{kind: replace_literal, path, old, new}}` | 1 | 73 | 360 | Edit: 1 call, 35 / 133 |
-| Replace a block located only by content | `edit_apply replace_literal` with the block as `old` | 1 | 293 | 375 | Edit: 1 call, 255 / 292 |
-| Rename a local identifier (5 occurrences) | `edit_apply replace_literal {path, old, new, expected_count: 5}` | 1 | 66 | 400 | Edit replace_all: 1 call, 28 / 127 |
-| Add a new file (40 lines) | `edit_apply {operation:{kind: create_file, path, content}}` | 1 | 317 | 354 | Write: 1 call, 279 / 7 |
-| Coordinated edits in three files, then build and test | 5 x `replace_literal` + `verify_run {stages:[check, tests], revision_or_transaction: current}` | 6 | 691 | 2248 | Edit x5 + Bash: 6 calls, 454 / 928 |
-| Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, `verify_run check` | 12 | 1047 | 4774 | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
-| Run the test suite | `verify_run {stages:[tests], revision_or_transaction: current}` | 1 | 61 | 258 | Bash: 1 call, 14 / 13 (passing) |
-| Copy a file, then build (E7) | `edit_apply {operation:{kind: copy_file, from, to}}` + `verify_run check` | 2 | 126 | 582 | Read + Write + Bash: 3 calls, 414 / 453 (the content crosses the context twice); Bash `cp`: 2 calls, 43 / 0 |
-| Move a file, then test (E8) | `edit_apply {operation:{kind: move_file, from, to}}` + `verify_run tests`; the reply names the `git add` | 2 | 125 | 677 | Read + Write + Bash `rm` + Bash: 4 calls, 649 / 699; Bash `git mv`: 2 calls, 30 / 13 |
+| Read a whole file (150 lines) | `read {target:{path}}` | 1 | 38 | 1352 | Read: 1 call, 13 / 1584 |
+| Read a region by function name in a 900-line file | `read {target:{symbol_locator:{path, name_path}}}` | 1 | 50 | 410 | Grep + Read: 2 calls, 53 / 284 |
+| Find every call site of a function | `search {query, mode: literal}` | 1 | 40 | 226 | Grep: 1 call, 24 / 358 |
+| Read three related files | `read {targets:[{path},{path},{path}]}` | 1 | 49 | 2416 | Read x3: 3 calls, 39 / 2665 |
+| Change one line in a known file | `edit_apply {operation:{kind: replace_literal, path, old, new}}` | 1 | 76 | 265 | Edit: 1 call, 35 / 133 |
+| Replace a block located only by content | `edit_apply replace_literal` with the block as `old` | 1 | 296 | 260 | Edit: 1 call, 255 / 292 |
+| Rename a local identifier (5 occurrences) | `edit_apply replace_literal {path, old, new, expected_count: 5}` | 1 | 69 | 266 | Edit replace_all: 1 call, 28 / 127 |
+| Add a new file (40 lines) | `edit_apply {operation:{kind: create_file, path, content}}` | 1 | 320 | 210 | Write: 1 call, 279 / 7 |
+| Coordinated edits in three files, then build and test | 5 x `replace_literal` + `verify_run {stages:[check, tests], revision_or_transaction: current}` | 6 | 697 | 1454 | Edit x5 + Bash: 6 calls, 454 / 970 |
+| Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, `verify_run check` | 12 | 1059 | 2760 | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
+| Run the test suite | `verify_run {stages:[tests], revision_or_transaction: current}` | 1 | 62 | 280 | Bash: 1 call, 14 / 55 (one failing test) |
+| Copy a file, then build (E7) | `edit_apply {operation:{kind: copy_file, from, to}}` + `verify_run check` | 2 | 122 | 437 | Read + Write + Bash: 3 calls, 435 / 486 (the content crosses the context twice); Bash `cp`: 2 calls, 43 / 0 |
+| Move a file, then test (E8) | `edit_apply {operation:{kind: move_file, from, to}}` + `verify_run tests`; the reply names the `git add` | 2 | 121 | 563 | Read + Write + Bash `rm` + Bash: 4 calls, 649 / 741; Bash `git mv`: 2 calls, 30 / 13 |
 | Delete a file you have read | `edit_apply {operation:{kind: delete_file, path, revision_id}}` | 1 | about 50 | about 300 | Bash `rm`: 1 call |
 | Overwrite a file you have read | `edit_apply {operation:{kind: create_file, path, content, replace: true, revision_id}}` | 1 | content + 40 | about 350 | Write: 1 call |
 | Read a big file without a blind dump | `read {target:{path}, max_lines: 200}` then `view: outline` or a window | 1 or 2 | 40 | capped | Read: 1 call, whole file |

@@ -16,6 +16,7 @@ func debugActionSchema(properties map[string]any, required []string, actions ...
 func debugStatefulProperties() map[string]any {
 	return map[string]any{
 		"workspace_id":    map[string]any{"type": "string"},
+		"root":            map[string]any{"type": "string"},
 		"idempotency_key": map[string]any{"type": "string"},
 		"transaction_id":  map[string]any{"type": "string"},
 	}
@@ -24,6 +25,7 @@ func debugStatefulProperties() map[string]any {
 func debugReadProperties() map[string]any {
 	return map[string]any{
 		"workspace_id":   map[string]any{"type": "string"},
+		"root":           map[string]any{"type": "string"},
 		"transaction_id": map[string]any{"type": "string"},
 	}
 }
@@ -93,7 +95,7 @@ func modernDebugSessionTool(profiles []Profile) ToolDescriptor {
 		ExperimentalProperties: map[string]any{"trace_policy": executionTracePolicySchema()},
 		Class:                  ClassProviderRead, Name: "debug_session", Description: "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
 		Profiles: profiles, Destructive: true,
-		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
+		InputSchema: debugActionSchema(properties, []string{"action"},
 			"start", "attach", "restart", "stop"),
 	}
 }
@@ -107,7 +109,7 @@ func modernDebugBreakpointsTool(profiles []Profile) ToolDescriptor {
 		ExperimentalProperties: map[string]any{"action": enumSchema("list", "set", "remove", "clear", "watch"), "value_name": stringSchema("Exact scalar local name for a native write watchpoint in an active value-enabled trace.")},
 		Class:                  ClassProviderRead, Name: "debug_breakpoints", Description: "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
 		Profiles: profiles, Destructive: true,
-		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
+		InputSchema: debugActionSchema(properties, []string{"action"},
 			"list", "set", "remove", "clear"),
 	}
 }
@@ -121,7 +123,7 @@ func modernDebugControlTool(profiles []Profile) ToolDescriptor {
 	return ToolDescriptor{
 		Class: ClassProviderRead, Name: "debug_control", Description: "Continue, pause, step, or run to a revision-bound source target.",
 		Profiles: profiles, Destructive: true,
-		InputSchema: debugActionSchema(properties, []string{"workspace_id", "idempotency_key", "action"},
+		InputSchema: debugActionSchema(properties, []string{"action"},
 			"continue", "pause", "step_over", "step_into", "step_out", "run_to"),
 	}
 }
@@ -146,7 +148,7 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 		ExperimentalProperties: map[string]any{"action": enumSchema("threads", "stack", "scopes", "variables", "evaluate", "trace", "mutation_capabilities", "value_origin", "compare_traces"), "passing_trace_id": stringSchema("Completed reference trace; passing is a caller-supplied role."), "failing_trace_id": stringSchema("Completed comparison trace; failing is a caller-supplied role."), "value_name": stringSchema("Exact captured local name; no evaluation is performed."), "trace_id": stringSchema("A completed or active trace; omit for the current/latest trace.")},
 		Class:                  ClassProviderRead, Name: "debug_inspect", Description: "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
 		Profiles: profiles, ReadOnly: true,
-		InputSchema: debugActionSchema(properties, []string{"workspace_id", "action"},
+		InputSchema: debugActionSchema(properties, []string{"action"},
 			"threads", "stack", "scopes", "variables", "evaluate"),
 	}
 }
@@ -156,7 +158,7 @@ func modernDebugInspectTool(profiles []Profile) ToolDescriptor {
 // property. Every other tool passes.
 func ValidateDebugArguments(name string, arguments map[string]any) error {
 	action, _ := arguments["action"].(string)
-	allowed := map[string]bool{"workspace_id": true, "idempotency_key": true, "transaction_id": true, "action": true}
+	allowed := map[string]bool{"workspace_id": true, "root": true, "idempotency_key": true, "transaction_id": true, "action": true}
 	var extras []string
 	var err error
 	switch name {
@@ -167,7 +169,7 @@ func ValidateDebugArguments(name string, arguments map[string]any) error {
 	case "debug_control":
 		extras, err = debugControlExtras(action, arguments)
 	case "debug_inspect":
-		allowed = map[string]bool{"workspace_id": true, "transaction_id": true, "action": true}
+		allowed = map[string]bool{"workspace_id": true, "root": true, "transaction_id": true, "action": true}
 		extras, err = debugInspectExtras(action, arguments)
 	default:
 		return nil

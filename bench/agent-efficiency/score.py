@@ -275,15 +275,32 @@ def batch_started(rows: list[dict]) -> str:
     return min(stamps)
 
 
-def batch_threads(connection: sqlite3.Connection, since: str) -> dict[tuple, list[str]]:
+def thread_providers(connection: sqlite3.Connection) -> dict[str, str]:
+    """The provider each thread ran on, as the session projection recorded it."""
+    return {
+        thread_id: (provider or "")
+        for thread_id, provider in connection.execute(
+            "select thread_id, provider_name from projection_thread_sessions"
+        )
+    }
+
+
+def batch_threads(connection: sqlite3.Connection, since: str, provider: str = "") -> dict[tuple, list[str]]:
     """Map (scenario, language, family) to the benchmark threads started since `since`.
 
     The steward titles threads itself, so a thread is recognised by its first user
     message, which is the rendered prompt; threads of one scenario are interchangeable
     and are assigned to the batch rows in creation order.
+
+    Two batches of the same scenarios on different models render the same prompt,
+    so the prompt alone cannot tell their threads apart: scoring them without
+    `provider` gave the codex and the Muse batch identical numbers, which were one
+    batch's threads counted twice. `provider` keeps only the threads that ran on
+    the provider the batch named.
     """
     threads: dict[tuple, list[str]] = {}
     seen: set[str] = set()
+    providers = thread_providers(connection) if provider else {}
     rows = connection.execute(
         "select thread_id, text from projection_thread_messages where role = 'user' "
         "and text like ? and created_at >= ? order by created_at",
@@ -293,6 +310,8 @@ def batch_threads(connection: sqlite3.Connection, since: str) -> dict[tuple, lis
         if thread_id in seen:
             continue
         seen.add(thread_id)
+        if provider and provider.lower() not in providers.get(thread_id, "").lower():
+            continue
         scenario = re.search(r"Task \((\w+):", text)
         family = re.search(r"Tool family under test: (\w+)", text)
         language = re.search(r"fixtures/(\w+)", text)
@@ -373,6 +392,9 @@ def main() -> None:
     parser.add_argument("--batch", required=True)
     parser.add_argument("--db", default=DEFAULT_DB)
     parser.add_argument("--markdown", action="store_true")
+    parser.add_argument("--provider", default="",
+                        help="keep only threads that ran on this provider (claude, codex, opencode); "
+                             "needed when two batches of the same scenarios ran on different models")
     args = parser.parse_args()
     log = os.path.join(HERE, "runs", f"{args.batch}.tsv")
     with open(log, encoding="utf-8") as handle:
@@ -380,7 +402,7 @@ def main() -> None:
     connection = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     tokenizer = Tokenizer()
     try:
-        threads = batch_threads(connection, batch_started(rows))
+        threads = batch_threads(connection, batch_started(rows), args.provider)
         runs = [score_run(connection, tokenizer, row, threads) for row in rows]
     finally:
         tokenizer.close()

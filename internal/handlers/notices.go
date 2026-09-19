@@ -28,8 +28,15 @@ type DiagnosticUpdate struct {
 	Kind        string                            `json:"kind"`
 	Severity    int                               `json:"severity,omitempty"`
 	Path        string                            `json:"path,omitempty"`
+	Line        int                               `json:"line,omitempty"`
+	Message     string                            `json:"message,omitempty"`
 	Attribution *workspacecore.CulpritAttribution `json:"attribution,omitempty"`
 }
+
+// maxNoticeMessage bounds the message a notice carries. A compiler says what
+// is wrong in a line; a type checker can say it in a paragraph, and the
+// paragraph belongs in diagnostics, not in the delta of every reply.
+const maxNoticeMessage = 160
 
 // clientIdentityKey carries the MCP session identity through the request
 // context so per-client delivery state can be keyed without a session object.
@@ -42,6 +49,42 @@ func WithClientIdentity(ctx context.Context, identity string) context.Context {
 func clientIdentity(ctx context.Context) string {
 	identity, _ := ctx.Value(clientIdentityKey{}).(string)
 	return identity
+}
+
+// previousCallKey carries the tool this client called before this one, so a
+// handler can answer a repeated single-target call with the one-call
+// alternative at the moment it would have helped.
+type previousCallKey struct{}
+
+func withPreviousCall(ctx context.Context, tool string) context.Context {
+	return context.WithValue(ctx, previousCallKey{}, tool)
+}
+
+func previousCall(ctx context.Context) string {
+	tool, _ := ctx.Value(previousCallKey{}).(string)
+	return tool
+}
+
+// batchHint is the one-call alternative to a repeated single-target call,
+// attached at most once per client and workspace.
+func (h *Handlers) batchHint(ctx context.Context, workspace *workspacecore.Workspace, tool string, result map[string]any) {
+	if previousCall(ctx) != tool || workspace == nil {
+		return
+	}
+	if !h.notices.TakeHint(workspace.Identity().ID, clientIdentity(ctx), tool) {
+		return
+	}
+	var hint map[string]any
+	switch tool {
+	case "read":
+		hint = map[string]any{"tool": "read", "action": "read_several_files_in_one_call", "targets": "[{path}, {path}, ...]"}
+	case "edit_apply":
+		hint = map[string]any{"tool": "edit_apply", "action": "apply_several_edits_in_one_call", "operations": "[{kind, ...}, ...]"}
+	default:
+		return
+	}
+	next, _ := result["next"].([]any)
+	result["next"] = append(next, hint)
 }
 
 // noticeDelivery remembers, per workspace and client, the last diagnostic
@@ -59,8 +102,25 @@ type clientCursors struct {
 	// the service resolves a root into a workspace before the call runs
 	// and discards that reply, so the debt is remembered here and settled
 	// by the first reply that does reach the client.
-	owed  map[string]bool
-	order []string
+	owed map[string]bool
+	// unavailable is the last diagnostic unavailability each client was
+	// told about. A workspace with no language server repeats the same
+	// reason and the same recovery on every edit of a session, which is a
+	// paragraph the client has already read and cannot act on twice.
+	unavailable map[string]string
+	// opened is the workspace overview each client was last given. Agents
+	// open a workspace they already hold several times a session; the
+	// second answer is the same tree, the same commands and the same
+	// capabilities they were shown the first time.
+	opened map[string]string
+	// lastTool is the tool each client called last in this workspace, and
+	// hinted the one-call alternatives it has already been shown. Agents
+	// read one file at a time and edit one line at a time when read.targets
+	// and edit_apply.operations take dozens of either: 1,843 read-then-read
+	// and 1,396 edit-then-edit pairs in four days of fleet spool.
+	lastTool map[string]string
+	hinted   map[string]bool
+	order    []string
 }
 
 func newNoticeDelivery() *noticeDelivery {
@@ -77,6 +137,83 @@ func (n *noticeDelivery) TakeGuide(workspaceID workspacecore.ID, client string) 
 		return false
 	}
 	delete(clients.owed, client)
+	return true
+}
+
+// TakeUnavailability reports whether this client has already been told this
+// exact diagnostic unavailability for this workspace, and records it. An
+// empty fingerprint clears the memory, so the next unavailability is told in
+// full however often the verdict flips.
+func (n *noticeDelivery) TakeUnavailability(workspaceID workspacecore.ID, client, fingerprint string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return false
+	}
+	if clients.unavailable == nil {
+		clients.unavailable = map[string]string{}
+	}
+	if fingerprint == "" {
+		delete(clients.unavailable, client)
+		return false
+	}
+	repeated := clients.unavailable[client] == fingerprint
+	clients.unavailable[client] = fingerprint
+	return repeated
+}
+
+// TakeOverview reports whether this client has already been given this exact
+// workspace overview, and records it.
+func (n *noticeDelivery) TakeOverview(workspaceID workspacecore.ID, client, fingerprint string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil || fingerprint == "" {
+		return false
+	}
+	if clients.opened == nil {
+		clients.opened = map[string]string{}
+	}
+	repeated := clients.opened[client] == fingerprint
+	clients.opened[client] = fingerprint
+	return repeated
+}
+
+// NoteCall records the tool this client is calling now and returns the one
+// it called before, in this workspace.
+func (n *noticeDelivery) NoteCall(workspaceID workspacecore.ID, client, tool string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return ""
+	}
+	if clients.lastTool == nil {
+		clients.lastTool = map[string]string{}
+	}
+	previous := clients.lastTool[client]
+	clients.lastTool[client] = tool
+	return previous
+}
+
+// TakeHint reports whether this client still has to be shown one hint in
+// this workspace, and records that it now has been.
+func (n *noticeDelivery) TakeHint(workspaceID workspacecore.ID, client, name string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	clients := n.delivered[workspaceID]
+	if clients == nil {
+		return false
+	}
+	if clients.hinted == nil {
+		clients.hinted = map[string]bool{}
+	}
+	key := client + "\x00" + name
+	if clients.hinted[key] {
+		return false
+	}
+	clients.hinted[key] = true
 	return true
 }
 
@@ -136,6 +273,9 @@ func (n *noticeDelivery) track(workspaceID workspacecore.ID, client string) *cli
 		for len(clients.order) > maxNoticeClients {
 			delete(clients.cursors, clients.order[0])
 			delete(clients.owed, clients.order[0])
+			delete(clients.unavailable, clients.order[0])
+			delete(clients.opened, clients.order[0])
+			delete(clients.lastTool, clients.order[0])
 			clients.order = clients.order[1:]
 		}
 	}
@@ -180,10 +320,55 @@ func (h *Handlers) AttachDiagnosticUpdates(ctx context.Context, workspace *works
 	if len(updates) == 0 {
 		return
 	}
+	describeNotices(workspace, updates)
 	result["diagnostic_updates"] = updates
+	// The summary was written before the language server published these,
+	// so an edit that says "no new diagnostics" can arrive with findings
+	// beside it. Say what the reply carries rather than contradicting it.
+	if summary, ok := result["summary"].(string); ok && strings.HasSuffix(summary, "no new diagnostics") {
+		if count := countNewNotices(updates); count > 0 {
+			result["summary"] = strings.TrimSuffix(summary, "no new diagnostics") +
+				fmt.Sprintf("%d diagnostic(s) published since, in diagnostic_updates", count)
+		}
+	}
 	if dropped || page.More || page.Truncated {
 		result["diagnostic_updates_truncated"] = true
 	}
+}
+
+// describeNotices fills in the line and the message of every update whose
+// finding the ledger still holds.
+func describeNotices(workspace *workspacecore.Workspace, updates []DiagnosticUpdate) {
+	ids := make([]string, 0, len(updates))
+	for _, update := range updates {
+		if update.Kind != "resolved" {
+			ids = append(ids, update.ID)
+		}
+	}
+	findings := workspace.DiagnosticFindings(ids)
+	for index, update := range updates {
+		finding, known := findings[update.ID]
+		if !known {
+			continue
+		}
+		updates[index].Line = finding.Range.StartLine
+		message := finding.Message
+		if len(message) > maxNoticeMessage {
+			message = message[:maxNoticeMessage] + "..."
+		}
+		updates[index].Message = message
+	}
+}
+
+// countNewNotices counts the findings a delta reports as new.
+func countNewNotices(updates []DiagnosticUpdate) int {
+	count := 0
+	for _, update := range updates {
+		if update.Kind == "new" {
+			count++
+		}
+	}
+	return count
 }
 
 // collapseNotices keeps one entry per finding, newest first, its last kind

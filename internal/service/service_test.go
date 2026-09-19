@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,7 +87,7 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 		"kind": "documents", "files": []string{document},
 	})
 	if reopened["workspace"].(map[string]any)["id"] != workspaceID ||
-		reopened["data"].(map[string]any)["registry"].(map[string]any)["reused"] != true {
+		!strings.HasPrefix(fmt.Sprint(reopened["summary"]), "Reopened") {
 		t.Fatalf("repeated open = %#v after %#v", reopened, opened)
 	}
 	searched := callModern(t, firstSession, "search", map[string]any{
@@ -288,7 +290,9 @@ func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error
 	return t.base.RoundTrip(clone)
 }
 
-func TestHuyangMCPAdapterDefaultsToFullAndProxiesService(t *testing.T) {
+// The adapter defaults to the edit profile: a coding session pays for the
+// debugger only when it asks for it.
+func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
 	base := t.TempDir()
 	socketPath := filepath.Join(base, "control.sock")
 	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
@@ -312,8 +316,8 @@ func TestHuyangMCPAdapterDefaultsToFullAndProxiesService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 19 {
-		t.Fatalf("default adapter catalog = %d tools, want 19", len(listed.Tools))
+	if len(listed.Tools) != 13 {
+		t.Fatalf("default adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
 	}
 	_ = session.Close()
 	_ = toAdapterWriter.Close()
@@ -366,8 +370,8 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after service restart: %v", err)
 	}
-	if len(listed.Tools) != 19 {
-		t.Fatalf("reconnected adapter catalog = %d tools, want 19", len(listed.Tools))
+	if len(listed.Tools) != 13 {
+		t.Fatalf("reconnected adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
 	}
 
 	stopSecond()
@@ -376,8 +380,8 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after second service restart: %v", err)
 	}
-	if len(listed.Tools) != 19 {
-		t.Fatalf("twice-reconnected adapter catalog = %d tools, want 19", len(listed.Tools))
+	if len(listed.Tools) != 13 {
+		t.Fatalf("twice-reconnected adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
 	}
 }
 

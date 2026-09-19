@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
@@ -79,7 +80,11 @@ func (h *Handlers) read(ctx context.Context, requestID string, workspace *worksp
 	if len(request.Targets) > 0 && request.Handle == "" && !request.HasPath && request.Symbol == nil && !request.HasRange {
 		return h.readMany(ctx, requestID, workspace, request)
 	}
-	return h.readOne(ctx, requestID, workspace, request)
+	result := h.readOne(ctx, requestID, workspace, request)
+	// Two single-file reads in a row are one read with targets; the hint
+	// arrives on the second one, where it is about the call just made.
+	h.batchHint(ctx, workspace, "read", result)
+	return result
 }
 
 // readOne dispatches a single-target read on the shape of its target.
@@ -283,7 +288,10 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	rawPath, _ := request.Symbol["path"].(string)
 	rawName, _ := request.Symbol["name_path"].(string)
 	path, name := workspacePath(workspace, rawPath), canonicalNamePath(rawName)
-	matches, coverage, findErr := workspace.FindSymbols(name)
+	// The locator names one file, so only that file is parsed: the
+	// workspace-wide scan read every document in the repository and answered
+	// coverage about files this read never asked about.
+	matches, coverage, findErr := workspace.FindSymbolsInFile(path, name)
 	if findErr != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
 	}
@@ -303,7 +311,22 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 		}
 	}
 	if len(exact) != 1 {
-		return symbolReadMiss(requestID, workspace, coverage, exact, rawName, path)
+		// A language the native sectioner does not parse still has an
+		// outline, through the language server that is attached to it. Its
+		// declarations are what this file does have, so a name that is not
+		// among them is a name that is not there -- not a parser that is
+		// missing, which is what the reply used to say about every miss in
+		// a TypeScript or a Java file on a machine whose servers were all
+		// attached.
+		if len(matches) == 0 {
+			if sections, _, ok := h.outlineViaProvider(ctx, requestID, workspace, path); ok {
+				coverage = workspacecore.Coverage{Complete: true, Semantic: "embedded_nvim"}
+				for _, section := range sections {
+					matches = append(matches, workspacecore.HandleRecord{Locator: workspacecore.SemanticLocator{Path: path, NamePath: section.Name}})
+				}
+			}
+		}
+		return symbolReadMiss(requestID, workspace, coverage, exact, matches, rawName, path)
 	}
 	resolved, resolveErr := workspace.ResolveHandle(exact[0].Handle)
 	if resolveErr != nil {
@@ -322,26 +345,71 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read symbol %s", name), map[string]any{
 		"path": path, "name_path": name, "kind": current.Kind, "content": string(read.Content[current.ByteStart:current.ByteEnd]),
 		"revision_id": read.Snapshot.Revision, "handle": resolved.Handle, "start_line": startLine, "end_line": endLine,
-		"coverage": coverage,
 	})
 }
 
 // symbolReadMiss answers a locator that resolved to no or several
 // declarations, with the cheapest recovery for each case.
-func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact []workspacecore.HandleRecord, rawName, path string) map[string]any {
+// candidateNamePaths names the declarations the file does have, in file
+// order and bounded, so a miss on a bare method name answers the qualified
+// locator that resolves instead of a dead end. Declarations that carry the
+// requested name come first, because "Balance" wanting "Ledger/Balance" is
+// the common case; the rest of the file's declarations follow, because a
+// name that is simply not there is answered by what is.
+func candidateNamePaths(nearby []workspacecore.HandleRecord, rawName string) []string {
+	const maxCandidates = 5
+	leaf := rawName
+	if index := strings.LastIndexAny(leaf, "/."); index >= 0 {
+		leaf = leaf[index+1:]
+	}
+	seen := make(map[string]bool, len(nearby))
+	named := make([]string, 0, maxCandidates)
+	others := make([]string, 0, maxCandidates)
+	for _, record := range nearby {
+		name := record.Locator.NamePath
+		if name == "" || name == rawName || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if strings.Contains(name, leaf) {
+			named = append(named, name)
+			continue
+		}
+		others = append(others, name)
+	}
+	candidates := append(named, others...)
+	if len(candidates) > maxCandidates {
+		candidates = candidates[:maxCandidates]
+	}
+	return candidates
+}
+
+func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, coverage workspacecore.Coverage, exact, nearby []workspacecore.HandleRecord, rawName, path string) map[string]any {
 	// A name that is not there and a name that is there twice are different
 	// mistakes with different repairs - use another name, or qualify the one
 	// you used - and "did not resolve uniquely" described both.
 	outcome, code := "conflict", "symbol_not_found"
 	summary := fmt.Sprintf("No declaration named %s in %s", rawName, path)
+	// A method is declared under its receiver, so the bare name of one never
+	// resolves. The scan already found those declarations; naming them here
+	// is the difference between a dead end and a locator the caller can
+	// retry in one call.
+	candidates := candidateNamePaths(nearby, rawName)
+	if len(exact) == 0 && len(candidates) > 0 {
+		summary = fmt.Sprintf("No declaration named %s in %s; the file declares %s", rawName, path, strings.Join(candidates, ", "))
+	}
 	if len(exact) > 1 {
 		summary = fmt.Sprintf("%d declarations named %s in %s; the locator selects none of them", len(exact), rawName, path)
 	}
 	if !coverage.Complete {
-		outcome, code, summary = "unavailable", "semantic_provider_unavailable", "Symbol read requires parser coverage that is unavailable"
+		outcome, code = "unavailable", "semantic_provider_unavailable"
+		summary = fmt.Sprintf("No parser covers %s, so a declaration in it cannot be located by name", path)
 	}
-	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary,
-		map[string]any{"coverage": coverage, "matches": exact, "match_count": len(exact)})
+	data := map[string]any{"coverage": coverage, "matches": exact, "match_count": len(exact)}
+	if len(candidates) > 0 {
+		data["candidates"] = candidates
+	}
+	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, data)
 	next := []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
 	if len(exact) == 0 && coverage.Complete {
 		// The outline is the list of names this file does declare, which is
@@ -368,7 +436,7 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	}
 	read, err := workspace.Read(request.Path)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+		return missingPathFailure(requestID, workspace, request.Path, err)
 	}
 	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, request.StartLine, request.EndLine)
 	if rangeErr != nil {
@@ -403,6 +471,62 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 		}
 	}
 	return result
+}
+
+// missingPathFailure answers a read of a path the workspace does not hold
+// with the paths it does hold under that name. A file an agent expected in
+// one directory and found in another is the commonest read failure in the
+// friction spool, and "<path> is missing" ends the line of enquiry where the
+// path that does exist would continue it.
+func missingPathFailure(requestID string, workspace *workspacecore.Workspace, path string, err error) map[string]any {
+	result := mcpapi.Failure(requestID, workspace, "read_failed", err)
+	if !strings.Contains(err.Error(), "is missing") {
+		return result
+	}
+	data, _ := result["data"].(map[string]any)
+	if data == nil {
+		data = map[string]any{}
+		result["data"] = data
+	}
+	if candidates := pathsNamed(workspace, path); len(candidates) > 0 {
+		data["candidates"] = candidates
+		result["summary"] = fmt.Sprintf("No file at %s; the workspace holds %s", path, strings.Join(candidates, ", "))
+		return result
+	}
+	result["summary"] = fmt.Sprintf("No file at %s, and no file of that name anywhere in the workspace", path)
+	result["next"] = []any{map[string]any{"tool": "search", "action": "locate_the_file_by_name", "query": pathBase(path)}}
+	return result
+}
+
+// pathsNamed are the workspace paths whose base name is the base name of
+// path, bounded, in path order.
+func pathsNamed(workspace *workspacecore.Workspace, path string) []string {
+	const maxPathCandidates = 5
+	base := pathBase(path)
+	if base == "" {
+		return nil
+	}
+	orientation, err := workspace.Orient()
+	if err != nil {
+		return nil
+	}
+	candidates := make([]string, 0, maxPathCandidates)
+	for _, entry := range orientation.Entries {
+		if pathBase(entry.Path) != base || entry.Path == path {
+			continue
+		}
+		if candidates = append(candidates, entry.Path); len(candidates) == maxPathCandidates {
+			break
+		}
+	}
+	return candidates
+}
+
+func pathBase(path string) string {
+	if index := strings.LastIndexByte(path, '/'); index >= 0 {
+		return path[index+1:]
+	}
+	return path
 }
 
 // numberLines prefixes every line with its 1-based number and a tab, so an

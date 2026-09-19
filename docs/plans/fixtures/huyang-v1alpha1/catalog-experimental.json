@@ -1,6 +1,6 @@
 [
   {
-    "description": "Open a project (or an exact list of documents) and get its workspace_id, revision, capabilities, the verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), a top-level overview and recent commits. Call it once per repository root and pass the workspace_id to every other tool. Cheapest calls afterwards: read (path, line window, symbol_locator or several targets), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.",
+    "description": "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -79,6 +79,10 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "view": {
           "enum": [
             "status",
@@ -93,9 +97,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "workspace_inspect"
@@ -796,6 +797,10 @@
           "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "since": {
           "description": "Optional diagnostic cursor.",
           "type": "string"
@@ -805,9 +810,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "diagnostics"
@@ -846,6 +848,10 @@
         },
         "revision": {
           "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
+          "type": "string"
+        },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
           "type": "string"
         },
         "target": {
@@ -961,7 +967,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "target"
       ],
       "type": "object"
@@ -1131,30 +1136,25 @@
           "type": "object"
         },
         "operations": {
-          "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many.",
+          "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many. Each item takes the fields of operation above, which describes them.",
           "items": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
               "content": {
-                "description": "create_file: the file content; replace_range: exact replacement bytes.",
                 "type": "string"
               },
               "destination_revision_id": {
-                "description": "move_file, copy_file: optional revision of the missing destination, as a read or search returned it.",
                 "type": "string"
               },
               "expected_count": {
-                "description": "replace_literal: how many occurrences old must have (default 1); any other count changes nothing and the response lists the locations.",
                 "minimum": 1,
                 "type": "integer"
               },
               "expected_sha256": {
-                "description": "delete_file: the content hash of the file to remove (alternative to revision_id); copy_file: optional hash the source must have.",
                 "type": "string"
               },
               "from": {
-                "description": "move_file: the workspace file to move; copy_file: the file to copy, a workspace path or an absolute path outside the workspace.",
                 "type": "string"
               },
               "kind": {
@@ -1168,27 +1168,21 @@
                 "type": "string"
               },
               "new": {
-                "description": "replace_literal: replacement text.",
                 "type": "string"
               },
               "old": {
-                "description": "replace_literal: exact text to replace, may span lines. If it differs from the file only by a uniform indentation, the edit still applies and the response says so.",
                 "type": "string"
               },
               "path": {
-                "description": "replace_literal: file to search (omit to search the whole workspace); create_file: the new path; delete_file: the file to remove.",
                 "type": "string"
               },
               "replace": {
-                "description": "create_file: overwrite an existing file; requires revision_id of the file as it is now.",
                 "type": "boolean"
               },
               "revision_id": {
-                "description": "delete_file (required unless expected_sha256), create_file with replace (required), move_file (optional): the revision of the file as read.",
                 "type": "string"
               },
               "to": {
-                "description": "move_file, copy_file: the destination, which must not exist; parent directories are created.",
                 "type": "string"
               }
             },
@@ -1283,33 +1277,27 @@
               "type": "array"
             },
             "operations": {
-              "description": "At most 8 operations per request. Build larger plans incrementally with action=edit and edit.mode=add.",
               "items": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "additionalProperties": false,
                 "properties": {
                   "content": {
-                    "description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
                     "maxLength": 4194304,
                     "type": "string"
                   },
                   "depends_on": {
                     "items": {
-                      "description": "Predecessor op_id.",
                       "type": "string"
                     },
                     "type": "array"
                   },
                   "destination_revision_id": {
-                    "description": "Expected destination document revision for move_file and copy_file.",
                     "type": "string"
                   },
                   "expected_sha256": {
-                    "description": "copy_file: hash the source must have; bound at creation when omitted. The source may be an absolute path outside the workspace.",
                     "type": "string"
                   },
                   "from": {
-                    "description": "Source path for move_file or copy_file.",
                     "type": "string"
                   },
                   "indentation": {
@@ -1340,15 +1328,12 @@
                     "type": "string"
                   },
                   "op_id": {
-                    "description": "Stable operation identifier unique within the plan.",
                     "type": "string"
                   },
                   "path": {
-                    "description": "Workspace path for create_file or delete_file.",
                     "type": "string"
                   },
                   "revision_id": {
-                    "description": "Expected source/path document revision. Optional for create_file; Huyang binds the current missing-target revision..",
                     "type": "string"
                   },
                   "target": {
@@ -1459,7 +1444,6 @@
                     "type": "object"
                   },
                   "to": {
-                    "description": "Destination path for move_file or copy_file.",
                     "type": "string"
                   }
                 },
@@ -1568,7 +1552,7 @@
           "type": "array"
         },
         "operations": {
-          "description": "At most 8 operations per request. Build larger plans incrementally with action=edit and edit.mode=add.",
+          "description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
           "items": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
@@ -1787,6 +1771,10 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "view": {
           "enum": [
             "plan",
@@ -1801,8 +1789,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1810,7 +1796,7 @@
     "name": "change_plan"
   },
   {
-    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.",
+    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files. A failing test is usually explained by its output and the source; when it is not, this server also offers a debugger (breakpoints, stepping, variables, watchpoints) under its debugger profile, which a harness loads on request rather than in every session.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1909,6 +1895,10 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "to_revision_or_current": {
           "description": "Later revision or current.",
           "type": "string"
@@ -1926,7 +1916,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "from_revision",
         "to_revision_or_current"
       ],
@@ -1965,13 +1954,16 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
       "required": [
-        "workspace_id",
         "evidence_id"
       ],
       "type": "object"
@@ -2001,14 +1993,15 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "language_server_status"
@@ -2054,6 +2047,10 @@
           ],
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "server": {
           "description": "Optional Mason package or lspconfig name; none installs only the parser.",
           "type": "string"
@@ -2064,8 +2061,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2280,6 +2275,9 @@
           ],
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "stop_on_entry": {
           "type": "boolean"
         },
@@ -2456,8 +2454,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2511,6 +2507,9 @@
             "full",
             "compact"
           ],
+          "type": "string"
+        },
+        "root": {
           "type": "string"
         },
         "target": {
@@ -2619,8 +2618,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2671,6 +2668,9 @@
             "full",
             "compact"
           ],
+          "type": "string"
+        },
+        "root": {
           "type": "string"
         },
         "target": {
@@ -2780,8 +2780,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -2871,6 +2869,9 @@
           ],
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "scope": {
           "enum": [
             "locals",
@@ -2898,7 +2899,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "action"
       ],
       "type": "object"

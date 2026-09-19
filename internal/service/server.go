@@ -67,6 +67,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			map[string]any{
 				"isError": isError,
 				"outcome": fmt.Sprint(envelope["outcome"]),
+				"code":    envelope["code"],
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
@@ -76,6 +77,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 
 func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
 	envelope = mcpapi.CompactReceipt(tool, arguments, envelope)
+	envelope = mcpapi.TrimWireDiffs(tool, envelope)
 	pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))
 	if renderErr != nil {
 		return nil, renderErr
@@ -139,7 +141,7 @@ func modernClientName(request *mcp.CallToolRequest) string {
 
 func logModernValidationFriction(session, name, root string, arguments map[string]any, err error, client string, started time.Time) {
 	logFriction(session, name, root, arguments, map[string]any{
-		"isError": true, "outcome": "failed", "client": client,
+		"isError": true, "outcome": "failed", "code": "invalid_arguments", "client": client,
 		"content": []map[string]any{{"type": "text", "text": err.Error()}},
 	}, started)
 }

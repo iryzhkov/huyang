@@ -241,7 +241,8 @@ func TestVerificationEnvelopeOffersRunnableFullFallback(t *testing.T) {
 
 // A verification in which every stage was skipped because the root is not
 // trusted says so in the summary and names the user config file, instead of
-// claiming completion; a mixed result stays partial with a count.
+// claiming completion; a mixed result stays partial and names both the stage
+// that passed and the stage that did not run, with its reason.
 func TestVerificationOutcomeNamesWhyNothingRan(t *testing.T) {
 	skipped := workspacecore.VerificationStage{Stage: "check", Status: workspacecore.VerificationSkipped, Coverage: workspacecore.Coverage{Skipped: []string{"workspace_not_trusted"}}}
 	outcome, summary := verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{skipped, skipped}})
@@ -250,7 +251,8 @@ func TestVerificationOutcomeNamesWhyNothingRan(t *testing.T) {
 	}
 	ran := workspacecore.VerificationStage{Stage: "tests", Status: workspacecore.VerificationPassed}
 	outcome, summary = verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{ran, skipped}})
-	if outcome != "partial" || !strings.Contains(summary, "1 stage(s) unavailable") {
+	if outcome != "partial" || !strings.Contains(summary, "tests passed") ||
+		!strings.Contains(summary, "check did not run (workspace_not_trusted)") {
 		t.Fatalf("mixed outcome=%q summary=%q", outcome, summary)
 	}
 	if outcome, summary = verificationOutcome(workspacecore.VerificationResult{Stages: []workspacecore.VerificationStage{ran}}); outcome != "ok" || strings.Contains(summary, "unavailable") {

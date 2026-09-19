@@ -1,6 +1,6 @@
 [
   {
-    "description": "Open a project (or an exact list of documents) and get its workspace_id, revision, capabilities, the verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), a top-level overview and recent commits. Call it once per repository root and pass the workspace_id to every other tool. Cheapest calls afterwards: read (path, line window, symbol_locator or several targets), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.",
+    "description": "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -45,6 +45,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "view": {
           "enum": [
             "status",
@@ -58,9 +62,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "workspace_inspect"
@@ -607,6 +608,10 @@
           "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
           "type": "boolean"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "since": {
           "description": "Optional diagnostic cursor.",
           "type": "string"
@@ -616,9 +621,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "workspace_id"
-      ],
       "type": "object"
     },
     "name": "diagnostics"
@@ -637,13 +639,16 @@
           "description": "Evidence identifier.",
           "type": "string"
         },
+        "root": {
+          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "type": "string"
+        },
         "workspace_id": {
           "description": "Workspace ID from workspace_open; or omit it and pass root.",
           "type": "string"
         }
       },
       "required": [
-        "workspace_id",
         "evidence_id"
       ],
       "type": "object"
@@ -839,6 +844,9 @@
         "program": {
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "stop_on_entry": {
           "type": "boolean"
         },
@@ -870,8 +878,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -909,6 +915,9 @@
         "log_message": {
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
@@ -1011,8 +1020,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1047,6 +1054,9 @@
         "line_offset": {
           "minimum": 1,
           "type": "integer"
+        },
+        "root": {
+          "type": "string"
         },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1155,8 +1165,6 @@
         }
       },
       "required": [
-        "workspace_id",
-        "idempotency_key",
         "action"
       ],
       "type": "object"
@@ -1217,6 +1225,9 @@
           ],
           "type": "string"
         },
+        "root": {
+          "type": "string"
+        },
         "scope": {
           "enum": [
             "locals",
@@ -1236,7 +1247,6 @@
         }
       },
       "required": [
-        "workspace_id",
         "action"
       ],
       "type": "object"

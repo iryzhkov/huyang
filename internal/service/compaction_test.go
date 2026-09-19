@@ -181,10 +181,15 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 			t.Fatalf("compact hit carries %s: %#v", key, hit)
 		}
 	}
-	// The default hit is path, line and text; the editable handle and the
+	// The default hit is path and line; the matched text is omitted when it
+	// is the literal query the caller sent, and the editable handle and the
 	// column come with include_handles or include_ranges.
-	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != "needle" || hit["handle"] != nil || hit["column"] != nil {
+	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != nil || hit["handle"] != nil || hit["column"] != nil {
 		t.Fatalf("compact hit = %#v", hit)
+	}
+	pattern := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "need..", "mode": "regex"})
+	if matched := pattern["data"].(map[string]any)["hits"].([]map[string]any)[0]["match"]; matched != "needle" {
+		t.Fatalf("a regular expression hit must carry the text it matched: %#v", matched)
 	}
 	anchored := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "needle", "include_ranges": true})
 	hit = anchored["data"].(map[string]any)["hits"].([]map[string]any)[0]
@@ -198,6 +203,27 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 	hit = refined["data"].(map[string]any)["hits"].([]map[string]any)[0]
 	if _, present := hit["range"]; present {
 		t.Fatalf("refined hit carries anchors by default: %#v", hit)
+	}
+}
+
+// A relative root is refused rather than resolved against the service's own
+// working directory, which is a different repository than the caller's.
+func TestRelativeRootIsRefused(t *testing.T) {
+	direct := newDirectWorkspaces(t.TempDir())
+	defer direct.closeProviders()
+	for _, arguments := range []map[string]any{
+		{"kind": "project", "root": "bench/agent-efficiency/fixtures/go"},
+	} {
+		opened := direct.call(context.Background(), "workspace_open", arguments)
+		if opened["outcome"] != "failed" || opened["code"] != "root_not_absolute" {
+			t.Fatalf("relative root was not refused: %#v", opened)
+		}
+	}
+	read := direct.call(context.Background(), "read", map[string]any{
+		"root": "bench/agent-efficiency/fixtures/go", "target": map[string]any{"path": "ledger.go"},
+	})
+	if read["outcome"] != "failed" || read["code"] != "root_not_absolute" {
+		t.Fatalf("a relative root on another tool was not refused: %#v", read)
 	}
 }
 
@@ -239,8 +265,13 @@ func TestWorkspaceOpenOverviewIsCompactByDefault(t *testing.T) {
 		t.Fatal("compact overview still lists entries")
 	}
 	commits := data["recent_commits"].(map[string]any)["commits"].([]map[string]any)
-	if len(commits) != 3 || commits[0]["subject"] != "commit 4" || commits[0]["handle"] == nil {
+	// The opaque handle is not here: read view=history hands out the same
+	// handles for the file the caller is actually interested in.
+	if len(commits) != 3 || commits[0]["subject"] != "commit 4" || commits[0]["abbreviated_id"] == nil {
 		t.Fatalf("recent commits = %#v", commits)
+	}
+	if _, present := commits[0]["handle"]; present {
+		t.Fatalf("compact commit carries an opaque handle: %#v", commits[0])
 	}
 	if _, present := commits[0]["author_name"]; present {
 		t.Fatalf("compact commit carries author metadata: %#v", commits[0])
@@ -328,8 +359,11 @@ func TestReadSymbolLocatorFallsBackToProviderDeclarations(t *testing.T) {
 	if !strings.HasPrefix(content, "type Shipment struct {") || strings.Contains(content, "func other") {
 		t.Fatalf("symbol content = %q", content)
 	}
-	if coverage := read["data"].(map[string]any)["coverage"].(workspacecore.Coverage); !coverage.Complete {
-		t.Fatalf("coverage = %#v", coverage)
+	// A declaration that was found and read in full is its own coverage; the
+	// block that used to ride along described every other file in the
+	// workspace and cost more than the declaration did.
+	if coverage, present := read["data"].(map[string]any)["coverage"]; present {
+		t.Fatalf("successful symbol read carried coverage: %#v", coverage)
 	}
 	missing := direct.call(context.Background(), "read", map[string]any{
 		"workspace_id": workspaceID,
