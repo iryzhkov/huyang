@@ -222,14 +222,35 @@ PROMPT_PREFIX = "You are running one scenario of the Huyang agent-efficiency ben
 
 
 def batch_started(rows: list[dict]) -> str:
-    """UTC timestamp of the earliest task file in the batch, from its file name."""
+    """UTC timestamp of the earliest row in the batch, from its started_at column.
+
+    submit.sh writes started_at when it starts each row. There is deliberately no
+    fallback: a default bound would silently widen the thread lookup to every benchmark
+    thread ever recorded, and the scores would be computed against somebody else's runs
+    without anything saying so. A batch log without the column was written by an older
+    submit.sh and has to be submitted again.
+    """
     stamps = []
-    for row in rows:
-        match = re.search(r"-(\d{8}-\d{6})\.md$", row["task_file"])
-        if match:
-            local = datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").astimezone()
-            stamps.append(local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
-    return min(stamps) if stamps else "1970-01-01T00:00:00"
+    for index, row in enumerate(rows, start=1):
+        value = (row.get("started_at") or "").strip()
+        if not value:
+            raise SystemExit(
+                f"row {index} of the batch log has no started_at; it was written by a "
+                "submit.sh from before that column existed, so there is no batch start "
+                "time and the batch has to be submitted again"
+            )
+        try:
+            moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise SystemExit(
+                f"row {index} of the batch log has an unreadable started_at: {value!r}"
+            )
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        stamps.append(moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+    if not stamps:
+        raise SystemExit("the batch log has no rows, so it has no start time")
+    return min(stamps)
 
 
 def batch_threads(connection: sqlite3.Connection, since: str) -> dict[tuple, list[str]]:
