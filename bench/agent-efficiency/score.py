@@ -222,34 +222,56 @@ PROMPT_PREFIX = "You are running one scenario of the Huyang agent-efficiency ben
 
 
 def batch_started(rows: list[dict]) -> str:
-    """UTC timestamp of the earliest row in the batch, from its started_at column.
+    """UTC timestamp of the earliest row in the batch.
 
-    submit.sh writes started_at when it starts each row. There is deliberately no
-    fallback: a default bound would silently widen the thread lookup to every benchmark
-    thread ever recorded, and the scores would be computed against somebody else's runs
-    without anything saying so. A batch log without the column was written by an older
-    submit.sh and has to be submitted again.
+    submit.sh writes started_at when it starts each row, and that column is the bound
+    whenever it is present. There is deliberately no *default* bound: a default would
+    silently widen the thread lookup to every benchmark thread ever recorded, and the
+    scores would be computed against somebody else's runs without anything saying so.
+
+    A legacy log has no started_at column, but the batches committed under runs/
+    (after.tsv, haiku.tsv) carry task_file, whose -YYYYMMDD-HHMMSS.md suffix is the
+    moment submit.sh wrote that row's task file. That is a real per-row measurement
+    rather than a default, so it is used when started_at is absent, and the substitution
+    is announced once on stderr. Without it those logs could never be scored again;
+    RESULTS.md records batch `after` as scored for only 22 of its 99 runs.
+
+    When a row yields neither, the refusal names the row.
     """
     stamps = []
+    derived_from_task_file = False
     for index, row in enumerate(rows, start=1):
         value = (row.get("started_at") or "").strip()
-        if not value:
+        if value:
+            try:
+                moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                raise SystemExit(
+                    f"row {index} of the batch log has an unreadable started_at: {value!r}"
+                )
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            stamps.append(moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+            continue
+        match = re.search(r"-(\d{8}-\d{6})\.md$", (row.get("task_file") or "").strip())
+        if not match:
             raise SystemExit(
-                f"row {index} of the batch log has no started_at; it was written by a "
-                "submit.sh from before that column existed, so there is no batch start "
-                "time and the batch has to be submitted again"
+                f"row {index} of the batch log has no started_at, and no task_file whose "
+                "name ends in -YYYYMMDD-HHMMSS.md, so the batch has no start time and has "
+                "to be submitted again"
             )
-        try:
-            moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            raise SystemExit(
-                f"row {index} of the batch log has an unreadable started_at: {value!r}"
-            )
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
-        stamps.append(moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+        local = datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").astimezone()
+        stamps.append(local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+        derived_from_task_file = True
     if not stamps:
         raise SystemExit("the batch log has no rows, so it has no start time")
+    if derived_from_task_file:
+        print(
+            "this batch log has no started_at, so the start time is derived from the "
+            "-YYYYMMDD-HHMMSS suffix of task_file, which is when submit.sh wrote each "
+            "row's task file",
+            file=sys.stderr,
+        )
     return min(stamps)
 
 

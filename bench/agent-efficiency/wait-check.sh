@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exit 0 once every task of a submitted batch has finished, for a t3-steward wait.
 #
-# Usage: wait-check.sh BATCH [--db ~/.t3/userdata/state.sqlite]
+# Usage: wait-check.sh BATCH [--db PATH]     (default PATH: ~/.t3/userdata/state.sqlite)
 #
 # The steward titles the threads it starts itself, so a batch task is recognised
 # the way score.py recognises it: by its first user message, which is the
@@ -14,13 +14,42 @@
 # The start time has no default on purpose. A missing bound would count every
 # benchmark thread ever recorded, the count would reach the batch size within
 # seconds, and the wait would report a batch finished that had barely started.
+# score.py can fall back to the task_file column of a legacy log; this script
+# does not, because no caller hands it a historical log and a silently wrong
+# bound here is exactly the wrong answer this check exists to prevent.
 set -uo pipefail
+
+usage="usage: wait-check.sh BATCH [--db PATH]"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 batch="${1:-}"
-db="${3:-$HOME/.t3/userdata/state.sqlite}"
+[ -n "$batch" ] || { echo "a batch name is required; $usage" >&2; exit 2; }
+shift
+
+# The database is named with a flag, never positionally. Reading it out of $3
+# meant "wait-check.sh BATCH /path/to/db" queried the default database instead
+# and reported a count against a database the caller never named.
+db="$HOME/.t3/userdata/state.sqlite"
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--db)
+		[ "$#" -ge 2 ] || { echo "--db needs a path; $usage" >&2; exit 2; }
+		db="$2"
+		shift 2
+		;;
+	-*)
+		echo "unknown option '$1'; the only option is --db PATH; $usage" >&2
+		exit 2
+		;;
+	*)
+		echo "unexpected argument '$1'; name the database with --db PATH, not as a bare path; $usage" >&2
+		exit 2
+		;;
+	esac
+done
+
 log="$HERE/runs/$batch.tsv"
-[ -n "$batch" ] && [ -f "$log" ] || { echo "no batch log for '$batch'"; exit 2; }
+[ -f "$log" ] || { echo "no batch log for '$batch'"; exit 2; }
 
 python3 - "$log" "$db" <<'EOF'
 import csv, sqlite3, sys
