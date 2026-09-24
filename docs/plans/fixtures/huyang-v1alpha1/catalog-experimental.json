@@ -14,6 +14,7 @@
           "type": "array"
         },
         "kind": {
+          "description": "Defaults to project when root is given and to documents when only files are.",
           "enum": [
             "project",
             "documents"
@@ -49,9 +50,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "kind"
-      ],
       "type": "object"
     },
     "name": "workspace_open"

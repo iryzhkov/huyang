@@ -345,15 +345,23 @@ func searchSchema() map[string]any {
 	return schemaObject(properties)
 }
 
+// workspaceKindSchema is workspace_open's kind, which may be omitted: what
+// was sent already says which kind is meant.
+func workspaceKindSchema() map[string]any {
+	schema := enumSchema("project", "documents")
+	schema["description"] = "Defaults to project when root is given and to documents when only files are."
+	return schema
+}
+
 // orientationTools are the read-only tools every profile carries.
 func orientationTools(orient []Profile) []ToolDescriptor {
 	return []ToolDescriptor{
 		{Class: ClassProviderRead, Name: "workspace_open", Description: "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"kind":     enumSchema("project", "documents"),
+			"kind":     workspaceKindSchema(),
 			"root":     stringSchema("Project root; required for kind=project."),
 			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
 			"overview": enumSchema("compact", "full"),
-		}, "kind")},
+		})},
 		{Class: ClassProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "view": enumSchema("status", "overview", "map"),
 		})},

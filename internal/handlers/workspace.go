@@ -15,9 +15,17 @@ import (
 )
 
 // decodeOpenOptions reads what to open. The second result is the reply that
-// says why the arguments name nothing openable.
+// says why the arguments name nothing openable. An omitted kind follows
+// from what was sent: a root is a project, files alone are documents.
 func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any) (workspacecore.OpenOptions, map[string]any) {
 	kind, _ := arguments["kind"].(string)
+	if kind == "" {
+		if root, _ := arguments["root"].(string); strings.TrimSpace(root) != "" {
+			kind = "project"
+		} else if len(mcpapi.AnySlice(arguments["files"])) > 0 {
+			kind = "documents"
+		}
+	}
 	options := workspacecore.OpenOptions{Kind: workspacecore.Kind(kind), StateDir: h.stateDir, ProviderEpoch: 1, Sectioner: workspacecore.NativeSectioner{}}
 	switch kind {
 	case "project":
@@ -46,7 +54,9 @@ func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any)
 		}
 		sort.Strings(options.Files)
 	default:
-		return options, mcpapi.Envelope(requestID, nil, "failed", "invalid_workspace_kind", "kind must be project or documents", map[string]any{})
+		result := mcpapi.Envelope(requestID, nil, "failed", "invalid_workspace_kind", "name what to open: root for a project, or files for documents", map[string]any{})
+		result["next"] = []any{map[string]any{"tool": "workspace_open", "action": "name_the_repository_root_by_its_absolute_path"}}
+		return options, result
 	}
 	return options, nil
 }
@@ -56,11 +66,11 @@ func (h *Handlers) decodeOpenOptions(requestID string, arguments map[string]any)
 // named a root, and that reply is discarded, so it must not count as having
 // shown anybody the overview.
 func (h *Handlers) open(ctx context.Context, requestID string, arguments map[string]any, delivered bool) map[string]any {
-	kind, _ := arguments["kind"].(string)
 	options, failure := h.decodeOpenOptions(requestID, arguments)
 	if failure != nil {
 		return failure
 	}
+	kind := string(options.Kind)
 	opened, err := workspacecore.Open(options)
 	if err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", err.Error(), map[string]any{})
