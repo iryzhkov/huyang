@@ -194,6 +194,42 @@ func runGitAt(root string, stdin []byte, args ...string) (string, bool, error) {
 	return out.String(), out.truncated, nil
 }
 
+// GitChangedPaths lists the workspace-relative files Git reports as changed
+// against HEAD, staged or not, together with the untracked files it does not
+// ignore. It answers "what is different from the last commit", which is
+// what an affected-scope verification needs when no receipt says what
+// changed.
+func (w *Workspace) GitChangedPaths() ([]string, error) {
+	repository, err := w.gitRepository()
+	if err != nil {
+		return nil, err
+	}
+	out, truncated, err := runGitAt(w.Identity().Root, nil, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--", ".")
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	if truncated {
+		return nil, errors.New("git status output exceeded its bound")
+	}
+	var paths []string
+	for _, record := range strings.Split(out, "\x00") {
+		// Each record is two status letters, a space and the path relative
+		// to the repository root.
+		if len(record) < 4 {
+			continue
+		}
+		path := record[3:]
+		if repository.prefix != "" {
+			if !strings.HasPrefix(path, repository.prefix+"/") {
+				continue
+			}
+			path = strings.TrimPrefix(path, repository.prefix+"/")
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
 func (w *Workspace) gitRepository() (*gitState, error) {
 	w.handlesMu.Lock()
 	defer w.handlesMu.Unlock()

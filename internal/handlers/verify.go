@@ -24,8 +24,9 @@ import (
 const verificationDiagnosticSettleWait = 1500 * time.Millisecond
 
 type cachedVerification struct {
-	Result  workspacecore.VerificationResult
-	Outcome string
+	Result   workspacecore.VerificationResult
+	Outcome  string
+	Warnings []string
 }
 
 func fullVerificationFallback(result workspacecore.VerificationResult) map[string]any {
@@ -90,6 +91,9 @@ type VerifyJob struct {
 	identity  workspacecore.Identity
 	stager    *providerpool.SandboxStager
 	verbose   bool
+	// warnings are what the run had to decide on the caller's behalf, such
+	// as where the affected files came from.
+	warnings []string
 }
 
 // verify runs both phases back to back for callers that already hold the
@@ -171,7 +175,7 @@ func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspac
 		}, "\x00"),
 	}
 	if cached, cacheHit := h.verification.lookup(job.cacheKey); cacheHit {
-		return nil, modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result)
+		return nil, withVerifyWarnings(modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result), cached.Warnings)
 	}
 	stager, failure := h.locateVerifyStager(ctx, requestID, workspace, request.revision)
 	if failure != nil {
@@ -237,11 +241,21 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 			next, _ := resultEnvelope["next"].([]any)
 			resultEnvelope["next"] = append([]any{recovery}, next...)
 		}
-		return resultEnvelope
+		return withVerifyWarnings(resultEnvelope, job.warnings)
 	}
 	outcome, summary := verificationOutcome(result)
-	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome})
-	return verificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result, job.verbose)
+	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome, Warnings: job.warnings})
+	return withVerifyWarnings(verificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result, job.verbose), job.warnings)
+}
+
+// withVerifyWarnings adds the run's own warnings to a verify_run reply.
+func withVerifyWarnings(envelope map[string]any, warnings []string) map[string]any {
+	if len(warnings) == 0 {
+		return envelope
+	}
+	existing, _ := envelope["warnings"].([]string)
+	envelope["warnings"] = append(append([]string(nil), existing...), warnings...)
+	return envelope
 }
 
 // verificationOutcome reduces the stages to the envelope outcome and a
@@ -332,7 +346,9 @@ func (h *Handlers) verifyCanonical(ctx context.Context, requestID string, worksp
 	var err error
 	files, filesErr := sandbox.BaseStageFiles()
 	if filesErr == nil {
-		files, filesErr = h.selectChangedFiles(files, identity, job.testScope)
+		var warnings []string
+		files, warnings, filesErr = h.selectChangedFiles(workspace, files, identity, job.testScope)
+		job.warnings = append(job.warnings, warnings...)
 	}
 	if filesErr == nil {
 		result, filesErr, err = h.runCanonicalPipeline(ctx, requestID, workspace, sandbox, job, files)
@@ -348,17 +364,35 @@ func (h *Handlers) verifyCanonical(ctx context.Context, requestID string, worksp
 
 // selectChangedFiles keeps the staged files the receipts record as changed
 // at the current revision. Without receipt coverage a full verification
-// keeps every file, while an affected-scope verification refuses.
-func (h *Handlers) selectChangedFiles(files []workspacecore.PlanStageFile, identity workspacecore.Identity, testScope string) ([]workspacecore.PlanStageFile, error) {
+// keeps every file. An affected-scope verification then takes the changed
+// files from Git instead - modified against HEAD, staged or not, and
+// untracked - and says so in a warning; when Git cannot answer, or names no
+// file in the tree, the scope is widened to every file with a warning,
+// because refusing leaves the caller nothing to run.
+func (h *Handlers) selectChangedFiles(workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, identity workspacecore.Identity, testScope string) ([]workspacecore.PlanStageFile, []string, error) {
 	changedPaths, err := h.provenance.CanonicalChangedPaths(identity.ID, identity.StateSeq)
 	if err != nil {
-		if testScope == "affected" {
-			return nil, err
+		if testScope != "affected" {
+			return files, nil, nil
 		}
-		return files, nil
+		gitPaths, gitErr := workspace.GitChangedPaths()
+		if gitErr != nil {
+			return files, []string{fmt.Sprintf("scope_widened: no receipt says what changed at wsrev_%d and Git could not say either (%v); every file is treated as affected.", identity.StateSeq, gitErr)}, nil
+		}
+		filtered := keepChangedFiles(files, gitPaths)
+		if len(filtered) == 0 {
+			return files, []string{fmt.Sprintf("scope_widened: no receipt says what changed at wsrev_%d and Git reports no changed file; every file is treated as affected.", identity.StateSeq)}, nil
+		}
+		return filtered, []string{fmt.Sprintf("No receipt says what changed at wsrev_%d; the %d affected file(s) are those Git reports as changed against HEAD or untracked.", identity.StateSeq, len(filtered))}, nil
 	}
-	changed := make(map[string]bool, len(changedPaths))
-	for _, path := range changedPaths {
+	return keepChangedFiles(files, changedPaths), nil, nil
+}
+
+// keepChangedFiles filters the staged files down to the named paths, in
+// place.
+func keepChangedFiles(files []workspacecore.PlanStageFile, paths []string) []workspacecore.PlanStageFile {
+	changed := make(map[string]bool, len(paths))
+	for _, path := range paths {
 		changed[path] = true
 	}
 	filtered := files[:0]
@@ -367,7 +401,7 @@ func (h *Handlers) selectChangedFiles(files []workspacecore.PlanStageFile, ident
 			filtered = append(filtered, file)
 		}
 	}
-	return filtered, nil
+	return filtered
 }
 
 // runCanonicalPipeline loads the policy, attaches a sandbox provider for the
