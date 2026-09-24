@@ -448,6 +448,38 @@ func TestReadOfAMissingPathIsCodedDocumentNotFound(t *testing.T) {
 	}
 }
 
+// A scope that is the exact path of one file keeps its substring meaning,
+// so it also names every file whose path ends in it, whichever listing the
+// workspace uses. A Git-only shortcut once answered cmd/main.go with that one
+// file, and said so with complete coverage, while the walk found both.
+func TestScopeNamingAFilePathAlsoMatchesLongerPaths(t *testing.T) {
+	for _, listing := range []string{"walk", "git"} {
+		t.Run(listing, func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range []string{"cmd/main.go", "tools/cmd/main.go"} {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, path, "package main // needle\n")
+			}
+			if listing == "git" {
+				if output, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v: %s", err, output)
+				}
+			}
+			ws := newNativeWorkspace(t, KindProject, root, nil, Limits{MaxFiles: 100, MaxDepth: 4, MaxBytes: 1024, MaxMatches: 20})
+			result, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral, Paths: []string{"cmd/main.go"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Hits) != 2 || result.Coverage.FilesConsidered != 2 {
+				t.Fatalf("scope cmd/main.go found %+v over %+v", result.Hits, result.Coverage)
+			}
+		})
+	}
+}
+
 func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a-binary"), bytes.Repeat([]byte{0}, 900), 0o600); err != nil {

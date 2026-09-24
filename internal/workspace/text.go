@@ -554,9 +554,6 @@ func (w *Workspace) collectScopedFiles(patterns []string) ([]string, Coverage, e
 		files := w.collectAllowlisted(patterns, &coverage)
 		return files, scopeCoverage(coverage, patterns), nil
 	}
-	if files, ok := w.collectNamedFiles(patterns, &coverage); ok {
-		return files, coverage, nil
-	}
 	// The inventory honours .gitignore through the sanitized Git runner so
 	// ambient GIT_DIR, GIT_CONFIG_* injection and core.fsmonitor hooks never
 	// reach the native text path. A truncated listing is not trusted; the
@@ -567,50 +564,6 @@ func (w *Workspace) collectScopedFiles(patterns []string) ([]string, Coverage, e
 	}
 	files, err := w.walkFiles(patterns, &coverage)
 	return files, scopeCoverage(coverage, patterns), err
-}
-
-// collectNamedFiles answers a scope whose every pattern is the path of an
-// existing file without listing the tree. Git still has to list each named
-// file, so an ignored file is not searched just because it was named, and a
-// named file Git does not list sends the scope back to the full listing, where
-// the pattern keeps its substring meaning. A bare base name is never taken as
-// a path here, because it also names every file of that name below the root.
-func (w *Workspace) collectNamedFiles(patterns []string, coverage *Coverage) ([]string, bool) {
-	if len(patterns) == 0 {
-		return nil, false
-	}
-	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
-	for _, pattern := range patterns {
-		if !strings.Contains(pattern, "/") {
-			return nil, false
-		}
-		absolute, err := w.confinedPath(pattern)
-		if err != nil || displayPath(w.identity.Root, absolute) != pattern {
-			return nil, false
-		}
-		info, err := os.Lstat(absolute)
-		if err != nil || !info.Mode().IsRegular() {
-			return nil, false
-		}
-		args = append(args, ":(literal)"+pattern)
-	}
-	output, truncated, err := runGitAt(w.identity.Root, nil, args...)
-	if err != nil || truncated {
-		return nil, false
-	}
-	named := *coverage
-	files := w.collectListedFiles(output, patterns, &named)
-	listed := make(map[string]bool, len(files))
-	for _, name := range files {
-		listed[displayPath(w.identity.Root, name)] = true
-	}
-	for _, pattern := range patterns {
-		if !listed[pattern] {
-			return nil, false
-		}
-	}
-	*coverage = named
-	return files, true
 }
 
 // scopeCoverage drops the skipped entries a scope excludes. A walk notes an
