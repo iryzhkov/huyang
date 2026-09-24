@@ -283,10 +283,12 @@ func TestSemanticSearchResolvesTheSymbolFirst(t *testing.T) {
 	}
 }
 
-// A semantic search for a name declared twice resolves inside its paths
-// scope, and when the name is still ambiguous it says how to narrow in terms
-// search accepts: each follow-up repeats the search scoped to one candidate.
-// Navigate, which takes a target, keeps pointing at target.symbol_locator.
+// A semantic search for a name declared twice uses its paths scope to pick
+// the declaration when the scope holds one, and when the name is still
+// ambiguous it says how to narrow in terms search accepts: each follow-up
+// repeats the search scoped to one candidate. A scope that holds no
+// declaration picks nothing and leaves the name ambiguous. Navigate, which
+// takes a target, keeps pointing at target.symbol_locator.
 func TestSemanticSearchNarrowsAnAmbiguousNameWithPaths(t *testing.T) {
 	handlers, workspaceID, _ := literalFixture(t, map[string]string{
 		"a/one.go": "package a\n\nfunc Target() {}\n",
@@ -318,12 +320,67 @@ func TestSemanticSearchNarrowsAnAmbiguousNameWithPaths(t *testing.T) {
 		t.Fatalf("a scoped semantic search did not resolve inside its scope: %#v", narrowed)
 	}
 	outside := handlers.Execute(context.Background(), "req_amb_outside", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "mode": "references", "paths": []any{"c/"}})
-	if outside["code"] != "symbol_not_found" || strings.Contains(outside["summary"].(string), "symbol_locator") {
+	if outside["code"] != "symbol_ambiguous" || len(outside["next"].([]any)) != 2 {
 		t.Fatalf("a scope holding no declaration = %#v", outside)
 	}
 	navigated := handlers.Execute(context.Background(), "req_amb_nav", "navigate", map[string]any{"workspace_id": workspaceID, "symbol": "Target", "relation": "references"})
 	if navigated["code"] != "symbol_ambiguous" || !strings.Contains(navigated["summary"].(string), "target.symbol_locator") {
 		t.Fatalf("ambiguous navigate = %#v", navigated)
+	}
+}
+
+// referencesProvider answers references with fixed locations and every
+// other operation with an empty result.
+type referencesProvider struct {
+	stubProvider
+	locations []any
+}
+
+func (p *referencesProvider) Call(_ context.Context, request provider.Request) (provider.Result, error) {
+	if request.Operation == "references" {
+		return provider.Result{Value: map[string]any{"count": len(p.locations), "locations": p.locations}}, nil
+	}
+	return provider.Result{Value: map[string]any{}}, nil
+}
+
+// paths on a semantic search keeps the hits under those paths; it does not
+// have to hold the declaration. References in c/ to a function declared in
+// a/ are exactly what paths ["c/"] asks for.
+func TestSemanticSearchPathsFilterTheHitsNotTheDeclaration(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"a/one.go": "package a\n\nfunc Target() {}\n\nvar _ = Target\n",
+		"c/use.go": "package c\n\nimport \"example.com/a\"\n\nvar _ = a.Target\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &referencesProvider{
+		stubProvider: stubProvider{descriptor: provider.Descriptor{ID: "stub", Backend: "test", Epoch: 1, Root: root}},
+		locations: []any{
+			map[string]any{"file": filepath.Join(root, "a/one.go"), "line": 5},
+			map[string]any{"file": filepath.Join(root, "c/use.go"), "line": 5},
+		},
+	}
+	handlers := newTestHandlers(t, fixedFactory{backend: backend})
+	result := handlers.Execute(context.Background(), "req_refs", "search", map[string]any{
+		"root": root, "query": "Target", "mode": "references", "paths": []any{"c/"},
+	})
+	if result["outcome"] != "ok" {
+		t.Fatalf("references scoped away from the declaration = %#v", result)
+	}
+	navigation := result["data"].(map[string]any)["navigation"].(map[string]any)
+	locations := navigation["locations"].([]any)
+	if len(locations) != 1 || !strings.HasSuffix(locations[0].(map[string]any)["file"].(string), "c/use.go") {
+		t.Fatalf("scoped references = %#v", navigation)
+	}
+	if navigation["count"] != 1 || navigation["outside_paths"] != 1 {
+		t.Fatalf("scoped references do not account for the hits outside paths: %#v", navigation)
 	}
 }
 

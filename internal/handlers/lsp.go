@@ -366,7 +366,10 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 // locatorForSymbol turns a bare symbol name into the symbol_locator of its
 // one declaration, natively for Go and Python and through the provider
 // otherwise, so navigate and semantic search need no path from the caller.
-// A search's paths scope keeps only the declarations inside it, and a search
+// A search's paths scope says which hits to keep, not where the symbol is
+// declared: references in c/ to a function declared in a/ are what
+// paths ["c/"] asks for. So the scope only picks among several declarations
+// of the name, and only when it keeps at least one of them. A search
 // (searchMode names its mode) is told how to narrow in terms search accepts:
 // paths, not target.symbol_locator.
 func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, symbol string, scope []string, searchMode string) (map[string]any, map[string]any) {
@@ -381,13 +384,20 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 		if slash := strings.LastIndex(leaf, "/"); slash >= 0 {
 			leaf = leaf[slash+1:]
 		}
-		if record.Locator.NamePath != name && leaf != name {
-			continue
+		if record.Locator.NamePath == name || leaf == name {
+			exact = append(exact, record)
 		}
-		if len(scope) > 0 && !workspacecore.MatchesPathScope(record.Locator.Path, scope) {
-			continue
+	}
+	if len(exact) > 1 && len(scope) > 0 {
+		var inside []workspacecore.HandleRecord
+		for _, record := range exact {
+			if workspacecore.MatchesPathScope(record.Locator.Path, scope) {
+				inside = append(inside, record)
+			}
 		}
-		exact = append(exact, record)
+		if len(inside) > 0 {
+			exact = inside
+		}
 	}
 	switch len(exact) {
 	case 1:
@@ -396,9 +406,6 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 		summary := fmt.Sprintf("no declaration named %q; name the file with target.symbol_locator or search literally", symbol)
 		if searchMode != "" {
 			summary = fmt.Sprintf("no declaration named %q; search literally", symbol)
-			if len(scope) > 0 {
-				summary = fmt.Sprintf("no declaration named %q inside paths %q; widen paths or search literally", symbol, scope)
-			}
 		}
 		result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_not_found", summary, map[string]any{"symbol": symbol})
 		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": symbol, "mode": "literal"}}

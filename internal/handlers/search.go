@@ -215,6 +215,56 @@ func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspa
 		fallback["warnings"] = append(fallback["warnings"].([]string), fmt.Sprintf("no language server answered %s for %q; these are literal matches", relation, query))
 		return fallback
 	}
+	if result["outcome"] == "ok" {
+		return scopeNavigation(workspace, result, relation, argStrings(arguments["paths"]))
+	}
+	return result
+}
+
+// scopeNavigation keeps the hits of a semantic search that lie inside its
+// paths scope. The declaration is resolved without the scope, since the
+// references a caller scopes to c/ are usually to something declared
+// elsewhere, so the scope applies here, to what the language server found.
+func scopeNavigation(workspace *workspacecore.Workspace, result map[string]any, relation string, scope []string) map[string]any {
+	data, _ := result["data"].(map[string]any)
+	navigation, _ := data["navigation"].(map[string]any)
+	if len(scope) == 0 || navigation == nil {
+		return result
+	}
+	kept, outside := 0, 0
+	for _, key := range []string{"locations", "calls"} {
+		items, present := navigation[key].([]any)
+		if !present {
+			continue
+		}
+		inside := make([]any, 0, len(items))
+		for _, item := range items {
+			entry, _ := item.(map[string]any)
+			file, _ := entry["file"].(string)
+			if workspacecore.MatchesPathScope(workspacePath(workspace, file), scope) {
+				inside = append(inside, item)
+			} else {
+				outside++
+			}
+		}
+		navigation[key] = inside
+		kept += len(inside)
+	}
+	if outside == 0 {
+		return result
+	}
+	navigation["outside_paths"] = outside
+	if _, present := navigation["locations"]; present {
+		navigation["count"] = kept
+	}
+	if _, capped := navigation["dropped"]; capped {
+		// The server's reply was cut before the scope was applied, so the
+		// locations inside paths past that cut are not here either.
+		result = appendWarning(result, fmt.Sprintf("the language server's %s reply was capped before paths %q were applied; more hits may lie inside paths", relation, scope))
+	}
+	if kept == 0 {
+		result = appendWarning(result, fmt.Sprintf("none of the %d %s hits lie inside paths %q", outside, relation, scope))
+	}
 	return result
 }
 
