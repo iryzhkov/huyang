@@ -258,6 +258,50 @@ func TestSemanticSearchResolvesTheSymbolFirst(t *testing.T) {
 	}
 }
 
+// A semantic search for a name declared twice resolves inside its paths
+// scope, and when the name is still ambiguous it says how to narrow in terms
+// search accepts: each follow-up repeats the search scoped to one candidate.
+// Navigate, which takes a target, keeps pointing at target.symbol_locator.
+func TestSemanticSearchNarrowsAnAmbiguousNameWithPaths(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{
+		"a/one.go": "package a\n\nfunc Target() {}\n",
+		"b/two.go": "package b\n\nfunc Target() {}\n",
+	})
+	ambiguous := handlers.Execute(context.Background(), "req_amb", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "mode": "references"})
+	summary, _ := ambiguous["summary"].(string)
+	if ambiguous["code"] != "symbol_ambiguous" || strings.Contains(summary, "symbol_locator") || !strings.Contains(summary, "paths") {
+		t.Fatalf("ambiguous semantic search = %#v", ambiguous)
+	}
+	next := ambiguous["next"].([]any)
+	if len(next) != 2 {
+		t.Fatalf("ambiguous search offers %d follow-ups: %#v", len(next), next)
+	}
+	scoped := map[string]bool{}
+	for _, raw := range next {
+		step := raw.(map[string]any)
+		paths, _ := step["paths"].([]string)
+		if step["tool"] != "search" || step["mode"] != "references" || len(paths) != 1 {
+			t.Fatalf("follow-up does not repeat the search scoped to a candidate: %#v", step)
+		}
+		scoped[paths[0]] = true
+	}
+	if !scoped["a/one.go"] || !scoped["b/two.go"] {
+		t.Fatalf("follow-ups do not cover the candidates: %#v", next)
+	}
+	narrowed := handlers.Execute(context.Background(), "req_amb_scoped", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "mode": "references", "paths": []any{"a/"}})
+	if narrowed["code"] == "symbol_ambiguous" || narrowed["code"] == "symbol_not_found" {
+		t.Fatalf("a scoped semantic search did not resolve inside its scope: %#v", narrowed)
+	}
+	outside := handlers.Execute(context.Background(), "req_amb_outside", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "mode": "references", "paths": []any{"c/"}})
+	if outside["code"] != "symbol_not_found" || strings.Contains(outside["summary"].(string), "symbol_locator") {
+		t.Fatalf("a scope holding no declaration = %#v", outside)
+	}
+	navigated := handlers.Execute(context.Background(), "req_amb_nav", "navigate", map[string]any{"workspace_id": workspaceID, "symbol": "Target", "relation": "references"})
+	if navigated["code"] != "symbol_ambiguous" || !strings.Contains(navigated["summary"].(string), "target.symbol_locator") {
+		t.Fatalf("ambiguous navigate = %#v", navigated)
+	}
+}
+
 // An edit to a file that no language server or parser can diagnose is
 // plainly ok: no provisional verdict, no diagnostic recovery hints.
 func TestEditOfProseFileIsPlainlyOK(t *testing.T) {

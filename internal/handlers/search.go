@@ -180,7 +180,9 @@ var semanticRelations = map[string]bool{
 // no server can answer, it falls back to the literal search and says so.
 func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspace *workspacecore.Workspace, relation string, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
-	result := h.navigateProvider(ctx, requestID, workspace, map[string]any{"relation": relation, "symbol": query})
+	result := h.navigateProvider(ctx, requestID, workspace, map[string]any{
+		"relation": relation, "symbol": query, "paths": arguments["paths"], "search_mode": relation,
+	})
 	switch result["code"] {
 	case "language_server_unavailable", "semantic_provider_start_failed", "semantic_provider_unavailable":
 		delete(arguments, "mode")

@@ -320,7 +320,8 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 	relation, _ := arguments["relation"].(string)
 	target, _ := arguments["target"].(map[string]any)
 	if symbol, _ := arguments["symbol"].(string); symbol != "" && target == nil {
-		locator, failure := h.locatorForSymbol(ctx, requestID, workspace, symbol)
+		searchMode, _ := arguments["search_mode"].(string)
+		locator, failure := h.locatorForSymbol(ctx, requestID, workspace, symbol, argStrings(arguments["paths"]), searchMode)
 		if failure != nil {
 			return failure
 		}
@@ -363,7 +364,10 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 // locatorForSymbol turns a bare symbol name into the symbol_locator of its
 // one declaration, natively for Go and Python and through the provider
 // otherwise, so navigate and semantic search need no path from the caller.
-func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, symbol string) (map[string]any, map[string]any) {
+// A search's paths scope keeps only the declarations inside it, and a search
+// (searchMode names its mode) is told how to narrow in terms search accepts:
+// paths, not target.symbol_locator.
+func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, workspace *workspacecore.Workspace, symbol string, scope []string, searchMode string) (map[string]any, map[string]any) {
 	name := canonicalNamePath(symbol)
 	found := h.symbolFind(ctx, requestID+"_symbol", workspace, map[string]any{"query": name})
 	data, _ := found["data"].(map[string]any)
@@ -375,15 +379,26 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 		if slash := strings.LastIndex(leaf, "/"); slash >= 0 {
 			leaf = leaf[slash+1:]
 		}
-		if record.Locator.NamePath == name || leaf == name {
-			exact = append(exact, record)
+		if record.Locator.NamePath != name && leaf != name {
+			continue
 		}
+		if len(scope) > 0 && !workspacecore.MatchesPathScope(record.Locator.Path, scope) {
+			continue
+		}
+		exact = append(exact, record)
 	}
 	switch len(exact) {
 	case 1:
 		return map[string]any{"path": exact[0].Locator.Path, "name_path": exact[0].Locator.NamePath}, nil
 	case 0:
-		result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_not_found", fmt.Sprintf("no declaration named %q; name the file with target.symbol_locator or search literally", symbol), map[string]any{"symbol": symbol})
+		summary := fmt.Sprintf("no declaration named %q; name the file with target.symbol_locator or search literally", symbol)
+		if searchMode != "" {
+			summary = fmt.Sprintf("no declaration named %q; search literally", symbol)
+			if len(scope) > 0 {
+				summary = fmt.Sprintf("no declaration named %q inside paths %q; widen paths or search literally", symbol, scope)
+			}
+		}
+		result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_not_found", summary, map[string]any{"symbol": symbol})
 		result["next"] = []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": symbol, "mode": "literal"}}
 		return nil, result
 	}
@@ -391,7 +406,24 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 	for _, record := range exact {
 		locations = append(locations, record.Locator.Path+"#"+record.Locator.NamePath)
 	}
-	result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; pick one with target.symbol_locator", len(exact), symbol), map[string]any{"symbol": symbol, "declarations": locations})
+	data = map[string]any{"symbol": symbol, "declarations": locations}
+	if searchMode == "" {
+		return nil, mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; pick one with target.symbol_locator", len(exact), symbol), data)
+	}
+	// Search takes no target, so each follow-up repeats the search scoped to
+	// one candidate's file under that candidate's full name path, which
+	// resolves to it alone.
+	result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; narrow with paths or query a name path from data.declarations", len(exact), symbol), data)
+	next := []any{}
+	for _, record := range exact {
+		if len(next) == 2 {
+			break
+		}
+		next = append(next, map[string]any{
+			"tool": "search", "action": "scope_to_candidate", "query": record.Locator.NamePath, "mode": searchMode, "paths": []string{record.Locator.Path},
+		})
+	}
+	result["next"] = next
 	return nil, result
 }
 
