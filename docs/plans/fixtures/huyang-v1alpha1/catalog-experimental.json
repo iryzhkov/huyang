@@ -106,8 +106,7 @@
       "additionalProperties": false,
       "properties": {
         "context_lines": {
-          "description": "Lines of numbered context around each hit, like grep -C.",
-          "maximum": 20,
+          "description": "Lines of numbered context around each hit, like grep -C; at most 20, and a larger value is reduced to 20 with a warning.",
           "minimum": 0,
           "type": "integer"
         },

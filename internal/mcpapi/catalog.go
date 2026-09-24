@@ -50,6 +50,10 @@ const (
 	MaxToolArgumentBytes = 32 << 20
 	MaxPlanOperations    = 32
 	MaxPlanContentBytes  = 4 << 20
+	// MaxSearchContextLines is the most context search attaches to a hit. A
+	// larger request is reduced to it with a warning, not refused, so the
+	// bound is stated in the description rather than as a schema maximum.
+	MaxSearchContextLines = 20
 )
 
 // ProfileOrder is the frozen catalog: these are compared byte for byte
@@ -336,7 +340,7 @@ func searchSchema() map[string]any {
 		"workspace_id": workspaceIDProperty(), "root": rootProperty(),
 		"query": stringSchema("Text, regular expression, or for the semantic modes a symbol name."), "mode": enumSchema("literal", "regex", "references", "definition", "implementation", "type_definition", "incoming_calls", "outgoing_calls"),
 		"paths":             map[string]any{"type": "array", "items": stringSchema("Path substring or glob (whole path or base name)."), "description": "Keep only hits under these paths."},
-		"context_lines":     map[string]any{"type": "integer", "minimum": 0, "maximum": 20, "description": "Lines of numbered context around each hit, like grep -C."},
+		"context_lines":     map[string]any{"type": "integer", "minimum": 0, "description": fmt.Sprintf("Lines of numbered context around each hit, like grep -C; at most %d, and a larger value is reduced to %d with a warning.", MaxSearchContextLines, MaxSearchContextLines)},
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
 		"git_history": historySource, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
 		"include_ranges":  map[string]any{"type": "boolean", "description": "Add byte anchors to every hit."},

@@ -90,20 +90,26 @@ func TestChangePlanRequestBoundsAdvertiseChunkedRecovery(t *testing.T) {
 
 // A numeric bound in the catalog is a promise about what the service accepts,
 // so an argument outside it is refused here rather than passed to a handler
-// that has no bound of its own: context_lines is the case that showed it,
-// where a million lines of context were attached to every hit.
+// that has no bound of its own.
 func TestDeclaredNumericBoundsAreRefused(t *testing.T) {
 	schema := searchSchema()
 	err := ValidateToolArguments(schema, map[string]any{
-		"workspace_id": "ws_test", "query": "needle", "context_lines": float64(1000000),
+		"workspace_id": "ws_test", "query": "needle", "limit": float64(1000000),
 	})
-	if err == nil || !strings.Contains(err.Error(), "maximum 20") {
-		t.Fatalf("context_lines above its declared maximum was accepted: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "maximum 200") {
+		t.Fatalf("limit above its declared maximum was accepted: %v", err)
 	}
+	// context_lines has no schema maximum: the handler reduces a larger
+	// value to MaxSearchContextLines and says so, and the description
+	// states the bound.
 	if err := ValidateToolArguments(schema, map[string]any{
-		"workspace_id": "ws_test", "query": "needle", "context_lines": float64(20),
+		"workspace_id": "ws_test", "query": "needle", "context_lines": float64(1000000),
 	}); err != nil {
-		t.Fatalf("context_lines at its declared maximum was refused: %v", err)
+		t.Fatalf("context_lines above the bound was refused instead of reduced: %v", err)
+	}
+	contextLines := schema["properties"].(map[string]any)["context_lines"].(map[string]any)
+	if !strings.Contains(contextLines["description"].(string), "at most 20") {
+		t.Fatalf("context_lines does not state its bound: %v", contextLines)
 	}
 	if err := ValidateToolArguments(schema, map[string]any{
 		"workspace_id": "ws_test", "query": "needle", "limit": float64(0),
