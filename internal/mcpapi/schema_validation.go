@@ -13,6 +13,26 @@ func ValidateToolArguments(schema map[string]any, arguments map[string]any) erro
 	return validateSchemaValue(schema, arguments, "arguments")
 }
 
+// batchHints say how to send more items than one request of a tool takes.
+// They are the tool's own: the change_plan recovery attached to read's
+// targets told a reader to build a plan.
+var batchHints = map[string]string{
+	"change_plan": "append another bounded batch with change_plan action=edit and edit.mode=add",
+	"edit_apply":  "split the operations across several edit_apply calls, or stage them with change_plan when they must land together",
+	"read":        "split the targets across several read calls",
+}
+
+// ValidateCall validates the arguments of a call to the named tool, and
+// adds the tool's own way around a list bound to a refusal of one.
+func ValidateCall(tool string, schema, arguments map[string]any) error {
+	err := ValidateToolArguments(schema, arguments)
+	var argument *ArgumentError
+	if errors.As(err, &argument) && argument.overflow && batchHints[tool] != "" {
+		argument.message += "; " + batchHints[tool]
+	}
+	return err
+}
+
 // validateSchemaValue checks value against the subset of JSON Schema the
 // catalog uses: oneOf alternatives, enums, and the object, string, boolean,
 // integer and array types with their closed-property, length and item
@@ -310,7 +330,9 @@ func validateArray(schema map[string]any, value any, path string) error {
 		return argumentError(schema, path, "%s must be an array", path)
 	}
 	if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
-		return argumentError(schema, path, "%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
+		refusal := argumentError(schema, path, "%s has %d items, maximum %d", path, len(array), maximum)
+		refusal.overflow = true
+		return refusal
 	}
 	itemSchema, _ := schema["items"].(map[string]any)
 	if itemSchema == nil {

@@ -62,11 +62,24 @@ func TestChangePlanRequestBoundsAdvertiseChunkedRecovery(t *testing.T) {
 	for index := range tooMany {
 		tooMany[index] = map[string]any{"op_id": fmt.Sprintf("op-%d", index), "kind": "create_file"}
 	}
-	err := ValidateToolArguments(schema, map[string]any{
+	if MaxPlanOperations != 32 || !strings.Contains(operations["description"].(string), "At most 32 operations") {
+		t.Fatalf("change_plan takes %d operations per request: %v", MaxPlanOperations, operations["description"])
+	}
+	err := ValidateCall("change_plan", schema, map[string]any{
 		"workspace_id": "ws_test", "idempotency_key": "bounded", "action": "create", "operations": tooMany,
 	})
 	if err == nil || !strings.Contains(err.Error(), "edit.mode=add") {
 		t.Fatalf("oversized plan error is not actionable: %v", err)
+	}
+	// The plan recovery belongs to change_plan: a read with too many
+	// targets is told to split them, not to build a plan.
+	targets := make([]any, 33)
+	for index := range targets {
+		targets[index] = map[string]any{"path": "go.mod"}
+	}
+	err = ValidateCall("read", toolSchema(t, "read"), map[string]any{"workspace_id": "ws_test", "targets": targets})
+	if err == nil || strings.Contains(err.Error(), "change_plan") || !strings.Contains(err.Error(), "several read calls") {
+		t.Fatalf("oversized read carries another tool's recovery: %v", err)
 	}
 	tooLarge := make(json.RawMessage, MaxToolArgumentBytes+1)
 	err = ValidateToolArgumentSize(tooLarge)

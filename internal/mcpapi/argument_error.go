@@ -21,6 +21,9 @@ type ArgumentError struct {
 	// refusal could name one.
 	Suggestion string
 	message    string
+	// overflow marks a list longer than its bound, which ValidateCall
+	// answers with the tool's own way to send the rest.
+	overflow bool
 }
 
 func (e *ArgumentError) Error() string { return e.message }

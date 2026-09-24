@@ -62,7 +62,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 		// the server sends new arguments as text.
 		arguments = mcpapi.NormalizeArguments(arguments)
 		aliased = mcpapi.ApplyArgumentAliases(descriptor.Name, arguments)
-		if err := mcpapi.ValidateToolArguments(descriptor.InputSchema, arguments); err != nil {
+		if err := mcpapi.ValidateCall(descriptor.Name, descriptor.InputSchema, arguments); err != nil {
 			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
 		}
 		if err := mcpapi.ValidateDebugArguments(descriptor.Name, arguments); err != nil {

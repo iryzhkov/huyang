@@ -1243,7 +1243,7 @@
                 ],
                 "type": "object"
               },
-              "maxItems": 8,
+              "maxItems": 32,
               "type": "array"
             }
           },
@@ -1257,7 +1257,7 @@
           "type": "string"
         },
         "operations": {
-          "description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
+          "description": "At most 32 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
           "items": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
@@ -1443,7 +1443,7 @@
             ],
             "type": "object"
           },
-          "maxItems": 8,
+          "maxItems": 32,
           "type": "array"
         },
         "plan_id": {

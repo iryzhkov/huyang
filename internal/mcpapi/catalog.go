@@ -48,7 +48,7 @@ type ToolDescriptor struct {
 
 const (
 	MaxToolArgumentBytes = 32 << 20
-	MaxPlanOperations    = 8
+	MaxPlanOperations    = 32
 	MaxPlanContentBytes  = 4 << 20
 )
 
@@ -280,7 +280,7 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	operation := planOperationSchema(operationKinds)
 	operations := map[string]any{
 		"type": "array", "items": operation, "maxItems": MaxPlanOperations,
-		"description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
+		"description": fmt.Sprintf("At most %d operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.", MaxPlanOperations),
 	}
 	return schemaObject(map[string]any{
 		"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
