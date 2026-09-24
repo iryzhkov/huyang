@@ -383,7 +383,13 @@ func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) 
 	for _, path := range files {
 		read, readErr := w.Read(path)
 		if readErr != nil {
-			coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(readErr.Error(), 256))
+			// A file no sectioner could have found a declaration in - an
+			// image, an archive, a lock file - does not make a symbol answer
+			// incomplete by failing to read: it would have contributed
+			// nothing had it read.
+			if w.symbolRelevant(path) {
+				coverage.noteSkipped(displayPath(w.identity.Root, path), sanitizeText(readErr.Error(), 256))
+			}
 			continue
 		}
 		sections, sectionErr := w.sectioner.Sections(read.Path, read.Content)
@@ -409,6 +415,17 @@ func (w *Workspace) FindSymbols(query string) ([]HandleRecord, Coverage, error) 
 		return records[i].Locator.Path < records[j].Locator.Path
 	})
 	return records, coverage, nil
+}
+
+// symbolRelevant reports whether a file is one the sectioner could declare a
+// symbol in, or one it would hand to the semantic provider. A sectioner that
+// knows its own reach says so through CouldSection; the native one answers
+// by extension.
+func (w *Workspace) symbolRelevant(path string) bool {
+	if judge, ok := w.sectioner.(interface{ CouldSection(path string) bool }); ok {
+		return judge.CouldSection(path)
+	}
+	return NativeSectioner{}.CouldSection(path)
 }
 
 // FindSymbolsInFile resolves a query inside one document. A symbol locator

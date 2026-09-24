@@ -36,6 +36,19 @@ func (NativeSectioner) Sections(path string, content []byte) ([]Section, error) 
 	return nil, nil
 }
 
+// CouldSection reports whether a path has an extension Sections parses, or a
+// source extension it refuses with ErrNoNativeParser so the semantic
+// provider is asked. Every other file declares nothing a symbol search can
+// find.
+func (NativeSectioner) CouldSection(path string) bool {
+	extension := strings.ToLower(filepath.Ext(path))
+	switch extension {
+	case ".go", ".py", ".pyi", ".md", ".markdown", ".toml":
+		return true
+	}
+	return otherSourceExtensions[extension]
+}
+
 // ErrNoNativeParser marks a source language the native sectioner does not
 // understand, so symbol coverage is reported as incomplete for it and the
 // semantic provider is consulted.
