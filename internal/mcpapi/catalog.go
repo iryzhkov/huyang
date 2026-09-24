@@ -518,6 +518,7 @@ func OutputEnvelopeSchema() map[string]any {
 		"guide":                        map[string]any{"type": "array", "items": stringSchema("One rule for calling this server at its cheapest, sent once when a workspace is first opened.")},
 		"idempotency":                  enumSchema("created", "replayed"),
 		"idempotency_persisted":        map[string]any{"type": "boolean"},
+		"retryable":                    map[string]any{"type": "boolean", "description": "Whether the same call, unchanged, can succeed later; present only where that is known."},
 	}, "api_version", "request_id", "outcome", "summary", "data", "warnings", "next")
 }
 

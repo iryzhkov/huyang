@@ -251,7 +251,7 @@ func CompactTextEnvelope(envelope map[string]any) map[string]any {
 	// socket and found it missing.
 	for _, key := range []string{
 		"code", "workspace", "transaction", "idempotency", "idempotency_persisted",
-		"guide", "diagnostic_updates", "diagnostic_updates_truncated",
+		"guide", "diagnostic_updates", "diagnostic_updates_truncated", "retryable",
 	} {
 		if value, ok := envelope[key]; ok {
 			compact[key] = value

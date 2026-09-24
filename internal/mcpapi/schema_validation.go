@@ -22,7 +22,7 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 		return validateOneOf(schema, alternatives, value, path)
 	}
 	if enum, ok := schema["enum"].([]any); ok && !slices.Contains(enum, value) {
-		return fmt.Errorf("%s is not one of the allowed values", path)
+		return argumentError(schema, path, "%s is not one of the allowed values; it must be %s", path, DescribeShape(schema))
 	}
 	switch schema["type"] {
 	case "object":
@@ -30,19 +30,19 @@ func validateSchemaValue(schema map[string]any, value any, path string) error {
 	case "string":
 		text, ok := value.(string)
 		if !ok {
-			return fmt.Errorf("%s must be a string", path)
+			return argumentError(schema, path, "%s must be a string", path)
 		}
 		if maximum, ok := schema["maxLength"].(int); ok && len(text) > maximum {
-			return fmt.Errorf("%s is %d bytes, maximum %d bytes", path, len(text), maximum)
+			return argumentError(schema, path, "%s is %d bytes, maximum %d bytes", path, len(text), maximum)
 		}
 	case "boolean":
 		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("%s must be a boolean", path)
+			return argumentError(schema, path, "%s must be a boolean", path)
 		}
 	case "integer":
 		number, ok := value.(float64)
 		if !ok || number != float64(int64(number)) {
-			return fmt.Errorf("%s must be an integer", path)
+			return argumentError(schema, path, "%s must be an integer", path)
 		}
 		return validateIntegerBounds(schema, int64(number), path)
 	case "array":
@@ -76,7 +76,7 @@ func validateOneOf(schema map[string]any, alternatives []any, value any, path st
 		}
 	}
 	if matches != 1 {
-		return fmt.Errorf("%s must match exactly one allowed shape", path)
+		return argumentError(schema, path, "%s must match exactly one allowed shape", path)
 	}
 	return nil
 }
@@ -88,10 +88,10 @@ func validateOneOf(schema map[string]any, alternatives []any, value any, path st
 // that the argument was out of range.
 func validateIntegerBounds(schema map[string]any, number int64, path string) error {
 	if minimum, ok := schema["minimum"].(int); ok && number < int64(minimum) {
-		return fmt.Errorf("%s is %d, minimum %d", path, number, minimum)
+		return argumentError(schema, path, "%s is %d, minimum %d", path, number, minimum)
 	}
 	if maximum, ok := schema["maximum"].(int); ok && number > int64(maximum) {
-		return fmt.Errorf("%s is %d, maximum %d", path, number, maximum)
+		return argumentError(schema, path, "%s is %d, maximum %d", path, number, maximum)
 	}
 	return nil
 }
@@ -99,20 +99,20 @@ func validateIntegerBounds(schema map[string]any, number int64, path string) err
 func validateObject(schema map[string]any, value any, path string) error {
 	object, ok := value.(map[string]any)
 	if !ok {
-		return fmt.Errorf("%s must be an object", path)
+		return argumentError(schema, path, "%s must be an object", path)
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if closed, present := schema["additionalProperties"].(bool); present && !closed {
 		for _, key := range sortedKeys(object) {
 			if _, ok := properties[key]; !ok {
-				return fmt.Errorf("%s contains unknown property %q%s", path, key, whereItBelongs(properties, key))
+				return argumentError(schema, path+"."+key, "%s contains unknown property %q%s", path, key, whereItBelongs(properties, key))
 			}
 		}
 	}
 	if required, ok := schema["required"].([]string); ok {
 		for _, key := range required {
 			if _, present := object[key]; !present {
-				return fmt.Errorf("%s is missing required property %q", path, key)
+				return argumentError(schema, path+"."+key, "%s is missing required property %q", path, key)
 			}
 		}
 	}
@@ -184,10 +184,10 @@ func sortedKeys(values map[string]any) []string {
 func validateArray(schema map[string]any, value any, path string) error {
 	array, ok := value.([]any)
 	if !ok {
-		return fmt.Errorf("%s must be an array", path)
+		return argumentError(schema, path, "%s must be an array", path)
 	}
 	if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
-		return fmt.Errorf("%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
+		return argumentError(schema, path, "%s has %d items, maximum %d; append another bounded batch with change_plan action=edit and edit.mode=add", path, len(array), maximum)
 	}
 	itemSchema, _ := schema["items"].(map[string]any)
 	if itemSchema == nil {
