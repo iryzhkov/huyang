@@ -32,6 +32,25 @@ type revisionCoverage struct {
 	// inferred are the gaps the workspace's own observations filled, each
 	// with the steps it was filled from.
 	inferred []any
+	// unlisted counts the paths inventory steps saw but did not keep, which
+	// therefore have no inferred entry.
+	unlisted int
+}
+
+// maxRevisionDiffEntries bounds each list a revision_diff reply carries. A
+// range across a checkout or a generator run can hold thousands of paths,
+// and past a few hundred a reply is read as a list of names, not a diff.
+const maxRevisionDiffEntries = 200
+
+// putBounded sets data[key] to at most maxRevisionDiffEntries items and, when
+// it cut the list, says so beside it with the full count.
+func putBounded(data map[string]any, key string, items []any) {
+	data[key] = items
+	if len(items) > maxRevisionDiffEntries {
+		data[key] = items[:maxRevisionDiffEntries]
+		data[key+"_truncated"] = true
+		data[key+"_total"] = len(items)
+	}
 }
 
 func (h *Handlers) revisionDiff(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -150,10 +169,11 @@ func fillObservedGaps(workspace *workspacecore.Workspace, coverage *revisionCove
 		}
 		for _, change := range changes {
 			coverage.known = append(coverage.known, observedRevisionDiffs(change)...)
+			coverage.unlisted += change.AddedOmitted + change.RemovedOmitted
 		}
 		filled := revisionSpan(gap[0], gap[1])
 		filled["inferred"] = true
-		filled["steps"] = changes
+		putBounded(filled, "steps", observedSteps(changes))
 		coverage.inferred = append(coverage.inferred, filled)
 	}
 	coverage.gaps, coverage.spans = gaps, spans
@@ -161,6 +181,37 @@ func fillObservedGaps(workspace *workspacecore.Workspace, coverage *revisionCove
 		coverage.gaps = make([]any, 0)
 	}
 	sort.SliceStable(coverage.known, func(i, j int) bool { return coverage.known[i].From < coverage.known[j].From })
+}
+
+// observedSteps describes the steps an inferred segment was filled from. An
+// inventory step is described by its counts: the paths it kept are already
+// entries in diffs, and listing them here as well doubled the reply.
+func observedSteps(changes []workspacecore.ObservedChange) []any {
+	steps := make([]any, 0, len(changes))
+	for _, change := range changes {
+		step := map[string]any{"seq": change.Seq, "reason": change.Reason}
+		switch change.Reason {
+		case workspacecore.ObservedDocument:
+			step["path"] = change.Path
+		case workspacecore.ObservedInventory:
+			step["added"] = len(change.Added) + change.AddedOmitted
+			step["removed"] = len(change.Removed) + change.RemovedOmitted
+			if unlisted := change.AddedOmitted + change.RemovedOmitted; unlisted > 0 {
+				step["paths_not_listed"] = unlisted
+			}
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// unlistedWarning says that inventory steps saw more paths than they kept,
+// so the inferred entries do not name every file that appeared or went away.
+func unlistedWarning(coverage revisionCoverage) []string {
+	if coverage.unlisted == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("%d paths that appeared or went away in observed inventory steps are counted in inferred_segments but have no entry in diffs; git status lists them.", coverage.unlisted)}
 }
 
 // observedRevisionDiffs is what one observed step contributes to the diff:
@@ -286,13 +337,15 @@ func partialRevisionDiff(requestID string, workspace *workspacecore.Workspace, s
 	summary := fmt.Sprintf("No receipt or observation covers %s; known segments are returned with those gaps", strings.Join(uncovered, ", "))
 	data := map[string]any{
 		"from_revision": span.from, "to_revision": span.to, "current_revision": span.current,
-		"known_segments": coverage.segments, "gaps": coverage.gaps, "diffs": diffs,
+		"gaps": coverage.gaps,
 	}
+	putBounded(data, "known_segments", coverage.segments)
+	putBounded(data, "diffs", diffs)
 	if len(coverage.inferred) > 0 {
-		data["inferred_segments"] = coverage.inferred
+		putBounded(data, "inferred_segments", coverage.inferred)
 	}
 	result := mcpapi.Envelope(requestID, workspace, "partial", "diff_evidence_incomplete", summary, data)
-	result["warnings"] = []string{"Uncovered gaps may contain external writes, provider edits, or expired receipts, possibly from before a service restart; no diff is inferred for them."}
+	result["warnings"] = append([]string{"Uncovered gaps may contain external writes, provider edits, or expired receipts, possibly from before a service restart; no diff is inferred for them."}, unlistedWarning(coverage)...)
 	next := []any{map[string]any{
 		"action": "inspect_uncovered_range_with_git", "command": "git status --short && git diff",
 		"note": "Git shows what changed on disk against its own baseline, which covers the uncovered revisions " + strings.Join(uncovered, ", ") + " as well.",
@@ -338,16 +391,17 @@ func completeRevisionDiff(requestID string, workspace *workspacecore.Workspace, 
 	}
 	summary := fmt.Sprintf("%d native edit events cover %d net-changed paths between %s and %s", len(diffs), netChangedPaths, span.from, span.to)
 	data := map[string]any{
-		"from_revision": span.from, "to_revision": span.to, "current_revision": span.current, "diffs": diffs,
+		"from_revision": span.from, "to_revision": span.to, "current_revision": span.current,
 		"semantics": "net endpoint identity with ordered edit evidence",
 	}
+	putBounded(data, "diffs", diffs)
 	if len(coverage.inferred) == 0 {
 		return mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 	}
-	data["inferred_segments"] = coverage.inferred
+	putBounded(data, "inferred_segments", coverage.inferred)
 	summary = fmt.Sprintf("%d edit events, some observed on disk rather than made through Huyang, cover %d net-changed paths between %s and %s", len(diffs), netChangedPaths, span.from, span.to)
 	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
-	result["warnings"] = []string{"Some revisions have no edit receipt; their entries are inferred from what the workspace observed on disk and carry content hashes but no patch. Read the path, or run git diff on it, for the text."}
+	result["warnings"] = append([]string{"Some revisions have no edit receipt; their entries are inferred from what the workspace observed on disk and carry content hashes but no patch. Read the path, or run git diff on it, for the text."}, unlistedWarning(coverage)...)
 	return result
 }
 
