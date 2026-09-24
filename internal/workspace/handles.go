@@ -904,10 +904,9 @@ func (w *Workspace) InspectResultSet(id ResultSetID) (ResultSet, error) {
 		return ResultSet{}, &Conflict{Code: ConflictWorkspaceEpoch}
 	}
 	if set.Kind == ResultSetCurrentSource {
-		files, _, err := w.collectFiles()
-		if err == nil {
-			files = w.scopedFiles(files, set.Scope)
-		}
+		// The set is revalidated against the listing it was taken from, so
+		// the scope is applied the same way, before the file cap.
+		files, _, err := w.collectScopedFiles(set.Scope)
 		if err != nil || len(files) != len(set.SourceFiles) {
 			return ResultSet{}, &Conflict{Code: ConflictDocumentChanged}
 		}

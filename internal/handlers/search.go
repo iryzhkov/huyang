@@ -160,6 +160,11 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	} else if !result.Coverage.Complete {
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
+	// "0 matches" under a scope that named no file is not an answer about
+	// the code: the scope was probably a guessed path.
+	if len(result.Scope) > 0 && result.Coverage.FilesConsidered == 0 && result.Coverage.Complete {
+		envelope["warnings"] = append(envelope["warnings"].([]string), fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
+	}
 	return envelope
 }
 

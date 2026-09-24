@@ -525,9 +525,21 @@ func (w *Workspace) Orient() (Orientation, error) {
 }
 
 func (w *Workspace) collectFiles() ([]string, Coverage, error) {
+	return w.collectScopedFiles(nil)
+}
+
+// collectScopedFiles lists the documents inside a path scope, in path order.
+// The scope is applied before the file cap, so a scoped listing is capped only
+// when a file inside the scope was dropped: a scope that names one file in a
+// tree larger than the cap still lists that file and says it is complete. The
+// coverage describes the scope alone; a file outside it is not a gap.
+func (w *Workspace) collectScopedFiles(patterns []string) ([]string, Coverage, error) {
 	coverage := Coverage{Complete: true, Semantic: w.semanticCoverage()}
 	if w.identity.Kind == KindDocuments {
-		files := w.collectAllowlisted(&coverage)
+		files := w.collectAllowlisted(patterns, &coverage)
+		return files, scopeCoverage(coverage, patterns), nil
+	}
+	if files, ok := w.collectNamedFiles(patterns, &coverage); ok {
 		return files, coverage, nil
 	}
 	// The inventory honours .gitignore through the sanitized Git runner so
@@ -535,16 +547,85 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	// reach the native text path. A truncated listing is not trusted; the
 	// bounded walk below takes over instead.
 	if output, truncated, err := runGitAt(w.identity.Root, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err == nil && !truncated {
-		files := w.collectListedFiles(output, &coverage)
-		return files, coverage, nil
+		files := w.collectListedFiles(output, patterns, &coverage)
+		return files, scopeCoverage(coverage, patterns), nil
 	}
-	files, err := w.walkFiles(&coverage)
-	return files, coverage, err
+	files, err := w.walkFiles(patterns, &coverage)
+	return files, scopeCoverage(coverage, patterns), err
+}
+
+// collectNamedFiles answers a scope whose every pattern is the path of an
+// existing file without listing the tree. Git still has to list each named
+// file, so an ignored file is not searched just because it was named, and a
+// named file Git does not list sends the scope back to the full listing, where
+// the pattern keeps its substring meaning. A bare base name is never taken as
+// a path here, because it also names every file of that name below the root.
+func (w *Workspace) collectNamedFiles(patterns []string, coverage *Coverage) ([]string, bool) {
+	if len(patterns) == 0 {
+		return nil, false
+	}
+	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
+	for _, pattern := range patterns {
+		if !strings.Contains(pattern, "/") {
+			return nil, false
+		}
+		absolute, err := w.confinedPath(pattern)
+		if err != nil || displayPath(w.identity.Root, absolute) != pattern {
+			return nil, false
+		}
+		info, err := os.Lstat(absolute)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, false
+		}
+		args = append(args, ":(literal)"+pattern)
+	}
+	output, truncated, err := runGitAt(w.identity.Root, nil, args...)
+	if err != nil || truncated {
+		return nil, false
+	}
+	named := *coverage
+	files := w.collectListedFiles(output, patterns, &named)
+	listed := make(map[string]bool, len(files))
+	for _, name := range files {
+		listed[displayPath(w.identity.Root, name)] = true
+	}
+	for _, pattern := range patterns {
+		if !listed[pattern] {
+			return nil, false
+		}
+	}
+	*coverage = named
+	return files, true
+}
+
+// scopeCoverage drops the skipped entries a scope excludes. A walk notes an
+// unreadable directory or a depth limit before it can know whether anything
+// inside the scope lies below it; an entry whose path is outside the scope is
+// not a gap in a search that was told not to look there.
+func scopeCoverage(coverage Coverage, patterns []string) Coverage {
+	if len(patterns) == 0 {
+		return coverage
+	}
+	scoped := coverage
+	scoped.Skipped, scoped.SkippedCount = nil, 0
+	for _, skipped := range coverage.Skipped {
+		path, _, found := strings.Cut(skipped, ": ")
+		if found && !MatchesPathScope(path, patterns) {
+			continue
+		}
+		scoped.Skipped = append(scoped.Skipped, skipped)
+		scoped.SkippedCount++
+	}
+	// Entries past the bounded sample were counted but not named, so they
+	// cannot be placed inside or outside the scope; they stay counted.
+	scoped.SkippedCount += coverage.SkippedCount - len(coverage.Skipped)
+	scoped.Complete = scoped.SkippedCount == 0 && !scoped.Capped
+	return scoped
 }
 
 // collectAllowlisted returns the allowlisted documents in path order, keeping a missing
 // document (it may be created) and skipping one that cannot be stat'ed.
-func (w *Workspace) collectAllowlisted(coverage *Coverage) []string {
+func (w *Workspace) collectAllowlisted(patterns []string, coverage *Coverage) []string {
 	w.mu.Lock()
 	candidates := make([]string, 0, len(w.allowlist))
 	for name := range w.allowlist {
@@ -552,6 +633,15 @@ func (w *Workspace) collectAllowlisted(coverage *Coverage) []string {
 	}
 	w.mu.Unlock()
 	sort.Strings(candidates)
+	if len(patterns) > 0 {
+		scoped := candidates[:0]
+		for _, name := range candidates {
+			if MatchesPathScope(displayPath(w.identity.Root, name), patterns) {
+				scoped = append(scoped, name)
+			}
+		}
+		candidates = scoped
+	}
 	coverage.FilesConsidered = len(candidates)
 	files := make([]string, 0, len(candidates))
 	for _, name := range candidates {
@@ -575,11 +665,14 @@ func (w *Workspace) collectAllowlisted(coverage *Coverage) []string {
 }
 
 // collectListedFiles turns a NUL-separated git ls-files listing into bounded absolute
-// paths.
-func (w *Workspace) collectListedFiles(output string, coverage *Coverage) []string {
+// paths, keeping only those inside the scope.
+func (w *Workspace) collectListedFiles(output string, patterns []string, coverage *Coverage) []string {
 	var files []string
 	for _, relative := range strings.Split(output, "\x00") {
 		if relative == "" {
+			continue
+		}
+		if len(patterns) > 0 && !MatchesPathScope(relative, patterns) {
 			continue
 		}
 		coverage.FilesConsidered++
@@ -601,7 +694,7 @@ func (w *Workspace) collectListedFiles(output string, coverage *Coverage) []stri
 }
 
 // walkFiles is the bounded filesystem walk used when Git cannot list the tree.
-func (w *Workspace) walkFiles(coverage *Coverage) ([]string, error) {
+func (w *Workspace) walkFiles(patterns []string, coverage *Coverage) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(w.identity.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -624,6 +717,9 @@ func (w *Workspace) walkFiles(coverage *Coverage) ([]string, error) {
 				}
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if len(patterns) > 0 && !MatchesPathScope(filepath.ToSlash(rel), patterns) {
 			return nil
 		}
 		coverage.FilesConsidered++
@@ -686,11 +782,10 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	if err != nil {
 		return SearchResult{}, err
 	}
-	files, coverage, err := w.collectFiles()
+	files, coverage, err := w.collectScopedFiles(request.Paths)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	files, coverage = w.scopeFiles(files, request.Paths, coverage)
 	coverage.BytesRead = 0
 	revisions := make(map[string]RevisionID)
 	var hits []SearchHit
@@ -721,49 +816,6 @@ func (w *Workspace) Search(request SearchRequest) (SearchResult, error) {
 	}
 	result.ResultSet = &set
 	return result, nil
-}
-
-// scopeFiles keeps the documents a scoped search is about, and narrows its
-// coverage to the same set. A file outside the scope is not a gap: the caller
-// said not to look there, so counting it as considered, or reporting it as
-// skipped, describes a search nobody asked for.
-func (w *Workspace) scopeFiles(files []string, patterns []string, coverage Coverage) ([]string, Coverage) {
-	if len(patterns) == 0 {
-		return files, coverage
-	}
-	kept := w.scopedFiles(files, patterns)
-	scoped := Coverage{Complete: coverage.Complete, FilesConsidered: len(kept), Semantic: coverage.Semantic}
-	for _, skipped := range coverage.Skipped {
-		path, _, found := strings.Cut(skipped, ": ")
-		if found && !MatchesPathScope(path, patterns) {
-			continue
-		}
-		scoped.Skipped = append(scoped.Skipped, skipped)
-		scoped.SkippedCount++
-	}
-	// A cap reached while collecting the tree is still a gap in the scope,
-	// because the files it stopped at were never offered to the scope.
-	scoped.Capped = coverage.Capped
-	if scoped.SkippedCount == 0 && !scoped.Capped {
-		scoped.Complete = true
-	}
-	return kept, scoped
-}
-
-// scopedFiles keeps the paths a scope names, in the order they came in. A
-// frozen result set is revalidated against this same list, so the scope it
-// was taken under has to be applied the same way both times.
-func (w *Workspace) scopedFiles(files []string, patterns []string) []string {
-	if len(patterns) == 0 {
-		return files
-	}
-	kept := make([]string, 0, len(files))
-	for _, name := range files {
-		if MatchesPathScope(displayPath(w.identity.Root, name), patterns) {
-			kept = append(kept, name)
-		}
-	}
-	return kept
 }
 
 // MatchesPathScope reports whether a workspace-relative path is inside a

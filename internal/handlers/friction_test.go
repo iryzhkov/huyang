@@ -135,6 +135,25 @@ func TestScopedSearchLooksOnlyAtItsScope(t *testing.T) {
 	}
 }
 
+// A scope that names no file answers no matches, and says the scope matched
+// nothing, because a guessed path would otherwise read as "not in the code".
+func TestScopedSearchSaysWhenItsScopeMatchedNoFile(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"src/one.go": "package src\n\n// needle\n"})
+	result := handlers.Execute(context.Background(), "req_scope_none", "search", map[string]any{
+		"workspace_id": workspaceID, "query": "needle", "paths": []any{"lib/one.go"},
+	})
+	warnings, _ := result["warnings"].([]string)
+	if result["outcome"] != "ok" || result["data"].(map[string]any)["total"] != 0 || len(warnings) != 1 || !strings.Contains(warnings[0], "matched no file") {
+		t.Fatalf("a scope naming no file = %#v", result)
+	}
+	found := handlers.Execute(context.Background(), "req_scope_some", "search", map[string]any{
+		"workspace_id": workspaceID, "query": "absent", "paths": []any{"src/one.go"},
+	})
+	if warnings, _ := found["warnings"].([]string); len(warnings) != 0 {
+		t.Fatalf("a scope with a file warned that it matched none: %#v", found)
+	}
+}
+
 // A search that stopped at its match bound holds the bound, not the number
 // of matches in the workspace. The count says it is a floor, the bound is
 // named, and the follow-up offers the narrowing that reaches the files the
