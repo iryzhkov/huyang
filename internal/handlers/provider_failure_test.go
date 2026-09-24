@@ -25,6 +25,21 @@ func TestProviderFailuresAreClassifiedByKernelCode(t *testing.T) {
 	if cancelled["outcome"] != "failed" || cancelled["code"] != "request_cancelled" {
 		t.Fatalf("provider_cancelled = %#v", cancelled)
 	}
+	// A language server that has not attached yet is not a failure of the
+	// call: it is unavailable for now, and the same call can succeed.
+	for _, code := range []string{"lsp_starting", "lsp_attach_deadline_exceeded"} {
+		notReady := modernProviderFailure("req", workspace, "language_server_unavailable", &provider.ProviderError{Code: code, Message: "not attached"})
+		next, _ := notReady["next"].([]any)
+		if notReady["outcome"] != "unavailable" || notReady["retryable"] != true || notReady["code"] != "language_server_unavailable" || len(next) != 2 {
+			t.Fatalf("%s = %#v", code, notReady)
+		}
+		if status, _ := next[1].(map[string]any); status["tool"] != "language_server_status" {
+			t.Fatalf("%s next = %#v", code, next)
+		}
+		if notReady["data"].(map[string]any)["reason"] != code {
+			t.Fatalf("%s does not keep the provider's reason: %#v", code, notReady["data"])
+		}
+	}
 	plain := modernProviderFailure("req", workspace, "language_server_probe_failed", errors.New("boom"))
 	if plain["code"] != "language_server_probe_failed" {
 		t.Fatalf("uncoded failure = %#v", plain)
