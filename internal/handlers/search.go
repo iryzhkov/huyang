@@ -158,6 +158,11 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	} else if !result.Coverage.Complete {
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
+	// "0 matches" under a scope that named no file is not an answer about
+	// the code: the scope was probably a guessed path.
+	if len(result.Scope) > 0 && result.Coverage.FilesConsidered == 0 && result.Coverage.Complete {
+		envelope = appendWarning(envelope, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
+	}
 	return appendWarning(envelope, contextWarning)
 }
 
@@ -200,7 +205,9 @@ var semanticRelations = map[string]bool{
 // no server can answer, it falls back to the literal search and says so.
 func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspace *workspacecore.Workspace, relation string, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
-	result := h.navigateProvider(ctx, requestID, workspace, map[string]any{"relation": relation, "symbol": query})
+	result := h.navigateProvider(ctx, requestID, workspace, map[string]any{
+		"relation": relation, "symbol": query, "paths": arguments["paths"], "search_mode": relation,
+	})
 	switch result["code"] {
 	case "language_server_unavailable", "semantic_provider_start_failed", "semantic_provider_unavailable":
 		delete(arguments, "mode")

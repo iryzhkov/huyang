@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -312,6 +313,95 @@ func TestBoundedWalkerSkipsGitAndDisclosesCaps(t *testing.T) {
 		if strings.Contains(entry.Path, ".git") {
 			t.Fatalf("walker included Git internals: %+v", orientation)
 		}
+	}
+}
+
+// A scope is applied before the file cap. A tree larger than the cap used to
+// be listed up to the cap and then scoped, so a file past the cap was never
+// searched and the scoped answer still said the listing was capped; a scope
+// that fits under the cap is now listed whole and says it is complete.
+func TestScopedSearchAppliesItsScopeBeforeTheFileCap(t *testing.T) {
+	for _, listing := range []string{"walk", "git"} {
+		t.Run(listing, func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range []string{"a.txt", "b.txt", "z/later.txt", "z/other.txt"} {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, path, "needle in "+name+"\n")
+			}
+			if listing == "git" {
+				writeFile(t, filepath.Join(root, ".gitignore"), "z/other.txt\n")
+				if output, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v: %s", err, output)
+				}
+			}
+			ws := newNativeWorkspace(t, KindProject, root, nil, Limits{MaxFiles: 1, MaxDepth: 4, MaxBytes: 1024, MaxMatches: 20})
+			for _, scope := range [][]string{{"later"}, {"z/later.txt"}} {
+				result, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral, Paths: scope})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result.Hits) != 1 || result.Hits[0].Path != "z/later.txt" {
+					t.Fatalf("scope %v past the file cap found %+v", scope, result.Hits)
+				}
+				if !result.Coverage.Complete || result.Coverage.Capped || result.Coverage.FilesConsidered != 1 {
+					t.Fatalf("scope %v that fits the cap reported %+v", scope, result.Coverage)
+				}
+				// The frozen set is revalidated by listing the scope again.
+				if _, err := ws.InspectResultSet(result.ResultSet.Handle); err != nil {
+					t.Fatalf("scope %v froze a set it cannot revalidate: %v", scope, err)
+				}
+			}
+			absent, err := ws.Search(SearchRequest{Query: "missing", Mode: SearchLiteral, Paths: []string{"z/later.txt"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(absent.Hits) != 0 || !absent.Coverage.Complete {
+				t.Fatalf("a scoped search with no match is not a complete answer: %+v", absent)
+			}
+			nowhere, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral, Paths: []string{"no/such/file.txt"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(nowhere.Hits) != 0 || nowhere.Coverage.FilesConsidered != 0 {
+				t.Fatalf("a scope naming no file = %+v", nowhere)
+			}
+			// A scope wider than the cap is still capped, and says so.
+			wide, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral, Paths: []string{".txt"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wide.Coverage.Complete || !wide.Coverage.Capped {
+				t.Fatalf("a scope over the cap reported %+v", wide.Coverage)
+			}
+			if listing == "git" {
+				// An ignored file is not searched because a scope names it.
+				ignored, err := ws.Search(SearchRequest{Query: "needle", Mode: SearchLiteral, Paths: []string{"z/other.txt"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(ignored.Hits) != 0 {
+					t.Fatalf("a scope searched an ignored file: %+v", ignored.Hits)
+				}
+			}
+		})
+	}
+}
+
+// A read of a path at which nothing exists is coded, and names the path
+// relative to the workspace rather than as an absolute path on this host.
+func TestReadOfAMissingPathIsCodedDocumentNotFound(t *testing.T) {
+	root := t.TempDir()
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	_, err := ws.Read(filepath.Join("sub", "absent.go"))
+	var missing *DocumentNotFoundError
+	if ErrorCode(err) != CodeDocumentNotFound || !errors.As(err, &missing) || missing.Path != "sub/absent.go" {
+		t.Fatalf("missing read error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("missing read error names the absolute path: %v", err)
 	}
 }
 

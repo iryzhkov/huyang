@@ -2,8 +2,12 @@ package handlers
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 // One read call can carry several targets; each answers with its own
@@ -34,8 +38,92 @@ func TestReadTargetsAnswersSeveralFilesInOneCall(t *testing.T) {
 	if files[2]["content"] != "func C() {}" || files[2]["name_path"] != "C" {
 		t.Fatalf("symbol target = %#v", files[2])
 	}
-	if files[3]["code"] != "read_failed" || files[3]["path"] != "missing.go" {
+	if files[3]["code"] != "document_not_found" || files[3]["path"] != "missing.go" {
 		t.Fatalf("missing target = %#v", files[3])
+	}
+}
+
+// A read of a path that is not there names the paths the caller probably
+// meant: the same base name first, the one sharing more of the requested
+// directories ahead, then near spellings. Every view answers it the same way,
+// a symbol read blames the path rather than a missing parser, and a
+// multi-target read keeps each failed target's candidates and raises the
+// first recovery to the top.
+func TestReadOfAMissingPathOffersCandidates(t *testing.T) {
+	handlers, workspaceID, root := literalFixture(t, map[string]string{
+		"cmd/read.go": "package cmd\n", "pkg/handlers/read.go": "package handlers\n\nfunc Read() {}\n",
+		"pkg/handlers/store.go": "package handlers\n", "notes.txt": "notes\n",
+	})
+	read := func(target map[string]any) map[string]any {
+		return handlers.Execute(context.Background(), "req_missing", "read", map[string]any{"workspace_id": workspaceID, "target": target})
+	}
+	candidatesOf := func(result map[string]any) []string {
+		candidates, _ := result["data"].(map[string]any)["candidates"].([]string)
+		return candidates
+	}
+	moved := read(map[string]any{"path": "handlers/read.go"})
+	if moved["code"] != "document_not_found" || strings.Contains(moved["summary"].(string), root) {
+		t.Fatalf("missing path = %#v", moved)
+	}
+	if candidates := candidatesOf(moved); len(candidates) != 2 || candidates[0] != "pkg/handlers/read.go" || candidates[1] != "cmd/read.go" {
+		t.Fatalf("candidates = %#v", moved)
+	}
+	if _, present := moved["data"].(map[string]any)["coverage"]; !present {
+		t.Fatalf("absence is claimed without the listing it was checked against: %#v", moved)
+	}
+	if next := moved["next"].([]any); len(next) == 0 || next[0].(map[string]any)["path"] != "pkg/handlers/read.go" {
+		t.Fatalf("next = %#v", moved["next"])
+	}
+	if misspelled := read(map[string]any{"path": "pkg/handlers/stor.go"}); len(candidatesOf(misspelled)) != 1 || candidatesOf(misspelled)[0] != "pkg/handlers/store.go" {
+		t.Fatalf("near spelling = %#v", misspelled)
+	}
+	if outline := handlers.Execute(context.Background(), "req_missing_outline", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "handlers/read.go"}, "view": "outline",
+	}); outline["code"] != "document_not_found" || len(candidatesOf(outline)) != 2 {
+		t.Fatalf("missing outline = %#v", outline)
+	}
+	symbol := read(map[string]any{"symbol_locator": map[string]any{"path": "handlers/read.go", "name_path": "Read"}})
+	if symbol["code"] != "document_not_found" || len(candidatesOf(symbol)) != 2 {
+		t.Fatalf("symbol read of a missing file = %#v", symbol)
+	}
+	locator, _ := symbol["next"].([]any)[0].(map[string]any)["target"].(map[string]any)["symbol_locator"].(map[string]any)
+	if locator["path"] != "pkg/handlers/read.go" || locator["name_path"] != "Read" {
+		t.Fatalf("symbol recovery = %#v", symbol["next"])
+	}
+	if nowhere := read(map[string]any{"path": "zzz/absent.rs"}); nowhere["code"] != "document_not_found" || !strings.Contains(nowhere["summary"].(string), "anywhere in the workspace") {
+		t.Fatalf("absent everywhere = %#v", nowhere)
+	}
+	many := handlers.Execute(context.Background(), "req_missing_many", "read", map[string]any{
+		"workspace_id": workspaceID,
+		"targets":      []any{map[string]any{"path": "notes.txt"}, map[string]any{"path": "handlers/read.go"}},
+	})
+	files := many["data"].(map[string]any)["files"].([]map[string]any)
+	if candidates, _ := files[1]["candidates"].([]string); len(candidates) != 2 {
+		t.Fatalf("failed target lost its candidates: %#v", files[1])
+	}
+	if next := many["next"].([]any); len(next) == 0 || next[0].(map[string]any)["path"] != "pkg/handlers/read.go" {
+		t.Fatalf("multi-target next = %#v", many["next"])
+	}
+}
+
+// A listing stopped at its cap cannot say a file exists nowhere, so absence
+// is worded within the files it did list.
+func TestMissingPathAbsenceIsWordedWithinACappedListing(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{Kind: workspacecore.KindProject, Root: root, StateDir: t.TempDir(), Limits: workspacecore.Limits{MaxFiles: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := workspace.Read("absent.go")
+	result := readFailure("req_capped", workspace, readErr, "")
+	summary, _ := result["summary"].(string)
+	if result["code"] != "document_not_found" || strings.Contains(summary, "anywhere") || !strings.Contains(summary, "among the 1 files listed") {
+		t.Fatalf("absence under a capped listing = %#v", result)
 	}
 }
 
