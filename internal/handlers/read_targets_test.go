@@ -106,6 +106,30 @@ func TestReadOfAMissingPathOffersCandidates(t *testing.T) {
 	}
 }
 
+// After the exact base names come files of the same stem - a test beside
+// the source, the same name in another language - first in a directory of
+// the requested name, then elsewhere, and only then near spellings. The
+// whole list is still capped.
+func TestMissingPathCandidatesRankSameStemAfterExactNames(t *testing.T) {
+	listed := []string{
+		"other/store_test.go", "pkg/handlers/store_test.go", "web/handlers/store.test.ts",
+		"pkg/handlers/stare.go", "lib/store.go", "web/store.spec.ts", "pkg/handlers/unrelated.go",
+	}
+	named, near := pathCandidates(listed, "src/handlers/store.go")
+	if len(named) != 1 || named[0] != "lib/store.go" {
+		t.Fatalf("named = %#v", named)
+	}
+	want := []string{"pkg/handlers/store_test.go", "web/handlers/store.test.ts", "other/store_test.go", "web/store.spec.ts", "pkg/handlers/stare.go"}
+	if strings.Join(near, " ") != strings.Join(want, " ") {
+		t.Fatalf("near = %#v, want %#v", near, want)
+	}
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"pkg/handlers/store_test.go": "package handlers\n"})
+	result := handlers.Execute(context.Background(), "req_stem", "read", map[string]any{"workspace_id": workspaceID, "target": map[string]any{"path": "pkg/handlers/store.go"}})
+	if candidates, _ := result["data"].(map[string]any)["candidates"].([]string); len(candidates) != 1 || candidates[0] != "pkg/handlers/store_test.go" {
+		t.Fatalf("a source whose test exists offers = %#v", result)
+	}
+}
+
 // A listing stopped at its cap cannot say a file exists nowhere, so absence
 // is worded within the files it did list.
 func TestMissingPathAbsenceIsWordedWithinACappedListing(t *testing.T) {

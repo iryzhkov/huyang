@@ -74,10 +74,16 @@ func readFailure(requestID string, workspace *workspacecore.Workspace, err error
 }
 
 // pathCandidates are the listed paths a caller who asked for path probably
-// meant. named share its base name exactly; near have a base name within a
-// small edit distance of it, case included. Each group puts first the paths
-// that share more of the requested path's directories, counted from the
-// file up, and otherwise keeps listing order.
+// meant. named share its base name exactly. near are, in this order: files
+// of the same stem in a directory of the same name as the requested one
+// (read.go asked for, read_test.go or read.ts beside it), files of the same
+// stem elsewhere, and
+// base names within a small edit distance, case included. The stem ignores
+// the extension and a _test, .test or .spec suffix, because the file an
+// agent guesses and the one that exists are so often a source and its test
+// or one language's spelling of another's. Within a rank the paths that
+// share more of the requested path's directories, counted from the file up,
+// come first, and otherwise listing order is kept.
 func pathCandidates(listed []string, path string) (named, near []string) {
 	base := pathBase(path)
 	if base == "" {
@@ -85,26 +91,36 @@ func pathCandidates(listed []string, path string) (named, near []string) {
 	}
 	type scored struct {
 		path     string
+		rank     int
 		distance int
 		shared   int
 	}
-	lowered, bound := strings.ToLower(base), max(1, len(base)/5)
+	lowered, bound, stem := strings.ToLower(base), max(1, len(base)/5), fileStem(base)
 	var exact, similar []scored
 	for _, candidate := range listed {
 		if candidate == path {
 			continue
 		}
 		candidateBase := pathBase(candidate)
-		if candidateBase == base {
-			exact = append(exact, scored{path: candidate, shared: sharedDirectories(candidate, path)})
-			continue
-		}
-		if distance := editDistance(strings.ToLower(candidateBase), lowered, bound); distance <= bound {
-			similar = append(similar, scored{path: candidate, distance: distance, shared: sharedDirectories(candidate, path)})
+		shared := sharedDirectories(candidate, path)
+		switch {
+		case candidateBase == base:
+			exact = append(exact, scored{path: candidate, shared: shared})
+		case stem != "" && fileStem(candidateBase) == stem && shared > 0:
+			similar = append(similar, scored{path: candidate, rank: 0, shared: shared})
+		case stem != "" && fileStem(candidateBase) == stem:
+			similar = append(similar, scored{path: candidate, rank: 1, shared: shared})
+		default:
+			if distance := editDistance(strings.ToLower(candidateBase), lowered, bound); distance <= bound {
+				similar = append(similar, scored{path: candidate, rank: 2, distance: distance, shared: shared})
+			}
 		}
 	}
 	sort.SliceStable(exact, func(i, j int) bool { return exact[i].shared > exact[j].shared })
 	sort.SliceStable(similar, func(i, j int) bool {
+		if similar[i].rank != similar[j].rank {
+			return similar[i].rank < similar[j].rank
+		}
 		if similar[i].distance != similar[j].distance {
 			return similar[i].distance < similar[j].distance
 		}
@@ -159,6 +175,13 @@ func editDistance(left, right string, bound int) int {
 		previous, current = current, previous
 	}
 	return previous[len(right)]
+}
+
+// fileStem is a base name without its extensions or a _test suffix, lower
+// case: read.go, read_test.go, read.test.ts and Read.spec.ts share read.
+func fileStem(base string) string {
+	stem, _, _ := strings.Cut(base, ".")
+	return strings.ToLower(strings.TrimSuffix(stem, "_test"))
 }
 
 func pathBase(path string) string {
