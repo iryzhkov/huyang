@@ -1090,7 +1090,9 @@ compaction of a default result, or a new stable code. No mutation precondition w
   the call is not replay-protected, which is what omitting it means.
 - `read.numbered` (boolean) prefixes each content line with its number and a tab.
 - `search.paths` (array of substrings or globs) keeps only hits under those paths;
-  `search.context_lines` (0 to 20) adds `context`, the numbered lines around each hit.
+  `search.context_lines` (0 to 20) adds `context`, the numbered lines around each hit;
+  a larger value is reduced to 20 with a warning that points at `read` with a line
+  window, rather than refused.
   The search schema no longer uses `oneOf`; exactly one of `query`, `result_set_handle`
   with `refine`, or `git_history` is still expected.
 - Structured arguments (`target`, `targets`, `operation`, `operations`, `files`, `stages`,
