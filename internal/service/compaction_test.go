@@ -124,13 +124,13 @@ func TestDiagnosticUpdatesAreDeliveredOncePerClientAndCapped(t *testing.T) {
 func TestDiagnosticsReportIsCompactWithEvidenceOnlyOnTheEnvelope(t *testing.T) {
 	direct := newDirectWorkspaces(t.TempDir())
 	workspaceID, workspace := openTestProject(t, direct, map[string]string{"main.go": "package main\n"})
-	unavailable := direct.call(context.Background(), "diagnostics", map[string]any{"workspace_id": workspaceID})
-	report := unavailable["data"].(map[string]any)["diagnostics"].(map[string]any)
-	if unavailable["outcome"] != "unavailable" {
-		t.Fatalf("outcome = %#v", unavailable)
+	empty := direct.call(context.Background(), "diagnostics", map[string]any{"workspace_id": workspaceID})
+	report := empty["data"].(map[string]any)["diagnostics"].(map[string]any)
+	if empty["outcome"] != "ok" {
+		t.Fatalf("outcome = %#v", empty)
 	}
-	if _, present := report["new"]; present {
-		t.Fatalf("unavailable report carries bodies: %#v", report)
+	if items, _ := report["new"].([]map[string]any); len(items) != 0 {
+		t.Fatalf("empty report carries bodies: %#v", report)
 	}
 	if reasons := report["provisional_reasons"].([]string); len(reasons) != 1 || reasons[0] != "no_diagnostic_evidence" {
 		t.Fatalf("reasons = %#v", report["provisional_reasons"])
