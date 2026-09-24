@@ -276,9 +276,24 @@ func (w *Workspace) previewedPlan(planID string, expected uint64) (PlanRecord, e
 		}
 	}
 	if plan.Preview.Outcome != "ok" {
-		return plan, Coded(CodePlanValidationConflicts, errors.New("preview must succeed before prepare"))
+		return plan, Coded(CodePlanValidationConflicts, errors.New(previewConflictMessage(*plan.Preview)))
 	}
 	return plan, nil
+}
+
+// previewConflictMessage says why the preview prepare ran refused the plan, quoting the
+// first conflict so the caller can act without a second call to find out what it was.
+func previewConflictMessage(preview PlanPreview) string {
+	if len(preview.Conflicts) == 0 {
+		return fmt.Sprintf("plan preview ended %q, so the plan was not prepared", preview.Outcome)
+	}
+	first := preview.Conflicts[0]
+	where := "operation " + first.OpID
+	if first.Path != "" {
+		where += " on " + first.Path
+	}
+	return fmt.Sprintf("preview found %d conflict(s), so the plan was not prepared; first: %s: %s (%s)",
+		len(preview.Conflicts), where, first.Message, first.Code)
 }
 
 // evaluateInvariants asks the evaluator about every declared invariant and stores the
@@ -420,6 +435,31 @@ func (w *Workspace) ReopenPlan(ctx context.Context, planID string, expected uint
 	}
 	if err := stager.Rollback(ctx, planID); err != nil {
 		_, _ = w.transitionPlan(planID, expected, PlanFailed, "reopen_failed", err.Error(), nil)
+		return PlanRecord{}, err
+	}
+	if err := w.recordInvariants(planID, expected, resetInvariantProofs(plan.Invariants)); err != nil {
+		return PlanRecord{}, err
+	}
+	result, err := w.transitionPlan(planID, expected, PlanOpen, "reopen", "ok", nil)
+	w.prepareMu.Lock()
+	delete(w.activePlans, planID)
+	w.prepareMu.Unlock()
+	return result, err
+}
+
+// ReopenPlanWithoutSandbox returns a prepared plan to OPEN when its sandbox is already gone,
+// as it is after a service restart: there is nothing left to roll back, and refusing would
+// leave a plan that can be neither edited nor applied. The preparation and the proofs of its
+// invariants are dropped exactly as ReopenPlan drops them.
+func (w *Workspace) ReopenPlanWithoutSandbox(planID string, expected uint64) (PlanRecord, error) {
+	plan, err := w.InspectPlan(planID, expected)
+	if err != nil {
+		return PlanRecord{}, err
+	}
+	if !canTransition(plan.State, PlanRollingBack) {
+		return PlanRecord{}, illegalTransition(planID, plan.State, PlanRollingBack)
+	}
+	if _, err := w.transitionPlan(planID, expected, PlanRollingBack, "reopen_started", "sandbox_gone", plan.Preparation); err != nil {
 		return PlanRecord{}, err
 	}
 	if err := w.recordInvariants(planID, expected, resetInvariantProofs(plan.Invariants)); err != nil {

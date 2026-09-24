@@ -43,6 +43,28 @@ func TestParserStageParsesCommonStructuredConfig(t *testing.T) {
 	}
 }
 
+// A failed parser stage names the file and line it refused in the error the
+// caller sees, not only in the stage output, and a JSON syntax error carries
+// its line like every other format.
+func TestParserFailureNamesPathAndLine(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "broken.json"), []byte("{\n  \"a\": 1,\n  oops\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stage := parserStage(root, "wsrev_test", []string{"broken.json"})
+	if stage.Status != VerificationFailed || !strings.Contains(stage.Output, "broken.json:3:") {
+		t.Fatalf("invalid JSON was not diagnosed by line: %#v", stage)
+	}
+	err := parserFailure(stage.Output)
+	if err == nil || !strings.Contains(err.Error(), "broken.json:3:") {
+		t.Fatalf("parser failure = %v, want the path and line", err)
+	}
+	err = parserFailure("a.go:1:1: bad\nb.go:2:1: worse\n")
+	if !strings.Contains(err.Error(), "a.go:1:1: bad") || !strings.Contains(err.Error(), "1 more") {
+		t.Fatalf("parser failure with two files = %v", err)
+	}
+}
+
 func gitIgnoreFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

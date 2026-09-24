@@ -12,7 +12,8 @@ import (
 
 // planRequest is the decoded change_plan call. Operations and Edit are
 // present only for the actions that carry them; PlanRevision is zero when
-// omitted, which the workspace reads as the plan's current revision.
+// omitted, and changePlan resolves that to the plan's current revision
+// before any action runs.
 type planRequest struct {
 	Action            string
 	PlanID            string
@@ -88,6 +89,7 @@ func (h *Handlers) changePlan(ctx context.Context, requestID string, workspace *
 	if err != nil {
 		return h.planFailure(requestID, workspace, request.Action, planOutcome{err: err})
 	}
+	resolveCurrentPlanRevision(workspace, &request)
 	var outcome planOutcome
 	switch request.Action {
 	case "create":
@@ -117,6 +119,21 @@ func (h *Handlers) changePlan(ctx context.Context, requestID string, workspace *
 		return h.planFailure(requestID, workspace, request.Action, outcome)
 	}
 	return planResult(requestID, workspace, outcome.summary, outcome.plan)
+}
+
+// resolveCurrentPlanRevision reads an omitted or zero plan_revision as the
+// plan's current revision, once, so every action sees the same number. The
+// workspace refuses zero on every mutation, which is right for its own
+// callers but turned an omitted argument into "expected 0, current N" for
+// every action except inspect. A plan that cannot be read is left alone: the
+// action itself reports the unknown plan.
+func resolveCurrentPlanRevision(workspace *workspacecore.Workspace, request *planRequest) {
+	if request.PlanRevision != 0 || request.Action == "create" || (request.Action == "prepare" && request.HasOperations) {
+		return
+	}
+	if current, err := workspace.InspectPlan(request.PlanID, 0); err == nil {
+		request.PlanRevision = current.PlanRevision
+	}
 }
 
 func (h *Handlers) planCreate(ctx context.Context, requestID string, workspace *workspacecore.Workspace, request planRequest) planOutcome {
@@ -155,6 +172,11 @@ func (h *Handlers) planEdit(ctx context.Context, requestID string, workspace *wo
 // the plan returns to being an intent. The prepared revision stops existing at
 // that moment, which is the point: what somebody reviewed is replaced, never
 // quietly edited underneath them.
+//
+// A preparation whose sandbox is already gone, as after a service restart,
+// has nothing left to roll back, so the plan returns to OPEN without one.
+// Refusing the edit there left a plan that could be neither edited nor
+// applied.
 func (h *Handlers) reopenForEdit(ctx context.Context, workspace *workspacecore.Workspace, request planRequest) error {
 	current, err := workspace.InspectPlan(request.PlanID, request.PlanRevision)
 	if err != nil {
@@ -167,6 +189,10 @@ func (h *Handlers) reopenForEdit(ctx context.Context, workspace *workspacecore.W
 		return nil
 	}
 	stager, stagerErr := h.pool.PlanStager(workspace, request.PlanID, current.PlanRevision, false)
+	if workspacecore.ErrorCode(stagerErr) == workspacecore.CodeProviderUnavailable {
+		_, err = workspace.ReopenPlanWithoutSandbox(request.PlanID, current.PlanRevision)
+		return err
+	}
 	if stagerErr != nil {
 		return stagerErr
 	}
@@ -483,6 +509,14 @@ func planFailureNext(action, code string, plan workspacecore.PlanRecord) []any {
 			next = append(next, withPlan("inspect", nil), withPlan("discard", nil))
 		}
 		return next
+	case code == workspacecore.CodePlanValidationConflicts && plan.PlanID != "":
+		// The conflicts are in the plan's operations, every one listed in
+		// data.plan.preview, so the way forward is to change the operations
+		// or drop the plan.
+		return []any{
+			withPlan("edit", map[string]any{"note": "Change or remove the conflicting operations listed in data.plan.preview.conflicts, then prepare again."}),
+			withPlan("discard", nil),
+		}
 	case action == "prepare" && plan.PlanID != "":
 		return []any{withPlan("inspect", nil), withPlan("discard", nil)}
 	case action == "apply" && code == "workspace_epoch_changed" && plan.PlanID != "":
