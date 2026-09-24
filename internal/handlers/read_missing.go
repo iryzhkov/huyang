@@ -111,7 +111,7 @@ func pathCandidates(listed []string, path string) (named, near []string) {
 		case stem != "" && fileStem(candidateBase) == stem:
 			similar = append(similar, scored{path: candidate, rank: 1, shared: shared})
 		default:
-			if distance := editDistance(strings.ToLower(candidateBase), lowered, bound); distance <= bound {
+			if distance := mcpapi.EditDistance(strings.ToLower(candidateBase), lowered, bound); distance <= bound {
 				similar = append(similar, scored{path: candidate, rank: 2, distance: distance, shared: shared})
 			}
 		}
@@ -145,36 +145,6 @@ func sharedDirectories(left, right string) int {
 		shared++
 	}
 	return shared
-}
-
-// editDistance is the Levenshtein distance between two strings, or bound+1
-// as soon as it is certain to exceed bound.
-func editDistance(left, right string, bound int) int {
-	if diff := len(left) - len(right); diff > bound || -diff > bound {
-		return bound + 1
-	}
-	previous := make([]int, len(right)+1)
-	current := make([]int, len(right)+1)
-	for j := range previous {
-		previous[j] = j
-	}
-	for i := 1; i <= len(left); i++ {
-		current[0] = i
-		smallest := current[0]
-		for j := 1; j <= len(right); j++ {
-			cost := 1
-			if left[i-1] == right[j-1] {
-				cost = 0
-			}
-			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
-			smallest = min(smallest, current[j])
-		}
-		if smallest > bound {
-			return bound + 1
-		}
-		previous, current = current, previous
-	}
-	return previous[len(right)]
 }
 
 // fileStem is a base name without its extensions or a _test suffix, lower

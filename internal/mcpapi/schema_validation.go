@@ -194,7 +194,8 @@ func validateObject(schema map[string]any, value any, path string) error {
 // propertyAliases are the names agents reach for in place of a declared
 // property, taken from the friction spool. Each is offered only where the
 // object being validated declares the name it points at, as a sibling or a
-// level down.
+// level down. ApplyArgumentAliases rewrites from the same table, for the
+// tools where an alias with one meaning is accepted with a warning.
 var propertyAliases = map[string][]string{
 	"path":        {"paths"},
 	"path_prefix": {"paths"},
@@ -249,24 +250,35 @@ func nearMiss(key, sibling string) bool {
 	if len(key) >= 8 {
 		allowed = 2
 	}
-	return editDistance(key, sibling) <= allowed
+	return EditDistance(key, sibling, allowed) <= allowed
 }
 
-// editDistance is the Levenshtein distance between two property names.
-func editDistance(left, right string) int {
+// EditDistance is the Levenshtein distance between two strings, or bound+1
+// as soon as it is certain to exceed bound. Property suggestions here and
+// missing-path candidates in the handlers both ask only whether two names
+// are within a small distance, so neither pays for the full table.
+func EditDistance(left, right string, bound int) int {
+	if diff := len(left) - len(right); diff > bound || -diff > bound {
+		return bound + 1
+	}
 	previous := make([]int, len(right)+1)
 	current := make([]int, len(right)+1)
-	for index := range previous {
-		previous[index] = index
+	for j := range previous {
+		previous[j] = j
 	}
 	for i := 1; i <= len(left); i++ {
 		current[0] = i
+		smallest := current[0]
 		for j := 1; j <= len(right); j++ {
 			cost := 1
 			if left[i-1] == right[j-1] {
 				cost = 0
 			}
 			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+			smallest = min(smallest, current[j])
+		}
+		if smallest > bound {
+			return bound + 1
 		}
 		previous, current = current, previous
 	}

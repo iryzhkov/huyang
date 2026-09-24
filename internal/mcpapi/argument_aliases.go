@@ -16,16 +16,24 @@ func ApplyArgumentAliases(tool string, arguments map[string]any) []string {
 	case "search":
 		var warnings []string
 		warnings = append(warnings, aliasSearchPaths(arguments)...)
-		warnings = append(warnings, renameArgument(tool, arguments, "max_results", "limit")...)
+		warnings = append(warnings, renameArgument(tool, arguments, "max_results")...)
 		return warnings
 	case "revision_diff":
-		return renameArgument(tool, arguments, "to_revision", "to_revision_or_current")
+		return renameArgument(tool, arguments, "to_revision")
 	}
 	return nil
 }
 
-// renameArgument moves one argument to its canonical name.
-func renameArgument(tool string, arguments map[string]any, alias, canonical string) []string {
+// renameArgument moves one argument to the name propertyAliases gives it,
+// the same table validation suggests from, so a name that is rewritten and
+// a name that is refused with a suggestion cannot disagree about what it
+// meant. An alias with more than one meaning is never rewritten.
+func renameArgument(tool string, arguments map[string]any, alias string) []string {
+	canonicals := propertyAliases[alias]
+	if len(canonicals) != 1 {
+		return nil
+	}
+	canonical := canonicals[0]
 	value, present := arguments[alias]
 	if _, taken := arguments[canonical]; !present || taken {
 		return nil
