@@ -161,9 +161,9 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	// "0 matches" under a scope that named no file is not an answer about
 	// the code: the scope was probably a guessed path.
 	if len(result.Scope) > 0 && result.Coverage.FilesConsidered == 0 && result.Coverage.Complete {
-		envelope = appendWarning(envelope, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
+		envelope = mcpapi.AddWarnings(envelope, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
 	}
-	return appendWarning(envelope, contextWarning)
+	return mcpapi.AddWarnings(envelope, contextWarning)
 }
 
 // attachRequestedContext attaches the context_lines a search asked for. More
@@ -182,15 +182,6 @@ func attachRequestedContext(workspace *workspacecore.Workspace, hits []map[strin
 	}
 	return fmt.Sprintf("context_lines %d was reduced to %d, the most search attaches to each hit; for a wider window read the file with start_line and end_line around the hit",
 		requested, mcpapi.MaxSearchContextLines)
-}
-
-// appendWarning adds one warning to an envelope; an empty one is none.
-func appendWarning(envelope map[string]any, warning string) map[string]any {
-	if warning != "" {
-		warnings, _ := envelope["warnings"].([]string)
-		envelope["warnings"] = append(warnings, warning)
-	}
-	return envelope
 }
 
 // semanticRelations are the search modes answered by the language server
@@ -260,10 +251,10 @@ func scopeNavigation(workspace *workspacecore.Workspace, result map[string]any, 
 	if _, capped := navigation["dropped"]; capped {
 		// The server's reply was cut before the scope was applied, so the
 		// locations inside paths past that cut are not here either.
-		result = appendWarning(result, fmt.Sprintf("the language server's %s reply was capped before paths %q were applied; more hits may lie inside paths", relation, scope))
+		result = mcpapi.AddWarnings(result, fmt.Sprintf("the language server's %s reply was capped before paths %q were applied; more hits may lie inside paths", relation, scope))
 	}
 	if kept == 0 {
-		result = appendWarning(result, fmt.Sprintf("none of the %d %s hits lie inside paths %q", outside, relation, scope))
+		result = mcpapi.AddWarnings(result, fmt.Sprintf("none of the %d %s hits lie inside paths %q", outside, relation, scope))
 	}
 	return result
 }

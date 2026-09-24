@@ -248,6 +248,50 @@ func Envelope(requestID string, workspace *workspacecore.Workspace, outcome, cod
 	return result
 }
 
+// Warnings reads an envelope's warnings as strings. A handler builds them as
+// []string, but a receipt replayed from disk decodes them as []any, and a
+// caller that asserted only the first dropped the replayed ones.
+func Warnings(envelope map[string]any) []string {
+	switch values := envelope["warnings"].(type) {
+	case []string:
+		return values
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// AddWarnings appends warnings after the envelope's own; an empty one is none.
+func AddWarnings(envelope map[string]any, warnings ...string) map[string]any {
+	return joinWarnings(envelope, Warnings(envelope), warnings)
+}
+
+// PrependWarnings puts warnings ahead of the envelope's own, for warnings
+// about the call itself that the reader should see before the answer's.
+func PrependWarnings(envelope map[string]any, warnings ...string) map[string]any {
+	return joinWarnings(envelope, warnings, Warnings(envelope))
+}
+
+func joinWarnings(envelope map[string]any, first, second []string) map[string]any {
+	joined := make([]string, 0, len(first)+len(second))
+	for _, warning := range append(append([]string(nil), first...), second...) {
+		if warning != "" {
+			joined = append(joined, warning)
+		}
+	}
+	if len(joined) == len(Warnings(envelope)) {
+		return envelope
+	}
+	envelope["warnings"] = joined
+	return envelope
+}
+
 func AnySlice(value any) []any {
 	if values, ok := value.([]any); ok {
 		return values

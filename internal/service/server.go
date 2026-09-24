@@ -49,7 +49,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			logModernValidationFriction(session, descriptor.Name, root, arguments, err, client, started)
 			requestID := fmt.Sprintf("req_%d", direct.requests.Add(1))
 			envelope := mcpapi.FinalizeEnvelope(descriptor.Name, mcpapi.InvalidArguments(requestID, descriptor.Name, err))
-			return renderToolResponse(descriptor.Name, arguments, withWarnings(envelope, aliased), true)
+			return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), true)
 		}
 		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
 			return refuse("", map[string]any{}, err)
@@ -78,19 +78,10 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
-		return renderToolResponse(descriptor.Name, arguments, withWarnings(envelope, aliased), isError)
+		// An alias that was rewritten explains the rest of the reply, so its
+		// warning goes ahead of the ones the call produced.
+		return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), isError)
 	})
-}
-
-// withWarnings puts warnings ahead of the ones the call produced: an alias
-// that was rewritten explains the rest of the reply.
-func withWarnings(envelope map[string]any, warnings []string) map[string]any {
-	if len(warnings) == 0 {
-		return envelope
-	}
-	existing, _ := envelope["warnings"].([]string)
-	envelope["warnings"] = append(append([]string(nil), warnings...), existing...)
-	return envelope
 }
 
 func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {

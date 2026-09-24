@@ -175,7 +175,7 @@ func (h *Handlers) VerifyPrepare(ctx context.Context, requestID string, workspac
 		}, "\x00"),
 	}
 	if cached, cacheHit := h.verification.lookup(job.cacheKey); cacheHit {
-		return nil, withVerifyWarnings(modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result), cached.Warnings)
+		return nil, mcpapi.AddWarnings(modernVerificationEnvelope(requestID, workspace, cached.Outcome, "", "Verification reused for the exact revision and stage selection", "revision_hit", cached.Result), cached.Warnings...)
 	}
 	stager, failure := h.locateVerifyStager(ctx, requestID, workspace, request.revision)
 	if failure != nil {
@@ -241,21 +241,11 @@ func (h *Handlers) VerifyRun(ctx context.Context, requestID string, workspace *w
 			next, _ := resultEnvelope["next"].([]any)
 			resultEnvelope["next"] = append([]any{recovery}, next...)
 		}
-		return withVerifyWarnings(resultEnvelope, job.warnings)
+		return mcpapi.AddWarnings(resultEnvelope, job.warnings...)
 	}
 	outcome, summary := verificationOutcome(result)
 	h.verification.store(job.cacheKey, cachedVerification{Result: result, Outcome: outcome, Warnings: job.warnings})
-	return withVerifyWarnings(verificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result, job.verbose), job.warnings)
-}
-
-// withVerifyWarnings adds the run's own warnings to a verify_run reply.
-func withVerifyWarnings(envelope map[string]any, warnings []string) map[string]any {
-	if len(warnings) == 0 {
-		return envelope
-	}
-	existing, _ := envelope["warnings"].([]string)
-	envelope["warnings"] = append(append([]string(nil), existing...), warnings...)
-	return envelope
+	return mcpapi.AddWarnings(verificationEnvelope(requestID, workspace, outcome, "", summary, "revision_miss", result, job.verbose), job.warnings...)
 }
 
 // verificationOutcome reduces the stages to the envelope outcome and a
