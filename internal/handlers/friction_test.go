@@ -97,6 +97,31 @@ func TestSearchPathsAndContextLines(t *testing.T) {
 	}
 }
 
+// context_lines above the bound is reduced to it with a warning that points
+// at read, rather than refused.
+func TestSearchReducesContextLinesAboveTheBound(t *testing.T) {
+	var source strings.Builder
+	for line := 1; line <= 60; line++ {
+		fmt.Fprintf(&source, "line %d\n", line)
+	}
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"long.txt": source.String()})
+	result := handlers.Execute(context.Background(), "req_search", "search", map[string]any{
+		"workspace_id": workspaceID, "query": "line 30\n", "context_lines": 100,
+	})
+	hits := result["data"].(map[string]any)["hits"].([]map[string]any)
+	if result["outcome"] != "ok" || len(hits) != 1 {
+		t.Fatalf("search = %#v", result)
+	}
+	context, _ := hits[0]["context"].(string)
+	if !strings.HasPrefix(context, "10\tline 10\n") || !strings.HasSuffix(context, "50\tline 50\n") {
+		t.Fatalf("context was not reduced to 20 lines each side: %q", context)
+	}
+	warnings, _ := result["warnings"].([]string)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "reduced to 20") || !strings.Contains(warnings[0], "start_line") {
+		t.Fatalf("warnings = %q", warnings)
+	}
+}
+
 // A scope is what the search looks at, not a filter over what it found.
 // Filtering the answer spends the match cap on files the caller excluded, so
 // a common term scoped to one directory could answer nothing at all while

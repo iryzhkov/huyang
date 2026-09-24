@@ -338,7 +338,9 @@ func (h *Handlers) navigateProvider(ctx context.Context, requestID string, works
 	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, relation, providerArguments)
 	if err != nil {
 		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
-		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
+		if result["retryable"] != true {
+			result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
+		}
 		return result
 	}
 	// The reply is the navigation itself; the provider's process detail is
@@ -409,7 +411,9 @@ func (h *Handlers) codeActionsProvider(ctx context.Context, requestID string, wo
 	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, "code_actions", providerArguments)
 	if err != nil {
 		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
-		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
+		if result["retryable"] != true {
+			result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
+		}
 		return result
 	}
 	return mcpapi.Envelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": providerpool.Status(ctx, backend)})

@@ -113,9 +113,7 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
 	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges, includeHandles, literalEcho(arguments, query))
-	if context := argInt(arguments, "context_lines", 0); context > 0 {
-		attachSearchContext(workspace, hits, context)
-	}
+	contextWarning := attachRequestedContext(workspace, hits, arguments)
 	// A capped search stopped collecting; the matches it holds are the bound
 	// it stopped at, not the matches in the workspace. Saying "1000 matches"
 	// for a hundred thousand is the one number an agent uses to decide
@@ -159,6 +157,33 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		}
 	} else if !result.Coverage.Complete {
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
+	}
+	return appendWarning(envelope, contextWarning)
+}
+
+// attachRequestedContext attaches the context_lines a search asked for. More
+// than mcpapi.MaxSearchContextLines is reduced to that bound rather than
+// refused, and the warning it returns says so and where the rest is: a
+// caller who wants a wider window around a hit wants read with a line
+// window, not a larger block repeated beside every hit.
+func attachRequestedContext(workspace *workspacecore.Workspace, hits []map[string]any, arguments map[string]any) string {
+	requested := argInt(arguments, "context_lines", 0)
+	if requested <= 0 {
+		return ""
+	}
+	attachSearchContext(workspace, hits, min(requested, mcpapi.MaxSearchContextLines))
+	if requested <= mcpapi.MaxSearchContextLines {
+		return ""
+	}
+	return fmt.Sprintf("context_lines %d was reduced to %d, the most search attaches to each hit; for a wider window read the file with start_line and end_line around the hit",
+		requested, mcpapi.MaxSearchContextLines)
+}
+
+// appendWarning adds one warning to an envelope; an empty one is none.
+func appendWarning(envelope map[string]any, warning string) map[string]any {
+	if warning != "" {
+		warnings, _ := envelope["warnings"].([]string)
+		envelope["warnings"] = append(warnings, warning)
 	}
 	return envelope
 }

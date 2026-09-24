@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,16 +60,16 @@ func call(t *testing.T, session *mcp.ClientSession, name string, arguments map[s
 }
 
 // callRefused runs a tool that the server is expected to reject outright, and
-// returns the refusal. A schema violation is refused by the transport rather
-// than answered with an envelope, which is the point when the question is
+// returns the refusal. A schema violation is answered before any handler runs,
+// with an invalid_arguments envelope, which is the point when the question is
 // whether an argument is advertised at all.
 func callRefused(t *testing.T, session *mcp.ClientSession, name string, arguments map[string]any) error {
 	t.Helper()
-	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
-	if err == nil {
-		t.Fatalf("%s accepted arguments it does not advertise", name)
+	envelope := call(t, session, name, arguments)
+	if envelope["outcome"] != "failed" || envelope["code"] != "invalid_arguments" {
+		t.Fatalf("%s accepted arguments it does not advertise: %v", name, envelope)
 	}
-	return err
+	return errors.New(fmt.Sprint(envelope["summary"]))
 }
 
 // sessionHandle is the client session type, named once so helpers can take

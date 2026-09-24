@@ -14,6 +14,7 @@
           "type": "array"
         },
         "kind": {
+          "description": "Defaults to project when root is given and to documents when only files are.",
           "enum": [
             "project",
             "documents"
@@ -32,9 +33,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "kind"
-      ],
       "type": "object"
     },
     "name": "workspace_open"
@@ -73,8 +71,7 @@
       "additionalProperties": false,
       "properties": {
         "context_lines": {
-          "description": "Lines of numbered context around each hit, like grep -C.",
-          "maximum": 20,
+          "description": "Lines of numbered context around each hit, like grep -C; at most 20, and a larger value is reduced to 20 with a warning.",
           "minimum": 0,
           "type": "integer"
         },

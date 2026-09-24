@@ -48,8 +48,12 @@ type ToolDescriptor struct {
 
 const (
 	MaxToolArgumentBytes = 32 << 20
-	MaxPlanOperations    = 8
+	MaxPlanOperations    = 32
 	MaxPlanContentBytes  = 4 << 20
+	// MaxSearchContextLines is the most context search attaches to a hit. A
+	// larger request is reduced to it with a warning, not refused, so the
+	// bound is stated in the description rather than as a schema maximum.
+	MaxSearchContextLines = 20
 )
 
 // ProfileOrder is the frozen catalog: these are compared byte for byte
@@ -280,7 +284,7 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 	operation := planOperationSchema(operationKinds)
 	operations := map[string]any{
 		"type": "array", "items": operation, "maxItems": MaxPlanOperations,
-		"description": "At most 8 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
+		"description": fmt.Sprintf("At most %d operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.", MaxPlanOperations),
 	}
 	return schemaObject(map[string]any{
 		"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
@@ -336,7 +340,7 @@ func searchSchema() map[string]any {
 		"workspace_id": workspaceIDProperty(), "root": rootProperty(),
 		"query": stringSchema("Text, regular expression, or for the semantic modes a symbol name."), "mode": enumSchema("literal", "regex", "references", "definition", "implementation", "type_definition", "incoming_calls", "outgoing_calls"),
 		"paths":             map[string]any{"type": "array", "items": stringSchema("Path substring or glob (whole path or base name)."), "description": "Keep only hits under these paths."},
-		"context_lines":     map[string]any{"type": "integer", "minimum": 0, "maximum": 20, "description": "Lines of numbered context around each hit, like grep -C."},
+		"context_lines":     map[string]any{"type": "integer", "minimum": 0, "description": fmt.Sprintf("Lines of numbered context around each hit, like grep -C; at most %d, and a larger value is reduced to %d with a warning.", MaxSearchContextLines, MaxSearchContextLines)},
 		"result_set_handle": stringSchema("Frozen current-source result set."), "refine": refinement,
 		"git_history": historySource, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
 		"include_ranges":  map[string]any{"type": "boolean", "description": "Add byte anchors to every hit."},
@@ -345,15 +349,23 @@ func searchSchema() map[string]any {
 	return schemaObject(properties)
 }
 
+// workspaceKindSchema is workspace_open's kind, which may be omitted: what
+// was sent already says which kind is meant.
+func workspaceKindSchema() map[string]any {
+	schema := enumSchema("project", "documents")
+	schema["description"] = "Defaults to project when root is given and to documents when only files are."
+	return schema
+}
+
 // orientationTools are the read-only tools every profile carries.
 func orientationTools(orient []Profile) []ToolDescriptor {
 	return []ToolDescriptor{
 		{Class: ClassProviderRead, Name: "workspace_open", Description: "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
-			"kind":     enumSchema("project", "documents"),
+			"kind":     workspaceKindSchema(),
 			"root":     stringSchema("Project root; required for kind=project."),
 			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
 			"overview": enumSchema("compact", "full"),
-		}, "kind")},
+		})},
 		{Class: ClassProviderRead, Name: "workspace_inspect", Description: "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "view": enumSchema("status", "overview", "map"),
 		})},
@@ -518,6 +530,7 @@ func OutputEnvelopeSchema() map[string]any {
 		"guide":                        map[string]any{"type": "array", "items": stringSchema("One rule for calling this server at its cheapest, sent once when a workspace is first opened.")},
 		"idempotency":                  enumSchema("created", "replayed"),
 		"idempotency_persisted":        map[string]any{"type": "boolean"},
+		"retryable":                    map[string]any{"type": "boolean", "description": "Whether the same call, unchanged, can succeed later; present only where that is known."},
 	}, "api_version", "request_id", "outcome", "summary", "data", "warnings", "next")
 }
 

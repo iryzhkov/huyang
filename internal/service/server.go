@@ -41,25 +41,32 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 	}, func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		started := time.Now()
 		client := modernClientName(request)
+		var aliased []string
+		// A refused argument is answered with an envelope like any other
+		// refusal. Returning the Go error let the SDK turn it into bare text
+		// with no code, no next step and no request ID.
+		refuse := func(root string, arguments map[string]any, err error) (*mcp.CallToolResult, error) {
+			logModernValidationFriction(session, descriptor.Name, root, arguments, err, client, started)
+			requestID := fmt.Sprintf("req_%d", direct.requests.Add(1))
+			envelope := mcpapi.FinalizeEnvelope(descriptor.Name, mcpapi.InvalidArguments(requestID, descriptor.Name, err))
+			return renderToolResponse(descriptor.Name, arguments, withWarnings(envelope, aliased), true)
+		}
 		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
-			logModernValidationFriction(session, descriptor.Name, "", map[string]any{}, err, client, started)
-			return nil, err
+			return refuse("", map[string]any{}, err)
 		}
 		arguments, err := mcpapi.DecodeArguments(request.Params.Arguments)
 		if err != nil {
-			logModernValidationFriction(session, descriptor.Name, "", map[string]any{}, err, client, started)
-			return nil, err
+			return refuse("", map[string]any{}, err)
 		}
 		// Decode before validating: a client whose cached schema predates
 		// the server sends new arguments as text.
 		arguments = mcpapi.NormalizeArguments(arguments)
-		if err := mcpapi.ValidateToolArguments(descriptor.InputSchema, arguments); err != nil {
-			logModernValidationFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
-			return nil, err
+		aliased = mcpapi.ApplyArgumentAliases(descriptor.Name, arguments)
+		if err := mcpapi.ValidateCall(descriptor.Name, descriptor.InputSchema, arguments); err != nil {
+			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
 		}
 		if err := mcpapi.ValidateDebugArguments(descriptor.Name, arguments); err != nil {
-			logModernValidationFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err, client, started)
-			return nil, err
+			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
 		}
 		envelope := direct.call(handlers.WithClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
@@ -71,8 +78,19 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 				"client":  client,
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
-		return renderToolResponse(descriptor.Name, arguments, envelope, isError)
+		return renderToolResponse(descriptor.Name, arguments, withWarnings(envelope, aliased), isError)
 	})
+}
+
+// withWarnings puts warnings ahead of the ones the call produced: an alias
+// that was rewritten explains the rest of the reply.
+func withWarnings(envelope map[string]any, warnings []string) map[string]any {
+	if len(warnings) == 0 {
+		return envelope
+	}
+	existing, _ := envelope["warnings"].([]string)
+	envelope["warnings"] = append(append([]string(nil), warnings...), existing...)
+	return envelope
 }
 
 func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
