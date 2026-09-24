@@ -167,6 +167,26 @@ func TestAffectedSelectionWithoutAssociationIsUnavailableNotClean(t *testing.T) 
 	}
 }
 
+// A deleted file is no prepared file, but it is a change: the tests that
+// cover where it was are selected even when nothing else changed.
+func TestAffectedSelectionCountsRemovedPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-specific")
+	}
+	sandbox, _ := pipelineSandbox(t, map[string]string{"src/kept.go": "package src\n"})
+	policy := trustedPolicy(t, sandbox.Tree)
+	policy.Tests = []CommandPolicy{{Name: "unit", Command: []string{"true"}, Covers: []string{"src/**"}}}
+	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
+		Revision: "prep_removed", Stages: []string{"tests"}, TestScope: "affected", RemovedPaths: []string{"src/gone.go"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Stages) != 1 || len(result.Stages[0].ExecutedTests) != 1 || result.Stages[0].ExecutedTests[0] != "unit" {
+		t.Fatalf("a deletion selected no covering test: %+v", result.Stages)
+	}
+}
+
 func TestAffectedSelectionIncludesRevisionKeyedPriorFailure(t *testing.T) {
 	graph := ImpactGraph{Affected: []string{"src/value.go"}}
 	tests := []CommandPolicy{{Name: "integration", Command: []string{"go", "test", "./integration"}, Covers: []string{"integration/**"}}}

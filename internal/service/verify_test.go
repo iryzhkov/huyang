@@ -112,6 +112,61 @@ func TestVerifyRunAffectedScopeFallsBackToGitWithoutReceipts(t *testing.T) {
 	}
 }
 
+// When Git answers that nothing changed, the affected set is empty and says
+// so; it is not widened to every file, which is for when Git cannot answer.
+// A deletion is a change: the files beside the deleted one are affected.
+func TestVerifyRunAffectedScopeFromGitIsEmptyOrHoldsDeletions(t *testing.T) {
+	direct, workspaceID, root := openProbeProject(t, map[string]string{
+		"a/gone.go":  "package a\nvar Gone = 1\n",
+		"a/kept.go":  "package a\nvar Kept = 2\n",
+		"b/other.go": "package b\nvar Other = 3\n",
+	})
+	defer direct.closeProviders()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"add", "."},
+		{"-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"},
+	} {
+		if output, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	verify := func(key string) map[string]any {
+		return direct.call(context.Background(), "verify_run", map[string]any{
+			"workspace_id": workspaceID, "idempotency_key": key,
+			"revision_or_transaction": "current", "stages": []any{"parser"}, "test_scope": "affected",
+		})
+	}
+	// An external write and its revert leave a revision no receipt describes
+	// and a tree Git reports as clean.
+	kept := filepath.Join(root, "a/kept.go")
+	for _, content := range []string{"package a\nvar Kept = 4\n", "package a\nvar Kept = 2\n"} {
+		if err := os.WriteFile(kept, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		direct.call(context.Background(), "workspace_inspect", map[string]any{"workspace_id": workspaceID, "view": "status"})
+	}
+	clean := verify("clean-affected")
+	if scope := affectedParserScope(t, clean); len(scope) != 0 {
+		t.Fatalf("a clean tree was widened to %#v", scope)
+	}
+	if warnings := clean["warnings"].([]string); len(warnings) == 0 || !strings.HasPrefix(warnings[0], "no_changes") {
+		t.Fatalf("an empty affected set carries no warning: %#v", clean)
+	}
+	if err := os.Remove(filepath.Join(root, "a/gone.go")); err != nil {
+		t.Fatal(err)
+	}
+	deleted := verify("deleted-affected")
+	if deleted["outcome"] != "ok" {
+		t.Fatalf("deletion-only verification = %#v", deleted)
+	}
+	if scope := affectedParserScope(t, deleted); len(scope) != 1 || scope[0] != "a/kept.go" {
+		t.Fatalf("deletion-only scope = %#v, want the file beside the deleted one", scope)
+	}
+	if warnings := deleted["warnings"].([]string); len(warnings) == 0 || !strings.Contains(warnings[0], "1 deleted") {
+		t.Fatalf("deletion is not counted in the warning: %#v", deleted)
+	}
+}
+
 // Without receipts or Git, an affected-scope verification widens to every
 // file with a scope_widened warning instead of refusing.
 func TestVerifyRunAffectedScopeWidensWithoutReceiptsOrGit(t *testing.T) {

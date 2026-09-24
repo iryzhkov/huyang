@@ -105,6 +105,10 @@ type VerificationRequest struct {
 	// providers itself.
 	Contributors       []AnalysisContributor                                                     `json:"-"`
 	DiagnosticVerifier func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
+	// RemovedPaths are changed paths that no longer exist. No stage can read
+	// them, but the affected-test selection counts them as changed, so a
+	// deletion still selects the tests that cover where the file was.
+	RemovedPaths []string
 }
 
 type VerificationStage struct {
@@ -1333,7 +1337,8 @@ func (run *pipelineRun) tests() error {
 }
 
 func (run *pipelineRun) affectedTests() error {
-	stages, targeted, err := runAffectedTests(run.ctx, run.sandbox, run.policy, run.request, run.affected)
+	changed := append(append([]string(nil), run.affected...), run.request.RemovedPaths...)
+	stages, targeted, err := runAffectedTests(run.ctx, run.sandbox, run.policy, run.request, changed)
 	run.result.Stages = append(run.result.Stages, stages...)
 	run.result.Targeted = targeted
 	if targeted != nil {

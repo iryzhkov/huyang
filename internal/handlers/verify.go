@@ -347,7 +347,7 @@ func (h *Handlers) verifyCanonical(ctx context.Context, requestID string, worksp
 	files, filesErr := sandbox.BaseStageFiles()
 	if filesErr == nil {
 		var warnings []string
-		files, warnings, filesErr = h.selectChangedFiles(workspace, files, identity, job.testScope)
+		files, job.request.RemovedPaths, warnings, filesErr = h.selectChangedFiles(workspace, files, identity, job.testScope)
 		job.warnings = append(job.warnings, warnings...)
 	}
 	if filesErr == nil {
@@ -363,45 +363,61 @@ func (h *Handlers) verifyCanonical(ctx context.Context, requestID string, worksp
 }
 
 // selectChangedFiles keeps the staged files the receipts record as changed
-// at the current revision. Without receipt coverage a full verification
-// keeps every file. An affected-scope verification then takes the changed
-// files from Git instead - modified against HEAD, staged or not, and
-// untracked - and says so in a warning; when Git cannot answer, or names no
-// file in the tree, the scope is widened to every file with a warning,
-// because refusing leaves the caller nothing to run.
-func (h *Handlers) selectChangedFiles(workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, identity workspacecore.Identity, testScope string) ([]workspacecore.PlanStageFile, []string, error) {
+// at the current revision, and returns the changed paths that no longer
+// exist. Without receipt coverage a full verification keeps every file. An
+// affected-scope verification then takes the changed files from Git instead
+// - modified against HEAD, staged or not, untracked, and deleted - and says
+// so in a warning. Only when Git cannot answer is the scope widened to every
+// file, because refusing leaves the caller nothing to run; Git answering
+// that nothing changed is an empty affected set, not a reason to run all.
+func (h *Handlers) selectChangedFiles(workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, identity workspacecore.Identity, testScope string) ([]workspacecore.PlanStageFile, []string, []string, error) {
 	changedPaths, err := h.provenance.CanonicalChangedPaths(identity.ID, identity.StateSeq)
-	if err != nil {
-		if testScope != "affected" {
-			return files, nil, nil
-		}
-		gitPaths, gitErr := workspace.GitChangedPaths()
-		if gitErr != nil {
-			return files, []string{fmt.Sprintf("scope_widened: no receipt says what changed at wsrev_%d and Git could not say either (%v); every file is treated as affected.", identity.StateSeq, gitErr)}, nil
-		}
-		filtered := keepChangedFiles(files, gitPaths)
-		if len(filtered) == 0 {
-			return files, []string{fmt.Sprintf("scope_widened: no receipt says what changed at wsrev_%d and Git reports no changed file; every file is treated as affected.", identity.StateSeq)}, nil
-		}
-		return filtered, []string{fmt.Sprintf("No receipt says what changed at wsrev_%d; the %d affected file(s) are those Git reports as changed against HEAD or untracked.", identity.StateSeq, len(filtered))}, nil
+	if err == nil {
+		filtered, removed := keepChangedFiles(files, changedPaths)
+		return filtered, removed, nil, nil
 	}
-	return keepChangedFiles(files, changedPaths), nil, nil
+	if testScope != "affected" {
+		return files, nil, nil, nil
+	}
+	gitPaths, gitErr := workspace.GitChangedPaths()
+	if gitErr != nil {
+		return files, nil, []string{fmt.Sprintf("scope_widened: no receipt says what changed at wsrev_%d and Git could not say either (%v); every file is treated as affected.", identity.StateSeq, gitErr)}, nil
+	}
+	filtered, removed := keepChangedFiles(files, gitPaths)
+	if len(filtered) == 0 && len(removed) == 0 {
+		return filtered, nil, []string{fmt.Sprintf("no_changes: no receipt says what changed at wsrev_%d and Git reports no changed file, so no file is affected and no affected test runs; test_scope=full runs every test.", identity.StateSeq)}, nil
+	}
+	return filtered, removed, []string{fmt.Sprintf("No receipt says what changed at wsrev_%d; the affected files are those Git reports as changed against HEAD, untracked or deleted: %d present and %d deleted.", identity.StateSeq, len(filtered), len(removed))}, nil
 }
 
 // keepChangedFiles filters the staged files down to the named paths, in
-// place.
-func keepChangedFiles(files []workspacecore.PlanStageFile, paths []string) []workspacecore.PlanStageFile {
+// place, and returns the named paths no staged file holds, which are the
+// deleted ones. A deletion changes the directory it was in - in Go, the
+// package that lost a file - so the files beside a deleted path are kept too.
+func keepChangedFiles(files []workspacecore.PlanStageFile, paths []string) ([]workspacecore.PlanStageFile, []string) {
 	changed := make(map[string]bool, len(paths))
 	for _, path := range paths {
 		changed[path] = true
 	}
+	present := make(map[string]bool, len(files))
+	for _, file := range files {
+		present[file.Path] = true
+	}
+	var removed []string
+	besideRemoved := map[string]bool{}
+	for _, path := range paths {
+		if !present[path] {
+			removed = append(removed, path)
+			besideRemoved[filepath.Dir(path)] = true
+		}
+	}
 	filtered := files[:0]
 	for _, file := range files {
-		if changed[file.Path] {
+		if changed[file.Path] || besideRemoved[filepath.Dir(file.Path)] {
 			filtered = append(filtered, file)
 		}
 	}
-	return filtered
+	return filtered, removed
 }
 
 // runCanonicalPipeline loads the policy, attaches a sandbox provider for the
