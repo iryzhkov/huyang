@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +46,33 @@ func TestSchemaViolationsAreAnsweredWithAnEnvelope(t *testing.T) {
 	var text map[string]any
 	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &text); err != nil || text["code"] != "invalid_arguments" || text["retryable"] != false {
 		t.Fatalf("text content is not the envelope: %v %v", err, result.Content[0])
+	}
+}
+
+// The spellings agents reach for first are answered, with a warning that
+// names the canonical one, rather than refused.
+func TestAliasedArgumentsAreAnsweredWithAWarning(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{"a.txt": "needle one\n", "b.txt": "needle two\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session, cleanup := connectOfficialClient(t, mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()))
+	defer cleanup()
+	read := callModern(t, session, "read", map[string]any{"root": root, "path": "a.txt"})
+	if read["outcome"] != "ok" || !strings.Contains(read["data"].(map[string]any)["content"].(string), "needle one") {
+		t.Fatalf("read with a top-level path = %#v", read)
+	}
+	if warnings := read["warnings"].([]any); len(warnings) == 0 || !strings.Contains(warnings[0].(string), "target.path") {
+		t.Fatalf("read warnings = %#v", read["warnings"])
+	}
+	searched := callModern(t, session, "search", map[string]any{"root": root, "query": "needle", "path": "b.txt", "max_results": 5})
+	if searched["outcome"] != "ok" || searched["data"].(map[string]any)["total"] != float64(1) {
+		t.Fatalf("search with path was not scoped to it: %#v", searched)
+	}
+	if warnings := searched["warnings"].([]any); len(warnings) != 2 {
+		t.Fatalf("search warnings = %#v", searched["warnings"])
 	}
 }
 
