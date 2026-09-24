@@ -419,17 +419,19 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 	if searchMode == "" {
 		return nil, mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; pick one with target.symbol_locator", len(exact), symbol), data)
 	}
-	// Search takes no target, so each follow-up repeats the search scoped to
-	// one candidate's file under that candidate's full name path, which
-	// resolves to it alone.
-	result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; narrow with paths or query a name path from data.declarations", len(exact), symbol), data)
+	// Search takes no target, and its paths filter the hits rather than
+	// choose the declaration, so a search scoped to a candidate's file would
+	// drop every hit outside it. Each follow-up is the same relation through
+	// navigate, which names the candidate exactly and keeps all its hits.
+	result := mcpapi.Envelope(requestID, workspace, "conflict", "symbol_ambiguous", fmt.Sprintf("%d declarations are named %q; navigate with target.symbol_locator from data.declarations to get every hit of one", len(exact), symbol), data)
 	next := []any{}
 	for _, record := range exact {
 		if len(next) == 2 {
 			break
 		}
 		next = append(next, map[string]any{
-			"tool": "search", "action": "scope_to_candidate", "query": record.Locator.NamePath, "mode": searchMode, "paths": []string{record.Locator.Path},
+			"tool": "navigate", "action": "navigate_from_candidate", "relation": searchMode,
+			"target": map[string]any{"symbol_locator": map[string]any{"path": record.Locator.Path, "name_path": record.Locator.NamePath}},
 		})
 	}
 	result["next"] = next

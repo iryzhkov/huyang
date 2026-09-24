@@ -1,6 +1,7 @@
 # S22 — Iron out the friction agents hit in the field
 
-Status: approved 2026-09-24; in progress on `fix/huyang-kinks`
+Status: approved 2026-09-24; W1 to W5 implemented and reviewed on `fix/huyang-kinks`
+(see the implementation notes at the end); deployment and the field measurement remain
 Prepared: 2026-09-24
 Base: `dd7dafc` (GitHub `main`, the deployed build `0.4.0/dd7dafc8f287`)
 
@@ -134,3 +135,54 @@ cold and warm Rust measurement stays open; it needs the large Codex checkout.
 - `go test ./...`, `go vet ./...` and the Lua unit tests pass.
 - After deployment, the next weekly `toolfeedback report --source huyang` is compared
   with the table above; the target is that no listed cluster keeps a stuck rate above 20%.
+
+## Implementation notes
+
+The waves were built in parallel on three branches and merged; a three-axis review
+(standards, spec, correctness) followed, and its findings were fixed on the same branch.
+
+Departures from the plan, each deliberate:
+
+- W4.2: receipts keep content hashes, not bytes, so a gap cannot be diffed against disk.
+  The workspace instead keeps a bounded in-memory log of the revision steps it observed
+  (file changes, inventory changes, provider epochs). A gap made only of observed steps is
+  answered `ok` with entries marked inferred, by path and hash, without a patch. The log
+  does not survive a restart, so a gap across one stays `partial`.
+- W4.3: no new provider probe; an empty ledger answers `ok` with no findings and
+  incomplete coverage.
+- W4.4: a clean tree gives an empty affected set, not a full run; full only when Git fails.
+- W1.7: the schema no longer declares a maximum for `context_lines`, because clients that
+  enforce schemas themselves would refuse before the server could reduce the value.
+- W5: the envelope keeps the operation's code (semantic search falls back on it); the
+  provider's reason is `data.reason`. `retryable` is a new envelope field.
+- W2.2: `paths` in a semantic search filters hits, as the schema says; it picks a
+  declaration only when it narrows an ambiguous name to one. The follow-ups for an
+  ambiguous name are `navigate` from each candidate, which keeps every hit.
+
+Found and fixed during integration, outside the waves:
+
+- A regex search compiled without the multi-line flag, so `^` and `$` anchored only at the
+  ends of the file: a search for conflict markers returned nothing. Queries and refinements
+  now compile with `(?m)`.
+- `git ls-files` lists a conflicted path once per index stage; the listing keeps it once.
+
+The review caught two regressions before release: semantic `paths` filtering the
+declaration instead of the hits, and an exact-file fast path that listed a named file
+only in Git workspaces, changing scope semantics. Both were fixed with tests.
+
+## Follow-ups for S23
+
+Friction met while building this stage through Huyang itself:
+
+- Search context blocks of neighbouring hits overlap and are repeated per hit; merge
+  overlapping windows into one block per file region.
+- Literal hits carry no line text, so every hit needs a read to be understood.
+- A `symbol_locator` naming a method by its bare name fails even when the reply itself
+  names the one declaration it could be (`Workspace/collectListedFiles`); resolve a unique
+  suffix with a warning.
+- Edit diagnostics report a language server's pre-existing warnings as new on the first
+  edit of a file that had no baseline.
+- A `paths` pattern such as `README.md` is a substring and also matches
+  `tests/fixtures/README.md`; say so in the reply when a scope matched more than the
+  exact path.
+- Query-time ranking (deferred above).

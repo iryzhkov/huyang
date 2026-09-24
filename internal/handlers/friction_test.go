@@ -296,9 +296,12 @@ func TestSemanticSearchNarrowsAnAmbiguousNameWithPaths(t *testing.T) {
 	})
 	ambiguous := handlers.Execute(context.Background(), "req_amb", "search", map[string]any{"workspace_id": workspaceID, "query": "Target", "mode": "references"})
 	summary, _ := ambiguous["summary"].(string)
-	if ambiguous["code"] != "symbol_ambiguous" || strings.Contains(summary, "symbol_locator") || !strings.Contains(summary, "paths") {
+	if ambiguous["code"] != "symbol_ambiguous" || !strings.Contains(summary, "navigate") {
 		t.Fatalf("ambiguous semantic search = %#v", ambiguous)
 	}
+	// A search scoped to a candidate's file would keep only the hits in that
+	// file, so each follow-up is navigate from the candidate, which keeps
+	// every hit.
 	next := ambiguous["next"].([]any)
 	if len(next) != 2 {
 		t.Fatalf("ambiguous search offers %d follow-ups: %#v", len(next), next)
@@ -306,11 +309,13 @@ func TestSemanticSearchNarrowsAnAmbiguousNameWithPaths(t *testing.T) {
 	scoped := map[string]bool{}
 	for _, raw := range next {
 		step := raw.(map[string]any)
-		paths, _ := step["paths"].([]string)
-		if step["tool"] != "search" || step["mode"] != "references" || len(paths) != 1 {
-			t.Fatalf("follow-up does not repeat the search scoped to a candidate: %#v", step)
+		target, _ := step["target"].(map[string]any)
+		locator, _ := target["symbol_locator"].(map[string]any)
+		path, _ := locator["path"].(string)
+		if step["tool"] != "navigate" || step["relation"] != "references" || path == "" || locator["name_path"] != "Target" {
+			t.Fatalf("follow-up does not navigate from a candidate: %#v", step)
 		}
-		scoped[paths[0]] = true
+		scoped[path] = true
 	}
 	if !scoped["a/one.go"] || !scoped["b/two.go"] {
 		t.Fatalf("follow-ups do not cover the candidates: %#v", next)
