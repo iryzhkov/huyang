@@ -863,6 +863,11 @@ func parseDocument(extension, relative string, content []byte) string {
 	case ".json":
 		var value any
 		if err := json.Unmarshal(content, &value); err != nil {
+			var syntax *json.SyntaxError
+			if errors.As(err, &syntax) {
+				line := 1 + bytes.Count(content[:min(int(syntax.Offset), len(content))], []byte("\n"))
+				return fmt.Sprintf("%s:%d: %v\n", relative, line, err)
+			}
 			return relative + ": " + err.Error() + "\n"
 		}
 	case ".jsonl":
@@ -1280,9 +1285,22 @@ func (run *pipelineRun) parser() error {
 	stage := parserStage(run.sandbox.Tree, run.request.Revision, run.affected)
 	run.result.Stages = append(run.result.Stages, stage)
 	if stage.Status == VerificationFailed {
-		return errors.New("parser verification failed")
+		return parserFailure(stage.Output)
 	}
 	return nil
+}
+
+// parserFailure names the first file and line the parser refused, which is what the
+// caller has to open next; the remaining failures stay in the stage output.
+func parserFailure(output string) error {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return errors.New("parser verification failed")
+	}
+	if len(lines) > 1 {
+		return fmt.Errorf("parser verification failed: %s (and %d more in the parser stage output)", lines[0], len(lines)-1)
+	}
+	return fmt.Errorf("parser verification failed: %s", lines[0])
 }
 
 func (run *pipelineRun) diagnostics() error {

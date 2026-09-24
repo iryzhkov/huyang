@@ -65,6 +65,9 @@ type stubProvider struct {
 	opens         int
 	authoritative bool
 	lastOperation string
+	// findSymbol, when set, is the find_symbol answer instead of the
+	// default single match.
+	findSymbol map[string]any
 }
 
 func newStubProvider() *stubProvider {
@@ -105,6 +108,9 @@ func (p *stubProvider) Call(_ context.Context, request provider.Request) (provid
 			"status": "failed", "note": "Mason install failed; inspect :MasonLog and retry",
 		}}}, nil
 	case "find_symbol":
+		if p.findSymbol != nil {
+			return provider.Result{Value: p.findSymbol}, nil
+		}
 		return provider.Result{Value: map[string]any{"matches": []any{map[string]any{
 			"file": "model.go", "name_path": "Shipment", "kind": "struct", "lines": "3-5",
 		}}}}, nil

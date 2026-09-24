@@ -160,6 +160,9 @@ type Workspace struct {
 	stateDir        string
 	sectioner       Sectioner
 	failures        []EnvironmentFailure
+	// observed is the bounded log of state-sequence steps the workspace
+	// advanced on an observation rather than a write of its own.
+	observed []ObservedChange
 
 	tracesMu sync.Mutex
 	traces   *executionTraceStore
@@ -211,6 +214,7 @@ func (w *Workspace) SyncProviderEpoch(epoch uint64) Identity {
 	if epoch != w.identity.Epoch {
 		w.identity.Epoch = epoch
 		w.identity.StateSeq++
+		w.observeLocked(ObservedChange{Reason: ObservedProviderEpoch})
 	}
 	return w.identity
 }
@@ -276,6 +280,7 @@ func (w *Workspace) PrimeDocuments() error {
 		// native diff for the uncovered transition, so advance once and let
 		// revision_diff expose the resulting external gap.
 		w.identity.StateSeq++
+		w.observeLocked(w.observedInventory(w.knownPaths, current))
 	}
 	w.knownPaths = current
 	w.pathsPrimed = true
@@ -333,6 +338,10 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 	latest, hadLatest := w.documents[absolute]
 	if hadLatest && signature != latest.signature {
 		w.identity.StateSeq++
+		w.observeLocked(ObservedChange{
+			Reason: ObservedDocument, Path: w.observedPath(absolute),
+			BeforeSHA256: latest.contentHash, AfterSHA256: contentHash,
+		})
 	}
 	contentChanged := hadLatest && latest.contentHash != contentHash
 

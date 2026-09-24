@@ -273,6 +273,24 @@ func attachSearchContext(workspace *workspacecore.Workspace, hits []map[string]a
 	}
 }
 
+// providerIncompleteness names why a provider's find_symbol answer does not
+// cover everything it was asked about - it said so itself, or its optional
+// language-server enrichment is still pending - or returns "" when it does.
+// Without it a provider that answered with half its sources was reported as
+// complete coverage.
+func providerIncompleteness(value map[string]any) string {
+	if enrichment, ok := value["enrichment"].(map[string]any); ok && enrichment["status"] == "pending" {
+		if reason, _ := enrichment["reason"].(string); reason != "" {
+			return "provider_enrichment_pending: " + reason
+		}
+		return "provider_enrichment_pending"
+	}
+	if complete, present := value["complete"].(bool); present && !complete {
+		return "provider_evidence_incomplete"
+	}
+	return ""
+}
+
 // symbolFind answers from the native text core when it has parser coverage
 // and otherwise asks the semantic provider, registering its matches as
 // durable symbol handles so later locators can select them.
@@ -300,6 +318,10 @@ func (h *Handlers) symbolFind(ctx context.Context, requestID string, workspace *
 			provided, warning := registerProviderMatches(workspace, mcpapi.AnySlice(value["matches"]))
 			records, providerWarning = mergeSymbolRecords(records, provided), warning
 			coverage = workspacecore.Coverage{Complete: providerWarning == "", Semantic: "embedded_nvim"}
+			if reason := providerIncompleteness(value); reason != "" {
+				coverage.Complete = false
+				coverage.Skipped = append(coverage.Skipped, reason)
+			}
 		}
 	}
 	includeSource, _ := arguments["include_source"].(bool)
