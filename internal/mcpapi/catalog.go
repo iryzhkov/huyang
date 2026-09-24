@@ -50,6 +50,8 @@ const (
 	MaxToolArgumentBytes = 32 << 20
 	MaxPlanOperations    = 32
 	MaxPlanContentBytes  = 4 << 20
+	// MaxReadTargets is the most targets one read call takes.
+	MaxReadTargets = 32
 	// MaxSearchContextLines is the most context search attaches to a hit. A
 	// larger request is reduced to it with a warning, not refused, so the
 	// bound is stated in the description rather than as a schema maximum.
@@ -379,7 +381,7 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 		}, "relation"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassPureRead, Name: "read", Description: "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": readTargetSchema(), "view": enumSchema("source", "outline", "history", "changes"),
-			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.", "items": schemaObject(map[string]any{
+			"targets": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxReadTargets, "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.", "items": schemaObject(map[string]any{
 				"path": stringSchema("Workspace-relative file path."), "start_line": map[string]any{"type": "integer", "minimum": 1}, "end_line": map[string]any{"type": "integer", "minimum": 1},
 				"max_lines":      map[string]any{"type": "integer", "minimum": 1, "description": "Cap for this target; overrides the call-level max_lines."},
 				"view":           enumSchema("source", "outline"),

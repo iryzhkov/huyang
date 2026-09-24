@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/provider"
@@ -30,17 +31,15 @@ func TestProviderFailuresAreClassifiedByKernelCode(t *testing.T) {
 	for _, code := range []string{"lsp_starting", "lsp_attach_deadline_exceeded"} {
 		notReady := modernProviderFailure("req", workspace, "language_server_unavailable", &provider.ProviderError{Code: code, Message: "not attached"})
 		next, _ := notReady["next"].([]any)
-		if notReady["outcome"] != "unavailable" || notReady["retryable"] != true || notReady["code"] != "language_server_unavailable" || len(next) != 2 {
+		if notReady["outcome"] != "unavailable" || notReady["retryable"] != true || notReady["code"] != "language_server_unavailable" || len(next) != 1 {
 			t.Fatalf("%s = %#v", code, notReady)
 		}
-		// A server still starting is retried first; one that never began
-		// attaching is inspected first.
-		statusAt := 1
-		if code == "lsp_attach_deadline_exceeded" {
-			statusAt = 0
-		}
-		if status, _ := next[statusAt].(map[string]any); status["tool"] != "language_server_status" {
+		// Every next entry names a tool; retrying is advice in the summary.
+		if status, _ := next[0].(map[string]any); status["tool"] != "language_server_status" {
 			t.Fatalf("%s next = %#v", code, next)
+		}
+		if summary, _ := notReady["summary"].(string); !strings.Contains(summary, "retry the same call") {
+			t.Fatalf("%s summary gives no retry advice: %q", code, summary)
 		}
 		if notReady["data"].(map[string]any)["reason"] != code {
 			t.Fatalf("%s does not keep the provider's reason: %#v", code, notReady["data"])

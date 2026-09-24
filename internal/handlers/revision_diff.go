@@ -345,16 +345,27 @@ func partialRevisionDiff(requestID string, workspace *workspacecore.Workspace, s
 		putBounded(data, "inferred_segments", coverage.inferred)
 	}
 	result := mcpapi.Envelope(requestID, workspace, "partial", "diff_evidence_incomplete", summary, data)
-	result["warnings"] = append([]string{"Uncovered gaps may contain external writes, provider edits, or expired receipts, possibly from before a service restart; no diff is inferred for them."}, unlistedWarning(coverage)...)
-	next := []any{map[string]any{
-		"action": "inspect_uncovered_range_with_git", "command": "git status --short && git diff",
-		"note": "Git shows what changed on disk against its own baseline, which covers the uncovered revisions " + strings.Join(uncovered, ", ") + " as well.",
-	}}
-	if len(paths) > 0 {
-		next = append(next, map[string]any{"tool": "read", "action": "inspect_known_changed_paths", "paths": paths})
-	} else {
-		next = append(next, map[string]any{"tool": "workspace_inspect", "action": "record_current_revision_as_new_baseline", "view": "status"})
+	// Git is not a Huyang tool, so it is advice in a warning; next names only
+	// tools a caller can call with the arguments given.
+	result["warnings"] = append([]string{
+		"Uncovered gaps may contain external writes, provider edits, or expired receipts, possibly from before a service restart; no diff is inferred for them.",
+		"git status --short && git diff shows what changed on disk against Git's own baseline, which covers the uncovered revisions " + strings.Join(uncovered, ", ") + " as well.",
+	}, unlistedWarning(coverage)...)
+	var next []any
+	if first := coverage.spans[0][0]; first > span.fromSeq {
+		next = append(next, map[string]any{
+			"tool": "revision_diff", "action": "diff_the_covered_range_before_the_first_gap",
+			"from_revision": span.from, "to_revision_or_current": fmt.Sprintf("wsrev_%d", first),
+		})
 	}
+	if len(paths) > 0 {
+		targets := make([]any, 0, min(len(paths), mcpapi.MaxReadTargets))
+		for _, path := range paths[:min(len(paths), mcpapi.MaxReadTargets)] {
+			targets = append(targets, map[string]any{"path": path})
+		}
+		next = append(next, map[string]any{"tool": "read", "action": "inspect_known_changed_paths", "targets": targets})
+	}
+	next = append(next, map[string]any{"tool": "workspace_inspect", "action": "record_current_revision_as_new_baseline", "view": "status"})
 	result["next"] = next
 	return result
 }

@@ -89,7 +89,8 @@ func TestRevisionDiffNormalisesRangeEndpoints(t *testing.T) {
 }
 
 // A step nobody observed, here one from before a service restart, stays an
-// explicit gap: the reply names the uncovered range and points at git.
+// explicit gap: the reply names the uncovered range, says in a warning that
+// Git covers it, and offers only calls to Huyang tools as next steps.
 func TestRevisionDiffNamesGapItCannotAccountFor(t *testing.T) {
 	root, stateDir := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("before\n"), 0o600); err != nil {
@@ -118,9 +119,17 @@ func TestRevisionDiffNamesGapItCannotAccountFor(t *testing.T) {
 	if summary, _ := result["summary"].(string); !strings.Contains(summary, "wsrev_1..wsrev_2") {
 		t.Fatalf("summary does not name the uncovered range: %q", summary)
 	}
+	if warnings := strings.Join(result["warnings"].([]string), " "); !strings.Contains(warnings, "git status") {
+		t.Fatalf("partial diff does not point at git: %q", warnings)
+	}
 	next := mcpapi.AnySlice(result["next"])
-	if len(next) == 0 || next[0].(map[string]any)["action"] != "inspect_uncovered_range_with_git" {
-		t.Fatalf("partial diff does not point at git: %#v", next)
+	if len(next) == 0 {
+		t.Fatalf("partial diff offers no next step: %#v", result)
+	}
+	for _, raw := range next {
+		if step := raw.(map[string]any); step["tool"] == nil || step["tool"] == "" {
+			t.Fatalf("next entry names no tool: %#v", step)
+		}
 	}
 }
 
