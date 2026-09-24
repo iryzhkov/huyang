@@ -304,20 +304,20 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	rawPath, _ := request.Symbol["path"].(string)
 	rawName, _ := request.Symbol["name_path"].(string)
 	path, name := workspacePath(workspace, rawPath), canonicalNamePath(rawName)
+	// A file that is not there has no declarations to find, and no parser
+	// or provider to blame: the miss is the path, and the recovery is the
+	// same one a read of the path would get. It is checked first, because
+	// what the parser or a provider says about a file that does not exist
+	// depends on the language, and some of them answer "no such symbol".
+	if _, readErr := workspace.Read(path); workspacecore.ErrorCode(readErr) == workspacecore.CodeDocumentNotFound {
+		return readFailure(requestID, workspace, readErr, name)
+	}
 	// The locator names one file, so only that file is parsed: the
 	// workspace-wide scan read every document in the repository and answered
 	// coverage about files this read never asked about.
 	matches, coverage, findErr := workspace.FindSymbolsInFile(path, name)
 	if findErr != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
-	}
-	// A file that is not there has no declarations to find, and no parser
-	// or provider to blame: the miss is the path, and the recovery is the
-	// same one a read of the path would get.
-	if len(matches) == 0 && !coverage.Complete {
-		if _, readErr := workspace.Read(path); workspacecore.ErrorCode(readErr) == workspacecore.CodeDocumentNotFound {
-			return readFailure(requestID, workspace, readErr, name)
-		}
 	}
 	var exact []workspacecore.HandleRecord
 	for _, match := range matches {

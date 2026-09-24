@@ -130,6 +130,32 @@ func TestMissingPathCandidatesRankSameStemAfterExactNames(t *testing.T) {
 	}
 }
 
+// A symbol read of a file that is not there is answered as a missing path
+// with candidates in every language, whatever the parser or a provider would
+// have said about the absent file, and before anything else about the
+// locator is judged: an empty name path used to fail as a parser error.
+func TestSymbolReadOfAMissingFileIsAMissingPathInEveryLanguage(t *testing.T) {
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{
+		"lib/tool.go": "package lib\n\nfunc Run() {}\n", "lib/tool.py": "def run():\n    pass\n",
+		"lib/tool.ts": "export function run() {}\n",
+	})
+	for _, path := range []string{"src/tool.go", "src/tool.py", "src/tool.ts"} {
+		result := handlers.Execute(context.Background(), "req_missing_symbol", "read", map[string]any{
+			"workspace_id": workspaceID, "target": map[string]any{"symbol_locator": map[string]any{"path": path, "name_path": "run"}},
+		})
+		candidates, _ := result["data"].(map[string]any)["candidates"].([]string)
+		if result["code"] != "document_not_found" || len(candidates) == 0 || candidates[0] != "lib/"+pathBase(path) {
+			t.Fatalf("symbol read of missing %s = %#v", path, result)
+		}
+	}
+	unnamed := handlers.Execute(context.Background(), "req_missing_unnamed", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"symbol_locator": map[string]any{"path": "src/tool.go", "name_path": ""}},
+	})
+	if unnamed["code"] != "document_not_found" {
+		t.Fatalf("symbol read of a missing file with no name = %#v", unnamed)
+	}
+}
+
 // A listing stopped at its cap cannot say a file exists nowhere, so absence
 // is worded within the files it did list.
 func TestMissingPathAbsenceIsWordedWithinACappedListing(t *testing.T) {
