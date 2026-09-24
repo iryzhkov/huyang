@@ -390,6 +390,21 @@ func TestScopedSearchAppliesItsScopeBeforeTheFileCap(t *testing.T) {
 	}
 }
 
+// A read of a path at which nothing exists is coded, and names the path
+// relative to the workspace rather than as an absolute path on this host.
+func TestReadOfAMissingPathIsCodedDocumentNotFound(t *testing.T) {
+	root := t.TempDir()
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	_, err := ws.Read(filepath.Join("sub", "absent.go"))
+	var missing *DocumentNotFoundError
+	if ErrorCode(err) != CodeDocumentNotFound || !errors.As(err, &missing) || missing.Path != "sub/absent.go" {
+		t.Fatalf("missing read error = %v", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("missing read error names the absolute path: %v", err)
+	}
+}
+
 func TestSearchDoesNotSpendTextBudgetOnBinaryFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a-binary"), bytes.Repeat([]byte{0}, 900), 0o600); err != nil {

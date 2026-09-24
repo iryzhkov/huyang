@@ -524,6 +524,21 @@ func (w *Workspace) Orient() (Orientation, error) {
 	return Orientation{Workspace: w.Identity(), Entries: entries, Coverage: coverage}, nil
 }
 
+// Paths lists the workspace's documents as workspace-relative paths, with the
+// coverage of the listing. Nothing is read or stat'ed beyond what the listing
+// itself needs, so it is cheap enough to answer a read of a missing path.
+func (w *Workspace) Paths() ([]string, Coverage, error) {
+	files, coverage, err := w.collectFiles()
+	if err != nil {
+		return nil, coverage, err
+	}
+	paths := make([]string, len(files))
+	for index, name := range files {
+		paths[index] = displayPath(w.identity.Root, name)
+	}
+	return paths, coverage, nil
+}
+
 func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	return w.collectScopedFiles(nil)
 }
@@ -751,6 +766,9 @@ func (w *Workspace) Read(path string) (TextRead, error) {
 	snapshot, err := w.Refresh(absolute, ProviderLayer{})
 	if err != nil {
 		return TextRead{}, err
+	}
+	if snapshot.Disk.Kind == ObjectMissing {
+		return TextRead{}, Coded(CodeDocumentNotFound, &DocumentNotFoundError{Path: displayPath(w.identity.Root, absolute)})
 	}
 	if snapshot.Disk.Kind != ObjectRegularText {
 		return TextRead{}, fmt.Errorf("%s is %s, not regular text", absolute, snapshot.Disk.Kind)

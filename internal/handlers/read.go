@@ -115,6 +115,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	files := make([]map[string]any, 0, len(request.Targets))
 	entries := make([]map[string]any, 0, len(request.Targets))
 	failed, truncated := 0, 0
+	var firstNext []any
 	for index, target := range request.Targets {
 		single := readRequest{
 			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
@@ -137,8 +138,17 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
 			failed++
-			files = append(files, map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]})
+			failure := map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]}
+			// The candidates are the recovery; a failed target that dropped
+			// them left only a summary to parse.
+			if data, _ := result["data"].(map[string]any); data["candidates"] != nil {
+				failure["candidates"] = data["candidates"]
+			}
+			files = append(files, failure)
 			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
+			if next, _ := result["next"].([]any); len(next) > 0 && firstNext == nil {
+				firstNext = next
+			}
 			continue
 		}
 		data := readTargetData(result["data"], readTargetLabel(single))
@@ -159,7 +169,13 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		// cut them; each entry says which one it hit.
 		summary += fmt.Sprintf("; %d truncated", truncated)
 	}
-	return mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
+	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
+	// The top-level next is where a client looks first, so the first failed
+	// target's recovery is raised there; each target keeps its own.
+	if firstNext != nil {
+		result["next"] = firstNext
+	}
+	return result
 }
 
 // readTargetData normalises one target's payload into the map a multi-target
@@ -242,7 +258,7 @@ func (h *Handlers) readHandle(ctx context.Context, requestID string, workspace *
 	request.Path = resolved.Path
 	read, err := workspace.Read(request.Path)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+		return readFailure(requestID, workspace, err, "")
 	}
 	if resolved.ByteStart < 0 || resolved.ByteEnd > len(read.Content) || resolved.ByteEnd < resolved.ByteStart {
 		return mcpapi.Envelope(requestID, workspace, "conflict", "target_deleted", "Resolved handle range is no longer readable", resolution)
@@ -295,6 +311,14 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	if findErr != nil {
 		return mcpapi.Failure(requestID, workspace, "symbol_read_failed", findErr)
 	}
+	// A file that is not there has no declarations to find, and no parser
+	// or provider to blame: the miss is the path, and the recovery is the
+	// same one a read of the path would get.
+	if len(matches) == 0 && !coverage.Complete {
+		if _, readErr := workspace.Read(path); workspacecore.ErrorCode(readErr) == workspacecore.CodeDocumentNotFound {
+			return readFailure(requestID, workspace, readErr, name)
+		}
+	}
 	var exact []workspacecore.HandleRecord
 	for _, match := range matches {
 		if match.Locator.Path == path && match.Locator.NamePath == name {
@@ -337,7 +361,7 @@ func (h *Handlers) readSymbol(ctx context.Context, requestID string, workspace *
 	}
 	read, readErr := workspace.Read(path)
 	if readErr != nil {
-		return mcpapi.Failure(requestID, workspace, "read_failed", readErr)
+		return readFailure(requestID, workspace, readErr, name)
 	}
 	current := resolved.Current
 	startLine := bytes.Count(read.Content[:current.ByteStart], []byte("\n")) + 1
@@ -410,7 +434,7 @@ func symbolReadMiss(requestID string, workspace *workspacecore.Workspace, covera
 		data["candidates"] = candidates
 	}
 	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, data)
-	next := []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "path": path}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
+	next := []any{map[string]any{"tool": "search", "action": "literal_fallback", "query": rawName, "paths": []string{path}}, map[string]any{"tool": "read", "action": "read_known_path", "path": path}}
 	if len(exact) == 0 && coverage.Complete {
 		// The outline is the list of names this file does declare, which is
 		// the answer to "then what is it called".
@@ -436,7 +460,7 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	}
 	read, err := workspace.Read(request.Path)
 	if err != nil {
-		return missingPathFailure(requestID, workspace, request.Path, err)
+		return readFailure(requestID, workspace, err, "")
 	}
 	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, request.StartLine, request.EndLine)
 	if rangeErr != nil {
@@ -473,62 +497,6 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	return result
 }
 
-// missingPathFailure answers a read of a path the workspace does not hold
-// with the paths it does hold under that name. A file an agent expected in
-// one directory and found in another is the commonest read failure in the
-// friction spool, and "<path> is missing" ends the line of enquiry where the
-// path that does exist would continue it.
-func missingPathFailure(requestID string, workspace *workspacecore.Workspace, path string, err error) map[string]any {
-	result := mcpapi.Failure(requestID, workspace, "read_failed", err)
-	if !strings.Contains(err.Error(), "is missing") {
-		return result
-	}
-	data, _ := result["data"].(map[string]any)
-	if data == nil {
-		data = map[string]any{}
-		result["data"] = data
-	}
-	if candidates := pathsNamed(workspace, path); len(candidates) > 0 {
-		data["candidates"] = candidates
-		result["summary"] = fmt.Sprintf("No file at %s; the workspace holds %s", path, strings.Join(candidates, ", "))
-		return result
-	}
-	result["summary"] = fmt.Sprintf("No file at %s, and no file of that name anywhere in the workspace", path)
-	result["next"] = []any{map[string]any{"tool": "search", "action": "locate_the_file_by_name", "query": pathBase(path)}}
-	return result
-}
-
-// pathsNamed are the workspace paths whose base name is the base name of
-// path, bounded, in path order.
-func pathsNamed(workspace *workspacecore.Workspace, path string) []string {
-	const maxPathCandidates = 5
-	base := pathBase(path)
-	if base == "" {
-		return nil
-	}
-	orientation, err := workspace.Orient()
-	if err != nil {
-		return nil
-	}
-	candidates := make([]string, 0, maxPathCandidates)
-	for _, entry := range orientation.Entries {
-		if pathBase(entry.Path) != base || entry.Path == path {
-			continue
-		}
-		if candidates = append(candidates, entry.Path); len(candidates) == maxPathCandidates {
-			break
-		}
-	}
-	return candidates
-}
-
-func pathBase(path string) string {
-	if index := strings.LastIndexByte(path, '/'); index >= 0 {
-		return path[index+1:]
-	}
-	return path
-}
-
 // numberLines prefixes every line with its 1-based number and a tab, so an
 // agent can cite or window a line without counting.
 func numberLines(content []byte, first int) []byte {
@@ -551,7 +519,7 @@ func numberLines(content []byte, first int) []byte {
 func (h *Handlers) readOutline(ctx context.Context, requestID string, workspace *workspacecore.Workspace, path string) map[string]any {
 	outline, err := workspace.Outline(path)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+		return readFailure(requestID, workspace, err, "")
 	}
 	// Only when the native sectioner did not understand the document: a file
 	// it parsed and found nothing in declares nothing, and asking a language

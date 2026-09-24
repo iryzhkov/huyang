@@ -23,7 +23,18 @@ const (
 	CodeInvariantNotProven        = "invariant_not_proven"
 	CodeProviderUnavailable       = "provider_unavailable"
 	CodeWorkspaceBusy             = "workspace_busy"
+	CodeDocumentNotFound          = "document_not_found"
 )
+
+// DocumentNotFoundError is the cause under CodeDocumentNotFound: a read of a
+// path at which nothing exists. Path is workspace-relative, so a reply can
+// name it the way the caller did rather than as an absolute path on a host
+// the caller may not share.
+type DocumentNotFoundError struct {
+	Path string
+}
+
+func (e *DocumentNotFoundError) Error() string { return "no file at " + e.Path }
 
 // CodedError carries a stable machine-readable code next to a human-readable cause.
 // Its text keeps the historical "code: detail" shape so callers that still classify by
