@@ -46,9 +46,15 @@ func languageServerNotReady(requestID string, workspace *workspacecore.Workspace
 		"coverage": map[string]any{"complete": false, "unavailable": []string{"language_server"}},
 	})
 	result["retryable"] = true
-	result["next"] = []any{
-		map[string]any{"action": "retry_the_same_call_shortly"},
-		map[string]any{"tool": "language_server_status", "action": "inspect_attachment"},
+	retry := map[string]any{"action": "retry_the_same_call_shortly"}
+	inspect := map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}
+	// A server still starting is worth waiting for; one that never began
+	// attaching is better looked at first, because the status says whether
+	// it is unconfigured, missing or failed and what would fix it.
+	if provider.ErrorCode(err) == "lsp_starting" {
+		result["next"] = []any{retry, inspect}
+	} else {
+		result["next"] = []any{inspect, retry}
 	}
 	return result
 }

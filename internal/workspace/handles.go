@@ -984,7 +984,7 @@ func (w *Workspace) RefineResultSet(parentID ResultSetID, refinement ResultRefin
 	}
 	var expression *regexp.Regexp
 	if refinement.MatchRegex != "" {
-		expression, err = regexp.Compile(refinement.MatchRegex)
+		expression, err = compileLineRegex(refinement.MatchRegex)
 		if err != nil {
 			return ResultSet{}, fmt.Errorf("invalid refinement regular expression: %w", err)
 		}

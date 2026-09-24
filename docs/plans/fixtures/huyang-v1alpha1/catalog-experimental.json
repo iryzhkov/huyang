@@ -100,7 +100,7 @@
     "name": "workspace_inspect"
   },
   {
-    "description": "Find text or symbols in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex; mode=references, definition, implementation, type_definition, incoming_calls or outgoing_calls asks the language server about the symbol named by query and falls back to literal matches when no server answers. paths scopes the hits, context_lines adds the surrounding lines; refine a large result set instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.",
+    "description": "Find text or symbols in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex (^ and $ match at each line); mode=references, definition, implementation, type_definition, incoming_calls or outgoing_calls asks the language server about the symbol named by query and falls back to literal matches when no server answers. paths scopes the hits, context_lines adds the surrounding lines; refine a large result set instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1866,13 +1866,13 @@
     "name": "verify_run"
   },
   {
-    "description": "Explain changes between two revisions or a stale mutation refusal.",
+    "description": "Explain changes between two workspace revisions (wsrev_N, as edit replies return them) or a stale mutation refusal. Either end may be current; a reversed range is read in order. Changes made outside Huyang are listed by path and marked inferred; for a Git ref use git diff.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
         "from_revision": {
-          "description": "Earlier revision.",
+          "description": "Earlier revision: wsrev_N or current.",
           "type": "string"
         },
         "response_format": {
@@ -1897,7 +1897,7 @@
           "type": "string"
         },
         "to_revision_or_current": {
-          "description": "Later revision or current.",
+          "description": "Later revision: wsrev_N or current.",
           "type": "string"
         },
         "view": {

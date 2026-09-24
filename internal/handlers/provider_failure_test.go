@@ -33,7 +33,13 @@ func TestProviderFailuresAreClassifiedByKernelCode(t *testing.T) {
 		if notReady["outcome"] != "unavailable" || notReady["retryable"] != true || notReady["code"] != "language_server_unavailable" || len(next) != 2 {
 			t.Fatalf("%s = %#v", code, notReady)
 		}
-		if status, _ := next[1].(map[string]any); status["tool"] != "language_server_status" {
+		// A server still starting is retried first; one that never began
+		// attaching is inspected first.
+		statusAt := 1
+		if code == "lsp_attach_deadline_exceeded" {
+			statusAt = 0
+		}
+		if status, _ := next[statusAt].(map[string]any); status["tool"] != "language_server_status" {
 			t.Fatalf("%s next = %#v", code, next)
 		}
 		if notReady["data"].(map[string]any)["reason"] != code {

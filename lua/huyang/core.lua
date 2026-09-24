@@ -740,7 +740,7 @@ local function get_client(bufnr, method, timeout_ms)
                 err("lsp_starting: %s is still starting for %s (filetype: %s); retry shortly, a restart would only begin it again",
                     starting, vim.api.nvim_buf_get_name(bufnr), ft)
             end
-            err("lsp_attach_deadline_exceeded: no LSP client supporting %s attached to %s (filetype: %s); call language_server_setup restart",
+            err("lsp_attach_deadline_exceeded: no LSP client supporting %s attached to %s (filetype: %s); language_server_status says whether it is starting, unconfigured or failed",
                 method, vim.api.nvim_buf_get_name(bufnr), ft)
         end
         sleep(100)

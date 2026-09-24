@@ -134,6 +134,49 @@ func TestOpenDocumentOutsideProjectDoesNotRequireParentScan(t *testing.T) {
 	}
 }
 
+// A search of a tree in the middle of a merge finds every conflict marker
+// once. ^ used to anchor only at the start of the file, so a line-anchored
+// pattern missed every marker below line 1, and git lists a conflicted path
+// once per index stage, so each hit came back three times.
+func TestRegexSearchAnchorsLinesAndListsAConflictedFileOnce(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil && args[0] != "merge" {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	path := filepath.Join(root, "f.txt")
+	git("init", "-q", "-b", "main")
+	writeFile(t, path, "head\nbase\n")
+	git("add", ".")
+	git("commit", "-qm", "base")
+	git("checkout", "-qb", "other")
+	writeFile(t, path, "head\nother\n")
+	git("commit", "-qam", "other")
+	git("checkout", "-q", "main")
+	writeFile(t, path, "head\nmain\n")
+	git("commit", "-qam", "main")
+	git("merge", "other")
+
+	ws := newNativeWorkspace(t, KindProject, root, nil, Limits{})
+	result, err := ws.Search(SearchRequest{Query: `^(<<<<<<<|=======|>>>>>>>)`, Mode: SearchRegex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []int
+	for _, hit := range result.Hits {
+		lines = append(lines, hit.Line)
+	}
+	if !reflect.DeepEqual(lines, []int{2, 4, 6}) {
+		t.Fatalf("conflict marker lines = %v, want [2 4 6]; hits %+v", lines, result.Hits)
+	}
+	if result.Coverage.FilesConsidered != 1 {
+		t.Fatalf("files considered = %d, want 1", result.Coverage.FilesConsidered)
+	}
+}
+
 func TestNativeSearchLiteralRegexAndUnicodeCoordinates(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "unicode.txt")

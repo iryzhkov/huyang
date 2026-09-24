@@ -683,10 +683,14 @@ func (w *Workspace) collectAllowlisted(patterns []string, coverage *Coverage) []
 // paths, keeping only those inside the scope.
 func (w *Workspace) collectListedFiles(output string, patterns []string, coverage *Coverage) []string {
 	var files []string
+	previous := ""
 	for _, relative := range strings.Split(output, "\x00") {
-		if relative == "" {
+		// A path with a merge conflict is listed once per index stage, one
+		// after another; it is still one file on disk.
+		if relative == "" || relative == previous {
 			continue
 		}
+		previous = relative
 		if len(patterns) > 0 && !MatchesPathScope(relative, patterns) {
 			continue
 		}
@@ -751,6 +755,13 @@ func (w *Workspace) walkFiles(patterns []string, coverage *Coverage) ([]string, 
 	}
 	sort.Strings(files)
 	return files, err
+}
+
+// compileLineRegex compiles a search expression the way grep reads one: ^ and
+// $ match at every line boundary, not only at the ends of the file, because
+// a search reports lines and a caller anchoring a pattern means the line.
+func compileLineRegex(expression string) (*regexp.Regexp, error) {
+	return regexp.Compile("(?m)" + expression)
 }
 
 var (
@@ -861,7 +872,7 @@ func searchExpression(request SearchRequest) (SearchMode, *regexp.Regexp, error)
 		mode = SearchLiteral
 	}
 	if mode == SearchRegex {
-		expression, err := regexp.Compile(request.Query)
+		expression, err := compileLineRegex(request.Query)
 		if err != nil {
 			return mode, nil, fmt.Errorf("invalid regular expression: %w", err)
 		}
