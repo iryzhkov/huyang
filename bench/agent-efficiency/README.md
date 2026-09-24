@@ -38,7 +38,9 @@ Two measurements feed `RESULTS.md`:
 - `score.py` reads the finished threads out of the T3 state database and prints the
   per-scenario table for `RESULTS.md`.
 - `protocol/` holds the protocol measurement program.
-- `runs/` keeps one TSV per submitted batch (the titles to look up) and the scored JSON.
+- `runs/` keeps one TSV per submitted batch (one row per started run: scenario, language,
+  family, repetition, title, run id and the UTC instant the row was started) and the scored
+  JSON.
 
 ## Rerun the protocol measurement
 
@@ -61,13 +63,28 @@ bench/agent-efficiency/submit.sh baseline --reps 3
 bench/agent-efficiency/score.py --batch baseline --markdown
 ```
 
-`submit.sh` writes a task through `t3-backlog` for every scenario, language, family and
-repetition, using `instance: opencode` and `model:
-opencode/muse-spark-1.3-contributor-free`, and records the titles in
-`runs/<batch>.tsv`. The tasks run in an isolated clone of this repository at the branch
-head, so commit the fixtures and prompts before submitting. `score.py` finds the threads
-by title in `~/.t3/userdata/state.sqlite`, extracts every tool call and the provider
-token counts, and writes `runs/<batch>-scores.json` plus a Markdown table.
+`submit.sh` starts one task through `t3-backlog` for every scenario, language, family and
+repetition. The route is named once, as `--model opencode/muse-spark-1.3-contributor-free`,
+because the wrapper refuses `--instance` beside a model that already carries its instance.
+Each start passes `--no-notify`, since a batch submitter has no thread to be woken, and
+`--json`, because the run id is a field of the record rather than a line of the human
+output. It also passes an `--idempotency-key` built from the batch, scenario, language,
+family and repetition: without one, all repetitions of a cell send the same prompt and the
+steward refuses the second as the same key with different content. Re-submitting a batch
+name whose prompts have changed is therefore refused as well; use a new batch name.
+
+Nothing is submitted as class `required`. A benchmark is not urgent work, and a default
+batch of 13 scenarios x 3 families x 3 repetitions would otherwise take 117 runs out of
+reserved fleet capacity, so every start takes the default `surplus` class.
+
+Each started run is appended to `runs/<batch>.tsv` with its run id in the `run` column and
+the UTC instant it was started in `started_at`. Both `score.py` and `wait-check.sh` read
+`started_at` to bound their thread lookup to this batch; a log without that column is an
+error in both, not a lookup over every benchmark thread ever recorded. The tasks run in an
+isolated clone of this repository at the branch head, so commit the fixtures and prompts
+before submitting. `score.py` finds the threads by their first user message in
+`~/.t3/userdata/state.sqlite`, extracts every tool call and the provider token counts, and
+writes `runs/<batch>-scores.json` plus a Markdown table.
 
 Token counting for the agent measurement uses the same `cl100k_base` tokenizer as the
 protocol measurement (`go run ./bench/agent-efficiency/protocol count`), applied to the
