@@ -64,7 +64,8 @@ func TestWorkspaceInspectViewsReportRevisionAndAdvanceAfterEdit(t *testing.T) {
 }
 
 // A read-only inspection that observes an external write to a file the
-// service never read still advances the revision and leaves an explicit gap.
+// service never read still advances the revision, and revision_diff accounts
+// for that step with an inferred entry for the file.
 func TestWorkspaceInspectRecordsExternalWriteToUnreadFileAsRevisionGap(t *testing.T) {
 	direct, workspaceID, root := openProbeProject(t, map[string]string{
 		"main.go":   "package sample\n",
@@ -84,14 +85,15 @@ func TestWorkspaceInspectRecordsExternalWriteToUnreadFileAsRevisionGap(t *testin
 	diff := callModern(t, session, "revision_diff", map[string]any{
 		"workspace_id": workspaceID, "from_revision": "wsrev_1", "to_revision_or_current": "wsrev_2",
 	})
-	gaps := diff["data"].(map[string]any)["gaps"].([]any)
-	if len(gaps) != 1 {
-		t.Fatalf("external read-only change did not produce one explicit gap: %#v", diff)
+	inferred := mcpapi.AnySlice(diff["data"].(map[string]any)["inferred_segments"])
+	diffs := mcpapi.AnySlice(diff["data"].(map[string]any)["diffs"])
+	if diff["outcome"] != "ok" || len(inferred) != 1 || len(diffs) != 1 || diffs[0].(map[string]any)["path"] != "README.md" {
+		t.Fatalf("external read-only change was not accounted for as one inferred step: %#v", diff)
 	}
 }
 
 // Reopening a project after a file appeared externally advances the revision
-// and revision_diff reports the addition as one gap.
+// and revision_diff reports the addition as an inferred created file.
 func TestWorkspaceReopenRecordsExternalNewFileAsRevisionGap(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "known.txt"), []byte("known\n"), 0o600); err != nil {
@@ -115,9 +117,12 @@ func TestWorkspaceReopenRecordsExternalNewFileAsRevisionGap(t *testing.T) {
 	diff := direct.call(context.Background(), "revision_diff", map[string]any{
 		"workspace_id": workspaceID, "from_revision": from, "to_revision_or_current": to,
 	})
-	gaps := mcpapi.AnySlice(diff["data"].(map[string]any)["gaps"])
-	if len(gaps) != 1 {
-		t.Fatalf("revision gaps = %#v", gaps)
+	diffs := mcpapi.AnySlice(diff["data"].(map[string]any)["diffs"])
+	if diff["outcome"] != "ok" || len(diffs) != 1 {
+		t.Fatalf("external addition was not accounted for: %#v", diff)
+	}
+	if entry := diffs[0].(map[string]any); entry["path"] != "new.txt" || entry["change"] != "created" || entry["inferred"] != true {
+		t.Fatalf("external addition entry = %#v", entry)
 	}
 }
 
