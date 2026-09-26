@@ -261,6 +261,11 @@ func (w *Workspace) previewedPlan(planID string, expected uint64) (PlanRecord, e
 	if !canTransition(plan.State, PlanPreparing) {
 		return PlanRecord{}, illegalTransition(planID, plan.State, PlanPreparing)
 	}
+	// An expired or failed plan that retention has compacted lost the
+	// operation contents a preparation is built from.
+	if plan.Compacted {
+		return PlanRecord{}, Codedf(CodePlanStateInvalid, "plan %s was compacted by retention; create a new plan", planID)
+	}
 	// A plan with no operations stages nothing, so committing it would write
 	// no byte and still advance the canonical revision and answer a receipt
 	// that says a change was made. There is nothing here to prepare, and

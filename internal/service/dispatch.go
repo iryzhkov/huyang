@@ -62,6 +62,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 			SchedulerInfo: scheduler.description,
 		}),
 	}
+	direct.handlers.ProviderPool().SetWorkspaceSource(registry.All)
 	direct.loadErr = direct.loadState()
 	return direct
 }
@@ -87,7 +88,7 @@ func (d *directWorkspaces) loadState() error {
 	}
 	// A journal that cannot be resolved is logged rather than refusing to
 	// start: it stays on disk, and it concerns one file, not the service.
-	if result, err := workspacecore.RecoverNativeJournals(d.registry.stateDir, d.registry.all()); err != nil {
+	if result, err := workspacecore.RecoverNativeJournals(d.registry.stateDir, d.registry.All()); err != nil {
 		log.Printf("huyang: native edit journals: %v", err)
 	} else if len(result.Recovered)+len(result.Cleared)+len(result.Discarded)+len(result.Conflicts) > 0 {
 		log.Printf("huyang: native edit journals: recovered %v, cleared %v, discarded %v, conflicts %v",

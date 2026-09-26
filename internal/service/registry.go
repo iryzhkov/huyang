@@ -100,15 +100,15 @@ func (r *workspaceRegistry) Lookup(id workspacecore.ID) *workspacecore.Workspace
 	return r.items[id]
 }
 
-// all returns every open workspace.
-func (r *workspaceRegistry) all() []*workspacecore.Workspace {
+// All returns every open workspace, in no particular order.
+func (r *workspaceRegistry) All() []*workspacecore.Workspace {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	opened := make([]*workspacecore.Workspace, 0, len(r.items))
+	all := make([]*workspacecore.Workspace, 0, len(r.items))
 	for _, workspace := range r.items {
-		opened = append(opened, workspace)
+		all = append(all, workspace)
 	}
-	return opened
+	return all
 }
 
 // Adopt records a freshly opened workspace unless an equivalent definition

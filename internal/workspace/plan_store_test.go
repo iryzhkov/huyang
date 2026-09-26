@@ -31,6 +31,10 @@ func bulkyPlan(ws *Workspace, id string, state PlanState, updatedAt time.Time) P
 }
 
 func TestLegacyPlanFileIsMigratedPrunedAndCompacted(t *testing.T) {
+	// The open plan below is older than the idle limit. This test is about
+	// terminal retention leaving a non-terminal plan alone, so idle expiry,
+	// which would make it terminal first, is off.
+	t.Setenv(PlanIdleTTLVariable, "off")
 	root, stateDir := t.TempDir(), t.TempDir()
 	ws := openCommitWorkspace(t, root, stateDir)
 	now := time.Now().UTC()

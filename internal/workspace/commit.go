@@ -629,6 +629,9 @@ type commitRun struct {
 // admitCommit checks the plan, prepared revision, provider epoch and provisional
 // acceptance. It succeeds only for a plan this call may commit; nothing is written.
 func (w *Workspace) admitCommit(ctx context.Context, plan PlanRecord, expected uint64, preparedRevision string, stager PlanStager, settings commitOptions) (*commitRun, error) {
+	if plan.State == PlanExpired {
+		return nil, ExpiredPlanError(plan)
+	}
 	if (plan.State != PlanReady && plan.State != PlanProvisional) || plan.Preparation == nil {
 		return nil, Codedf(CodePlanStateInvalid, "plan %s is %s; only a READY plan commits", plan.PlanID, plan.State)
 	}
