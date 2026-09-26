@@ -326,6 +326,147 @@ do
         client == "rust-analyzer-test", why)
 end
 
+-- rust-analyzer's cargo builds go to one on-disk directory per project
+-- root, outside /tmp, and an existing CARGO_TARGET_DIR is left alone.
+do
+    local cargo_target = require("huyang.cargo_target")
+    cargo_target._swept = true
+    local scratch = vim.fn.tempname()
+    local original = { xdg = vim.env.XDG_CACHE_HOME, target = vim.env.CARGO_TARGET_DIR }
+    vim.env.XDG_CACHE_HOME = scratch .. "/cache"
+    vim.env.CARGO_TARGET_DIR = nil
+    local root = scratch .. "/proj"
+    vim.fn.mkdir(root, "p")
+    vim.fn.writefile({ "[package]" }, root .. "/Cargo.toml")
+
+    local dir = cargo_target.dir_for(root)
+    check("the cargo target directory is under XDG_CACHE_HOME",
+        vim.startswith(dir, scratch .. "/cache/huyang/cargo-target/proj-"), dir)
+    check("the cargo target directory is stable per root",
+        cargo_target.dir_for(root) == dir and cargo_target.dir_for(root .. "/") == dir
+            and cargo_target.dir_for(scratch .. "/other/proj") ~= dir)
+    vim.env.XDG_CACHE_HOME = ""
+    local default = cargo_target.dir_for(root)
+    check("without XDG_CACHE_HOME the cache is ~/.cache, outside the tempdir",
+        vim.startswith(default, vim.env.HOME .. "/.cache/huyang/cargo-target/")
+            and not vim.startswith(default, vim.fn.fnamemodify(vim.fn.tempname(), ":h:h")), default)
+    vim.env.XDG_CACHE_HOME = scratch .. "/cache"
+
+    local chosen = cargo_target.prepare(root)
+    check("prepare points CARGO_TARGET_DIR at the root's directory and creates it",
+        chosen == dir and vim.env.CARGO_TARGET_DIR == dir and vim.fn.isdirectory(dir) == 1,
+        { chosen = chosen, env = vim.env.CARGO_TARGET_DIR })
+    check("prepare again on the same root reuses the directory", cargo_target.prepare(root) == dir)
+
+    vim.env.CARGO_TARGET_DIR = scratch .. "/mine"
+    check("an existing CARGO_TARGET_DIR is left alone",
+        cargo_target.prepare(root) == nil and vim.env.CARGO_TARGET_DIR == scratch .. "/mine")
+    vim.env.CARGO_TARGET_DIR = nil
+    check("a root without Cargo.toml gets no target directory",
+        cargo_target.prepare(scratch) == nil and vim.env.CARGO_TARGET_DIR == nil)
+
+    vim.env.XDG_CACHE_HOME = original.xdg
+    vim.env.CARGO_TARGET_DIR = original.target
+    vim.fn.delete(scratch, "rf")
+end
+
+-- Per-root cargo directories not used for the configured number of days
+-- are pruned; a recently used one and the current root's are kept.
+do
+    local cargo_target = require("huyang.cargo_target")
+    local base = vim.fn.tempname()
+    local now = os.time()
+    local function make(name, age_days, stamped)
+        local dir = base .. "/" .. name
+        vim.fn.mkdir(dir .. "/debug", "p")
+        local t = now - age_days * 86400
+        if stamped then
+            vim.fn.writefile({}, dir .. "/.huyang-last-used")
+            vim.uv.fs_utime(dir .. "/.huyang-last-used", t, t)
+            vim.uv.fs_utime(dir, now, now)
+        else
+            vim.uv.fs_utime(dir, t, t)
+        end
+        return dir
+    end
+    local stale = make("stale-aaaa", 40, true)
+    local fresh = make("fresh-bbbb", 2, true)
+    local unstamped = make("unstamped-cccc", 45, false)
+    local current = make("current-dddd", 90, true)
+    local removed = {}
+    local function remove(path)
+        removed[#removed + 1] = path
+        vim.fn.delete(path, "rf")
+    end
+    cargo_target.prune({ base = base, now = now, max_age_days = 30, keep = current, remove = remove })
+    table.sort(removed)
+    check("stale per-root caches are pruned by the stamp's age, falling back to the directory's",
+        vim.deep_equal(removed, { stale, unstamped }) and vim.fn.isdirectory(fresh) == 1
+            and vim.fn.isdirectory(current) == 1, removed)
+    removed = {}
+    cargo_target.prune({ base = base, now = now, max_age_days = 1, remove = remove })
+    check("the age limit is a setting", vim.deep_equal(removed, { current, fresh }) or vim.deep_equal(removed, { fresh, current }), removed)
+    local original = vim.env.HUYANG_CARGO_TARGET_MAX_AGE_DAYS
+    vim.env.HUYANG_CARGO_TARGET_MAX_AGE_DAYS = "7"
+    local seven = cargo_target.max_age_days()
+    vim.env.HUYANG_CARGO_TARGET_MAX_AGE_DAYS = "nonsense"
+    local fallback = cargo_target.max_age_days()
+    vim.env.HUYANG_CARGO_TARGET_MAX_AGE_DAYS = original
+    check("HUYANG_CARGO_TARGET_MAX_AGE_DAYS sets the age, 30 otherwise", seven == 7 and fallback == 30,
+        { seven, fallback })
+    check("pruning a missing cache directory is a no-op",
+        #cargo_target.prune({ base = base .. "/absent", remove = remove }) == 0)
+    vim.fn.delete(base, "rf")
+end
+
+-- The sweep removes the cargo directory an earlier version left in a dead
+-- Neovim's tempdir and keeps a live Neovim's and our own.
+do
+    local cargo_target = require("huyang.cargo_target")
+    local scratch = vim.fn.tempname()
+    local base = scratch .. "/nvim.test"
+    local orphan = base .. "/DEAD01/0-huyang-cargo-target"
+    local live = base .. "/LIVE01/3-huyang-cargo-target"
+    local own = base .. "/OWN001"
+    local mine = own .. "/0-huyang-cargo-target"
+    local unrelated = base .. "/DEAD01/5"
+    for _, dir in ipairs({ orphan .. "/debug", live .. "/debug", mine, unrelated }) do vim.fn.mkdir(dir, "p") end
+    local asked = {}
+    local function is_live(name)
+        asked[name] = true
+        return name == "LIVE01"
+    end
+    local removed = {}
+    local function remove(path)
+        removed[#removed + 1] = path
+        vim.fn.delete(path, "rf")
+    end
+    cargo_target.sweep({ base = base, own = own, is_live = is_live, remove = remove })
+    check("the sweep removes the orphan and keeps the live Neovim's and our own",
+        vim.deep_equal(removed, { orphan }) and vim.fn.isdirectory(live) == 1 and vim.fn.isdirectory(mine) == 1
+            and vim.fn.isdirectory(unrelated) == 1 and not asked.OWN001, { removed = removed, asked = asked })
+
+    removed = {}
+    local other = scratch .. "/not-nvim"
+    vim.fn.mkdir(other .. "/X/0-huyang-cargo-target", "p")
+    cargo_target.sweep({ base = other, own = other .. "/Y", is_live = function() return false end, remove = remove })
+    check("the sweep only works in a Neovim temp root", #removed == 0, removed)
+
+    -- The real /proc check: a process whose working directory is inside a
+    -- tempdir keeps that tempdir's cargo directory.
+    removed = {}
+    vim.fn.delete(base .. "/LIVE01", "rf")
+    local held = base .. "/HELD01/0-huyang-cargo-target"
+    vim.fn.mkdir(held, "p")
+    local sleeper = vim.system({ "sleep", "30" }, { cwd = base .. "/HELD01" })
+    vim.fn.mkdir(orphan, "p")
+    cargo_target.sweep({ base = base, own = own, remove = remove })
+    sleeper:kill(9)
+    check("the /proc check keeps a tempdir a live process holds",
+        vim.deep_equal(removed, { orphan }) and vim.fn.isdirectory(held) == 1, removed)
+    vim.fn.delete(scratch, "rf")
+end
+
 if failures > 0 then
     io.stdout:write(("unit_check: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

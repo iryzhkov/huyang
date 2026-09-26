@@ -268,15 +268,9 @@ local function workspace_support(args)
     if type(root) ~= "string" or root == "" then
         err("missing project root")
     end
-    if vim.uv.fs_stat(root .. "/Cargo.toml") and not vim.env.CARGO_TARGET_DIR then
-        local target = vim.fn.tempname() .. "-huyang-cargo-target"
-        vim.fn.mkdir(target, "p")
-        vim.env.CARGO_TARGET_DIR = target
-        vim.api.nvim_create_autocmd("VimLeavePre", {
-            once = true,
-            callback = function() pcall(vim.fn.delete, target, "rf") end,
-        })
-    end
+    -- rust-analyzer's builds go to a shared on-disk directory per root, not
+    -- the project's target/ and not /tmp; see cargo_target.lua.
+    require("huyang.cargo_target").prepare(root)
     local files = project_files(root)
     local by_ft, sample, ext_cache = {}, {}, {}
     -- Reading a shebang costs a file open, so only for the files that have no

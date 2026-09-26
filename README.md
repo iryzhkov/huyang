@@ -178,6 +178,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_DEBUG_VERDICT` | unset | Any value makes the kernel report which signal ended a post-edit wait. Read by the Lua kernel. | `AGENT99_DEBUG_VERDICT` |
 | `HUYANG_DEBUG_IDLE_MS` | 600000 | Idle timeout of a debugger session in milliseconds. Read by the Lua kernel. | `AGENT99_DEBUG_IDLE_MS` |
 | `HUYANG_NVIM_DAP_PATH` | unset | nvim-dap checkout for the debugger tools; when set, the discovery in [Requirements](#requirements) searches nothing else. Read by the Lua kernel. | `AGENT99_NVIM_DAP_PATH` |
+| `HUYANG_CARGO_TARGET_MAX_AGE_DAYS` | 30 | For a Cargo project the provider points `CARGO_TARGET_DIR` (unless already set) at `$XDG_CACHE_HOME/huyang/cargo-target/<name>-<hash of root>`, else `~/.cache/...`, shared by every session on that root, so rust-analyzer's builds stay out of both the project's `target/` and `/tmp`. Directories no session has used for this many days are removed when a provider starts. Read by the Lua kernel. | no |
 | `CLAUDE_CODE_SESSION_ID` | random per process | Session identifier recorded in friction events when the client is Claude Code. | no |
 | `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | XDG defaults | Bases for the socket, state directory, friction spool, and `huyang/config.toml` trust policy. | no |
 
