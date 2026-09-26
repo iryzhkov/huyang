@@ -357,6 +357,11 @@ do
         chosen == dir and vim.env.CARGO_TARGET_DIR == dir and vim.fn.isdirectory(dir) == 1,
         { chosen = chosen, env = vim.env.CARGO_TARGET_DIR })
     check("prepare again on the same root reuses the directory", cargo_target.prepare(root) == dir)
+    local sandbox = scratch .. "/sandbox-1234/tree"
+    vim.fn.mkdir(sandbox, "p")
+    vim.fn.writefile({ "[package]" }, sandbox .. "/Cargo.toml")
+    check("a plan sandbox shares its source root's directory",
+        cargo_target.prepare(sandbox, root) == dir and vim.env.CARGO_TARGET_DIR == dir)
 
     vim.env.CARGO_TARGET_DIR = scratch .. "/mine"
     check("an existing CARGO_TARGET_DIR is left alone",

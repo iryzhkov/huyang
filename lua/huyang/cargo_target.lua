@@ -170,15 +170,17 @@ function M.sweep(opts)
     return removed
 end
 
--- Point CARGO_TARGET_DIR at root's shared build directory when root is a
--- Cargo project and the environment has not already chosen one, and, once
--- per process, clear what earlier sessions left behind. Returns the
+-- Point CARGO_TARGET_DIR at the shared build directory of cache_root
+-- (root itself by default; a plan sandbox names its source root) when root
+-- is a Cargo project and the environment has not already chosen one, and,
+-- once per process, clear what earlier sessions left behind. Returns the
 -- directory it chose, or nil.
-function M.prepare(root)
+function M.prepare(root, cache_root)
     local dir
     local env = vim.env.CARGO_TARGET_DIR
     if (env == nil or env == "" or env == ours) and vim.uv.fs_stat(root .. "/Cargo.toml") then
-        dir = M.dir_for(root)
+        if type(cache_root) ~= "string" or cache_root == "" then cache_root = root end
+        dir = M.dir_for(cache_root)
         vim.fn.mkdir(dir, "p")
         pcall(vim.fn.writefile, {}, dir .. "/" .. STAMP)
         vim.env.CARGO_TARGET_DIR = dir

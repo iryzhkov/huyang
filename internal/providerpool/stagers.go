@@ -259,7 +259,7 @@ func (s *SandboxStager) stageIntoSandbox(ctx context.Context, request workspacec
 	s.setResources(sandbox, backend, stager)
 	_, _ = Call(ctx, s.workspace, backend, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
-	}, "workspace_support", map[string]any{"root": sandbox.Tree})
+	}, "workspace_support", map[string]any{"root": sandbox.Tree, "cargo_root": s.workspace.Identity().Root})
 	abandon := func(err error) (*workspacecore.Sandbox, error) {
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
@@ -338,7 +338,9 @@ func (s *SandboxStager) recordStagedDiagnostics(ctx context.Context, sandbox *wo
 	s.setResources(sandbox, replacement, nil)
 	_, _ = Call(ctx, s.workspace, replacement, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
-	}, "workspace_support", map[string]any{"root": sandbox.Tree, "attach_wait_ms": VerificationAttachWaitMS})
+	}, "workspace_support", map[string]any{
+		"root": sandbox.Tree, "cargo_root": s.workspace.Identity().Root, "attach_wait_ms": VerificationAttachWaitMS,
+	})
 	diagnosticReport, err := RecordStagedDiagnostics(ctx, s.workspace, replacement, files, s.baseRevision, s.planID)
 	if err != nil {
 		return verification, err

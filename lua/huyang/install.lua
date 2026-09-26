@@ -269,8 +269,10 @@ local function workspace_support(args)
         err("missing project root")
     end
     -- rust-analyzer's builds go to a shared on-disk directory per root, not
-    -- the project's target/ and not /tmp; see cargo_target.lua.
-    require("huyang.cargo_target").prepare(root)
+    -- the project's target/ and not /tmp; see cargo_target.lua. A plan
+    -- sandbox passes its source root as cargo_root so it shares that
+    -- root's build instead of starting one per sandbox.
+    require("huyang.cargo_target").prepare(root, args.cargo_root)
     local files = project_files(root)
     local by_ft, sample, ext_cache = {}, {}, {}
     -- Reading a shebang costs a file open, so only for the files that have no
