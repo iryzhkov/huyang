@@ -732,13 +732,12 @@ func commandStage(ctx context.Context, root, revision, name, mode string, comman
 // records its duration, capped output and exit code on the stage.
 func runSandboxCommand(ctx context.Context, root string, environment []string, command CommandPolicy, policy PipelinePolicy, started time.Time, stage *VerificationStage) error {
 	process := exec.CommandContext(ctx, command.Command[0], command.Command[1:]...)
-	configureCommandCancellation(process)
 	process.Dir = root
 	process.Env = append(environment, "HUYANG_SANDBOX=1")
 	var output cappedCommandOutput
 	output.limit = policy.Resource.MaxOutputBytes
 	process.Stdout, process.Stderr = &output, &output
-	runErr := process.Run()
+	runErr := runCommandTree(process)
 	stage.DurationMS = time.Since(started).Milliseconds()
 	stage.Output = output.String()
 	if process.ProcessState != nil {

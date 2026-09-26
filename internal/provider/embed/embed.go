@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iryzhkov/huyang/internal/procguard"
 	"github.com/iryzhkov/huyang/internal/provider"
 
 	"github.com/neovim/go-client/nvim"
@@ -121,6 +122,10 @@ type generation struct {
 	epoch   uint64
 	nvim    *nvim.Nvim
 	command *exec.Cmd
+	// tree guards Neovim together with the language servers, build helpers
+	// and debug adapters it starts, so ending the generation ends all of
+	// them, and so does the death of this process.
+	tree    *procguard.Guard
 	stdin   io.WriteCloser
 	channel int
 	stderr  *tailBuffer
@@ -513,7 +518,10 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 	}
 	command := exec.Command(b.config.Executable, args...)
 	command.Dir = b.config.Root
-	setDeathSignal(command)
+	tree, err := procguard.Wrap(command)
+	if err != nil {
+		return nil, launchFailure(epoch, "starting nvim", err)
+	}
 	stderr := &tailBuffer{}
 	command.Stderr = stderr
 	stdin, err := command.StdinPipe()
@@ -524,24 +532,24 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 	if err != nil {
 		return nil, launchFailure(epoch, "opening Neovim stdout", err)
 	}
-	if err := command.Start(); err != nil {
+	if err := tree.Start(); err != nil {
 		return nil, launchFailure(epoch, "starting nvim", err)
 	}
 	client, err := nvim.New(stdout, stdin, stdin, nil)
 	if err != nil {
-		_ = command.Process.Kill()
-		_ = command.Wait()
+		tree.Stop()
+		_ = tree.Wait()
 		return nil, launchFailure(epoch, "creating embedded RPC client", err)
 	}
 	g := &generation{
-		epoch: epoch, nvim: client, command: command, stdin: stdin,
+		epoch: epoch, nvim: client, command: command, tree: tree, stdin: stdin,
 		stderr: stderr, done: make(chan error, 1),
 	}
 	if err := client.RegisterHandler(completionMethod, func(id string, payload map[string]any) {
 		b.deliver(g.epoch, id, payload)
 	}); err != nil {
-		_ = command.Process.Kill()
-		_ = command.Wait()
+		tree.Stop()
+		_ = tree.Wait()
 		return nil, &provider.Failure{Code: provider.FailureBootstrap, Epoch: epoch, Detail: "registering completion handler: " + err.Error(), Err: err}
 	}
 	g.alive.Store(true)
@@ -578,10 +586,10 @@ func (b *Backend) DapRuntime() DapRuntime {
 
 func (b *Backend) serve(g *generation) {
 	serveErr := g.nvim.Serve()
-	if g.alive.Swap(false) && g.command.Process != nil {
-		_ = g.command.Process.Kill()
+	if g.alive.Swap(false) {
+		g.tree.Stop()
 	}
-	waitErr := g.command.Wait()
+	waitErr := g.tree.Wait()
 	err := errors.Join(serveErr, waitErr)
 	g.done <- err
 	close(g.done)
@@ -819,9 +827,12 @@ func (b *Backend) deliver(epoch uint64, id string, payload map[string]any) {
 	}
 }
 
+// terminate ends a generation at once. Stopping the guard kills Neovim and
+// every descendant it started, not only the Neovim process, so a language
+// server or a running cargo check cannot outlive the generation.
 func (b *Backend) terminate(g *generation) {
-	if g != nil && g.alive.Swap(false) && g.command.Process != nil {
-		_ = g.command.Process.Kill()
+	if g != nil && g.alive.Swap(false) {
+		g.tree.Stop()
 	}
 }
 
