@@ -639,7 +639,7 @@ func isolatedCommandEnv() ([]string, func(), error) {
 			}
 		}
 	}
-	runtimeRoot, err := os.MkdirTemp("", "huyang-command-env-*")
+	runtimeRoot, err := commandScratchDir("huyang-command-env-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("create isolated command environment: %w", err)
 	}
@@ -943,7 +943,7 @@ func runIsolatedCommandBatch(ctx context.Context, root, revision, name, mode str
 			results[index] = commandStageFailure(revision, name, mode, commands[index], err)
 			return
 		}
-		cloneRoot, cloneErr := os.MkdirTemp("", "huyang-verification-command-*")
+		cloneRoot, cloneErr := commandScratchDir("huyang-verification-command-*")
 		if cloneErr != nil {
 			results[index] = commandStageFailure(revision, name, mode, commands[index], cloneErr)
 			return

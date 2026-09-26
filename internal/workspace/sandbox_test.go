@@ -254,6 +254,53 @@ func TestReapSandboxesRemovesOnlyOwnedUnreferencedDirectories(t *testing.T) {
 	}
 }
 
+// A sandbox appears under its sandbox- name only with its marker inside, so
+// a kill can never leave a markerless sandbox- directory that the reaper
+// must treat as foreign. What a kill can leave is a staging directory, and
+// the reaper removes one once it is clearly abandoned.
+func TestSandboxRootNeverExistsWithoutMarker(t *testing.T) {
+	base, source := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sandbox, err := MaterializeSandbox(context.Background(), source, base, ID("ws_0123456789abcdef0123456789abcdef"), "plan_staging", 1, "wsrev_1", DefaultSandboxLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(filepath.Base(sandbox.Root), "sandbox-") || sandbox.Tree != filepath.Join(sandbox.Root, "tree") {
+		t.Fatalf("sandbox root = %q, tree = %q", sandbox.Root, sandbox.Tree)
+	}
+	if _, err := os.Stat(filepath.Join(sandbox.Tree, "file")); err != nil {
+		t.Fatalf("materialized tree is missing its file: %v", err)
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("sandbox base holds %v, %v; want only the sandbox", entries, err)
+	}
+	abandoned := filepath.Join(base, sandboxStagingPrefix+"abandoned")
+	recent := filepath.Join(base, sandboxStagingPrefix+"recent")
+	for _, path := range []string{abandoned, recent} {
+		if err := os.MkdirAll(filepath.Join(path, "tree"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := time.Now().Add(-2 * sandboxStagingMaxAge)
+	if err := os.Chtimes(abandoned, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReapSandboxes(base, map[string]bool{"plan_staging": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Fatalf("abandoned staging directory retained: %v", err)
+	}
+	for _, path := range []string{recent, sandbox.Root} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s removed: %v", path, err)
+		}
+	}
+}
+
 func TestSandboxPreparedChangesCaptureExactLegacyDelta(t *testing.T) {
 	source, base := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(source, "replace.txt"), []byte("before\n"), 0o600); err != nil {

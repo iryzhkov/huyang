@@ -251,6 +251,9 @@ type RecoveryResult struct {
 	Recovered []string `json:"recovered,omitempty"`
 	Cleared   []string `json:"cleared,omitempty"`
 	Conflicts []string `json:"conflicts,omitempty"`
+	// Discarded names journals that were cut short before they were
+	// complete, which proves their mutation never started.
+	Discarded []string `json:"discarded,omitempty"`
 }
 
 type journalRecord struct {
@@ -1219,6 +1222,9 @@ func (w *Workspace) mutateFile(path string, preExists bool, preimage []byte, pos
 		return err
 	}
 	if err := ensureCurrent(path, preExists, preimage); err != nil {
+		// Nothing was written, so the journal has nothing to recover; left
+		// behind it would only wait for a startup recovery to clear it.
+		cleanupJournal = true
 		return err
 	}
 	if postExists {
@@ -1235,6 +1241,10 @@ func (w *Workspace) mutateFile(path string, preExists bool, preimage []byte, pos
 		err = syncDirectory(filepath.Dir(path))
 	}
 	if err != nil {
+		// A write that failed and left the preimage in place needs no
+		// recovery either. One that left anything else keeps its journal,
+		// so the next start can put the preimage back.
+		cleanupJournal = stateMatches(path, preExists, preimage)
 		return err
 	}
 	cleanupJournal = true
@@ -1272,69 +1282,10 @@ func syncDirectory(path string) error {
 	return directory.Sync()
 }
 
+// Recover resolves the native edit journals in the workspace's state
+// directory whose target this workspace owns; see RecoverNativeJournals.
 func (w *Workspace) Recover() (RecoveryResult, error) {
-	var result RecoveryResult
-	if w.stateDir == "" {
-		return result, errors.New("native mutation recovery state directory is required")
-	}
-	entries, err := os.ReadDir(w.stateDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return result, nil
-	}
-	if err != nil {
-		return result, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "native-") || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		journalPath := filepath.Join(w.stateDir, entry.Name())
-		data, readErr := os.ReadFile(journalPath)
-		if readErr != nil {
-			return result, readErr
-		}
-		var record journalRecord
-		if jsonErr := json.Unmarshal(data, &record); jsonErr != nil || record.Version != 1 {
-			return result, fmt.Errorf("invalid recovery journal %s", entry.Name())
-		}
-		target, confineErr := w.confinedPath(record.Path)
-		if confineErr != nil {
-			return result, fmt.Errorf("recovery journal target: %w", confineErr)
-		}
-		preimage, preErr := base64.StdEncoding.DecodeString(record.Preimage)
-		postimage, postErr := base64.StdEncoding.DecodeString(record.Postimage)
-		if preErr != nil || postErr != nil {
-			return result, fmt.Errorf("invalid recovery journal payload %s", entry.Name())
-		}
-		if stateMatches(target, record.PreExists, preimage) {
-			if removeErr := os.Remove(journalPath); removeErr != nil {
-				return result, removeErr
-			}
-			result.Cleared = append(result.Cleared, target)
-			continue
-		}
-		if !stateMatches(target, record.PostExists, postimage) {
-			result.Conflicts = append(result.Conflicts, target)
-			continue
-		}
-		var restoreErr error
-		if record.PreExists {
-			restoreErr = atomicWriteFile(target, preimage, fs.FileMode(record.Mode))
-		} else if restoreErr = os.Remove(target); restoreErr == nil || errors.Is(restoreErr, os.ErrNotExist) {
-			restoreErr = syncDirectory(filepath.Dir(target))
-		}
-		if restoreErr != nil {
-			return result, restoreErr
-		}
-		if removeErr := os.Remove(journalPath); removeErr != nil {
-			return result, removeErr
-		}
-		result.Recovered = append(result.Recovered, target)
-	}
-	sort.Strings(result.Recovered)
-	sort.Strings(result.Cleared)
-	sort.Strings(result.Conflicts)
-	return result, nil
+	return RecoverNativeJournals(w.stateDir, []*Workspace{w})
 }
 
 func stateMatches(path string, exists bool, content []byte) bool {
