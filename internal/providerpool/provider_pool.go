@@ -25,6 +25,13 @@ type Pool struct {
 	stagers   map[stagerKey]*SandboxStager
 
 	idleTimeout time.Duration
+	// planIdleTTL is how long a plan may sit unused before the sweep expires
+	// it and releases its stager; zero turns expiry off.
+	planIdleTTL time.Duration
+	// workspaces lists every open workspace, so the sweep also reaches plans
+	// that hold no stager: intents never prepared, and preparations a
+	// restart discarded. Without it only workspaces with a stager are swept.
+	workspaces  func() []*workspacecore.Workspace
 	now         func() time.Time
 	rootMissing func(string) bool
 	reaperMu    sync.Mutex
@@ -37,6 +44,7 @@ func New(sandboxBase string, factory Factory) *Pool {
 	return &Pool{
 		factory:     factory,
 		idleTimeout: DefaultProviderIdleTimeout,
+		planIdleTTL: workspacecore.PlanIdleTTL(),
 		now:         time.Now,
 		rootMissing: providerRootMissing,
 		sandboxBase: sandboxBase,
@@ -213,8 +221,12 @@ func (p *Pool) SandboxBaseDir() string {
 // workspace, or nil.
 func (p *Pool) Stager(workspaceID workspacecore.ID, planID string) *SandboxStager {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.stagers[stagerKey{workspace: workspaceID, planID: planID}]
+	stager := p.stagers[stagerKey{workspace: workspaceID, planID: planID}]
+	p.mu.Unlock()
+	if stager != nil {
+		stager.MarkUsed()
+	}
+	return stager
 }
 
 // stagersFor lists the sandbox stagers registered for one workspace, in no

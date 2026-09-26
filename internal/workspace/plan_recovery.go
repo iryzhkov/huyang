@@ -12,22 +12,26 @@ func (w *Workspace) RecoverablePreparedPlan(reference string) (PlanRecord, bool)
 		if plan.PlanID != reference && plan.Preparation.PreparedRevision != reference {
 			continue
 		}
-		restartRestored := false
-		for i := len(plan.Events) - 1; i >= 0; i-- {
-			event := plan.Events[i]
-			if event.Action == "provider_restart_restore" &&
-				event.Outcome == "provider_buffers_discarded_reprepare_available" {
-				restartRestored = true
-				break
-			}
-			if event.Action == "prepare" || event.Action == "prepare_failed" {
-				break
-			}
-		}
-		if !restartRestored {
+		if !restartRestored(plan) {
 			continue
 		}
 		return clonePlan(plan), true
 	}
 	return PlanRecord{}, false
+}
+
+// restartRestored reports whether a plan's latest preparation was discarded by
+// a service restart rather than by a failed prepare of its own.
+func restartRestored(plan PlanRecord) bool {
+	for i := len(plan.Events) - 1; i >= 0; i-- {
+		event := plan.Events[i]
+		if event.Action == "provider_restart_restore" &&
+			event.Outcome == "provider_buffers_discarded_reprepare_available" {
+			return true
+		}
+		if event.Action == "prepare" || event.Action == "prepare_failed" {
+			return false
+		}
+	}
+	return false
 }

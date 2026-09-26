@@ -178,7 +178,8 @@ func TestDiscardAndTransitionRefuseIllegalEdges(t *testing.T) {
 	}
 	for from, to := range map[PlanState]PlanState{
 		PlanOpen: PlanCommitted, PlanReady: PlanDiscarded, PlanCommitted: PlanRolledBack,
-		PlanRecoveryRequired: PlanDiscarded, PlanDiscarded: PlanOpen, PlanExpired: PlanPreparing,
+		PlanRecoveryRequired: PlanDiscarded, PlanDiscarded: PlanOpen, PlanExpired: PlanCommitted,
+		PlanCommitting: PlanExpired, PlanPreparing: PlanExpired,
 	} {
 		if canTransition(from, to) {
 			t.Fatalf("state machine allows %s -> %s", from, to)
@@ -187,6 +188,7 @@ func TestDiscardAndTransitionRefuseIllegalEdges(t *testing.T) {
 	for from, to := range map[PlanState]PlanState{
 		PlanCommitting: PlanConflicted, PlanConflicted: PlanOpen, PlanFailed: PlanPreparing,
 		PlanRecoveryRequired: PlanRolledBack, PlanPreviewed: PlanExpired,
+		PlanReady: PlanExpired, PlanExpired: PlanPreparing,
 	} {
 		if !canTransition(from, to) {
 			t.Fatalf("state machine refuses %s -> %s", from, to)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/iryzhkov/huyang/internal/provider"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
@@ -84,6 +85,26 @@ type SandboxStager struct {
 	verification     workspacecore.VerificationResult
 	preparedRevision string
 	done             bool
+	// lastUsed is when a caller last looked this stager up or verified through
+	// it. The idle plan sweep counts it as use of the plan, and it is the grace
+	// that keeps a stager created for a prepare that has not started yet.
+	lastUsed time.Time
+}
+
+// MarkUsed records that a caller is using this stager's preparation now.
+func (s *SandboxStager) MarkUsed() {
+	now := s.pool.now()
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if now.After(s.lastUsed) {
+		s.lastUsed = now
+	}
+}
+
+func (s *SandboxStager) lastUse() time.Time {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.lastUsed
 }
 
 func (s *SandboxStager) Epoch() uint64 {
@@ -178,6 +199,7 @@ func (s *SandboxStager) SetPreparedRevision(revision string) {
 func (s *SandboxStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	s.MarkUsed()
 	sandbox, prepared, done := s.snapshot()
 	if sandbox == nil || done {
 		return workspacecore.VerificationResult{}, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
@@ -233,6 +255,9 @@ func (s *SandboxStager) Stage(ctx context.Context, request workspacecore.PlanSta
 	s.stateMu.Lock()
 	s.prepared, s.verification = request, verification
 	s.stateMu.Unlock()
+	// A prepare can outlast the idle limit on a slow project; the plan's
+	// idle time starts when its preparation exists, not when it was asked for.
+	s.MarkUsed()
 	return nil
 }
 
@@ -476,9 +501,11 @@ func (p *Pool) PreparedStager(workspace *workspacecore.Workspace, reference stri
 			continue
 		}
 		if candidate.planID == reference {
+			candidate.MarkUsed()
 			return candidate
 		}
 		if _, result, available := candidate.PreparedRequest(); available && result.Revision == reference {
+			candidate.MarkUsed()
 			return candidate
 		}
 	}
@@ -493,6 +520,7 @@ func (p *Pool) PlanStager(workspace *workspacecore.Workspace, planID string, pla
 	p.mu.Unlock()
 	if existing != nil {
 		if existing.reusable(planRevision) {
+			existing.MarkUsed()
 			return existing, nil
 		}
 		if !create && !existing.finished() {
@@ -521,10 +549,12 @@ func (p *Pool) PlanStager(workspace *workspacecore.Workspace, planID string, pla
 	stager := &SandboxStager{
 		pool: p, workspace: workspace, sandboxBase: p.sandboxBase,
 		planID: planID, planRevision: planRevision, baseRevision: fmt.Sprintf("wsrev_%d", identity.StateSeq),
+		lastUsed: p.now(),
 	}
 	p.mu.Lock()
 	if current := p.stagers[key]; current != nil && current.reusable(planRevision) {
 		p.mu.Unlock()
+		current.MarkUsed()
 		return current, nil
 	}
 	p.stagers[key] = stager

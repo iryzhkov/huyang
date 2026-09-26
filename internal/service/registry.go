@@ -100,6 +100,17 @@ func (r *workspaceRegistry) Lookup(id workspacecore.ID) *workspacecore.Workspace
 	return r.items[id]
 }
 
+// All returns every open workspace, in no particular order.
+func (r *workspaceRegistry) All() []*workspacecore.Workspace {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	all := make([]*workspacecore.Workspace, 0, len(r.items))
+	for _, workspace := range r.items {
+		all = append(all, workspace)
+	}
+	return all
+}
+
 // Adopt records a freshly opened workspace unless an equivalent definition
 // (same kind, root and file allowlist) is already registered, in which case
 // the registered workspace is returned and created is false. A new record

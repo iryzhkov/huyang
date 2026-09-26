@@ -355,6 +355,8 @@ func missingPreparation(err error, plan workspacecore.PlanRecord, inspectErr err
 	switch {
 	case inspectErr != nil:
 		return inspectErr
+	case plan.State == workspacecore.PlanExpired:
+		return workspacecore.ExpiredPlanError(plan)
 	case plan.State != workspacecore.PlanReady && plan.State != workspacecore.PlanProvisional:
 		return workspacecore.Codedf(workspacecore.CodePlanStateInvalid,
 			"plan %s is %s and holds no preparation to commit; only a prepared plan is applied", plan.PlanID, plan.State)
@@ -592,7 +594,7 @@ func planStateNext(plan workspacecore.PlanRecord) []any {
 		return []any{with("apply", map[string]any{"prepared_revision": preparedRevisionOf(plan), "accept_provisional": true, "use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanConflicted, workspacecore.PlanFailed:
 		return []any{with("inspect", nil), with("discard", nil)}
-	case workspacecore.PlanOpen, workspacecore.PlanPreviewed:
+	case workspacecore.PlanOpen, workspacecore.PlanPreviewed, workspacecore.PlanExpired:
 		return []any{with("prepare", map[string]any{"use_new_idempotency_key": true}), with("discard", nil)}
 	case workspacecore.PlanRecoveryRequired:
 		return []any{with("inspect", nil)}

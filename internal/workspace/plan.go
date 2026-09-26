@@ -76,15 +76,17 @@ var planTransitions = map[PlanState][]PlanState{
 	PlanPreviewed:  {PlanOpen, PlanPreviewed, PlanPreparing, PlanDiscarded, PlanExpired},
 	PlanPreparing:  {PlanConflicted, PlanFailed, PlanProvisional, PlanReady},
 	PlanConflicted: {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
-	PlanFailed:     {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded},
+	// FAILED reaches EXPIRED only for a preparation a service restart discarded
+	// and apply could still recreate; see planExpirable.
+	PlanFailed: {PlanOpen, PlanPreparing, PlanRollingBack, PlanDiscarded, PlanExpired},
 	// READY and PROVISIONAL reach CONFLICTED because a commit can be refused
 	// before it is admitted - the canonical bytes moved under the preparation -
 	// and that is a conflict, not a failure of the plan. Without the edge the
 	// refusal was correct but carried an internal "cannot move from PROVISIONAL
 	// to CONFLICTED" behind it, and the plan stayed in a state that claimed it
 	// was still applicable.
-	PlanProvisional: {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted},
-	PlanReady:       {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted},
+	PlanProvisional: {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted, PlanExpired},
+	PlanReady:       {PlanCommitting, PlanRollingBack, PlanFailed, PlanConflicted, PlanExpired},
 	PlanCommitting:  {PlanCommitted, PlanRecoveryRequired, PlanConflicted, PlanFailed},
 	// ROLLING_BACK -> OPEN is how a prepared plan is revised: the preparation is
 	// released and the plan returns to being an intent, rather than ending as a
@@ -94,7 +96,9 @@ var planTransitions = map[PlanState][]PlanState{
 	PlanCommitted:        {},
 	PlanRolledBack:       {},
 	PlanDiscarded:        {},
-	PlanExpired:          {},
+	// An expired plan released its preparation but kept its operations, so it
+	// can be prepared again, edited or discarded, exactly like a failed one.
+	PlanExpired: {PlanOpen, PlanPreparing, PlanDiscarded},
 }
 
 // canTransition reports whether the plan state machine allows moving from one state to
@@ -238,7 +242,13 @@ type PlanEvent struct {
 
 // recordPlanEvent appends one event, stamps UpdatedAt, and applies event retention.
 func recordPlanEvent(plan *PlanRecord, action string, outcome string) {
-	plan.UpdatedAt = time.Now().UTC()
+	recordPlanEventAt(plan, action, outcome, time.Now().UTC())
+}
+
+// recordPlanEventAt is recordPlanEvent at a given instant, for the idle sweep,
+// which decides on the clock it was handed and stamps the event with the same one.
+func recordPlanEventAt(plan *PlanRecord, action string, outcome string, at time.Time) {
+	plan.UpdatedAt = at
 	plan.Events = append(plan.Events, PlanEvent{
 		Action: action, PlanRevision: plan.PlanRevision, Outcome: outcome, At: plan.UpdatedAt,
 	})
@@ -346,6 +356,16 @@ func (w *Workspace) loadPlans() error {
 		}
 		w.plans[id] = plan
 		changed[id] = true
+	}
+	// A plan that went idle before the restart expires now rather than at the
+	// first sweep, so apply can never recreate a preparation that is already
+	// past its limit.
+	expired, err := w.expireIdlePlansLocked(time.Now().UTC(), PlanIdleTTL(), nil)
+	if err != nil {
+		return err
+	}
+	for _, plan := range expired {
+		changed[plan.PlanID] = true
 	}
 	dropped, compacted, err := w.pruneTerminalPlansLocked(time.Now().UTC())
 	if err != nil {

@@ -87,6 +87,7 @@ func (h *Handlers) resolvePrepared(requestID string, workspace *workspacecore.Wo
 	}
 	for _, stager := range h.pool.StagersFor(identity.ID) {
 		if view, ok := stager.Prepared(); ok && view.PreparedRevision == selector.Revision {
+			stager.MarkUsed()
 			return view, nil
 		}
 	}

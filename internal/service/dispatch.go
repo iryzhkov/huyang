@@ -59,6 +59,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 			SchedulerInfo: scheduler.description,
 		}),
 	}
+	direct.handlers.ProviderPool().SetWorkspaceSource(registry.All)
 	direct.loadErr = direct.loadState()
 	return direct
 }

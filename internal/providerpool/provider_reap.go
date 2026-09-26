@@ -41,7 +41,8 @@ func providerRootMissing(root string) bool {
 // ReapIdle closes unused canonical providers. Slots remain in the map:
 // deleting one could orphan a provider opened by a caller holding its pointer.
 // Debug providers are pinned, including canonical providers reused for debugging.
-// Sandbox stagers have a separate plan lifetime and are never reaped here.
+// Sandbox stagers have a separate plan lifetime and are never reaped here;
+// ExpireIdlePlans releases them with their plan.
 func (p *Pool) ReapIdle() int {
 	p.mu.Lock()
 	slots := make([]*providerSlot, 0, len(p.providers))
@@ -109,6 +110,7 @@ func (p *Pool) StartReaper(interval time.Duration) {
 				return
 			case <-ticker.C:
 				p.ReapIdle()
+				p.ExpireIdlePlans()
 			}
 		}
 	}()
