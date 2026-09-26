@@ -17,6 +17,19 @@ local client = require("huyang.client")
 
 local ledgers = {}    -- [client] = { entry, ... }, newest last
 local groups = {}     -- [client] = { seq = n, open = n or nil }
+local forgotten = {}  -- [client] = undo steps dropped by the bounds below
+
+-- Bounds on one client's ledger. Every entry keeps the lines an edit
+-- replaced and the lines it wrote, and a replace_pattern keeps both whole
+-- files, for as long as the provider runs: nothing takes entries out except
+-- an undo, so a busy agent's history grew without limit inside a provider
+-- that the idle reaper never reached. Past either bound the oldest whole
+-- steps are forgotten, never part of one, and the newest step is always
+-- kept however large it is. Sixty-four steps is deeper than any undo an
+-- agent has been seen to ask for; fifty thousand lines is a few megabytes
+-- of text.
+M.MAX_STEPS = 64
+M.MAX_LINES = 50000
 
 local function ledger()
     return client.slot(ledgers)
@@ -70,12 +83,39 @@ local function stamp(entry)
     end
 end
 
+local function entry_lines(e)
+    return #(e.old_lines or {}) + #(e.new_lines or {})
+end
+
+-- Forget the oldest steps of `current` until it fits M.MAX_STEPS and
+-- M.MAX_LINES. A step is every leading entry that shares the oldest
+-- group, the same grouping undo_last uses, so an undo never meets half a
+-- step whose other half was forgotten.
+local function trim(current)
+    local steps, lines = count_steps(current), 0
+    for _, e in ipairs(current) do lines = lines + entry_lines(e) end
+    local dropped = 0
+    while steps > 1 and (steps > M.MAX_STEPS or lines > M.MAX_LINES) do
+        local group = current[1].group
+        repeat
+            lines = lines - entry_lines(table.remove(current, 1))
+        until #current == 0 or group == nil or current[1].group ~= group
+        steps = steps - 1
+        dropped = dropped + 1
+    end
+    if dropped > 0 then
+        local id = client.current()
+        forgotten[id] = (forgotten[id] or 0) + dropped
+    end
+end
+
 --- Record one applied edit.
 --- entry = { file, bufnr, name_path, kind, first, last, old_lines, new_count }
 function M.record(entry)
     stamp(entry)
     local current = ledger()
     current[#current + 1] = entry
+    trim(current)
     -- Live UI: show the edit in the code window as it happens.
     pcall(function()
         require("huyang.ui").on_edit(entry)
@@ -85,6 +125,13 @@ end
 --- Number of edits this client has recorded.
 function M.count()
     return #ledger()
+end
+
+--- How many of this client's oldest undo steps the ledger bounds have
+--- forgotten, so an undo that runs out of history can say it was cut rather
+--- than suggest there was nothing older.
+function M.forgotten()
+    return forgotten[client.current()] or 0
 end
 
 --- Return this client's recorded edits and start it a fresh ledger.

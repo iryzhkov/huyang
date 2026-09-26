@@ -2583,11 +2583,20 @@ end
 -- an action another client was offered.
 local action_cache = {}   -- [client] = { next = n, [token] = entry }
 
+-- Tokens are only removed when their action is applied, and most listed
+-- actions never are, so each client's cache keeps only its newest
+-- MAX_CACHED_ACTIONS listings. Each one holds the server's raw actions, whole
+-- workspace edits included. Tokens are consecutive, so the one that falls out
+-- is always next - MAX_CACHED_ACTIONS, and applying it answers "unknown or
+-- expired" like any other stale token.
+local MAX_CACHED_ACTIONS = 32
+
 local function cache_actions(entry)
     local mine = client_slot(action_cache)
     mine.next = (mine.next or 0) + 1
     local token = tostring(mine.next)
     mine[token] = entry
+    mine[tostring(mine.next - MAX_CACHED_ACTIONS)] = nil
     return token
 end
 
@@ -4085,6 +4094,11 @@ local function undo_edit(args)
         unit = "reverted files",
         reach = "all of them were reverted; only the listing is cut",
     })
+    if result.remaining == 0 and edits.forgotten() > 0 then
+        result.history_note = ("%d older undo step(s) of yours were forgotten earlier to bound the "
+            .. "editor's memory (the ledger keeps the newest %d steps and %d lines); what they "
+            .. "wrote is still in the files"):format(edits.forgotten(), edits.MAX_STEPS, edits.MAX_LINES)
+    end
     if others.clients > 0 then
         result.other_clients = ("%d other client(s) share this workspace and had %d undo step(s) "
             .. "on it, which this call did not touch: the ledger is per client, so undo_edit "
@@ -4916,6 +4930,10 @@ M.silent_server = silent_server
 M.stopped_servers = stopped_servers
 M.code_actions = code_actions
 M.apply_code_action = apply_code_action
+-- Exported for tests/unit_edit.lua: the bound on the code-action cache.
+M.cache_actions = cache_actions
+M.cached_actions = cached_actions
+M.MAX_CACHED_ACTIONS = MAX_CACHED_ACTIONS
 M.huyang_workspace_edit = huyang_workspace_edit
 M.replace_symbol_body = replace_symbol_body
 M.replace_symbol_lines = replace_symbol_lines

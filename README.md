@@ -297,6 +297,8 @@ is a workspace with an unfinished commit journal or a plan that was committing, 
 opened at start so its recovery runs then.
 
 In-memory stores are bounded too: 32 revisions per document (`maxRevisionsPerDocument`),
+16 MiB of superseded revision records per workspace, least recently superseded evicted
+first (`maxHistoricalRevisionBytes`),
 20000 live handles (`maxLiveHandles`), 64 live result sets (`maxLiveResultSets`), and 20
 diagnostic updates per reply (`maxDiagnosticUpdates`).
 

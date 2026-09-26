@@ -135,7 +135,7 @@ func (c *Conflict) Error() string {
 // to still hold.
 const maxRevisionsPerDocument = 32
 
-const unknownRevisionDetail = "expected revision is not known to this service instance: it was issued before a restart, under an earlier provider epoch, or before the retained revision history"
+const unknownRevisionDetail = "expected revision is not known to this service instance: it was issued before a restart, under an earlier provider epoch, or before the retained revision history, whose oldest superseded revisions are evicted when it outgrows its memory budget"
 
 type cachedDocument struct {
 	disk        DiskSnapshot
@@ -153,13 +153,16 @@ type Workspace struct {
 	// revisionHistory keeps the insertion order of revisions per absolute
 	// path so that revisions can be pruned oldest-first.
 	revisionHistory map[string][]RevisionID
-	knownPaths      map[string]struct{}
-	pathsPrimed     bool
-	allowlist       map[string]struct{}
-	limits          Limits
-	stateDir        string
-	sectioner       Sectioner
-	failures        []EnvironmentFailure
+	// historical bounds the memory spent on superseded revisions across all
+	// documents; see maxHistoricalRevisionBytes.
+	historical  *revisionBudget
+	knownPaths  map[string]struct{}
+	pathsPrimed bool
+	allowlist   map[string]struct{}
+	limits      Limits
+	stateDir    string
+	sectioner   Sectioner
+	failures    []EnvironmentFailure
 	// observed is the bounded log of state-sequence steps the workspace
 	// advanced on an observation rather than a write of its own.
 	observed []ObservedChange
@@ -384,12 +387,19 @@ func (w *Workspace) snapshot(path string, layer ProviderLayer, forceHash bool) (
 
 // rememberRevisionLocked records a snapshot under its revision token and
 // prunes the oldest snapshots of the same document beyond
-// maxRevisionsPerDocument. The caller holds w.mu.
+// maxRevisionsPerDocument. The last entry of a document's history is its
+// current revision; every earlier entry is superseded and counts against
+// the workspace's historical revision budget, which evicts the least
+// recently superseded revisions of any document. The caller holds w.mu.
 func (w *Workspace) rememberRevisionLocked(absolute string, snapshot DocumentSnapshot) {
 	if w.revisionHistory == nil {
 		w.revisionHistory = make(map[string][]RevisionID)
 	}
 	history := w.revisionHistory[absolute]
+	if last := len(history) - 1; last >= 0 && history[last] != snapshot.Revision {
+		w.retireRevisionLocked(absolute, history[last])
+	}
+	w.reviveRevisionLocked(snapshot.Revision)
 	for index, id := range history {
 		if id == snapshot.Revision {
 			history = append(history[:index], history[index+1:]...)
@@ -398,11 +408,13 @@ func (w *Workspace) rememberRevisionLocked(absolute string, snapshot DocumentSna
 	}
 	history = append(history, snapshot.Revision)
 	for len(history) > maxRevisionsPerDocument {
+		w.reviveRevisionLocked(history[0])
 		delete(w.revisions, history[0])
 		history = history[1:]
 	}
 	w.revisionHistory[absolute] = history
 	w.revisions[snapshot.Revision] = snapshot
+	w.enforceRevisionBudgetLocked()
 }
 
 // RevisionHistoryLength reports how many snapshots are retained for a
