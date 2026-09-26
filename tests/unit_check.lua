@@ -357,6 +357,8 @@ do
         chosen == dir and vim.env.CARGO_TARGET_DIR == dir and vim.fn.isdirectory(dir) == 1,
         { chosen = chosen, env = vim.env.CARGO_TARGET_DIR })
     check("prepare again on the same root reuses the directory", cargo_target.prepare(root) == dir)
+    check("the stamp records the project root",
+        vim.fn.readfile(dir .. "/.huyang-last-used")[1] == vim.fs.normalize(root))
     local sandbox = scratch .. "/sandbox-1234/tree"
     vim.fn.mkdir(sandbox, "p")
     vim.fn.writefile({ "[package]" }, sandbox .. "/Cargo.toml")
@@ -419,6 +421,16 @@ do
     vim.env.HUYANG_CARGO_TARGET_MAX_AGE_DAYS = original
     check("HUYANG_CARGO_TARGET_MAX_AGE_DAYS sets the age, 30 otherwise", seven == 7 and fallback == 30,
         { seven, fallback })
+    removed = {}
+    local project = base .. "/project"
+    vim.fn.mkdir(project, "p")
+    local kept = make("kept-eeee", 0, true)
+    vim.fn.writefile({ project }, kept .. "/.huyang-last-used")
+    local gone = make("gone-ffff", 0, true)
+    vim.fn.writefile({ base .. "/deleted-attempt/workspace" }, gone .. "/.huyang-last-used")
+    cargo_target.prune({ base = base, now = now, max_age_days = 30, remove = remove })
+    check("a cache whose project root is gone is pruned at once; a fresh one whose root exists is kept",
+        vim.deep_equal(removed, { gone }) and vim.fn.isdirectory(kept) == 1, removed)
     check("pruning a missing cache directory is a no-op",
         #cargo_target.prune({ base = base .. "/absent", remove = remove }) == 0)
     vim.fn.delete(base, "rf")

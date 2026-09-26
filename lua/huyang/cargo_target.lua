@@ -22,8 +22,9 @@ M.DEFAULT_MAX_AGE_DAYS = 30
 
 -- The suffix earlier versions gave the per-session directory in the tempdir.
 local LEGACY_SUFFIX = "-huyang-cargo-target"
--- Touched each time a session uses a directory: a directory's own mtime
--- does not change when cargo writes below it.
+-- Written each time a session uses a directory, holding the project root it
+-- builds: a directory's own mtime does not change when cargo writes below
+-- it, and the root tells the prune when the project itself is gone.
 local STAMP = ".huyang-last-used"
 
 -- The directory CARGO_TARGET_DIR was set to by this process, so a second
@@ -82,8 +83,18 @@ local function last_used(dir)
     return stat and stat.mtime.sec or nil
 end
 
--- Remove the per-root directories under base not used for max_age_days.
--- keep is never removed. Returns the paths removed.
+-- True when the stamp names a project root that no longer exists, such as
+-- a t3-steward attempt workspace or a deleted checkout: nothing can use
+-- that build again.
+local function root_gone(dir)
+    local ok, lines = pcall(vim.fn.readfile, dir .. "/" .. STAMP, "", 1)
+    local root = ok and lines and lines[1] or ""
+    return root:sub(1, 1) == "/" and vim.uv.fs_stat(root) == nil
+end
+
+-- Remove the per-root directories under base not used for max_age_days or
+-- whose project root is gone. keep is never removed. Returns the paths
+-- removed.
 function M.prune(opts)
     opts = opts or {}
     local base = opts.base or M.base_dir()
@@ -93,7 +104,7 @@ function M.prune(opts)
     for _, name in ipairs(subdirs(base)) do
         local dir = base .. "/" .. name
         local used = last_used(dir)
-        if dir ~= opts.keep and used and used < cutoff then
+        if dir ~= opts.keep and ((used and used < cutoff) or root_gone(dir)) then
             remove(dir)
             removed[#removed + 1] = dir
         end
@@ -182,7 +193,7 @@ function M.prepare(root, cache_root)
         if type(cache_root) ~= "string" or cache_root == "" then cache_root = root end
         dir = M.dir_for(cache_root)
         vim.fn.mkdir(dir, "p")
-        pcall(vim.fn.writefile, {}, dir .. "/" .. STAMP)
+        pcall(vim.fn.writefile, { vim.fs.normalize(cache_root) }, dir .. "/" .. STAMP)
         vim.env.CARGO_TARGET_DIR = dir
         ours = dir
     end
