@@ -21,7 +21,17 @@ func TestMain(m *testing.M) {
 			panic(fmt.Sprintf("tool %s produced an envelope that violates the output schema: %v\n%#v", tool, err, envelope))
 		}
 	})
-	os.Exit(m.Run())
+	// Every test spools into a scratch directory unless it names its own, so
+	// the suite neither writes to nor applies retention to the developer's
+	// real friction spool, which an `enabled` file there would otherwise arm.
+	spool, err := os.MkdirTemp("", "huyang-friction-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HUYANG_FRICTION_DIR", spool)
+	code := m.Run()
+	os.RemoveAll(spool)
+	os.Exit(code)
 }
 
 func assertModernOutputValid(t *testing.T, value map[string]any) {

@@ -189,6 +189,32 @@ func (r *directReplay) inFlight() bool {
 	}
 }
 
+// workspaceInFlight reports whether a stateful call against the workspace
+// has not finished yet.
+func (s *receiptStore) workspaceInFlight(workspaceID workspacecore.ID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, replay := range s.replays {
+		if replayWorkspace(key) == workspaceID && replay.inFlight() {
+			return true
+		}
+	}
+	return false
+}
+
+// forgetWorkspace drops the completed receipts of a workspace the registry
+// no longer knows, so they stop counting against the byte budget. Its
+// receipt file is removed with the rest of its state by the caller.
+func (s *receiptStore) forgetWorkspace(workspaceID workspacecore.ID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, replay := range s.replays {
+		if replayWorkspace(key) == workspaceID && !replay.inFlight() {
+			delete(s.replays, key)
+		}
+	}
+}
+
 func replayWorkspace(key string) workspacecore.ID {
 	workspace, _, _ := strings.Cut(key, "\x00")
 	return workspacecore.ID(workspace)

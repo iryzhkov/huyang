@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +33,11 @@ type directWorkspaces struct {
 	toolTimeout time.Duration
 	requests    atomic.Uint64
 	loadErr     error
+
+	// sweepMu guards the periodic registry sweep's stop and done channels.
+	sweepMu   sync.Mutex
+	sweepStop chan struct{}
+	sweepDone chan struct{}
 }
 
 func newDirectWorkspaces(stateDir string) *directWorkspaces {
@@ -65,7 +71,10 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 
 // loadState restores the registry and the receipts, migrating a version 1
 // registry's embedded receipts into per-workspace files, and reaps sandboxes
-// left by an earlier process and a command cache that outgrew its bound.
+// left by an earlier process and a command cache that outgrew its bound. The
+// registry is swept before the receipts are read, so the receipts of a
+// workspace about to be forgotten are never loaded, and only workspaces with
+// unfinished work are opened; every other one opens on first use.
 func (d *directWorkspaces) loadState() error {
 	if removed, err := workspacecore.PruneCommandCache(); err != nil {
 		log.Printf("huyang: command cache: %v", err)
@@ -76,6 +85,7 @@ func (d *directWorkspaces) loadState() error {
 	if err != nil {
 		return err
 	}
+	d.sweepWorkspaceState(time.Now())
 	if err := d.receipts.loadReceipts(); err != nil {
 		return err
 	}
@@ -87,6 +97,7 @@ func (d *directWorkspaces) loadState() error {
 			return fmt.Errorf("rewrite legacy registry: %w", err)
 		}
 	}
+	d.registry.openPending()
 	return workspacecore.ReapSandboxes(d.handlers.ProviderPool().SandboxBaseDir(), nil)
 }
 
@@ -102,6 +113,7 @@ func (d *directWorkspaces) get(id workspacecore.ID) *workspacecore.Workspace {
 }
 
 func (d *directWorkspaces) closeProviders() {
+	d.stopSweeper()
 	d.handlers.ProviderPool().Close()
 }
 

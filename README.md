@@ -170,6 +170,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_HEADLESS_INIT` | unset | Init file handed to every embedded Neovim the service starts, for language-server configuration. | `AGENT99_HEADLESS_INIT` |
 | `HUYANG_FRICTION` | unset | `1` enables the friction spool, `0` disables it; otherwise the spool is enabled by a file named `enabled` in the spool directory. | `AGENT99_FRICTION`, then `TOOLFEEDBACK` |
 | `HUYANG_FRICTION_DIR` | `$XDG_DATA_HOME/toolfeedback`, else `~/.local/share/toolfeedback` | Spool directory; Huyang writes under its own `huyang/` subdirectory. | `AGENT99_FRICTION_DIR`, then `TOOLFEEDBACK_DIR` |
+| `HUYANG_FRICTION_RETENTION_DAYS` | 90 | Days this host's spool files are kept, matching the `toolfeedback` reader's own retention; older ones, and the oldest beyond 256 MiB in total (`frictionSpoolMaxBytes`), are removed at service start and when the day file rotates. Files pulled from other hosts are left alone. | no |
 | `HUYANG_COMMAND_CACHE` | on | `off`, `0` or `false` gives every verification command throwaway toolchain caches instead of the shared ones under the state directory. Full isolation, at the price of recompiling and re-downloading in every stage. | no |
 | `HUYANG_DIRECT_STATE_DIR` | a fresh temporary directory | State directory for the in-process direct mode; only the test suites call that path. The service uses `--state-dir`. | no |
 | `HUYANG_TEST_FAULTS` | unset | `1` arms the kernel's fault-injection hooks in the embedded provider. Test-only. | no |
@@ -266,7 +267,7 @@ is a named constant in the code:
 
 | Path | Contents | Bound |
 |---|---|---|
-| `registry.json` | Workspace definitions only, format version 2 (`registryStateVersion`). A version 1 file, which also embedded receipts, is migrated on load and rewritten as version 2. | one record per open workspace |
+| `registry.json` | Workspace definitions only, format version 2 (`registryStateVersion`). A version 1 file, which also embedded receipts, is migrated on load and rewritten as version 2. A record whose root a sweep found gone carries `MissingSince`. | one record per registered workspace; a workspace whose root has stayed gone for 7 days (`missingRootGrace`) is forgotten (see below) |
 | `receipts/<workspace>.json` | Idempotency receipts, file version 1. A receipt keeps its full result for 15 minutes (`PayloadWindow`), then is trimmed to provenance fields. | 256 receipts per workspace (`PerWorkspace`), 32 MiB in total (`TotalBytes`), 4096 tombstones per workspace (`Tombstones`); an evicted receipt leaves a tombstone so a late retry is refused with `idempotency_receipt_evicted` rather than re-executed |
 | `plans/<workspace>/<plan>.json` | One plan record per file, format version 2 (`planRecordVersion`). The version 1 layout, one file per workspace holding every plan, is read on open, split into per-plan files, and removed. | terminal plans: newest 200 kept (`planRetainCount`), dropped after 30 days (`planRetainAge`), bulky payloads stripped after 1 hour (`planCompactAge`); events per plan: first 8 and last 56 (`planEventsHead`, `planEventsTail`) |
 | `commit-journals/<workspace>/` | Commit journals, format version 1 (`commitJournalVersion`). Prepared, applying, and recovery-required journals are never collected. | completed journals dropped after 7 days (`commitJournalRetention`), newest 64 kept beyond that (`commitJournalRetainCount`) |
@@ -275,6 +276,24 @@ is a named constant in the code:
 | `sandboxes/sandbox-*/` | Isolated preparation trees, each with an `owner.json` marker (version 1). Sandboxes whose plan is no longer referenced are removed on service start. | one per prepared plan |
 | `command-cache/` | The toolchain caches every verification command shares, so a repeated `verify_run` neither recompiles nor re-downloads: `xdg/` is the cache home for everything that follows the XDG specification, and `go-build/`, `golangci-lint/`, `ccache/`, `sccache/`, `zig/`, `npm/`, `yarn/`, `pip/`, `uv/`, `deno/` and `composer/` cover the toolchains that keep a cache elsewhere. HOME stays throwaway per run, and package or registry homes still come from the user. | removed whole when it passes 4 GiB (`commandCacheMaxBytes`) or when nothing has used it for 30 days (`commandCacheMaxAge`), checked at most daily (`commandCachePruneInterval`) at service start; every entry is reproducible, so deleting the directory only costs a cold build. `HUYANG_COMMAND_CACHE=off` gives each run a throwaway cache instead |
 | `http-token` | Bearer token for `--http` and `--pprof`. | one file |
+
+The per-workspace stores (`receipts/`, `diagnostics/`, `plans/`, `commit-journals/`,
+`test-history/`) are also bounded by the registry. At service start and every hour
+(`registrySweepInterval`) a sweep records when each registered root is first answered as not
+existing, clears that mark if the root comes back, and forgets a workspace whose root has
+stayed gone for 7 days (`missingRootGrace`), deleting its files in every store. Time rather
+than the root's surroundings decides, because an unmounted disk leaves its mount point behind
+and looks exactly like a deleted worktree; a permission or I/O error never counts as missing.
+A workspace is kept, whatever became of its root, while a stateful call, a scheduler lane, a
+provider or sandbox, a plan being prepared or committed, or an unfinished commit journal still
+holds it. The same sweep deletes per-workspace files whose workspace is not registered at all,
+except an unfinished commit journal. Forgetting only costs history: opening the root again
+registers it under a new ID.
+
+Registered workspaces are opened on first use rather than at service start, so the
+diagnostic ledgers and plan records of workspaces nobody is using stay on disk. The exception
+is a workspace with an unfinished commit journal or a plan that was committing, which is
+opened at start so its recovery runs then.
 
 In-memory stores are bounded too: 32 revisions per document (`maxRevisionsPerDocument`),
 20000 live handles (`maxLiveHandles`), 64 live result sets (`maxLiveResultSets`), and 20
@@ -292,6 +311,11 @@ not cross the adapter/service boundary and therefore cannot relocate the daemon'
 
 Each line records the tool, the argument key names, the outcome, and the duration; never
 argument values or replies.
+
+The service keeps its own host's day files for `HUYANG_FRICTION_RETENTION_DAYS` (90 by
+default, the retention `toolfeedback prune` applies) and at most 256 MiB of them, and never
+removes the current day's file. Day files of other hosts, which `toolfeedback pull` copies
+into the same directory, are left for `toolfeedback prune`.
 
 The session a line belongs to is the one the adapter announces when it connects, taken
 from `HUYANG_SESSION_ID` or `CLAUDE_CODE_SESSION_ID` in the adapter's environment and

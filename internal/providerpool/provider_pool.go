@@ -203,6 +203,31 @@ func (p *Pool) Close() {
 	}
 }
 
+// Holds reports whether the pool keeps anything alive for the workspace: a
+// running canonical or debug provider, a caller still leasing its slot, or a
+// sandbox stager of one of its plans. The workspace registry never forgets a
+// workspace the pool still holds. A slot whose lock is taken is in use, so it
+// counts as held rather than being waited on.
+func (p *Pool) Holds(id workspacecore.ID) bool {
+	p.mu.Lock()
+	slot := p.providers[id]
+	for key := range p.stagers {
+		if key.workspace == id {
+			p.mu.Unlock()
+			return true
+		}
+	}
+	p.mu.Unlock()
+	if slot == nil {
+		return false
+	}
+	if !slot.mu.TryLock() {
+		return true
+	}
+	defer slot.mu.Unlock()
+	return slot.backend != nil || slot.users > 0
+}
+
 // sandboxBaseDir is the directory under which plan and verification
 // sandboxes are materialised.
 func (p *Pool) SandboxBaseDir() string {
