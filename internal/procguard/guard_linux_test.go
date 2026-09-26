@@ -82,6 +82,23 @@ func waitGone(t *testing.T, pids ...int) {
 	}
 }
 
+// waitDetached waits until pid runs in a different session from sibling.
+func waitDetached(t *testing.T, pid, sibling int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		stat, err := readStat(pid)
+		peer, peerErr := readStat(sibling)
+		if err == nil && peerErr == nil && stat.session != peer.session {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process %d did not detach into its own session", pid)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func killLater(t *testing.T, pids ...int) {
 	t.Cleanup(func() {
 		for _, pid := range pids {
@@ -137,6 +154,10 @@ wait`
 	}
 	pids := readPIDs(t, stdout, 3)
 	killLater(t, pids...)
+	// $! is printed as soon as the shell forks, before setsid has left the
+	// group; a slow machine would otherwise kill the owner while the third
+	// process is still, correctly, part of the guarded tree.
+	waitDetached(t, pids[2], pids[0])
 	if err := owner.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
