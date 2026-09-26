@@ -54,18 +54,33 @@ type languageSupport struct {
 	failedAttachments []string
 	// starting lists languages whose server has a client on its way but
 	// not yet initialized: neither attached nor failed.
-	starting       []string
-	installOptions map[string][]string
+	starting []string
+	// onDemand lists languages whose server is enabled and startable but
+	// was deliberately not started because the language is incidental to
+	// the project; the first call that loads one of its files starts it.
+	// onDemandServers names the servers configured for them.
+	onDemand        []string
+	onDemandServers []string
+	installOptions  map[string][]string
 }
 
 func summariseLanguageSupport(support map[string]any) languageSupport {
-	tally := languageSupport{attachedServers: []string{}, missing: []string{}, failedAttachments: []string{}, starting: []string{}, installOptions: map[string][]string{}}
+	tally := languageSupport{attachedServers: []string{}, missing: []string{}, failedAttachments: []string{}, starting: []string{}, onDemand: []string{}, onDemandServers: []string{}, installOptions: map[string][]string{}}
 	seenServers := map[string]struct{}{}
 	for _, raw := range mcpapi.AnySlice(support["languages"]) {
 		entry, _ := raw.(map[string]any)
 		reconcileParserSupport(entry)
 		language := fmt.Sprint(entry["filetype"])
 		lsp := fmt.Sprint(entry["lsp"])
+		if fmt.Sprint(entry["attach"]) == "on_demand" {
+			tally.onDemand = append(tally.onDemand, language)
+			for _, server := range mcpapi.AnySlice(entry["configured"]) {
+				if name := strings.TrimSpace(fmt.Sprint(server)); name != "" && !slices.Contains(tally.onDemandServers, name) {
+					tally.onDemandServers = append(tally.onDemandServers, name)
+				}
+			}
+			continue
+		}
 		if fmt.Sprint(entry["attach"]) == "starting" || strings.HasPrefix(lsp, "starting (") {
 			tally.starting = append(tally.starting, language)
 			continue
@@ -97,7 +112,10 @@ func summariseLanguageSupport(support map[string]any) languageSupport {
 	return tally
 }
 
-func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
+// languageServerStatus probes the canonical provider's language servers.
+// languages names filetypes whose servers should be started even when they
+// are incidental to the project and would otherwise start on first use.
+func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, workspace *workspacecore.Workspace, languages []string) map[string]any {
 	backend, release, err := h.pool.Canonical(ctx, workspace)
 	defer release()
 	if err != nil {
@@ -105,7 +123,11 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 		result["next"] = []any{map[string]any{"tool": "language_server_setup", "action": "restart", "use_new_idempotency_key": true}}
 		return result
 	}
-	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, "workspace_support", map[string]any{"root": workspace.Identity().Root})
+	probeArguments := map[string]any{"root": workspace.Identity().Root}
+	if len(languages) > 0 {
+		probeArguments["languages"] = languages
+	}
+	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, "workspace_support", probeArguments)
 	if err != nil {
 		result := modernProviderFailure(requestID, workspace, "language_server_probe_failed", err)
 		result["data"] = map[string]any{"provider": providerpool.Status(ctx, backend)}
@@ -119,7 +141,7 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 	if len(tally.attachedServers) == 0 && len(tally.starting) > 0 {
 		outcome, code = "provisional", "language_server_starting"
 		summary = fmt.Sprintf("No language server is attached yet; still starting for: %s. Retry shortly rather than restarting", strings.Join(tally.starting, ", "))
-	} else if len(tally.attachedServers) == 0 {
+	} else if len(tally.attachedServers) == 0 && len(tally.onDemand) == 0 {
 		outcome, code, summary = "unavailable", "language_server_unavailable", "No workspace language server is attached"
 	} else if len(tally.starting) > 0 {
 		outcome, code = "partial", "language_server_starting"
@@ -128,11 +150,15 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 		outcome, code = "partial", "language_server_attachment_incomplete"
 		summary = fmt.Sprintf("%d language server(s) attached, but configured servers did not attach for: %s", len(tally.attachedServers), strings.Join(tally.failedAttachments, ", "))
 	}
+	if len(tally.onDemand) > 0 {
+		summary += fmt.Sprintf("; servers for %s start on first use (pass languages to start them now)", strings.Join(tally.onDemand, ", "))
+	}
 	result := mcpapi.Envelope(requestID, workspace, outcome, code, summary, map[string]any{
 		"provider": providerpool.Status(ctx, backend), "language_servers": mcpapi.CompactLanguageSupport(support),
 		"attached_language_count": tally.attachedLanguages, "attached_server_count": len(tally.attachedServers),
 		"attached_servers": tally.attachedServers, "missing_languages": tally.missing,
 		"failed_attachment_languages": tally.failedAttachments, "starting_languages": tally.starting, "install_options": tally.installOptions,
+		"on_demand_languages": tally.onDemand, "on_demand_servers": tally.onDemandServers,
 	})
 	if len(tally.missing) > 0 {
 		result["warnings"] = []string{"Some workspace languages have no attached language server."}
@@ -189,14 +215,14 @@ func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, wo
 // restartLanguageServers replaces the canonical provider and verifies that
 // every server attached before the restart attached again.
 func (h *Handlers) restartLanguageServers(ctx context.Context, requestID string, workspace *workspacecore.Workspace) map[string]any {
-	before := h.languageServerStatus(ctx, requestID, workspace)
+	before := h.languageServerStatus(ctx, requestID, workspace, nil)
 	previouslyAttached := attachedServerNames(before)
 	backend, release, err := h.pool.Restart(ctx, workspace)
 	defer release()
 	if err != nil {
 		return mcpapi.Failure(requestID, workspace, "semantic_provider_restart_failed", err)
 	}
-	verified := h.languageServerStatus(ctx, requestID, workspace)
+	verified := h.languageServerStatus(ctx, requestID, workspace, nil)
 	data, _ := verified["data"].(map[string]any)
 	if data == nil {
 		data = map[string]any{}
@@ -204,9 +230,12 @@ func (h *Handlers) restartLanguageServers(ctx context.Context, requestID string,
 	data["provider"] = providerpool.Status(ctx, backend)
 	verified["data"] = data
 	current := attachedServerNames(verified)
+	// A server a tool call had started for an incidental language is not
+	// restarted by the probe; it is on demand again, not lost.
+	onDemand := stringList(data["on_demand_servers"])
 	lost := []string{}
 	for _, server := range previouslyAttached {
-		if !slices.Contains(current, server) {
+		if !slices.Contains(current, server) && !slices.Contains(onDemand, server) {
 			lost = append(lost, server)
 		}
 	}
@@ -223,10 +252,15 @@ func (h *Handlers) restartLanguageServers(ctx context.Context, requestID string,
 
 // attachedServerNames reads the attached servers out of a status envelope.
 func attachedServerNames(status map[string]any) []string {
-	names := []string{}
 	data, _ := status["data"].(map[string]any)
-	for _, server := range mcpapi.AnySlice(data["attached_servers"]) {
-		if name := strings.TrimSpace(fmt.Sprint(server)); name != "" {
+	return stringList(data["attached_servers"])
+}
+
+// stringList reads a list of names out of a decoded value, dropping blanks.
+func stringList(value any) []string {
+	names := []string{}
+	for _, item := range mcpapi.AnySlice(value) {
+		if name := strings.TrimSpace(fmt.Sprint(item)); name != "" {
 			names = append(names, name)
 		}
 	}

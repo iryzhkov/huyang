@@ -208,7 +208,7 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	case "revision_diff":
 		return h.revisionDiff(ctx, requestID, workspace, arguments)
 	case "language_server_status":
-		return h.languageServerStatus(ctx, requestID, workspace)
+		return h.languageServerStatus(ctx, requestID, workspace, stringList(arguments["languages"]))
 	case "language_server_setup":
 		return h.languageServerSetup(ctx, requestID, workspace, arguments)
 	case "navigate":

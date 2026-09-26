@@ -17,6 +17,20 @@ import (
 // well inside one tool call.
 const VerificationAttachWaitMS = 1500
 
+// StagedPaths lists the staged files that exist after the change. The
+// support probe is given them so it starts the servers of the languages
+// about to be diagnosed even when a language is incidental to the project
+// and would otherwise start only on first use, after the attach wait.
+func StagedPaths(files []workspacecore.PlanStageFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		if file.AfterExists {
+			paths = append(paths, file.Path)
+		}
+	}
+	return paths
+}
+
 type providerPlanStager struct {
 	workspace *workspacecore.Workspace
 	provider  provider.Provider
@@ -259,7 +273,7 @@ func (s *SandboxStager) stageIntoSandbox(ctx context.Context, request workspacec
 	s.setResources(sandbox, backend, stager)
 	_, _ = Call(ctx, s.workspace, backend, CallSpec{
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
-	}, "workspace_support", map[string]any{"root": sandbox.Tree, "cargo_root": s.workspace.Identity().Root})
+	}, "workspace_support", map[string]any{"root": sandbox.Tree, "cargo_root": s.workspace.Identity().Root, "files": StagedPaths(request.Files)})
 	abandon := func(err error) (*workspacecore.Sandbox, error) {
 		_ = backend.Close(context.Background())
 		_ = sandbox.Cleanup()
@@ -340,6 +354,7 @@ func (s *SandboxStager) recordStagedDiagnostics(ctx context.Context, sandbox *wo
 		RequestID: fmt.Sprintf("workspace_support_%s", s.planID), TransactionID: s.planID, Timeout: DefaultCallTimeout,
 	}, "workspace_support", map[string]any{
 		"root": sandbox.Tree, "cargo_root": s.workspace.Identity().Root, "attach_wait_ms": VerificationAttachWaitMS,
+		"files": StagedPaths(files),
 	})
 	diagnosticReport, err := RecordStagedDiagnostics(ctx, s.workspace, replacement, files, s.baseRevision, s.planID)
 	if err != nil {

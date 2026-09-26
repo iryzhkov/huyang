@@ -420,7 +420,7 @@ func (h *Handlers) runCanonicalPipeline(ctx context.Context, requestID string, w
 		return workspacecore.VerificationResult{}, policyErr, nil
 	}
 	request := job.request
-	probe := h.openDiagnosticProbe(ctx, requestID, workspace, sandbox.Tree, slices.Contains(job.stages, "diagnostics"))
+	probe := h.openDiagnosticProbe(ctx, requestID, workspace, sandbox.Tree, files, slices.Contains(job.stages, "diagnostics"))
 	if probe.ready {
 		request.DiagnosticVerifier = probe.verifier(workspace, requestID)
 	}
@@ -447,7 +447,7 @@ type diagnosticProbe struct {
 	report  *workspacecore.DiagnosticReport
 }
 
-func (h *Handlers) openDiagnosticProbe(ctx context.Context, requestID string, workspace *workspacecore.Workspace, tree string, wanted bool) *diagnosticProbe {
+func (h *Handlers) openDiagnosticProbe(ctx context.Context, requestID string, workspace *workspacecore.Workspace, tree string, files []workspacecore.PlanStageFile, wanted bool) *diagnosticProbe {
 	probe := &diagnosticProbe{}
 	if !wanted {
 		return probe
@@ -458,7 +458,7 @@ func (h *Handlers) openDiagnosticProbe(ctx context.Context, requestID string, wo
 	}
 	probe.backend = backend
 	_, err = providerpool.CallCanonical(ctx, "workspace_support_"+requestID, workspace, backend,
-		"workspace_support", map[string]any{"root": tree, "attach_wait_ms": providerpool.VerificationAttachWaitMS})
+		"workspace_support", map[string]any{"root": tree, "attach_wait_ms": providerpool.VerificationAttachWaitMS, "files": providerpool.StagedPaths(files)})
 	probe.ready = err == nil
 	return probe
 }

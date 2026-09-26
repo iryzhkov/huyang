@@ -393,8 +393,9 @@ func orientationTools(orient []Profile) []ToolDescriptor {
 			"numbered":  map[string]any{"type": "boolean", "description": "Prefix each line with its number and a tab."},
 			"limit":     map[string]any{"type": "integer", "minimum": 1, "description": "history and changes views: number of entries."},
 		}), ExperimentalProperties: preparedSelectorProperties()},
-		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassProviderRead, Name: "language_server_status", Description: "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace. Servers start for the project's main languages; one for an incidental language is reported on_demand and starts on the first call that touches its files, or now when named in languages.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(),
+			"languages": map[string]any{"type": "array", "items": stringSchema("Filetype, such as python or typescript."), "description": "Start the servers for these languages now instead of on first use."},
 		})},
 		{Class: ClassPureRead, Name: "diagnostics", Description: "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.", Profiles: orient, ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "since": stringSchema("Optional diagnostic cursor."),

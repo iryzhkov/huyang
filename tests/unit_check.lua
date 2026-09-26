@@ -484,6 +484,99 @@ do
     vim.fn.delete(scratch, "rf")
 end
 
+-- The support probe starts servers only for a project's significant
+-- languages. The counts are the ones observed on this project and on a Rust
+-- project whose two JavaScript files used to cost a ts_ls per provider.
+do
+    local function names(set)
+        local list = vim.tbl_keys(set)
+        table.sort(list)
+        return list
+    end
+    local huyang = { go = 355, json = 236, markdown = 139, lua = 30, python = 15, typescript = 12, sh = 11, gomod = 13 }
+    check("a Go project starts only its Go server",
+        vim.deep_equal(names(install._eager_filetypes(huyang)), { "go" }), names(install._eager_filetypes(huyang)))
+    local carpc = { rust = 104, toml = 19, markdown = 9, wgsl = 4, html = 2, javascript = 2, css = 2 }
+    check("two JavaScript files in a Rust project start no ts_ls",
+        vim.deep_equal(names(install._eager_filetypes(carpc)), { "rust" }), names(install._eager_filetypes(carpc)))
+    local mixed = { go = 50, typescript = 20, python = 5, json = 400 }
+    check("a fifth of the source files is significant, data files do not dilute it",
+        vim.deep_equal(names(install._eager_filetypes(mixed)), { "go", "typescript" }), names(install._eager_filetypes(mixed)))
+    local monorepo = { go = 2000, typescript = 150, python = 40 }
+    check("a hundred files are significant whatever their share",
+        vim.deep_equal(names(install._eager_filetypes(monorepo)), { "go", "typescript" }), names(install._eager_filetypes(monorepo)))
+    check("a tree of data files starts the server of its largest filetype",
+        vim.deep_equal(names(install._eager_filetypes({ yaml = 10, json = 3 })), { "yaml" }))
+    check("a requested language is started however small",
+        vim.deep_equal(names(install._eager_filetypes(huyang, { python = true })), { "go", "python" }))
+    local requested = install._requested_filetypes({ languages = { "lua", "" }, files = { "bench/x.py", "notes.nosuchext" } })
+    check("requests name languages directly or through files",
+        vim.deep_equal(names(requested), { "lua", "python" }), names(requested))
+end
+
+-- A server counts as running for a language once any buffer started it, and
+-- only a configured server with a runnable command can start on first use.
+do
+    local original = vim.lsp.get_clients
+    vim.lsp.get_clients = function()
+        return { { name = "ts_ls", initialized = true }, { name = "pyright", initialized = false },
+            { name = "ts_ls", initialized = true } }
+    end
+    check("an initialized server is running once",
+        vim.deep_equal(install._running_clients({ "ts_ls", "pyright" }), { "ts_ls" }))
+    vim.lsp.get_clients = original
+    vim.lsp.config("huyang_unit_runnable", { cmd = { "sh" }, filetypes = { "huyangunit" } })
+    vim.lsp.config("huyang_unit_missing", { cmd = { "huyang-no-such-server" }, filetypes = { "huyangunit" } })
+    check("a server on PATH can start", install._any_startable({ "huyang_unit_missing", "huyang_unit_runnable" }))
+    check("a server off PATH cannot", not install._any_startable({ "huyang_unit_missing" }))
+end
+
+-- End to end: an incidental Lua file is reported on_demand and starts no
+-- lua_ls, and naming the language starts it. COBOL leads the tree because
+-- nothing on this machine serves it, so the probe has no server to start.
+do
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    for i = 1, 9 do
+        vim.fn.writefile({ "       IDENTIFICATION DIVISION." }, ("%s/p%d.cob"):format(root, i))
+    end
+    vim.fn.writefile({ "return {}" }, root .. "/tool.lua")
+    local function probe(args)
+        local result, done
+        local co = coroutine.create(function()
+            result = install.workspace_support(args)
+            done = true
+        end)
+        local ok, e = coroutine.resume(co)
+        if not ok then error(e) end
+        vim.wait(20000, function() return done end, 50)
+        return result
+    end
+    local function lua_entry(report)
+        for _, entry in ipairs(report and report.languages or {}) do
+            if entry.filetype == "lua" then return entry end
+        end
+    end
+    local entry = lua_entry(probe({ root = root, attach_wait_ms = 250 }))
+    if vim.fn.executable("lua-language-server") == 1 then
+        check("an incidental language is reported on demand",
+            entry and entry.attach == "on_demand" and vim.deep_equal(entry.configured, { "lua_ls" }), entry)
+        check("and its server is not started", #vim.lsp.get_clients({ name = "lua_ls" }) == 0)
+        entry = lua_entry(probe({ root = root, languages = { "lua" }, attach_wait_ms = 10000 }))
+        check("naming the language starts its server",
+            entry and (entry.attach == "attached" or entry.attach == "starting")
+            and #vim.lsp.get_clients({ name = "lua_ls" }) > 0, entry)
+        entry = lua_entry(probe({ root = root, attach_wait_ms = 250 }))
+        check("a started server is reported attached, not on demand",
+            entry and entry.attach ~= "on_demand", entry)
+        for _, client in ipairs(vim.lsp.get_clients({ name = "lua_ls" })) do client:stop(true) end
+    else
+        check("without lua-language-server the language is not promised",
+            entry and entry.attach ~= "on_demand", entry)
+    end
+    vim.fn.delete(root, "rf")
+end
+
 if failures > 0 then
     io.stdout:write(("unit_check: %d failed\n"):format(failures))
     vim.cmd("cquit 1")

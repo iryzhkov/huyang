@@ -231,8 +231,12 @@ existing workspace, because its handle comes from one.
   reply says so; `huyang trust <root>` on the machine grants it.
 - A provisional edit verdict names what is missing: no server configured, the server
   not installed, still starting (its findings arrive with the next reply, attributed to
-  this edit), or none attached within the wait. Servers start in the background when a
-  project is opened, so this is rare after the first call.
+  this edit), or none attached within the wait. Servers for the project's main languages
+  start in the background when it is opened, so this is rare after the first call. A
+  language that is incidental to the project (not its largest source language, under a
+  fifth of its source files and under a hundred files) is reported `on_demand` by `language_server_status`: its server
+  starts on the first call that touches one of its files, which may then answer
+  `lsp_starting` once, or at once when the status call names it in `languages`.
 - `verbose: true` on `edit_apply` restores the full change record and handle resolution;
   nothing else needs it.
 - A whole-file rewrite through `edit_apply` is bounded (the patch in the response is cut at

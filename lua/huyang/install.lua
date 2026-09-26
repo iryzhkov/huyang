@@ -15,9 +15,60 @@ local enabled_lsp_configs_for, DATA_FILETYPES = core.enabled_lsp_configs_for, co
 -- has no parser (skim/find_symbol/ts_query blind) or no language server
 -- (definition/references/hover/diagnostics blind). Counts files per
 -- filetype from the git index, checks the parser instantly, and for the
--- filetypes that have an enabled LSP config loads one sample file and
--- waits briefly for a client to attach (the binary may be missing).
+-- significant filetypes (below) that have an enabled LSP config loads one
+-- sample file and waits briefly for a client to attach (the binary may be
+-- missing).
 local SUPPORT_MAX_FILETYPES = 10
+
+-- Which languages the probe starts a server for. Every provider used to
+-- load a sample of every configured filetype, so a Go repository ran gopls
+-- beside lua_ls, pyright, ts_ls and bashls for a handful of scripts, and a
+-- Rust project ran ts_ls for two JavaScript files: about a gigabyte per
+-- provider, most of it for languages nobody touched. The probe now starts a
+-- server only for the project's significant languages: the largest source
+-- filetype, any filetype holding at least EAGER_MIN_SHARE of the source
+-- files, and any with at least EAGER_MIN_FILES files, a real part of a
+-- large tree whatever its share. A fifth is the point below which a
+-- language reads as tooling beside the project rather than a part of it
+-- (huyang's Lua kernel is 7% of its source, e38-carpc's JavaScript 2%).
+-- The other languages stay enabled, so the first tool call that loads one of
+-- their files starts the server exactly as a probe would have, and the report
+-- calls them on_demand. Data filetypes (JSON, YAML, Markdown) do not count
+-- toward the shares, and only lead when the tree has no source at all.
+local EAGER_MIN_SHARE = 0.2
+local EAGER_MIN_FILES = 100
+
+-- The filetypes whose servers the probe starts, as a set. by_ft counts files
+-- per filetype; requested names filetypes a caller asked for explicitly (the
+-- languages of a status request, the files a plan is about to diagnose),
+-- which are always started.
+local function eager_filetypes(by_ft, requested)
+    local eager, source_total, top, top_any = {}, 0, nil, nil
+    for ft, count in pairs(by_ft) do
+        if not DATA_FILETYPES[ft] then
+            source_total = source_total + count
+            if not top or count > by_ft[top] or (count == by_ft[top] and ft < top) then top = ft end
+        end
+        if not top_any or count > by_ft[top_any] or (count == by_ft[top_any] and ft < top_any) then
+            top_any = ft
+        end
+    end
+    if top then
+        eager[top] = true
+    elseif top_any then
+        eager[top_any] = true
+    end
+    for ft, count in pairs(by_ft) do
+        if not DATA_FILETYPES[ft]
+            and (count >= EAGER_MIN_FILES or count >= EAGER_MIN_SHARE * source_total) then
+            eager[ft] = true
+        end
+    end
+    for ft in pairs(requested or {}) do
+        eager[ft] = true
+    end
+    return eager
+end
 
 local SUPPORT_ATTACH_MS = 2500
 local JAVA_RESTART_ATTACH_MS = 15000
@@ -262,6 +313,68 @@ local function support_attach_wait(ft, requested, restored)
     return wait_ms
 end
 
+-- The filetypes a caller asked to have started, as a set: args.languages
+-- names filetypes, args.files names files (relative to the root or
+-- absolute) whose filetypes are wanted, such as the files a plan is about
+-- to diagnose.
+local function requested_filetypes(args)
+    local requested = {}
+    for _, ft in ipairs(type(args.languages) == "table" and args.languages or {}) do
+        if type(ft) == "string" and ft ~= "" then requested[ft] = true end
+    end
+    for _, file in ipairs(type(args.files) == "table" and args.files or {}) do
+        local ft = type(file) == "string" and vim.filetype.match({ filename = file }) or nil
+        if ft then requested[ft] = true end
+    end
+    return requested
+end
+
+-- Load the sample file and wait up to wait_ms for a client to attach to it;
+-- the names of the clients that did.
+local function attach_sample(path, wait_ms)
+    local clients = {}
+    local okb, bufnr = pcall(load_buf, path)
+    if not okb then return clients end
+    local deadline = vim.uv.now() + wait_ms
+    while vim.uv.now() < deadline do
+        for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+            clients[#clients + 1] = c.name
+        end
+        if #clients > 0 then break end
+        sleep(100)
+    end
+    return clients
+end
+
+-- The initialized clients among the configured servers, whatever buffer
+-- started them: a server is running for a language once any of its files
+-- has been loaded, and a new buffer of that language attaches to it.
+local function running_clients(configured)
+    local names = {}
+    for _, client in ipairs(vim.lsp.get_clients()) do
+        if client.initialized and vim.tbl_contains(configured, client.name)
+            and not vim.tbl_contains(names, client.name) then
+            names[#names + 1] = client.name
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+-- Whether one of the configured servers has a command that can run: a
+-- function (it builds its own transport) or an executable on PATH.
+local function any_startable(configured)
+    for _, name in ipairs(configured) do
+        local okc, cfg = pcall(function() return vim.lsp.config[name] end)
+        local cmd = okc and type(cfg) == "table" and cfg.cmd or nil
+        if type(cmd) == "function" then return true end
+        if type(cmd) == "table" and type(cmd[1]) == "string" and vim.fn.executable(cmd[1]) == 1 then
+            return true
+        end
+    end
+    return false
+end
+
 local function workspace_support(args)
 	local requested_attach_wait = tonumber(args.attach_wait_ms)
     local root = args.root
@@ -303,9 +416,11 @@ local function workspace_support(args)
     end
     local fts = vim.tbl_keys(by_ft)
     table.sort(fts, function(a, b) return by_ft[a] > by_ft[b] end)
+    local requested = requested_filetypes(args)
+    local eager = eager_filetypes(by_ft, requested)
     local out, blind, not_probed = {}, {}, {}
     for i, ft in ipairs(fts) do
-        if i > SUPPORT_MAX_FILETYPES then
+        if i > SUPPORT_MAX_FILETYPES and not requested[ft] then
             -- Silently stopping here reported a repository's shell scripts as
             -- absent rather than as unprobed, and an agent following "install
             -- what says none" never learned they were covered.
@@ -376,23 +491,21 @@ local function workspace_support(args)
                 end)
                 if okd then debugger = dbg end
             end
-            local clients = {}
-            if #configs > 0 then
-                local okb, bufnr = pcall(load_buf, root .. "/" .. sample[ft])
-                if okb then
-                    local deadline = vim.uv.now() + attach_wait_ms
-                    while vim.uv.now() < deadline do
-                        for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-                            clients[#clients + 1] = c.name
-                        end
-                        if #clients > 0 then break end
-                        sleep(100)
-                    end
-                end
+            local clients, on_demand = {}, false
+            -- A server that cannot start is probed the old way even for an
+            -- incidental language: nothing is spawned, and the report says
+            -- it did not attach rather than promising a start on first use.
+            if #configs > 0 and (eager[ft] or not any_startable(configs)) then
+                clients = attach_sample(root .. "/" .. sample[ft], attach_wait_ms)
+            elseif #configs > 0 then
+                -- Not started for the probe, but a tool call may already have
+                -- started it by loading one of this language's files.
+                clients = running_clients(configs)
+                on_demand = #clients == 0 and starting_server(configs) == nil
             end
             local install_options = {}
             local okml, mlsp = pcall(require, "mason-lspconfig")
-            if #clients == 0 and okml then
+            if #clients == 0 and not on_demand and okml then
                 pcall(function()
                     install_options = mlsp.get_available_servers({ filetype = ft })
                     table.sort(install_options)
@@ -417,10 +530,17 @@ local function workspace_support(args)
                 enabled_from_system = system_enabled,
             }
             -- attach says where the server is: attached, still starting
-            -- (a client exists but has not initialized), configured but
-            -- absent after the wait, or not configured at all.
+            -- (a client exists but has not initialized), left to start on
+            -- first use (on_demand), configured but absent after the wait,
+            -- or not configured at all.
             entry.attach = #clients > 0 and "attached" or (#configs == 0 and "unconfigured" or "not_started")
-            if #clients == 0 and #configs > 0 then
+            if on_demand then
+                -- Enabled and startable, deliberately not started: the first
+                -- tool call that loads one of these files starts it.
+                entry.attach = "on_demand"
+                entry.lsp = "on demand (" .. table.concat(configs, ",") .. ")"
+                entry.configured = configs
+            elseif #clients == 0 and #configs > 0 then
                 local starting = starting_server(configs)
                 if starting then
                     entry.attach = "starting"
@@ -429,7 +549,7 @@ local function workspace_support(args)
                     entry.lsp = "none (configured: " .. table.concat(configs, ",") .. ", did not attach)"
                 end
             end
-            if not parser and #clients == 0 and not DATA_FILETYPES[ft] then
+            if not parser and #clients == 0 and not on_demand and not DATA_FILETYPES[ft] then
                 blind[#blind + 1] = ft
             end
             out[#out + 1] = entry
@@ -1025,6 +1145,10 @@ M._starting_server = starting_server
 M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 M._enable_installed_servers = enable_installed_servers
 M._support_attach_wait = support_attach_wait
+M._eager_filetypes = eager_filetypes
+M._requested_filetypes = requested_filetypes
+M._running_clients = running_clients
+M._any_startable = any_startable
 M._server_prerequisite = server_prerequisite
 M._ensure_mason_bin_on_path = ensure_mason_bin_on_path
 M._attached_client = attached_client

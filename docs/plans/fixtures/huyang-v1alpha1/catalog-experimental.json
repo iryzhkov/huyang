@@ -1968,11 +1968,19 @@
     "name": "evidence_get"
   },
   {
-    "description": "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace.",
+    "description": "Inspect the owned Neovim provider and probe language-server attachment for languages in this workspace. Servers start for the project's main languages; one for an incidental language is reported on_demand and starts on the first call that touches its files, or now when named in languages.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "languages": {
+          "description": "Start the servers for these languages now instead of on first use.",
+          "items": {
+            "description": "Filetype, such as python or typescript.",
+            "type": "string"
+          },
+          "type": "array"
+        },
         "response_format": {
           "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
           "enum": [

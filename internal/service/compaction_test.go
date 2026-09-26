@@ -296,6 +296,49 @@ func (p *installOptionsProvider) Call(ctx context.Context, request provider.Requ
 	return p.stubProvider.Call(ctx, request)
 }
 
+type onDemandProvider struct {
+	stubProvider
+	requested any
+}
+
+func (p *onDemandProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
+	if request.Operation == "workspace_support" {
+		p.requested = request.Arguments["languages"]
+		return provider.Result{Value: map[string]any{"languages": []any{
+			map[string]any{"filetype": "go", "lsp": "gopls", "attach": "attached"},
+			map[string]any{"filetype": "lua", "lsp": "on demand (lua_ls)", "attach": "on_demand", "configured": []any{"lua_ls"}},
+		}}}, nil
+	}
+	return p.stubProvider.Call(ctx, request)
+}
+
+// A language whose server starts on first use is neither attached, missing
+// nor failed: the status stays ok, offers no install, names it, and passes
+// an explicit languages request through to the probe.
+func TestLanguageServerStatusReportsOnDemandLanguages(t *testing.T) {
+	backend := &onDemandProvider{}
+	backend.descriptor = provider.Descriptor{ID: "on-demand", Backend: "test", Epoch: 1}
+	useFixedProvider(t, backend)
+	direct := newDirectWorkspaces(t.TempDir())
+	workspaceID, _ := openTestProject(t, direct, map[string]string{"main.go": "package main\n"})
+	status := direct.call(context.Background(), "language_server_status", map[string]any{"workspace_id": workspaceID})
+	data := status["data"].(map[string]any)
+	if status["outcome"] != "ok" || len(mcpapi.AnySlice(status["next"])) != 0 {
+		t.Fatalf("on-demand status = %#v", status)
+	}
+	if fmt.Sprint(data["on_demand_languages"]) != "[lua]" || fmt.Sprint(data["on_demand_servers"]) != "[lua_ls]" ||
+		fmt.Sprint(data["missing_languages"]) != "[]" || fmt.Sprint(data["attached_servers"]) != "[gopls]" {
+		t.Fatalf("on-demand tally = %#v", data)
+	}
+	if !strings.Contains(fmt.Sprint(status["summary"]), "lua start on first use") {
+		t.Fatalf("summary does not name the on-demand language: %v", status["summary"])
+	}
+	direct.call(context.Background(), "language_server_status", map[string]any{"workspace_id": workspaceID, "languages": []any{"lua"}})
+	if fmt.Sprint(backend.requested) != "[lua]" {
+		t.Fatalf("requested languages reached the probe as %#v", backend.requested)
+	}
+}
+
 func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 	backend := &installOptionsProvider{}
 	backend.descriptor = provider.Descriptor{ID: "options", Backend: "test", Epoch: 1}
