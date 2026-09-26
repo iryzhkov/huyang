@@ -192,6 +192,13 @@ func newID() (ID, error) {
 	return ID("ws_" + hex.EncodeToString(raw[:])), nil
 }
 
+// IsID reports whether value is shaped like a workspace ID, which is how a
+// sweep of the state directory tells a per-workspace file from anything else
+// that happens to live beside it.
+func IsID(value string) bool {
+	return validID(ID(value))
+}
+
 func validID(id ID) bool {
 	const prefix = "ws_"
 	value := string(id)

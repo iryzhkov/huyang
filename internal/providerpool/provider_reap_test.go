@@ -48,6 +48,30 @@ func reapFixture(t *testing.T) (*Pool, *workspacecore.Workspace, *reapFactory, f
 	t.Cleanup(p.Close)
 	return p, w, f, func(d time.Duration) { clock.Add(int64(d)) }
 }
+func TestHoldsReportsALiveOrLeasedProvider(t *testing.T) {
+	p, w, _, advance := reapFixture(t)
+	id := w.Identity().ID
+	if p.Holds(id) {
+		t.Fatal("a workspace with no provider is held")
+	}
+	_, release, err := p.Canonical(context.Background(), w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Holds(id) {
+		t.Fatal("a leased provider is not held")
+	}
+	release()
+	if !p.Holds(id) {
+		t.Fatal("a running provider is not held")
+	}
+	advance(DefaultProviderIdleTimeout)
+	p.ReapIdle()
+	if p.Holds(id) {
+		t.Fatal("a reaped provider is still held")
+	}
+}
+
 func TestReapIdleReopensSameWorkspace(t *testing.T) {
 	p, w, f, advance := reapFixture(t)
 	id := w.Identity().ID

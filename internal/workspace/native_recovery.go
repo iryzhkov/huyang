@@ -14,8 +14,7 @@ import (
 
 // RecoverNativeJournals resolves the native edit journals (native-*.json)
 // that a process killed in the middle of a mutation left in stateDir. The
-// service calls it once at startup, after the registry has restored every
-// workspace and before it serves a request, so no journal it reads can
+// service calls it once at startup, before it serves a request, so no journal it reads can
 // belong to a mutation still in progress.
 //
 // A mutation writes its journal completely and syncs it before it touches
@@ -39,6 +38,13 @@ import (
 // Those journals stayed for ever. An error for one journal does not stop the
 // others from being resolved.
 func RecoverNativeJournals(stateDir string, workspaces []*Workspace) (RecoveryResult, error) {
+	return RecoverNativeJournalsFor(stateDir, func(string) []*Workspace { return workspaces })
+}
+
+// RecoverNativeJournalsFor is RecoverNativeJournals with the workspaces that
+// may confine a journal chosen per journal path, so a service that opens
+// workspaces on first use opens only the ones a journal names.
+func RecoverNativeJournalsFor(stateDir string, candidates func(path string) []*Workspace) (RecoveryResult, error) {
 	var result RecoveryResult
 	if stateDir == "" {
 		return result, errors.New("native mutation recovery state directory is required")
@@ -55,7 +61,7 @@ func RecoverNativeJournals(stateDir string, workspaces []*Workspace) (RecoveryRe
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "native-") || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		if err := recoverNativeJournal(filepath.Join(stateDir, entry.Name()), workspaces, &result); err != nil {
+		if err := recoverNativeJournal(filepath.Join(stateDir, entry.Name()), candidates, &result); err != nil {
 			failures = append(failures, fmt.Errorf("recovery journal %s: %w", entry.Name(), err))
 		}
 	}
@@ -66,7 +72,7 @@ func RecoverNativeJournals(stateDir string, workspaces []*Workspace) (RecoveryRe
 	return result, errors.Join(failures...)
 }
 
-func recoverNativeJournal(journalPath string, workspaces []*Workspace, result *RecoveryResult) error {
+func recoverNativeJournal(journalPath string, candidates func(string) []*Workspace, result *RecoveryResult) error {
 	data, err := os.ReadFile(journalPath)
 	if err != nil {
 		return err
@@ -87,7 +93,7 @@ func recoverNativeJournal(journalPath string, workspaces []*Workspace, result *R
 	if preErr != nil || postErr != nil || !filepath.IsAbs(record.Path) {
 		return errors.New("invalid payload")
 	}
-	target, owned := nativeJournalTarget(record.Path, workspaces)
+	target, owned := nativeJournalTarget(record.Path, candidates(record.Path))
 	if stateMatches(target, record.PreExists, preimage) {
 		if err := os.Remove(journalPath); err != nil {
 			return err

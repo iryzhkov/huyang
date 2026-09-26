@@ -638,6 +638,18 @@ func TestInspectionSanitizesEnvironmentFailures(t *testing.T) {
 	}
 }
 
+func TestEnvironmentFailuresKeepOnlyTheNewest(t *testing.T) {
+	ws := newNativeWorkspace(t, KindProject, t.TempDir(), nil, Limits{})
+	for index := 0; index < maxEnvironmentFailures+8; index++ {
+		ws.RecordEnvironmentFailure(EnvironmentFailure{Layer: "provider", Code: fmt.Sprintf("failure_%d", index)})
+	}
+	failures := ws.Inspect().Failures
+	if len(failures) != maxEnvironmentFailures || failures[0].Code != "failure_8" ||
+		failures[len(failures)-1].Code != fmt.Sprintf("failure_%d", maxEnvironmentFailures+7) {
+		t.Fatalf("kept %d failures from %s to %s", len(failures), failures[0].Code, failures[len(failures)-1].Code)
+	}
+}
+
 func TestRecoveryRestoresPostimageAndPreservesThirdPartyWrite(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "recover.txt")

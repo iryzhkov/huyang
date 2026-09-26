@@ -123,6 +123,26 @@ func (s *workspaceScheduler) sandboxLane(workspaceID string) chan struct{} {
 	return lane
 }
 
+// busy reports whether any call holds or waits on one of the workspace's
+// lanes.
+func (s *workspaceScheduler) busy(workspaceID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.lanes[workspaceID]) > 0 || len(s.sandboxLanes[workspaceID]) > 0
+}
+
+// forget drops the idle lanes of a workspace the registry forgot.
+func (s *workspaceScheduler) forget(workspaceID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if lane, ok := s.lanes[workspaceID]; ok && len(lane) == 0 {
+		delete(s.lanes, workspaceID)
+	}
+	if lane, ok := s.sandboxLanes[workspaceID]; ok && len(lane) == 0 {
+		delete(s.sandboxLanes, workspaceID)
+	}
+}
+
 func acquireSlot(ctx context.Context, slot chan struct{}) (func(), error) {
 	select {
 	case slot <- struct{}{}:

@@ -174,6 +174,8 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 		config: config, direct: direct, unixListener: listener, socketInfo: socketInfo,
 	}
 	direct.handlers.ProviderPool().StartReaper(providerpool.DefaultReapInterval)
+	direct.startSweeper(registrySweepInterval)
+	pruneFrictionSpool(time.Now())
 	if config.HTTPAddress != "" {
 		if err := service.prepareHTTP(); err != nil {
 			service.Close()

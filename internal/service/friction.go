@@ -416,7 +416,12 @@ func writeFriction(ev frictionEvent) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	path := filepath.Join(dir, host+"-"+time.Now().UTC().Format("2006-01-02")+".jsonl")
+	now := time.Now()
+	day := now.UTC().Format(frictionDayLayout)
+	if frictionDayRotated(day) {
+		pruneFrictionDir(dir, host, now, frictionRetention(), frictionSpoolMaxBytes)
+	}
+	path := filepath.Join(dir, host+"-"+day+".jsonl")
 
 	// One O_APPEND write of a short line, so several servers spooling at
 	// once interleave whole lines rather than fragments.

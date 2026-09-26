@@ -472,7 +472,16 @@ func (w *Workspace) RecordEnvironmentFailure(failure EnvironmentFailure) {
 		}
 	}
 	w.failures = append(w.failures, failure)
+	// Only the newest failures are kept: a workspace that lives for weeks and
+	// hits the same broken toolchain on every call would otherwise grow this
+	// list, and every Inspect copy of it, without bound.
+	if excess := len(w.failures) - maxEnvironmentFailures; excess > 0 {
+		w.failures = append([]EnvironmentFailure(nil), w.failures[excess:]...)
+	}
 }
+
+// maxEnvironmentFailures bounds the environment failures a workspace keeps.
+const maxEnvironmentFailures = 32
 
 func sanitizeText(value string, limit int) string {
 	value = inlineSecretPattern.ReplaceAllString(value, "$1=<redacted>")
