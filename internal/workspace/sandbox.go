@@ -132,28 +132,18 @@ func MaterializeSandbox(ctx context.Context, sourceRoot, sandboxBase string, wor
 }
 
 func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, workspaceID ID, planID string, planRevision uint64, baseRevision, backend string, manifest []sandboxEntry) (*Sandbox, error) {
-	root, err := os.MkdirTemp(sandboxBase, "sandbox-")
-	if err != nil {
-		return nil, err
-	}
 	sandbox := &Sandbox{
-		Base: sandboxBase, SourceRoot: sourceRoot, Root: root, Tree: filepath.Join(root, "tree"), Backend: backend,
+		Base: sandboxBase, SourceRoot: sourceRoot, Backend: backend,
 		BaseRevision: baseRevision, WorkspaceID: workspaceID, PlanID: planID,
 		PlanRevision: planRevision, baseManifest: append([]sandboxEntry(nil), manifest...),
 	}
 	failed := true
 	defer func() {
-		if failed {
-			_ = os.RemoveAll(root)
+		if failed && sandbox.Root != "" {
+			_ = os.RemoveAll(sandbox.Root)
 		}
 	}()
-	if err := os.Chmod(root, 0o700); err != nil {
-		return nil, err
-	}
-	if err := os.Mkdir(sandbox.Tree, 0o700); err != nil {
-		return nil, err
-	}
-	if err := sandbox.writeMarker("materializing"); err != nil {
+	if err := sandbox.createOwnedRoot(); err != nil {
 		return nil, err
 	}
 	for _, entry := range manifest {
@@ -172,6 +162,53 @@ func materializeCandidate(ctx context.Context, sourceRoot, sandboxBase string, w
 	}
 	failed = false
 	return sandbox, nil
+}
+
+// sandboxStagingPrefix names a sandbox directory that does not hold its
+// ownership marker yet. ReapSandboxes only removes a sandbox- directory whose
+// marker names it, and leaves a markerless one alone as possibly foreign, so
+// a sandbox created under its final name and killed before the marker was
+// written would have stayed for ever. The directory is therefore created
+// under this prefix, given its marker, and only then renamed to sandbox-.
+const sandboxStagingPrefix = ".staging-sandbox-"
+
+// sandboxStagingMaxAge is how old a staging directory must be before
+// ReapSandboxes removes it. A staging directory lives for the few calls
+// between its creation and its rename, so one an hour old was abandoned by a
+// process that died in between.
+const sandboxStagingMaxAge = time.Hour
+
+// createOwnedRoot creates the sandbox root with its tree directory and its
+// materializing marker, and sets Root and Tree. The root appears under its
+// sandbox- name only once the marker is inside it.
+func (s *Sandbox) createOwnedRoot() error {
+	staging, err := os.MkdirTemp(s.Base, sandboxStagingPrefix)
+	if err != nil {
+		return err
+	}
+	s.Root = staging
+	if err := os.Chmod(staging, 0o700); err != nil {
+		return err
+	}
+	if err := os.Mkdir(filepath.Join(staging, "tree"), 0o700); err != nil {
+		return err
+	}
+	if err := s.writeMarker("materializing"); err != nil {
+		return err
+	}
+	// The suffix MkdirTemp chose is unique among staging names only, so the
+	// final name is checked first. The check and the rename are not atomic,
+	// but a rename onto another sandbox still fails, because every sandbox
+	// holds its marker and rename never replaces a non-empty directory.
+	root := filepath.Join(s.Base, "sandbox-"+strings.TrimPrefix(filepath.Base(staging), sandboxStagingPrefix))
+	if _, err := os.Lstat(root); err == nil {
+		return fmt.Errorf("sandbox root %s already exists", root)
+	}
+	if err := os.Rename(staging, root); err != nil {
+		return err
+	}
+	s.Root, s.Tree = root, filepath.Join(root, "tree")
+	return syncDirectory(s.Base)
 }
 
 // materializeEntry recreates one manifest entry under tree with its recorded mode.
@@ -714,6 +751,14 @@ func ReapSandboxes(base string, referenced map[string]bool) error {
 		return err
 	}
 	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), sandboxStagingPrefix) {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > sandboxStagingMaxAge {
+				if err := os.RemoveAll(filepath.Join(base, entry.Name())); err != nil {
+					return fmt.Errorf("cleanup_required: %w", err)
+				}
+			}
+			continue
+		}
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "sandbox-") {
 			continue
 		}

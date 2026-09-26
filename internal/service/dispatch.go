@@ -42,6 +42,9 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 	// The caches every verification command shares follow this service's
 	// state directory rather than the ambient environment.
 	workspacecore.SetCommandCacheRoot(filepath.Join(stateDir, "command-cache"))
+	// So do the scratch directories each command runs in, which must not
+	// land in a RAM-backed /tmp where a killed service would leave them.
+	workspacecore.SetCommandScratchRoot(filepath.Join(stateDir, "scratch"))
 	registry := newWorkspaceRegistry(stateDir)
 	receipts := newReceiptStore(stateDir, defaultReceiptLimits())
 	scheduler := newWorkspaceScheduler(providerQuota, externalJobQuota)
@@ -64,17 +67,31 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 }
 
 // loadState restores the registry and the receipts, migrating a version 1
-// registry's embedded receipts into per-workspace files, and reaps sandboxes
-// left by an earlier process and a command cache that outgrew its bound.
+// registry's embedded receipts into per-workspace files, and reaps sandboxes,
+// command scratch directories and edit journals left by an earlier process
+// and a command cache that outgrew its bound.
 func (d *directWorkspaces) loadState() error {
 	if removed, err := workspacecore.PruneCommandCache(); err != nil {
 		log.Printf("huyang: command cache: %v", err)
 	} else if removed {
 		log.Printf("huyang: command cache exceeded its bound and was removed")
 	}
+	if removed, err := workspacecore.SweepCommandScratch(); err != nil {
+		log.Printf("huyang: command scratch: removed %d, %v", removed, err)
+	} else if removed > 0 {
+		log.Printf("huyang: command scratch: removed %d directories left by earlier processes", removed)
+	}
 	legacy, migrate, err := d.registry.load()
 	if err != nil {
 		return err
+	}
+	// A journal that cannot be resolved is logged rather than refusing to
+	// start: it stays on disk, and it concerns one file, not the service.
+	if result, err := workspacecore.RecoverNativeJournals(d.registry.stateDir, d.registry.all()); err != nil {
+		log.Printf("huyang: native edit journals: %v", err)
+	} else if len(result.Recovered)+len(result.Cleared)+len(result.Discarded)+len(result.Conflicts) > 0 {
+		log.Printf("huyang: native edit journals: recovered %v, cleared %v, discarded %v, conflicts %v",
+			result.Recovered, result.Cleared, result.Discarded, result.Conflicts)
 	}
 	if err := d.receipts.loadReceipts(); err != nil {
 		return err
