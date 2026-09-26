@@ -100,7 +100,6 @@ func TestCommandTreeCancelKillsGrandchildren(t *testing.T) {
 	result := make(chan error, 1)
 	go func() { result <- runCommandTree(command) }()
 	grandchild := readGrandchild(t, reader)
-	_ = writer.Close()
 	cancel()
 	select {
 	case err := <-result:
@@ -110,5 +109,8 @@ func TestCommandTreeCancelKillsGrandchildren(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancelled command did not return")
 	}
+	// Closed only once the command has returned: the start reads the
+	// descriptor, and closing it earlier races with that read.
+	_ = writer.Close()
 	waitTreeGone(t, grandchild)
 }
