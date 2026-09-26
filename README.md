@@ -277,6 +277,8 @@ is a named constant in the code:
 | `http-token` | Bearer token for `--http` and `--pprof`. | one file |
 
 In-memory stores are bounded too: 32 revisions per document (`maxRevisionsPerDocument`),
+16 MiB of superseded revision records per workspace, least recently superseded evicted
+first (`maxHistoricalRevisionBytes`),
 20000 live handles (`maxLiveHandles`), 64 live result sets (`maxLiveResultSets`), and 20
 diagnostic updates per reply (`maxDiagnosticUpdates`).
 

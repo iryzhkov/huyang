@@ -482,6 +482,56 @@ do
     vim.fn.delete(root, "rf")
 end
 
+-- The code-action cache keeps each client's newest listings only: a token
+-- that falls out answers like any stale token, and the newest still apply.
+do
+    local first = edit.cache_actions({ actions = { "first" } })
+    local last
+    for _ = 1, edit.MAX_CACHED_ACTIONS do
+        last = edit.cache_actions({ actions = { "later" } })
+    end
+    local kept = 0
+    for token = tonumber(first), tonumber(last) do
+        if edit.cached_actions(token) then kept = kept + 1 end
+    end
+    check("code-action cache drops its oldest token past the bound",
+        edit.cached_actions(first) == nil and edit.cached_actions(last) ~= nil
+            and kept == edit.MAX_CACHED_ACTIONS, { kept = kept })
+    local ok, why = pcall(edit.apply_code_action, { token = first, index = 1 })
+    check("an evicted code-action token is refused as unknown or expired",
+        not ok and tostring(why):find("unknown or expired", 1, true), why)
+end
+
+-- The undo ledger forgets whole old steps past its bounds and always keeps
+-- the newest step, however large.
+do
+    local edits = require("huyang.edits")
+    local steps, lines = edits.MAX_STEPS, edits.MAX_LINES
+    edits.take()
+    edits.MAX_STEPS, edits.MAX_LINES = 3, 100
+    local function fake(n)
+        local out = {}
+        for i = 1, n do out[i] = "line " .. i end
+        return out
+    end
+    for i = 1, 5 do
+        edits.as_one_step(function()
+            edits.record({ file = "a" .. i, first = 1, old_lines = fake(1), new_lines = fake(1), new_count = 1 })
+            edits.record({ file = "b" .. i, first = 1, old_lines = fake(1), new_lines = fake(1), new_count = 1 })
+        end)
+    end
+    local kept = edits.take()
+    check("undo ledger keeps only the newest whole steps past the step bound",
+        edits.forgotten() == 2 and #kept == 6 and kept[1].file == "a3" and kept[6].file == "b5",
+        { forgotten = edits.forgotten(), files = vim.tbl_map(function(e) return e.file end, kept) })
+    edits.record({ file = "small", first = 1, old_lines = fake(10), new_lines = fake(10), new_count = 10 })
+    edits.record({ file = "huge", first = 1, old_lines = fake(200), new_lines = fake(200), new_count = 200 })
+    kept = edits.take()
+    check("undo ledger keeps the newest step even when it alone passes the line bound",
+        #kept == 1 and kept[1].file == "huge", vim.tbl_map(function(e) return e.file end, kept))
+    edits.MAX_STEPS, edits.MAX_LINES = steps, lines
+end
+
 if failures > 0 then
     io.stdout:write(("unit_edit: %d failed\n"):format(failures))
     vim.cmd("cquit 1")
