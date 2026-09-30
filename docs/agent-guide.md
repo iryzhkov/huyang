@@ -77,6 +77,33 @@ run the same guards and diagnostics, and return the workspace id for further edi
 file. `create_file` creates missing parent directories. Only `replace_range` needs an
 existing workspace, because its handle comes from one.
 
+## Forward MCP results once
+
+Huyang returns a structured envelope in `structuredContent` and a readable JSON text
+representation in `content`. When an orchestration wrapper forwards a result to the
+model, forward the structured envelope once:
+
+```javascript
+const result = await tools.mcp__huyang__read(arguments);
+text(result.structuredContent ?? result);
+```
+
+The fallback preserves legacy text-only errors and MCP failure metadata. If a wrapper
+parses a text-only JSON envelope, preserve that complete envelope; retain non-JSON text
+errors as readable text. Do not print both representations. Do not forward only `.data`
+or `.summary`: those omit outcome, workspace/document revisions, warnings, refusal codes,
+evidence and `next` recovery actions. A successful mutation can still have incomplete
+semantic diagnostics; the summary alone does not retain its recovery evidence. Batched
+reads also carry recovery and coverage per failed target.
+
+A bounded read of five `go.mod` lines through Huyang 0.4.0 on Normandy on 2026-09-30
+returned identical source bytes in both representations: serializing the entire MCP
+result used 1,910 UTF-8 bytes, while the structured envelope used 897 bytes (54 source
+bytes). Envelope metadata depends on session state, so these are sample sizes, not a
+constant ratio or a token benchmark. This measures the server's stdio boundary and whole
+result forwarding; it does not establish how a harness deduplicates its native rendering.
+Keep both transport representations for compatible consumers and deduplicate forwarding.
+
 ## Rules of thumb
 
 - Know the text you are changing: `replace_literal`. Do not search first. If the text
