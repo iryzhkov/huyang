@@ -47,6 +47,17 @@ func compactExecutionGraph(graph *workspacecore.ExecutionGraph) map[string]any {
 		if node.Line != 0 {
 			compact["line"] = node.Line
 		}
+		// Selected control-flow nodes need their conditions and source evidence;
+		// the declaration overview can omit that repeated detail.
+		if node.Owner != "" {
+			compact["evidence"] = node.Evidence
+			if node.Condition != nil {
+				compact["condition"] = node.Condition
+			}
+			if node.Column != 0 {
+				compact["column"] = node.Column
+			}
+		}
 		nodes = append(nodes, compact)
 	}
 	return map[string]any{
