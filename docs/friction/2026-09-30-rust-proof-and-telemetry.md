@@ -25,7 +25,9 @@ Full MCP request/results remain on gaming-pc at
 `/tmp/huyang-feedback-transcript.jsonl`; summaries are
 `/tmp/huyang-rust-linked-{cold,warm}-raw.jsonl`. These are disposable local artifacts.
 The shell's mise rust-analyzer shim failed, but the actual provider was attached and
-produced findings. A shell shim failure does not establish a broken provider.
+produced findings. Its executable was Mason's
+`/home/igor/.local/share/nvim/mason/packages/rust-analyzer/rust-analyzer-x86_64-unknown-linux-gnu`,
+version `rust-analyzer 0.3.3041-standalone`. A shell shim failure does not establish a broken provider.
 
 The cold result is correct under the evidence model: a server attachment or a clean
 build does not establish an ordered/version-matching push for the edited revision.
@@ -35,7 +37,8 @@ Existing workspace tests cover missing/matching version and ordered-barrier evid
 ## Recovery and scope
 
 The mutation receipt already includes changed paths and its exact revision. Inspect
-`language_server_status`, or use `verify_run` with `stages=["diagnostics"]` and
+`workspace_inspect(view="status")` for provider and pipeline state; detailed
+`language_server_status` requires the full profile (`huyang mcp -profile full`). Or use `verify_run` with `stages=["diagnostics"]` and
 `revision_or_transaction` equal to that receipt's revision. A later revision must be
 reported separately. Read `diagnostics` for the durable inbox, without repeating edits.
 Repeated unavailable/provisional replies suppress repeated recovery actions, but keep

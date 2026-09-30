@@ -45,6 +45,18 @@ func TestModernEditSpoolsDiagnosticStateOnRepeatedProvisionalResults(t *testing.
 		data := result["data"].(map[string]any)
 		next := result["next"].([]any)
 		if replacement[0] == "{ 1 }" {
+			for _, step := range next {
+				tool, _ := step.(map[string]any)["tool"].(string)
+				available := false
+				for _, descriptor := range mcpapi.Catalog(mcpapi.ProfileEdit) {
+					if descriptor.Name == tool {
+						available = true
+					}
+				}
+				if !available {
+					t.Fatalf("recovery tool unavailable in default edit profile: %s", tool)
+				}
+			}
 			if len(next) != 2 {
 				t.Fatalf("missing initial recovery: %#v", next)
 			}
@@ -55,7 +67,7 @@ func TestModernEditSpoolsDiagnosticStateOnRepeatedProvisionalResults(t *testing.
 		} else {
 			for _, step := range next {
 				tool := step.(map[string]any)["tool"]
-				if tool == "verify_run" || tool == "language_server_status" {
+				if tool == "verify_run" || tool == "language_server_status" || tool == "workspace_inspect" {
 					t.Fatalf("repeated diagnostic recovery: %#v", next)
 				}
 			}
