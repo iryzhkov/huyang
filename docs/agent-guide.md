@@ -162,6 +162,11 @@ Keep both transport representations for compatible consumers and deduplicate for
   rather than refining a set that is already a truncation. Files the search could not
   read, binaries included, are named in `coverage.skipped` with an exact
   `skipped_count`, because a file that was never opened is not a file with no matches.
+- Read commit changes with `read {view: changes, target: {handle: commit_handle}}`.
+  Obtain the opaque `commit_...` handle from `data.recent_commits[].handle` in a
+  `read {view: history, target: {path: known_file}}` response, or a `search git_history`
+  result. Git refs, object IDs and source handles do not substitute for it. If the
+  handle expires, read history again. For a Git ref comparison, use `git diff`.
 - New file: `create_file`; it refuses an existing path and names that file's
   `revision_id`, and `replace: true` with that revision overwrites the file in one call.
   Several files that must change atomically or not at all: `change_plan` (prepare, then
@@ -175,7 +180,16 @@ Keep both transport representations for compatible consumers and deduplicate for
   Huyang does not write the Git index: the reply's `git` block gives each path's tracked
   state and, when the source was tracked, `next` names the one command to run
   (`git add -A -- old new`); after it `git diff --cached -M` reports the move as a
-  rename. Symlinks and directories go through `change_plan`.
+  rename. Symlinks and directories go through `change_plan`. Native transfers have
+  a 4 MiB source bound because recovery journals retain complete bytes; a larger
+  source is refused without changing the destination. The bound cannot be raised
+  through `copy_file` arguments; choose a source within it rather than repeating the
+  same call. This is separate from verification snapshot limits.
+- A verification snapshot quota failure names `observed_bytes`, `limit_bytes` and
+  the path where it stopped. Review generated dependencies in the verification root
+  or adjust `.huyang.toml` `resource.max_snapshot_bytes` within the user's configured
+  resource cap, then retry verification. A quota refusal is not a failed compilation
+  or permission to verify different bytes without declaring that change.
 - After preparing a plan, the staged code is somewhere you can look: pass `revision:
   "prep_..."` (or `plan_id`) to `read`, `navigate`, `diagnostics` or `code_actions` on the
   experimental profile, and the answer comes from the sandbox and the language server that
