@@ -51,9 +51,16 @@ func TestWorkspaceInspectViewsReportRevisionAndAdvanceAfterEdit(t *testing.T) {
 		t.Fatalf("edit invented diagnostic timeout evidence: %#v", applied)
 	}
 	next := applied["next"].([]any)
-	if len(next) != 2 || next[0].(map[string]any)["tool"] != "language_server_status" ||
+	if len(next) != 2 || next[0].(map[string]any)["tool"] != "workspace_inspect" ||
+		next[0].(map[string]any)["view"] != "status" ||
+		next[1].(map[string]any)["tool"] != "verify_run" ||
+		next[1].(map[string]any)["revision_or_transaction"] != applied["data"].(map[string]any)["revision"] ||
 		next[1].(map[string]any)["revision_or_transaction"] != "wsrev_2" {
 		t.Fatalf("edit provider failure is not actionable: %#v", applied)
+	}
+	stages := mcpapi.AnySlice(next[1].(map[string]any)["stages"])
+	if len(stages) != 1 || stages[0] != "diagnostics" {
+		t.Fatalf("recovery does not request diagnostic evidence only: %#v", next[1])
 	}
 	inspected := callModern(t, session, "workspace_inspect", map[string]any{
 		"workspace_id": workspaceID, "view": "status",
