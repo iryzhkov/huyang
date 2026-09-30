@@ -74,14 +74,17 @@ func operationFailure(failure map[string]any, index int, merged appliedEdit, pre
 	}
 	data["failed_operation"] = index
 	data["applied_operations"] = index
+	leafRecovery, _ := failure["next"].([]any)
+	// Keep the failing operation's full bounded guidance under data, because
+	// the MCP finalizer caps top-level next and batch resume must come first.
+	data["operation_recovery"] = leafRecovery
 	if preview {
 		data["applied_operations"] = 0
 		data["previewed_operations"] = index
 		data["canonical_changed"] = false
 		warnings, _ := failure["warnings"].([]string)
 		failure["warnings"] = append(warnings, "preceding operations were previews; canonical bytes unchanged")
-		next, _ := failure["next"].([]any)
-		failure["next"] = append(next, map[string]any{"tool": "edit_apply", "action": "correct_failed_operation_and_retry_the_full_preview", "failed_operation": index})
+		failure["next"] = append([]any{map[string]any{"tool": "edit_apply", "action": "correct_failed_operation_and_retry_the_full_preview", "failed_operation": index}}, leafRecovery...)
 		return failure
 	}
 	if index > 0 {
@@ -89,11 +92,10 @@ func operationFailure(failure map[string]any, index int, merged appliedEdit, pre
 		data["changed_paths"] = changedPaths(merged.files)
 		warnings, _ := failure["warnings"].([]string)
 		failure["warnings"] = append(warnings, fmt.Sprintf("operations 0 to %d were applied and stay applied", index-1))
-		next, _ := failure["next"].([]any)
-		failure["next"] = append(next, map[string]any{
+		failure["next"] = append([]any{map[string]any{
 			"tool": "edit_apply", "action": "retry_from_failed_operation_after_correcting_it",
 			"failed_operation": index, "skip_applied_operations": index,
-		})
+		}}, leafRecovery...)
 	}
 	return failure
 }
