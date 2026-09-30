@@ -529,7 +529,7 @@ func editSummary(relocated, preview bool) string {
 func (h *Handlers) unavailability(ctx context.Context, workspace *workspacecore.Workspace, confidence string, reasons []string) map[string]any {
 	fingerprint := confidence + "\x00" + strings.Join(reasons, "\x00")
 	if h.notices.TakeUnavailability(workspace.Identity().ID, clientIdentity(ctx), fingerprint) {
-		return map[string]any{"confidence": confidence, "reasons_unchanged": true}
+		return map[string]any{"confidence": confidence, "reasons_unchanged": true, "reason_codes": mcpapi.DiagnosticReasonCodes(reasons)}
 	}
 	return map[string]any{"confidence": confidence, "reasons": reasons}
 }
@@ -549,6 +549,6 @@ func repeatedUnavailability(data map[string]any) bool {
 func editDiagnosticRecovery(revision any) []any {
 	return []any{
 		map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"},
-		map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": revision},
+		map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": revision, "stages": []string{"diagnostics"}, "note": "The mutation already applied; refresh diagnostic evidence without repeating it."},
 	}
 }
