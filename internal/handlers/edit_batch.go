@@ -20,6 +20,7 @@ func (h *Handlers) editOperations(ctx context.Context, requestID string, workspa
 		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations must be a non-empty array of replace_literal, create_file, move_file, copy_file or delete_file operations", map[string]any{})
 	}
 	flags := map[string]any{"preview_only": arguments["preview_only"], "verbose": arguments["verbose"], "format": arguments["format"]}
+	preview, _ := arguments["preview_only"].(bool)
 	merged := appliedEdit{fromStateSeq: workspace.Identity().StateSeq, revisions: map[string]workspacecore.RevisionID{}}
 	var base editRequest
 	for index, raw := range operations {
@@ -27,10 +28,10 @@ func (h *Handlers) editOperations(ctx context.Context, requestID string, workspa
 		flags["operation"] = operation
 		request, err := decodeEditRequest(flags)
 		if err != nil {
-			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", err.Error(), map[string]any{}), index, merged)
+			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", err.Error(), map[string]any{}), index, merged, preview)
 		}
 		if request.Kind == "replace_range" {
-			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations accepts every kind but replace_range; use a single operation for replace_range", map[string]any{}), index, merged)
+			return operationFailure(mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "operations accepts every kind but replace_range; use a single operation for replace_range", map[string]any{}), index, merged, preview)
 		}
 		base = request
 		var applied appliedEdit
@@ -47,7 +48,7 @@ func (h *Handlers) editOperations(ctx context.Context, requestID string, workspa
 			applied, failure = applyLiteral(requestID, workspace, request)
 		}
 		if failure != nil {
-			return operationFailure(failure, index, merged)
+			return operationFailure(failure, index, merged, preview)
 		}
 		mergeApplied(&merged, applied)
 	}
@@ -64,7 +65,7 @@ func (h *Handlers) editOperations(ctx context.Context, requestID string, workspa
 
 // operationFailure labels a refusal with the operation that caused it and
 // with how many operations before it were already applied.
-func operationFailure(failure map[string]any, index int, merged appliedEdit) map[string]any {
+func operationFailure(failure map[string]any, index int, merged appliedEdit, preview bool) map[string]any {
 	failure["summary"] = fmt.Sprintf("operation %d: %v", index, failure["summary"])
 	data, _ := failure["data"].(map[string]any)
 	if data == nil {
@@ -73,6 +74,16 @@ func operationFailure(failure map[string]any, index int, merged appliedEdit) map
 	}
 	data["failed_operation"] = index
 	data["applied_operations"] = index
+	if preview {
+		data["applied_operations"] = 0
+		data["previewed_operations"] = index
+		data["canonical_changed"] = false
+		warnings, _ := failure["warnings"].([]string)
+		failure["warnings"] = append(warnings, "preceding operations were previews; canonical bytes unchanged")
+		next, _ := failure["next"].([]any)
+		failure["next"] = append(next, map[string]any{"tool": "edit_apply", "action": "correct_failed_operation_and_retry_the_full_preview", "failed_operation": index})
+		return failure
+	}
 	if index > 0 {
 		data["changed_paths"] = changedPaths(merged.files)
 		warnings, _ := failure["warnings"].([]string)
