@@ -77,6 +77,11 @@ func operationFailure(failure map[string]any, index int, merged appliedEdit) map
 		data["changed_paths"] = changedPaths(merged.files)
 		warnings, _ := failure["warnings"].([]string)
 		failure["warnings"] = append(warnings, fmt.Sprintf("operations 0 to %d were applied and stay applied", index-1))
+		next, _ := failure["next"].([]any)
+		failure["next"] = append(next, map[string]any{
+			"tool": "edit_apply", "action": "retry_from_failed_operation_after_correcting_it",
+			"failed_operation": index, "skip_applied_operations": index,
+		})
 	}
 	return failure
 }

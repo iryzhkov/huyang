@@ -115,7 +115,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	files := make([]map[string]any, 0, len(request.Targets))
 	entries := make([]map[string]any, 0, len(request.Targets))
 	failed, truncated := 0, 0
-	var firstNext []any
+	var recovery []any
 	for index, target := range request.Targets {
 		single := readRequest{
 			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
@@ -141,13 +141,26 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 			failure := map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]}
 			// The candidates are the recovery; a failed target that dropped
 			// them left only a summary to parse.
-			if data, _ := result["data"].(map[string]any); data["candidates"] != nil {
-				failure["candidates"] = data["candidates"]
+			if data, _ := result["data"].(map[string]any); data != nil {
+				if data["candidates"] != nil {
+					failure["candidates"] = data["candidates"]
+				}
+				if data["coverage"] != nil {
+					failure["coverage"] = data["coverage"]
+				}
 			}
 			files = append(files, failure)
 			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
-			if next, _ := result["next"].([]any); len(next) > 0 && firstNext == nil {
-				firstNext = next
+			for _, raw := range mcpapi.AnySlice(result["next"]) {
+				if step, ok := raw.(map[string]any); ok {
+					identified := make(map[string]any, len(step)+2)
+					for key, value := range step {
+						identified[key] = value
+					}
+					identified["target_index"] = index
+					identified["target_path"] = readTargetLabel(single)
+					recovery = append(recovery, identified)
+				}
 			}
 			continue
 		}
@@ -170,10 +183,10 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		summary += fmt.Sprintf("; %d truncated", truncated)
 	}
 	result := mcpapi.Envelope(requestID, workspace, outcome, "", summary, map[string]any{"entries": entries, "files": files})
-	// The top-level next is where a client looks first, so the first failed
-	// target's recovery is raised there; each target keeps its own.
-	if firstNext != nil {
-		result["next"] = firstNext
+	// Preserve each failed target's recovery, with its original batch index.
+	// Copy the steps so nested single-target payloads keep their own shape.
+	if len(recovery) > 0 {
+		result["next"] = recovery
 	}
 	return result
 }
