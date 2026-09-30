@@ -548,7 +548,7 @@ func repeatedUnavailability(data map[string]any) bool {
 
 func editDiagnosticRecovery(revision any) []any {
 	return []any{
-		map[string]any{"tool": "language_server_status", "action": "inspect_attachment_and_install_options"},
+		map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status", "note": "Detailed attachment and install options are available through language_server_status in the full profile."},
 		map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": revision, "stages": []string{"diagnostics"}, "note": "The mutation already applied; refresh diagnostic evidence without repeating it."},
 	}
 }
