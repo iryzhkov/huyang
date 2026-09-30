@@ -85,6 +85,7 @@ func operationFailure(failure map[string]any, index int, merged appliedEdit, pre
 		return failure
 	}
 	if index > 0 {
+		data["canonical_changed"] = true
 		data["changed_paths"] = changedPaths(merged.files)
 		warnings, _ := failure["warnings"].([]string)
 		failure["warnings"] = append(warnings, fmt.Sprintf("operations 0 to %d were applied and stay applied", index-1))

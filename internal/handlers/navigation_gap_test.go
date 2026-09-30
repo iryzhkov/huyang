@@ -26,6 +26,19 @@ func TestChangesViewMissingHandleExplainsWhereToObtainIt(t *testing.T) {
 	}
 }
 
+func TestPartialBatchCopyRefusalRetainsCanonicalMutationState(t *testing.T) {
+	h, id, root := literalFixture(t, map[string]string{"one.txt": "first\n"})
+	if err := os.WriteFile(filepath.Join(root, "large.bin"), make([]byte, workspacecore.MaxTransferBytes+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := h.Execute(context.Background(), "partial_copy", "edit_apply", map[string]any{"workspace_id": id, "format": false, "operations": []any{map[string]any{"kind": "replace_literal", "path": "one.txt", "old": "first", "new": "second"}, map[string]any{"kind": "copy_file", "from": "large.bin", "to": "copied.bin"}}})
+	data := result["data"].(map[string]any)
+	content, err := os.ReadFile(filepath.Join(root, "one.txt"))
+	if err != nil || string(content) != "second\n" || data["canonical_changed"] != true || data["applied_operations"] != 1 {
+		t.Fatalf("partial batch lost mutation state: %#v bytes=%q err=%v", result, content, err)
+	}
+}
+
 func TestCopyBoundRefusalHasExplicitRecovery(t *testing.T) {
 	h, id, root := literalFixture(t, map[string]string{"one.txt": "first\n"})
 	if err := os.WriteFile(filepath.Join(root, "large.bin"), make([]byte, workspacecore.MaxTransferBytes+1), 0600); err != nil {
