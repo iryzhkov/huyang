@@ -166,14 +166,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 			return failure
 		}
 	}
-	idempotencyKey, _ := arguments["idempotency_key"].(string)
-	if idempotencyKey == "" {
-		// A caller that supplies no key gets a fresh one: the call is not
-		// replay-protected, which is what omitting the key means, and the
-		// key is echoed so a retry can still name it.
-		idempotencyKey = fmt.Sprintf("auto_%d_%s", time.Now().UnixNano(), requestID)
-		arguments["idempotency_key"] = idempotencyKey
-	}
+	idempotencyKey := ensureIdempotencyKey(arguments, requestID)
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
 		return mcpapi.Envelope(requestID, nil, "failed", "invalid_arguments", err.Error(), map[string]any{})
@@ -185,14 +178,7 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 
 	previous, pending := d.receipts.lookupOrBegin(replayKey, argumentsHash)
 	if previous != nil {
-		select {
-		case <-previous.done:
-			return d.replayReceipt(requestID, name, idempotencyKey, argumentsHash, previous)
-		case <-ctx.Done():
-			result := mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
-			normalizeToolTimeout(ctx, d.toolTimeout, name, result)
-			return result
-		}
+		return d.waitForReplay(ctx, requestID, name, idempotencyKey, argumentsHash, previous)
 	}
 
 	ctx = handlers.WithReceiptCheckpoint(ctx, func(receipt map[string]any) error {
@@ -227,6 +213,28 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	}
 	d.receipts.finish(pending, stored)
 	return result
+}
+
+// ensureIdempotencyKey gives a keyless call a fresh key and echoes it so a
+// retry can name it. Separate keyless calls never share replay protection.
+func ensureIdempotencyKey(arguments map[string]any, requestID string) string {
+	key, _ := arguments["idempotency_key"].(string)
+	if key == "" {
+		key = fmt.Sprintf("auto_%d_%s", time.Now().UnixNano(), requestID)
+		arguments["idempotency_key"] = key
+	}
+	return key
+}
+
+func (d *directWorkspaces) waitForReplay(ctx context.Context, requestID, name, idempotencyKey, argumentsHash string, previous *directReplay) map[string]any {
+	select {
+	case <-previous.done:
+		return d.replayReceipt(requestID, name, idempotencyKey, argumentsHash, previous)
+	case <-ctx.Done():
+		result := mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", ctx.Err().Error(), map[string]any{})
+		normalizeToolTimeout(ctx, d.toolTimeout, name, result)
+		return result
+	}
 }
 
 // replayReceipt answers a repeated stateful call from its recorded receipt:
