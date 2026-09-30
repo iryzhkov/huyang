@@ -188,7 +188,12 @@ func shellQuote(path string) string {
 // any other edit, and anything else is a failure under fallback.
 func lifecycleFailure(requestID string, workspace *workspacecore.Workspace, fallback string, err error) map[string]any {
 	if code := workspacecore.ErrorCode(err); code != "" {
-		return mcpapi.Envelope(requestID, workspace, "conflict", code, err.Error()+"; nothing changed", map[string]any{})
+		result := mcpapi.Envelope(requestID, workspace, "conflict", code, err.Error()+"; nothing changed", map[string]any{})
+		if code == workspacecore.CodeCopySourceTooLarge {
+			result["data"] = map[string]any{"max_transfer_bytes": workspacecore.MaxTransferBytes, "canonical_changed": false}
+			result["next"] = []any{map[string]any{"tool": "edit_apply", "action": "choose_a_source_within_the_transfer_bound", "max_transfer_bytes": workspacecore.MaxTransferBytes}}
+		}
+		return result
 	}
 	var conflict *workspacecore.Conflict
 	if errors.As(err, &conflict) {

@@ -244,13 +244,26 @@ func readTargetLabel(request readRequest) string {
 // readCommitChanges answers the changes view from an opaque commit handle.
 func readCommitChanges(requestID string, workspace *workspacecore.Workspace, request readRequest) map[string]any {
 	if request.Handle == "" {
-		return mcpapi.Envelope(requestID, workspace, "failed", "commit_handle_required", "changes view requires an opaque commit handle", map[string]any{})
+		result := mcpapi.Envelope(requestID, workspace, "failed", "commit_handle_required", "changes view requires an opaque commit handle from read view=history or search git_history; Git refs and source handles are not commit handles", map[string]any{})
+		result["next"] = commitHandleRecovery(request)
+		return result
 	}
 	changes, err := workspace.CommitChanges(workspacecore.CommitHandle(request.Handle), request.Limit)
 	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "commit_changes_failed", err)
+		result := mcpapi.Failure(requestID, workspace, "commit_changes_failed", err)
+		result["summary"] = fmt.Sprintf("%v; obtain a fresh opaque commit handle from read view=history or search git_history", result["summary"])
+		result["next"] = commitHandleRecovery(request)
+		return result
 	}
 	return mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("%d changed paths", len(changes.Changes)), changes)
+}
+
+func commitHandleRecovery(request readRequest) []any {
+	step := map[string]any{"tool": "read", "action": "obtain_a_commit_handle_from_the_history_of_a_known_file", "view": "history"}
+	if request.Path != "" {
+		step["target"] = map[string]any{"path": request.Path}
+	}
+	return []any{step, map[string]any{"tool": "read", "action": "retry_changes_with_the_history_entry_commit_handle", "view": "changes"}}
 }
 
 // readHandle resolves a revision-bound handle. Without a view or line
