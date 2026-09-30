@@ -64,6 +64,10 @@ type frictionEvent struct {
 	OK   bool   `json:"ok"`
 	Err  string `json:"err,omitempty"`
 	Ms   int64  `json:"ms"`
+	// ReasonCodes describe diagnostic gaps independently of mutation success.
+	ReasonCodes            []string `json:"reason_codes,omitempty"`
+	VerificationConfidence string   `json:"verification_confidence,omitempty"`
+	CanonicalChanged       *bool    `json:"canonical_changed,omitempty"`
 }
 
 var (
@@ -366,6 +370,7 @@ func logFriction(session, name, root string, args, res map[string]any, started t
 		Ms:      time.Since(started).Milliseconds(),
 	}
 	frictionMu.Unlock()
+	ev.ReasonCodes, ev.VerificationConfidence, ev.CanonicalChanged = frictionDiagnosticState(res["data"])
 
 	// Only the last element of the root: which project a call ran in is
 	// worth knowing, the rest of the path is not the spool's business.

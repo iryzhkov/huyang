@@ -76,6 +76,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 				"outcome": fmt.Sprint(envelope["outcome"]),
 				"code":    envelope["code"],
 				"client":  client,
+				"data":    envelope["data"],
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
 			}, started)
 		// An alias that was rewritten explains the rest of the reply, so its
