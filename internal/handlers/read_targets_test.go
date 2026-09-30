@@ -158,6 +158,25 @@ func TestSymbolReadOfAMissingFileIsAMissingPathInEveryLanguage(t *testing.T) {
 
 // A listing stopped at its cap cannot say a file exists nowhere, so absence
 // is worded within the files it did list.
+func TestMissingPathSimilarCandidatesPreserveCappedAbsence(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"astore_test.go", "zstore.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace, err := workspacecore.Open(workspacecore.OpenOptions{Kind: workspacecore.KindProject, Root: root, StateDir: t.TempDir(), Limits: workspacecore.Limits{MaxFiles: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := workspace.Read("missing/astore.go")
+	result := readFailure("capped_similar", workspace, readErr, "")
+	summary := result["summary"].(string)
+	if !strings.Contains(summary, "among the 1 files listed") || !strings.Contains(summary, "incomplete") {
+		t.Fatalf("similar candidates overclaim absence: %#v", result)
+	}
+}
+
 func TestMissingPathAbsenceIsWordedWithinACappedListing(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.txt", "b.txt"} {

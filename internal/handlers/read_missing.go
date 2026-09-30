@@ -44,6 +44,8 @@ func readFailure(requestID string, workspace *workspacecore.Workspace, err error
 	switch {
 	case len(named) > 0:
 		summary = fmt.Sprintf("No file at %s; the workspace holds %s", path, strings.Join(candidates, ", "))
+	case len(candidates) > 0 && !coverage.Complete:
+		summary = fmt.Sprintf("No file at %s, and none of that name among the %d files listed; listing incomplete, so the workspace may still hold one; similar paths: %s", path, len(listed), strings.Join(candidates, ", "))
 	case len(candidates) > 0:
 		summary = fmt.Sprintf("No file at %s and no file of that name; similar paths: %s", path, strings.Join(candidates, ", "))
 	case coverage.Complete:
