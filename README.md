@@ -203,7 +203,6 @@ there.
 ```ini
 [Unit]
 Description=Huyang semantic workspace service
-After=default.target
 
 [Service]
 Type=simple
@@ -215,6 +214,10 @@ RestartSec=2
 [Install]
 WantedBy=default.target
 ```
+
+The unit has no `After=default.target`: it is wanted by `default.target`, so that ordering
+would form a cycle with any unit ordered after `huyang.service`, and systemd would break the
+cycle by deleting one of the start jobs at boot.
 
 After installing the unit:
 

@@ -1,6 +1,5 @@
 [Unit]
 Description=Huyang semantic workspace service
-After=default.target
 
 [Service]
 Type=simple
