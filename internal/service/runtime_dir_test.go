@@ -111,6 +111,34 @@ func TestMCPStalePinNamesTheUIDMismatch(t *testing.T) {
 	}
 }
 
+// TestMCPStalePinNamesTheDefaultTheAdapterWouldUse covers the two cases where
+// the derived socket is not what removing the pin leads to: HUYANG_SOCKET
+// still applies once -socket is gone, and an XDG_RUNTIME_DIR inherited from
+// another user makes the default just as stale as the pin.
+func TestMCPStalePinNamesTheDefaultTheAdapterWouldUse(t *testing.T) {
+	unsetEnvForTest(t, "XDG_RUNTIME_DIR", "HUYANG_SOCKET")
+	root := useRunUserRoot(t, true)
+	other := strconv.Itoa(os.Getuid() + 1)
+	pinned := filepath.Join(root, other, "huyang", "control.sock")
+
+	t.Setenv("HUYANG_SOCKET", "/elsewhere/control.sock")
+	err := runHuyang([]string{"mcp", "-socket", pinned}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "remove -socket from the registration (the default is /elsewhere/control.sock)") {
+		t.Fatalf("with HUYANG_SOCKET set: err = %v, want the HUYANG_SOCKET path as the default", err)
+	}
+
+	unsetEnvForTest(t, "HUYANG_SOCKET")
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(root, other))
+	err = runHuyang([]string{"mcp", "-socket", pinned}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("mcp with a stale pinned socket succeeded")
+	}
+	if strings.Contains(err.Error(), "remove -socket") || !strings.Contains(err.Error(), "and so is the default "+pinned) ||
+		!strings.Contains(err.Error(), "check HUYANG_SOCKET and XDG_RUNTIME_DIR") {
+		t.Fatalf("with a foreign XDG_RUNTIME_DIR: err = %v, want the default named as stale too", err)
+	}
+}
+
 func TestMCPMissingSocketOfThisUIDKeepsTheConnectError(t *testing.T) {
 	unsetEnvForTest(t, "XDG_RUNTIME_DIR", "HUYANG_SOCKET")
 	root := useRunUserRoot(t, true)

@@ -169,7 +169,7 @@ func runMCPAdapter(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 // sits in another user's runtime directory, typically a registration copied
 // from a host where the service ran under a different UID. The pinned path is
 // never replaced; the error names the mismatch and the path this process
-// would derive on its own. It returns nil when the pin is not the problem.
+// would use without the pin. It returns nil when the pin is not the problem.
 func staleSocketPin(socketPath, pinnedBy string) error {
 	if pinnedBy == "" {
 		return nil
@@ -183,12 +183,18 @@ func staleSocketPin(socketPath, pinnedBy string) error {
 	if err == nil {
 		return nil
 	}
-	remedy := "remove -socket from the registration"
+	// Without -socket the adapter would still honour HUYANG_SOCKET; without
+	// HUYANG_SOCKET it derives the path.
+	remedy, fallback := "remove -socket from the registration", defaultHuyangSocket()
 	if pinnedBy == "HUYANG_SOCKET" {
-		remedy = "unset HUYANG_SOCKET in the harness environment"
+		remedy, fallback = "unset HUYANG_SOCKET in the harness environment", derivedHuyangSocket()
 	}
-	return fmt.Errorf("socket %s is in UID %d's runtime directory but this process runs as UID %d; %s (the default is %s): %w",
-		socketPath, owner, uid, remedy, derivedHuyangSocket(), err)
+	mismatch := fmt.Sprintf("socket %s is in UID %d's runtime directory but this process runs as UID %d", socketPath, owner, uid)
+	if fallbackOwner, ok := runtimedir.RunUserOwner(fallback); ok && fallbackOwner != uid {
+		return fmt.Errorf("%s, and so is the default %s; check HUYANG_SOCKET and XDG_RUNTIME_DIR in the harness environment: %w",
+			mismatch, fallback, err)
+	}
+	return fmt.Errorf("%s; %s (the default is %s): %w", mismatch, remedy, fallback, err)
 }
 
 func newHuyangService(config serviceConfig) (*huyangService, error) {

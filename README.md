@@ -152,7 +152,8 @@ Connect an MCP client through the stdio adapter:
 service's socket even when a harness starts it without `XDG_RUNTIME_DIR`). It refuses any
 other profile name. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
 lies in another UID's `/run/user/<n>/`, the adapter fails with an error that names both UIDs
-and the socket it would have derived; it never substitutes that path for the pinned one. The third
+and the socket it would use without the pin; it never substitutes that path for the pinned
+one. The third
 subcommand, `huyang trust`, administers the user trust policy (see "Trust and repository
 commands"). The adapter is
 intentionally thin: it forwards newline-delimited JSON-RPC to the service, and on a service
@@ -237,7 +238,8 @@ adapter derive the same socket for the same user: `$XDG_RUNTIME_DIR/huyang/contr
 else `/run/user/<uid>/huyang/control.sock` when that directory is a real directory owned by
 the user and not group- or world-writable, else `$TMPDIR/huyang-<uid>/huyang/control.sock`.
 A harness subprocess that does not inherit `XDG_RUNTIME_DIR` therefore still finds the
-systemd user service's socket. Set `HUYANG_SOCKET` or pass `--socket` only for a
+systemd user service's socket. The last, temporary-directory fallback depends on `TMPDIR`,
+so on a host without `/run/user/<uid>` both sides must share `TMPDIR` or `XDG_RUNTIME_DIR`. Set `HUYANG_SOCKET` or pass `--socket` only for a
 non-standard layout; a pinned path is tied to one UID and breaks when the registration is
 copied to another user.
 
