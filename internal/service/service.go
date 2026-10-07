@@ -24,6 +24,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/iryzhkov/huyang/internal/providerpool"
+	"github.com/iryzhkov/huyang/internal/runtimedir"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -79,15 +80,8 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 	}
 	switch arguments[0] {
 	case "serve":
-		flags := flag.NewFlagSet("huyang serve", flag.ContinueOnError)
-		flags.SetOutput(stderr)
 		config := serviceConfig{}
-		flags.StringVar(&config.SocketPath, "socket", defaultHuyangSocket(), "private Unix control socket")
-		flags.StringVar(&config.StateDir, "state-dir", defaultHuyangStateDir(), "durable service state directory")
-		flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address; a request may carry an X-Huyang-Client header so diagnostic_updates is a per-client delta across its stateless requests")
-		flags.StringVar(&config.PprofAddress, "pprof", "", "optional loopback address serving net/http/pprof profiles behind the HTTP bearer token, for heap and goroutine investigation")
-		flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
-		flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
+		flags := newServeFlags(&config, stderr)
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
@@ -110,33 +104,97 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 		}
 		return service.Serve(ctx)
 	case "mcp":
-		flags := flag.NewFlagSet("huyang mcp", flag.ContinueOnError)
-		flags.SetOutput(stderr)
-		profileName := "full"
-		socketPath := defaultHuyangSocket()
-		// edit is the default because it is what a coding session uses: the
-		// four debugger tools are 1,654 of the full catalog's 9,035 tokens,
-		// paid by every session, and the fleet spool has them called in 27 of
-		// 144 sessions. A session that wants them loads the debugger profile
-		// beside this one, or asks for full.
-		flags.StringVar(&profileName, "profile", "edit", "fixed catalog: edit (default), full, orient, debug, debugger, or experimental")
-		flags.StringVar(&socketPath, "socket", socketPath, "Huyang Unix control socket")
-		if err := flags.Parse(arguments[1:]); err != nil {
-			return err
-		}
-		if flags.NArg() != 0 {
-			return errors.New("usage: huyang mcp [--profile edit|full|orient|debug|debugger|experimental] [--socket PATH]")
-		}
-		profile, err := modernOnlyProfile(profileName)
-		if err != nil {
-			return err
-		}
-		return proxyHuyangMCP(socketPath, profile, stdin, stdout)
+		return runMCPAdapter(arguments[1:], stdin, stdout, stderr)
 	case "trust":
 		return runTrust(arguments[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown subcommand %q; usage: huyang <serve|mcp|trust>", arguments[0])
 	}
+}
+
+func newServeFlags(config *serviceConfig, stderr io.Writer) *flag.FlagSet {
+	flags := flag.NewFlagSet("huyang serve", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.StringVar(&config.SocketPath, "socket", defaultHuyangSocket(), "private Unix control socket")
+	flags.StringVar(&config.StateDir, "state-dir", defaultHuyangStateDir(), "durable service state directory")
+	flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address; a request may carry an X-Huyang-Client header so diagnostic_updates is a per-client delta across its stateless requests")
+	flags.StringVar(&config.PprofAddress, "pprof", "", "optional loopback address serving net/http/pprof profiles behind the HTTP bearer token, for heap and goroutine investigation")
+	flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
+	flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
+	return flags
+}
+
+func newMCPFlags(profileName, socketPath *string, stderr io.Writer) *flag.FlagSet {
+	flags := flag.NewFlagSet("huyang mcp", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	// edit is the default because it is what a coding session uses: the
+	// four debugger tools are 1,654 of the full catalog's 9,035 tokens,
+	// paid by every session, and the fleet spool has them called in 27 of
+	// 144 sessions. A session that wants them loads the debugger profile
+	// beside this one, or asks for full.
+	flags.StringVar(profileName, "profile", "edit", "fixed catalog: edit (default), full, orient, debug, debugger, or experimental")
+	flags.StringVar(socketPath, "socket", defaultHuyangSocket(), "Huyang Unix control socket")
+	return flags
+}
+
+func runMCPAdapter(arguments []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	var profileName, socketPath string
+	flags := newMCPFlags(&profileName, &socketPath, stderr)
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: huyang mcp [--profile edit|full|orient|debug|debugger|experimental] [--socket PATH]")
+	}
+	profile, err := modernOnlyProfile(profileName)
+	if err != nil {
+		return err
+	}
+	pinnedBy := ""
+	if os.Getenv("HUYANG_SOCKET") != "" {
+		pinnedBy = "HUYANG_SOCKET"
+	}
+	flags.Visit(func(set *flag.Flag) {
+		if set.Name == "socket" {
+			pinnedBy = "-socket"
+		}
+	})
+	if err := staleSocketPin(socketPath, pinnedBy); err != nil {
+		return err
+	}
+	return proxyHuyangMCP(socketPath, profile, stdin, stdout)
+}
+
+// staleSocketPin explains a pinned socket that cannot be reached because it
+// sits in another user's runtime directory, typically a registration copied
+// from a host where the service ran under a different UID. The pinned path is
+// never replaced; the error names the mismatch and the path this process
+// would use without the pin. It returns nil when the pin is not the problem.
+func staleSocketPin(socketPath, pinnedBy string) error {
+	if pinnedBy == "" {
+		return nil
+	}
+	owner, ok := runtimedir.RunUserOwner(socketPath)
+	uid := os.Getuid()
+	if !ok || owner == uid {
+		return nil
+	}
+	_, err := os.Lstat(socketPath)
+	if err == nil {
+		return nil
+	}
+	// Without -socket the adapter would still honour HUYANG_SOCKET; without
+	// HUYANG_SOCKET it derives the path.
+	remedy, fallback := "remove -socket from the registration", defaultHuyangSocket()
+	if pinnedBy == "HUYANG_SOCKET" {
+		remedy, fallback = "unset HUYANG_SOCKET in the harness environment", derivedHuyangSocket()
+	}
+	mismatch := fmt.Sprintf("socket %s is in UID %d's runtime directory but this process runs as UID %d", socketPath, owner, uid)
+	if fallbackOwner, ok := runtimedir.RunUserOwner(fallback); ok && fallbackOwner != uid {
+		return fmt.Errorf("%s, and so is the default %s; check HUYANG_SOCKET and XDG_RUNTIME_DIR in the harness environment: %w",
+			mismatch, fallback, err)
+	}
+	return fmt.Errorf("%s; %s (the default is %s): %w", mismatch, remedy, fallback, err)
 }
 
 func newHuyangService(config serviceConfig) (*huyangService, error) {
@@ -681,13 +739,25 @@ func modernOnlyProfile(name string) (mcpapi.Profile, error) {
 	}
 }
 
+// defaultHuyangSocket is the --socket default of both serve and mcp:
+// HUYANG_SOCKET when set, else derivedHuyangSocket.
 func defaultHuyangSocket() string {
 	if value := os.Getenv("HUYANG_SOCKET"); value != "" {
 		return value
 	}
-	base := os.Getenv("XDG_RUNTIME_DIR")
+	return derivedHuyangSocket()
+}
+
+// derivedHuyangSocket places the socket in this user's runtime directory
+// (see runtimedir.Base), else in a per-user directory under the temporary
+// directory. serve and mcp derive the same path for the same user even when a
+// harness starts mcp without XDG_RUNTIME_DIR, so a registration needs no
+// socket pin.
+func derivedHuyangSocket() string {
+	uid := os.Getuid()
+	base := runtimedir.Base(uid)
 	if base == "" {
-		base = filepath.Join(os.TempDir(), "huyang-"+strconv.Itoa(os.Getuid()))
+		base = filepath.Join(os.TempDir(), "huyang-"+strconv.Itoa(uid))
 	}
 	return filepath.Join(base, "huyang", "control.sock")
 }

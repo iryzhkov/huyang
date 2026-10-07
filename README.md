@@ -131,7 +131,7 @@ Start the long-lived service:
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--socket PATH` | `$HUYANG_SOCKET`, else `$XDG_RUNTIME_DIR/huyang/control.sock` | Private Unix control socket, mode 0600. When `XDG_RUNTIME_DIR` is unset the base is `$TMPDIR/huyang-<uid>`. |
+| `--socket PATH` | `$HUYANG_SOCKET`, else `<runtime dir>/huyang/control.sock` | Private Unix control socket, mode 0600. The runtime directory is `$XDG_RUNTIME_DIR` when it is set to an absolute path, else `/run/user/<uid>` when that is a real directory (not a symbolic link) owned by the current user and not group- or world-writable, else `$TMPDIR/huyang-<uid>`. |
 | `--state-dir PATH` | `$HUYANG_STATE_DIR`, else `$XDG_STATE_HOME/huyang`, else `~/.local/state/huyang` | Durable service state directory, mode 0700. |
 | `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Routes are `/mcp` (`full`), `/mcp/orient`, `/mcp/edit`, and `/mcp/debug`; every request needs `Authorization: Bearer <token>`. The transport is stateless. |
 | `--pprof LOOPBACK:PORT` | unset | Optional `net/http/pprof` listener behind the same bearer token, for heap and goroutine profiles of the live service. |
@@ -148,7 +148,12 @@ Connect an MCP client through the stdio adapter:
 ```
 
 `huyang mcp` accepts `--profile full|orient|edit|debug` (default `full`) and
-`--socket PATH` (default as for `serve`). It refuses any other profile name. The third
+`--socket PATH` (default as for `serve`, derived the same way, so the adapter finds the
+service's socket even when a harness starts it without `XDG_RUNTIME_DIR`). It refuses any
+other profile name. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
+lies in another UID's `/run/user/<n>/`, the adapter fails with an error that names both UIDs
+and the socket it would use without the pin; it never substitutes that path for the pinned
+one. The third
 subcommand, `huyang trust`, administers the user trust policy (see "Trust and repository
 commands"). The adapter is
 intentionally thin: it forwards newline-delimited JSON-RPC to the service, and on a service
@@ -163,7 +168,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 
 | Variable | Default | Purpose | `AGENT99_` fallback |
 |---|---|---|---|
-| `HUYANG_SOCKET` | `$XDG_RUNTIME_DIR/huyang/control.sock` | Default for `--socket` in `serve` and `mcp`. | no |
+| `HUYANG_SOCKET` | `$XDG_RUNTIME_DIR/huyang/control.sock`, else `/run/user/<uid>/huyang/control.sock` when that directory is private to the user, else `$TMPDIR/huyang-<uid>/huyang/control.sock` | Overrides the derived default for `--socket` in `serve` and `mcp`. Only for non-standard layouts; a standard install leaves it unset. | no |
 | `HUYANG_STATE_DIR` | `$XDG_STATE_HOME/huyang` | Default for `--state-dir`. | no |
 | `HUYANG_PROVIDER_BACKEND` | `embed` | Provider backend name. Only `embed` (or empty) is accepted; anything else fails at provider start. | `AGENT99_PROVIDER_BACKEND` |
 | `HUYANG_RUNTIME_PATH` | directory of the executable, its parent, or the working directory, whichever holds `lua/huyang/rpc.lua` | Runtime path handed to the embedded Neovim so it can load the kernel. | `AGENT99_RUNTIME_PATH` |
@@ -192,9 +197,10 @@ package and registry homes (`MISE_*`, `RUSTUP_HOME`, `CARGO_HOME`, `GRADLE_USER_
 already fetched. Its home directory is a throwaway one, while its caches are the shared
 ones under `command-cache/` described in [State directory](#state-directory).
 
-The embedded provider also takes a per-root lock file under
-`$XDG_RUNTIME_DIR/agent99-huyang/`; the directory name is historical and only the lock lives
-there.
+The embedded provider also takes a per-root lock file under `agent99-huyang/` in the same
+runtime directory as the socket, or under `$TMPDIR/agent99-huyang-<uid>/` when there is
+none; the directory name is historical and only the lock lives there. The provider refuses a
+lock directory that another user owns or that is group- or world-writable.
 
 ## User service
 
@@ -227,8 +233,15 @@ systemctl --user enable --now huyang.service
 ```
 
 Register the MCP command in each harness as
-`~/.local/share/huyang/bin/huyang mcp -socket /run/user/1000/huyang/control.sock -profile full`.
-Pinning the socket matters for harness subprocesses that do not inherit `XDG_RUNTIME_DIR`.
+`~/.local/share/huyang/bin/huyang mcp -profile full`, with no socket. The service and the
+adapter derive the same socket for the same user: `$XDG_RUNTIME_DIR/huyang/control.sock`,
+else `/run/user/<uid>/huyang/control.sock` when that directory is a real directory owned by
+the user and not group- or world-writable, else `$TMPDIR/huyang-<uid>/huyang/control.sock`.
+A harness subprocess that does not inherit `XDG_RUNTIME_DIR` therefore still finds the
+systemd user service's socket. The last, temporary-directory fallback depends on `TMPDIR`,
+so on a host without `/run/user/<uid>` both sides must share `TMPDIR` or `XDG_RUNTIME_DIR`. Set `HUYANG_SOCKET` or pass `--socket` only for a
+non-standard layout; a pinned path is tied to one UID and breaks when the registration is
+copied to another user.
 
 ### Upgrading a deployed service
 
