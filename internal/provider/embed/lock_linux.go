@@ -10,8 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
+
+	"github.com/iryzhkov/huyang/internal/runtimedir"
 )
 
 type rootLock struct {
@@ -19,14 +20,26 @@ type rootLock struct {
 	path string
 }
 
-func rootLockPath(root string) (string, error) {
-	dir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
-	if dir == "" {
-		dir = os.TempDir()
+// lockUID is the UID whose lock directory this process uses. It is a variable
+// so tests can simulate another user.
+var lockUID = os.Getuid
+
+// rootLockDir is agent99-huyang in the user's runtime directory (see
+// runtimedir.Base), else agent99-huyang-<uid> under the temporary directory:
+// a shared name there would let the first user on a host own every other
+// user's locks.
+func rootLockDir(uid int) string {
+	if base := runtimedir.Base(uid); base != "" {
+		return filepath.Join(base, "agent99-huyang")
 	}
-	dir = filepath.Join(dir, "agent99-huyang")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+	return filepath.Join(os.TempDir(), "agent99-huyang-"+strconv.Itoa(uid))
+}
+
+func rootLockPath(root string) (string, error) {
+	uid := lockUID()
+	dir := rootLockDir(uid)
+	if err := runtimedir.EnsurePrivate(dir, uid); err != nil {
+		return "", fmt.Errorf("embedded provider lock directory: %w", err)
 	}
 	sum := sha256.Sum256([]byte(root))
 	return filepath.Join(dir, "embed-"+hex.EncodeToString(sum[:10])+".lock"), nil
