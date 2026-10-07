@@ -1,0 +1,19 @@
+{
+ "batch": "x33-probe3",
+ "runs": [
+  {
+   "scenario": "R1",
+   "language": "go",
+   "family": "huyang",
+   "rep": "1",
+   "title": "bench x33-probe3 R1 go huyang r1",
+   "task_file": "/home/igor/.config/t3-steward/backlog-v2-drop/bench-x33-probe3-R1-go-huyang-r1-20260913-144022.md",
+   "thread_id": null,
+   "found": false
+  }
+ ],
+ "summary": [],
+ "missing": [
+  "bench x33-probe3 R1 go huyang r1"
+ ]
+}
