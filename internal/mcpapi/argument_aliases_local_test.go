@@ -76,6 +76,36 @@ func TestMalformedJSONObjectSaysWhereItBroke(t *testing.T) {
 	}
 }
 
+func TestSearchReadsIncludeAsPaths(t *testing.T) {
+	schema := searchSchema()
+	arguments := map[string]any{"query": "x", "include": "*.go"}
+	warnings := ApplyArgumentAliases("search", arguments)
+	if paths, _ := arguments["paths"].([]any); len(paths) != 1 || paths[0] != "*.go" || arguments["include"] != nil {
+		t.Fatalf("include was not read as paths: %v", arguments)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "include is not a search argument") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if err := ValidateCall("search", schema, arguments); err != nil {
+		t.Fatalf("aliased call is refused: %v", err)
+	}
+	// Beside paths it is ambiguous, and the refusal now points at paths
+	// rather than at include_handles.
+	ambiguous := map[string]any{"query": "x", "include": "*.go", "paths": []any{"cmd"}}
+	if warnings := ApplyArgumentAliases("search", ambiguous); len(warnings) != 0 {
+		t.Fatalf("include beside paths was rewritten: %v", ambiguous)
+	}
+	err := ValidateCall("search", schema, ambiguous)
+	if err == nil || !strings.Contains(err.Error(), "paths") || strings.Contains(err.Error(), "include_handles") {
+		t.Fatalf("include beside paths refusal = %v", err)
+	}
+	// include together with path is two guesses at one scope.
+	two := map[string]any{"query": "x", "include": "*.go", "path": "cmd"}
+	if warnings := ApplyArgumentAliases("search", two); len(warnings) != 0 || two["paths"] != nil {
+		t.Fatalf("two scope aliases were merged: %v", two)
+	}
+}
+
 func readSchemaForTest(t *testing.T) map[string]any {
 	t.Helper()
 	for _, descriptor := range Tools {

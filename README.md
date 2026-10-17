@@ -187,6 +187,42 @@ disconnect it reconnects for up to 30 seconds, replays the client's `initialize`
 and resends outstanding requests. Workspace identity, receipts, providers, and recovery
 state live in the service and survive adapter reconnects.
 
+### The client's working directory
+
+The service is shared and long-lived, so its own working directory means nothing to any
+client. The adapter is started by the client, and announces two things on every connection
+it makes to the service, including the one that replaces a lost connection: the directory
+the client started it in, and the agent session (`HUYANG_SESSION_ID`, else
+`CLAUDE_CODE_SESSION_ID`, else a name the adapter gives itself, `adapter-<random>`, kept
+for its lifetime). The service uses the directory for two things, and only when the answer
+is unambiguous:
+
+- **A relative `root`** (`"."`, `"../other"`) is resolved against that directory, following
+  symbolic links before applying `..`, so `link/..` means what the agent's shell means. It
+  is resolved only when the client's directory and the result both lie in a Git working
+  tree (a `.git` file counts, so a linked worktree is its own tree). Edits are included,
+  because the caller wrote the root. The reply warns `root "." was resolved against your
+  working directory to /abs; send absolute roots`.
+- **A default workspace, for read-only tools only.** A call to `workspace_open`,
+  `workspace_inspect`, `search`, `symbol_find`, `navigate`, `read`, `diagnostics`,
+  `evidence_get`, `code_actions`, `revision_diff` or `language_server_status` that names
+  neither `workspace_id` nor `root` reads the repository the client was started in, but
+  only when the client was started at the top of that working tree and the call names no
+  absolute path (an absolute path keeps its exact-document meaning). The reply warns
+  `no workspace was named, so the repository your client was started in, /abs, was used;
+  pass root to name another`.
+
+Nothing is defaulted when the connection announced no directory (HTTP, an older adapter),
+when the client was started outside any working tree (Codex starts every MCP server in the
+home directory), or when it was started in a subdirectory, where a relative path would
+mean one file to the agent and another to the workspace. An explicit `workspace_id` or
+absolute `root` always wins. **Mutations are never defaulted:** `edit_apply`,
+`change_plan`, `verify_run` and the debugger need the workspace named, because their
+guards check content, not intent, and an edit meant for another repository could land in
+this one. A replay key is built after a root is adopted into a `workspace_id`, so a retry
+that names the same workspace by `"."`, by its absolute root or by its ID replays the
+first call instead of applying it again.
+
 ## Environment variables
 
 Every variable the shipped code reads. "Fallback" names are read only when the `HUYANG_`

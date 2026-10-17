@@ -16,11 +16,11 @@ package service
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
 // clientConnection is what an adapter announced about its client.
@@ -65,7 +65,7 @@ func resolveClientPaths(tool string, arguments map[string]any, cwd string) []str
 	// works: Codex starts every MCP server from the home directory whatever
 	// directory the thread is in, so ".t3/repo" against that directory names
 	// a different checkout from the one the agent is looking at.
-	top := gitTopLevel(cwd)
+	top := workspacecore.GitTopLevel(cwd)
 	if top == "" {
 		return nil
 	}
@@ -82,7 +82,7 @@ func resolveClientPaths(tool string, arguments map[string]any, cwd string) []str
 		// lexically while the filesystem follows link elsewhere; resolving
 		// symbolic links first makes ".." mean what the agent's shell means.
 		resolved, err := filepath.EvalSymlinks(cwd + string(filepath.Separator) + root)
-		if err != nil || gitTopLevel(resolved) == "" {
+		if err != nil || workspacecore.GitTopLevel(resolved) == "" {
 			return nil
 		}
 		arguments["root"] = resolved
@@ -104,24 +104,6 @@ func resolveClientPaths(tool string, arguments map[string]any, cwd string) []str
 	}
 	arguments["root"] = top
 	return []string{fmt.Sprintf("no workspace was named, so the repository your client was started in, %s, was used; pass root to name another", top)}
-}
-
-// gitTopLevel is the top of the Git working tree that holds dir, or empty
-// when dir is in none. A .git file counts, so a linked worktree resolves to
-// itself rather than to the repository it was added from.
-func gitTopLevel(dir string) string {
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return ""
-	}
-	for current := filepath.Clean(dir); ; current = filepath.Dir(current) {
-		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
-			return current
-		}
-		if parent := filepath.Dir(current); parent == current {
-			return ""
-		}
-	}
 }
 
 // namesAbsolutePath reports whether a call names any file by absolute path.

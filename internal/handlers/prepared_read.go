@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -40,6 +41,12 @@ func (h *Handlers) readPrepared(requestID string, workspace *workspacecore.Works
 			map[string]any{"path": path, "revision": view.PreparedRevision})
 	}
 	body, firstLine, lastLine, rangeErr := boundedLines(content, request.StartLine, request.EndLine)
+	var pastEnd *startPastEndError
+	if errors.As(rangeErr, &pastEnd) {
+		// The same empty window a canonical read answers; end_line is the
+		// document's last line, so it reads as before start_line.
+		body, firstLine, lastLine, rangeErr = nil, pastEnd.start, pastEnd.total, nil
+	}
 	if rangeErr != nil {
 		return mcpapi.Failure(requestID, workspace, "invalid_range", rangeErr)
 	}
@@ -55,8 +62,12 @@ func (h *Handlers) readPrepared(requestID string, workspace *workspacecore.Works
 		"revision_id": view.PreparedRevision, "plan_id": view.PlanID, "plan_revision": view.PlanRevision,
 		"handle": preparedHandle(view, path, content),
 	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "",
+	result := mcpapi.Envelope(requestID, workspace, "ok", "",
 		fmt.Sprintf("Read %s at %s", path, view.PreparedRevision), data)
+	if pastEnd != nil {
+		result = mcpapi.AddWarnings(result, pastEnd.warning())
+	}
+	return result
 }
 
 // preparedHandle names bytes inside one prepared revision. It is deliberately

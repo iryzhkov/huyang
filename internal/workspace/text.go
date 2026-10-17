@@ -551,6 +551,22 @@ func (w *Workspace) Paths() ([]string, Coverage, error) {
 	return paths, coverage, nil
 }
 
+// ScopedPaths lists the workspace's documents inside a path scope as
+// workspace-relative paths, with the coverage of that scope alone. The scope
+// is applied before the file cap, as search applies it, so a listing of one
+// directory in a tree larger than the cap still lists that directory.
+func (w *Workspace) ScopedPaths(patterns []string) ([]string, Coverage, error) {
+	files, coverage, err := w.collectScopedFiles(patterns)
+	if err != nil {
+		return nil, coverage, err
+	}
+	paths := make([]string, len(files))
+	for index, name := range files {
+		paths[index] = displayPath(w.identity.Root, name)
+	}
+	return paths, coverage, nil
+}
+
 func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	return w.collectScopedFiles(nil)
 }
@@ -747,7 +763,7 @@ func (w *Workspace) Read(path string) (TextRead, error) {
 		return TextRead{}, Coded(CodeDocumentNotFound, &DocumentNotFoundError{Path: displayPath(w.identity.Root, absolute)})
 	}
 	if snapshot.Disk.Kind != ObjectRegularText {
-		return TextRead{}, fmt.Errorf("%s is %s, not regular text", absolute, snapshot.Disk.Kind)
+		return TextRead{}, &NotRegularTextError{Path: displayPath(w.identity.Root, absolute), Absolute: absolute, Kind: snapshot.Disk.Kind}
 	}
 	if snapshot.Disk.Size > w.limits.MaxBytes {
 		return TextRead{}, fmt.Errorf("%s exceeds the %d-byte read limit", absolute, w.limits.MaxBytes)

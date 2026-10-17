@@ -199,6 +199,9 @@ func validateObject(schema map[string]any, value any, path string) error {
 var propertyAliases = map[string][]string{
 	"path":        {"paths"},
 	"path_prefix": {"paths"},
+	// include is grep's and ripgrep's name for a file glob; without this
+	// entry it was answered with include_handles, which means something else.
+	"include":     {"paths"},
 	"max_results": {"limit"},
 	"to_revision": {"to_revision_or_current"},
 	"symbol":      {"query", "symbol_locator"},

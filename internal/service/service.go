@@ -409,6 +409,11 @@ type mcpProxy struct {
 	outstanding             map[string][]byte
 }
 
+// adapterWorkingDirectory is where the client started the adapter. Tests
+// replace it, because the test binary's own directory says nothing about
+// the client a test plays.
+var adapterWorkingDirectory = os.Getwd
+
 func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, stdout io.Writer) error {
 	// A client that exports no session id still runs one adapter per
 	// session, so the adapter names itself: without it every call from such
@@ -417,7 +422,7 @@ func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, 
 	if session == "" {
 		session = "adapter-" + randomID()
 	}
-	cwd, _ := os.Getwd()
+	cwd, _ := adapterWorkingDirectory()
 	proxy := &mcpProxy{
 		socketPath: socketPath, profile: profile, stdout: stdout, session: session, cwd: cwd,
 		backendEvents: make(chan proxyLineEvent, 32), done: make(chan struct{}),

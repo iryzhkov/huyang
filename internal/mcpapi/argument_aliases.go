@@ -154,20 +154,25 @@ func declaredMaximum(tool, property string) (int, bool) {
 	return 0, false
 }
 
-// aliasSearchPaths reads search's path or path_prefix as the paths scope.
-// Both at once, or either beside paths, is ambiguous and left to validation.
+// searchPathAliases are the names search reads as its paths scope.
+var searchPathAliases = []string{"path", "path_prefix", "include"}
+
+// aliasSearchPaths reads search's path, path_prefix or include as the paths
+// scope. More than one at once, or any beside paths, is ambiguous and left
+// to validation.
 func aliasSearchPaths(arguments map[string]any) []string {
 	if _, present := arguments["paths"]; present {
 		return nil
 	}
-	path, hasPath := arguments["path"]
-	prefix, hasPrefix := arguments["path_prefix"]
-	alias, value := "path", path
-	switch {
-	case hasPath == hasPrefix:
+	alias, value, found := "", any(nil), 0
+	for _, name := range searchPathAliases {
+		if named, present := arguments[name]; present {
+			alias, value = name, named
+			found++
+		}
+	}
+	if found != 1 {
 		return nil
-	case hasPrefix:
-		alias, value = "path_prefix", prefix
 	}
 	var paths []any
 	switch typed := value.(type) {

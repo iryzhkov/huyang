@@ -3,7 +3,9 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -116,6 +118,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	entries := make([]map[string]any, 0, len(request.Targets))
 	failed, truncated := 0, 0
 	var recovery []any
+	var warnings []string
 	for index, target := range request.Targets {
 		single := readRequest{
 			View: "source", StartLine: argInt(target, "start_line", 0), EndLine: argInt(target, "end_line", 0),
@@ -166,6 +169,11 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		}
 		data := readTargetData(result["data"], readTargetLabel(single))
 		files = append(files, data)
+		// A target that was read with a caveat, such as a window past its
+		// end, keeps the caveat; the envelope is the only place it can go.
+		for _, warning := range mcpapi.Warnings(result) {
+			warnings = append(warnings, readTargetLabel(single)+": "+warning)
+		}
 		entry := readEntry(data)
 		if entry["truncated"] == true {
 			truncated++
@@ -188,7 +196,7 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 	if len(recovery) > 0 {
 		result["next"] = recovery
 	}
-	return result
+	return mcpapi.AddWarnings(result, warnings...)
 }
 
 // readTargetData normalises one target's payload into the map a multi-target
@@ -209,6 +217,13 @@ func readTargetData(payload any, label string) map[string]any {
 // the delivery stopped at max_lines. An outline target has no bytes of its
 // own, so its entry counts the sections instead.
 func readEntry(data map[string]any) map[string]any {
+	if data["kind"] == "directory" {
+		entry := map[string]any{"path": data["path"], "kind": "directory", "entry_count": data["entry_count"]}
+		if data["truncated"] == true {
+			entry["truncated"] = true
+		}
+		return entry
+	}
 	if _, ok := data["sections"].([]map[string]any); ok {
 		// The count is what the file declares, not what this reply listed, so
 		// a truncated outline is not mistaken for a small file.
@@ -486,9 +501,27 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	}
 	read, err := workspace.Read(request.Path)
 	if err != nil {
+		// A directory is read to see what it holds, which is the commonest
+		// read failure in the friction spool; the listing is that answer.
+		var notText *workspacecore.NotRegularTextError
+		if errors.As(err, &notText) && notText.Kind == workspacecore.ObjectDirectory {
+			return readDirectory(requestID, workspace, notText)
+		}
 		return readFailure(requestID, workspace, err, "")
 	}
 	content, actualStart, actualEnd, rangeErr := boundedLines(read.Content, request.StartLine, request.EndLine)
+	var pastEnd *startPastEndError
+	if errors.As(rangeErr, &pastEnd) {
+		// Paging past the end, or guessing at a length, wants the length,
+		// not a refusal: the window is empty and the reply says where the
+		// document ends.
+		data := map[string]any{
+			"path": read.Path, "content": "", "revision_id": read.Snapshot.Revision,
+			"lines": pastEnd.total, "start_line": pastEnd.start,
+		}
+		result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s: start_line %d is past the end; the document has %d lines", read.Path, pastEnd.start, pastEnd.total), data)
+		return mcpapi.AddWarnings(result, pastEnd.warning())
+	}
 	if rangeErr != nil {
 		return mcpapi.Failure(requestID, workspace, "invalid_line_range", rangeErr)
 	}
@@ -519,6 +552,32 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 			map[string]any{"tool": "read", "action": "outline_then_window_what_matters", "path": read.Path, "view": "outline"},
 			map[string]any{"tool": "read", "action": "continue_from_line", "path": read.Path, "start_line": firstLine + request.MaxLines},
 		}
+	}
+	return result
+}
+
+// readDirectory answers a read of a directory with a bounded listing of
+// what the workspace holds in it. Nothing outside the workspace's own
+// listing is shown, so ignored files and anything past a symlink that
+// leaves the root stay out of it, as they stay out of search.
+func readDirectory(requestID string, workspace *workspacecore.Workspace, directory *workspacecore.NotRegularTextError) map[string]any {
+	path := directory.Path
+	if filepath.IsAbs(path) {
+		// displayPath names the root itself absolutely.
+		path = ""
+	}
+	listing, err := listWorkspacePaths(workspace, path, nil, maxDirectoryEntries)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, "read_failed", err)
+	}
+	data, summary := directoryListingData(path, listing)
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
+	if listing.truncated() {
+		narrower := map[string]any{"tool": "search", "action": "list_or_search_with_a_narrower_scope"}
+		if path != "" {
+			narrower["paths"] = []string{path + "/"}
+		}
+		result["next"] = []any{map[string]any{"tool": "read", "action": "read_a_listed_subdirectory"}, narrower}
 	}
 	return result
 }

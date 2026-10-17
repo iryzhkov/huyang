@@ -114,13 +114,3 @@ func TestResolveClientPathsNeverDefaultsAMutation(t *testing.T) {
 		t.Fatalf("an explicit relative root on an edit was not resolved: %v", arguments["root"])
 	}
 }
-
-func TestGitTopLevelAcceptsALinkedWorktreeFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if top := gitTopLevel(filepath.Join(dir)); top != dir {
-		t.Fatalf("gitTopLevel = %q, want %q", top, dir)
-	}
-}
