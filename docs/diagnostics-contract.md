@@ -167,7 +167,11 @@ query can still report a recurrence as a new transition since its cursor.
 Any currently open producer progress vetoes a baseline, even if it started before
 the call. Baseline validity is bound to the exact pre-edit document revision,
 including object identity and content. An older authoritative coverage dimension
-alone is insufficient after checkout or external writes. Findings without a matching
+alone is insufficient after checkout or external writes. Reading the postimage
+invalidates current lane coverage but does not invalidate retained authoritative
+payload proof for the exact pre-edit revision in that same lane. Baseline lookup
+rechecks that immutable payload's own authority and producer identity; current
+coverage need not still describe the preimage. Findings without a matching
 baseline retain `baseline_missing`. Refreshing a stale finding produces
 `persisting`, never a new-finding transition. Staged multi-document counts sum
 staged observations without changing the canonical current set.

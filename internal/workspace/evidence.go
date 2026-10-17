@@ -596,7 +596,9 @@ func (s *diagnosticStore) recordLocked(batch DiagnosticBatch) (DiagnosticReport,
 	}
 	prior := s.state.ProviderDimensions[dimension+"\x00"+key+"\x00"+string(batch.Kind)]
 	baselineKnown := batch.Baseline
-	if !baselineKnown && prior.Confidence == ConfidenceAuthoritative && batch.PreEditDocumentRevision != "" {
+	// Postimage reads invalidate current lane coverage, not immutable proof of
+	// the exact preimage. Recheck that payload's own authority below instead.
+	if !baselineKnown && batch.PreEditDocumentRevision != "" {
 		for _, id := range prior.EvidenceIDs {
 			var previous DiagnosticBatch
 			if evidence, ok := s.state.Evidence[id]; ok && json.Unmarshal(evidence.Payload, &previous) == nil &&
