@@ -191,6 +191,7 @@ def _owned_listener(server_pid, model_port):
         if match:
             inodes.setdefault(int(match[1]), []).append(int(entry.name))
     listeners = []
+    namespace_listeners = []
     for table in ("tcp", "tcp6"):
         raw = _bounded_bytes(base / "net" / table, MAX_PROC_BYTES).decode("ascii")
         lines = raw.splitlines()
@@ -200,10 +201,13 @@ def _owned_listener(server_pid, model_port):
             fields = line.split()
             _need(len(fields) >= 10, "short TCP table record")
             inode = int(fields[9])
-            if inode not in inodes or fields[3] != "0A":
+            if fields[3] != "0A":
+                continue
+            address, port = fields[1].split(":")
+            namespace_listeners.append((table, address, int(port, 16), inode))
+            if inode not in inodes:
                 continue
             _need(int(fields[7]) == os.getuid(), "listener UID differs from job")
-            address, port = fields[1].split(":")
             _need(table == "tcp" and address == "0100007F",
                   "owned listener is not exact IPv4 127.0.0.1")
             _need(len(inodes[inode]) == 1, "listener has ambiguous FD aliases")
@@ -211,6 +215,12 @@ def _owned_listener(server_pid, model_port):
                               "address": "127.0.0.1", "port": int(port, 16)})
     _need(len(listeners) == 1, "expected exactly one owned TCP listener")
     listener = listeners[0]
+    # A different inode at the same port could receive the ACP connection via
+    # SO_REUSEPORT (including wildcard/IPv6 listeners). Ownership alone is not
+    # enough: conservatively require one listener at this port in the namespace.
+    at_port = [item for item in namespace_listeners if item[2] == listener["port"]]
+    _need(at_port == [("tcp", "0100007F", listener["port"], listener["inode"])],
+          "ambiguous control listener in network namespace")
     _need(0 < listener["port"] <= 65535 and listener["port"] != model_port,
           "invalid control port or control/model port collision")
     return listener
@@ -341,20 +351,23 @@ def _ipv4(sockaddr):
 
 
 def _record(tid, path, original, start, end, text, complete):
-    match = re.fullmatch(r"(\w+)\((.*)\)\s+=\s+(.+)", text)
+    match = re.fullmatch(r"(\w+|\?\?\?)\((.*)\)\s+=\s+(.+)", text)
     if match is None:
         raise EvidenceError("unparsed syscall record")
     call, arguments, result = match.groups()
+    _need(call != "???" or (not complete and not arguments.strip() and result == "?"),
+          "unknown syscall outside terminal killed record")
+    _need(complete or result == "?", "unexpected incomplete syscall result")
     duration = re.search(r"\s+<(\d+\.\d+)>$", result)
     if duration is None:
-        # exit/exit_group never return, so strace cannot print a -T duration.
-        _need(call in ("exit", "exit_group") and result == "?",
+        # No-return exits and verified terminal interrupted calls have no -T.
+        _need(result == "?" and (call in ("exit", "exit_group") or not complete),
               "missing -T syscall duration")
     else:
         end = max(end, start + _ns(duration[1]))
         result = result[:duration.start()].rstrip()
     record = {"tid": tid, "path": path, "start_ns": start, "end_ns": end,
-              "call": call, "args": _split(arguments), "result": result,
+              "call": call, "args": [] if call == "???" else _split(arguments), "result": result,
               "text": text, "original_records": original, "complete": complete}
     # Validate destination structure here, even for failed attempts.
     destination_text(record)
@@ -366,9 +379,12 @@ def read_trace_records(case):
 
     Returns {records, violations}. A syscall record includes call, args, result,
     start_ns/end_ns, tid, path, and original_records=[{path,line}]. Split syscalls
-    retain *both* original lines. Signals/exits have kind and no call. Missing
-    timestamps/durations, orphaned resumes, unfinished calls and truncation fail
-    closed. Caller must preserve parser violations in its main audit too.
+    retain *both* original lines. Signals/exits have kind and no call. A terminal
+    unfinished call immediately followed by the same TID's final exit is retained
+    with complete=False; unknown ??? is accepted only when that exit is a kill.
+    Its recoverable explicit destination is still validated. Other missing timing,
+    orphaned resumes, unfinished calls and truncation fail closed. Caller must
+    preserve parser violations in its main audit too.
     """
     report = {"records": [], "violations": []}
     total = 0
@@ -384,12 +400,15 @@ def read_trace_records(case):
         for path in sorted(files):
             tid = int(path.name.rsplit(".", 1)[1])
             pending = None
+            pending_separated = False
+            terminated = False
             previous = -1
             with path.open("rb") as stream:
                 while True:
                     raw = stream.readline(MAX_LINE_BYTES + 1)
                     if not raw:
                         break
+                    _need(not terminated, "trace record after TID exit")
                     total += len(raw)
                     _need(total <= MAX_TRACE_BYTES, "trace byte bound exceeded")
                     _need(len(raw) <= MAX_LINE_BYTES and raw.endswith(b"\n"),
@@ -404,29 +423,47 @@ def read_trace_records(case):
                     original = {"path": path.name, "line": line}
                     _need(len(report["records"]) < MAX_TRACE_RECORDS, "trace record bound exceeded")
                     if body.startswith("--- ") and body.endswith(" ---"):
+                        pending_separated = pending is not None
                         report["records"].append({"kind": "signal", "tid": tid, "path": path.name,
                                                   "start_ns": stamp, "end_ns": stamp,
                                                   "original_records": [original]})
                         continue
                     if body.startswith("+++ ") and body.endswith(" +++"):
-                        _need(pending is None, "process exited with unfinished syscall")
                         _need(re.fullmatch(r"\+\+\+ (exited with \d+|killed by SIG\w+(?: \(core dumped\))?) \+\+\+", body),
                               "unrecognized trace terminal record")
+                        if pending is not None:
+                            _need(not pending_separated, "terminal syscall not immediately before exit")
+                            start, prefix, first, terminal_only = pending
+                            _need(not prefix.startswith("???(") or body.startswith("+++ killed by "),
+                                  "unknown terminal syscall without killed exit")
+                            report["records"].append(_record(
+                                tid, path.name, [first], start, stamp,
+                                prefix.rstrip() + ") = ?", False))
+                            pending = None
+                            _need(len(report["records"]) < MAX_TRACE_RECORDS,
+                                  "trace record bound exceeded")
                         report["records"].append({"kind": "exit", "tid": tid, "path": path.name,
                                                   "start_ns": stamp, "end_ns": stamp,
                                                   "original_records": [original]})
+                        terminated = True
                         continue
-                    if body.endswith("<unfinished ...>"):
+                    terminal = re.fullmatch(r"(.*)<unfinished \.\.\.>\)\s+=\s+\?", body)
+                    if body.endswith("<unfinished ...>") or terminal:
                         _need(pending is None, "overlapping unfinished syscalls")
-                        prefix = body[:-len("<unfinished ...>")]
-                        _need(re.match(r"\w+\(", prefix) is not None, "bad unfinished syscall")
-                        pending = (stamp, prefix, original)
+                        prefix = terminal[1] if terminal else body[:-len("<unfinished ...>")]
+                        _need(re.match(r"(?:\w+|\?\?\?)\(", prefix) is not None,
+                              "bad unfinished syscall")
+                        _need(not prefix.startswith("???(") or (not terminal and prefix.strip() == "???("),
+                              "unrecognized unknown terminal syscall")
+                        pending = (stamp, prefix, original, terminal is not None)
+                        pending_separated = False
                         continue
                     resumed = re.fullmatch(r"<\.\.\. (\w+) resumed>(.*)", body)
                     if resumed:
                         if pending is None:
                             raise EvidenceError("orphan resumed syscall")
-                        start, prefix, first = pending
+                        start, prefix, first, terminal_only = pending
+                        _need(not terminal_only, "terminal syscall was resumed")
                         _need(prefix.startswith(resumed[1] + "("), "resumed syscall mismatch")
                         text = prefix + resumed[2]
                         originals = [first, original]
@@ -476,7 +513,8 @@ def _trace_tree(records, acp_pid):
     parents = {}
     births = {}
     clones = [item for item in records
-              if item.get("call") in ("clone", "clone3", "fork", "vfork") and _return(item) > 0]
+              if item.get("complete") and item.get("call") in ("clone", "clone3", "fork", "vfork")
+              and _return(item) > 0]
     _need(len(clones) <= MAX_TASKS, "trace task bound exceeded")
     pending = list(clones)
     while pending:
@@ -547,7 +585,7 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
         server_pid = initial_capture["server"]["identity"]["pid"]
         expected_path = initial_capture["expected_binary_path"]
         acp_execs = [item for item in client if item["tid"] == acp_pid
-                     and item.get("call") == "execve" and _return(item) == 0]
+                     and item.get("complete") and item.get("call") == "execve" and _return(item) == 0]
         _need(len(acp_execs) == 1 and _exec_signature(acp_execs[0], expected_path) == "acp",
               "missing or ambiguous ACP native execve")
         acp_exec = acp_execs[0]
@@ -555,7 +593,7 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
         _need(groups.get(server_pid) == server_pid and server_pid in parents,
               "server is not in traced ACP descendants")
         server_execs = [item for item in client if item["tid"] == server_pid
-                        and item.get("call") == "execve" and _return(item) == 0]
+                        and item.get("complete") and item.get("call") == "execve" and _return(item) == 0]
         _need(len(server_execs) == 1
               and _exec_signature(server_execs[0], expected_path) == "serve --stdio --port 0",
               "missing or ambiguous native server execve")
@@ -598,7 +636,9 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
             if item.get("call") != "connect":
                 continue
             if _ipv4(destination_text(item)) == (listener["address"], listener["port"]):
-                _need(item["tid"] in groups, "control connect outside proven client tree")
+                _need(item.get("complete"), "incomplete control connect cannot prove ownership")
+                _need(groups.get(item["tid"]) == acp_pid,
+                      "control connect outside native ACP thread group")
                 _trace_after_birth(item, births, acp_exec)
                 connects.append(item)
         _need(connects, "no ACP control connect captured")
@@ -608,6 +648,20 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
 
         owned = [item for item in client if groups.get(item["tid"]) == server_pid]
         fd, inode = listener["fd"], listener["inode"]
+        # Snapshot uniqueness alone cannot exclude a transient SO_REUSEPORT peer
+        # between captures. Refuse successful/unknown use of this option on the
+        # listener, even before bind; do not infer safety from an option payload.
+        for item in client:
+            if item.get("call") != "setsockopt" or item["start_ns"] > last:
+                continue
+            args = item["args"]
+            _need(len(args) >= 3, "short setsockopt syscall")
+            if args[1:3] != ["SOL_SOCKET", "SO_REUSEPORT"]:
+                continue
+            number, socket_inode = _fd(args[0])
+            if socket_inode == inode or (groups.get(item["tid"]) == server_pid and number == fd):
+                _need(item.get("complete") and _return(item) < 0,
+                      "listener SO_REUSEPORT use is not safe to authorize")
         binds, listens, names = [], [], []
         for item in owned:
             call = item.get("call")
@@ -619,6 +673,7 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
             if socket_inode != inode:
                 continue
             _trace_after_birth(item, births, acp_exec)
+            _need(item.get("complete"), "incomplete listener lifecycle cannot prove ownership")
             _need(number == fd, "listener changed FD")
             _need(_return(item) == 0, "listener lifecycle operation failed")
             if call == "bind":
@@ -648,6 +703,7 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
             if item["end_ns"] < bind["start_ns"] or item["start_ns"] > last:
                 continue
             call, args = item.get("call"), item.get("args", [])
+            _need(not call or item.get("complete"), "incomplete server syscall during ownership interval")
             if item.get("kind") == "exit":
                 _need(item["tid"] != server_pid, "server exited before last control connect")
                 continue
@@ -673,11 +729,11 @@ def audit_acp_ipc(case, model_port, initial_capture, final_capture):
                 target = _fd(args[1])[0] if call != "dup" else _return(item)
                 _need(source != fd and source_inode != inode and target != fd,
                       "listener duplicated or replaced")
-            elif call == "fcntl" and _return(item) >= 0:
+            elif (call == "fcntl" and len(args) >= 2
+                  and args[1] in ("F_DUPFD", "F_DUPFD_CLOEXEC") and _return(item) >= 0):
                 number, socket_inode = _fd(args[0])
-                if len(args) >= 2 and args[1] in ("F_DUPFD", "F_DUPFD_CLOEXEC"):
-                    _need(number != fd and socket_inode != inode and _return(item) != fd,
-                          "listener duplicated with fcntl")
+                _need(number != fd and socket_inode != inode and _return(item) != fd,
+                      "listener duplicated with fcntl")
             elif call == "shutdown" and _return(item) == 0:
                 number, socket_inode = _fd(args[0])
                 _need(number != fd and socket_inode != inode, "listener shut down")
