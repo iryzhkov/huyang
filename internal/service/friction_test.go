@@ -198,6 +198,7 @@ func TestFrictionIsOffUntilAskedFor(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HUYANG_FRICTION_DIR", dir)
 	t.Setenv("HUYANG_FRICTION", "")
+	t.Setenv("AGENT99_FRICTION", "")
 	t.Setenv("TOOLFEEDBACK", "")
 
 	if frictionEnabled() {
@@ -235,18 +236,7 @@ func TestFrictionEventsCarryTheConnectionSession(t *testing.T) {
 	defer cleanup()
 	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 
-	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, frictionSource, entries[0].Name()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var event frictionEvent
-	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
-		t.Fatalf("spool line is not JSON: %v", err)
-	}
+	event := singleFrictionToolEvent(t, dir, "workspace_open")
 	// The id crossed a process boundary, so it is reduced to the characters
 	// an id is made of; a newline in it must not split the spool line.
 	if event.Session != "agent-7f3anot-a-second-line" {
@@ -279,18 +269,7 @@ func TestAdapterSessionReachesTheSpoolOverTheControlSocket(t *testing.T) {
 	defer cleanup()
 	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 
-	entries, err := os.ReadDir(filepath.Join(spool, frictionSource))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
-	}
-	data, err := os.ReadFile(filepath.Join(spool, frictionSource, entries[0].Name()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var event frictionEvent
-	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
-		t.Fatalf("spool line is not JSON: %v", err)
-	}
+	event := singleFrictionToolEvent(t, spool, "workspace_open")
 	if event.Session != "adapter-session-1" {
 		t.Fatalf("spooled session = %q, want the one the adapter announced", event.Session)
 	}
@@ -306,18 +285,7 @@ func TestModernToolCallsWriteFrictionEvents(t *testing.T) {
 	defer cleanup()
 	callModern(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
 
-	entries, err := os.ReadDir(filepath.Join(dir, frictionSource))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one modern MCP spool file, got %v (err %v)", entries, err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, frictionSource, entries[0].Name()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var event frictionEvent
-	if err := json.Unmarshal(bytes.TrimSpace(data), &event); err != nil {
-		t.Fatalf("modern MCP spool line is not JSON: %v", err)
-	}
+	event := singleFrictionToolEvent(t, dir, "workspace_open")
 	if event.Tool != "workspace_open" || !event.OK || event.Root != filepath.Base(root) {
 		t.Fatalf("wrong modern MCP friction event: %+v", event)
 	}

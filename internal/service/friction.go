@@ -16,6 +16,11 @@ package service
 // text" into a fingerprint that groups with every other occurrence of the
 // same failure.
 //
+// Optional tf-call-v1 HMACs correlate original inputs without writing them.
+// Equality is visible within a host key epoch, but no unkeyed digest or secret
+// leaves the host. Enabled capture has bounded parsing and private key reads;
+// explicit disablement skips canonicalization and all key/spool I/O.
+//
 // Writing to the spool must never affect a tool call, so every failure in
 // here is dropped in silence: losing an event is better than failing a call
 // because the disk is full.
@@ -36,6 +41,7 @@ import (
 	"time"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // frictionSource names this tool's directory in the spool. Every tool that
@@ -44,26 +50,35 @@ const frictionSource = "huyang"
 
 // frictionEvent is one line of the spool.
 type frictionEvent struct {
-	TS      string   `json:"ts"`
-	Host    string   `json:"host"`
-	Session string   `json:"session"`
-	Proc    string   `json:"proc"`
-	Client  string   `json:"client,omitempty"`
-	Ver     string   `json:"ver,omitempty"`
-	Seq     int      `json:"seq"`
-	Tool    string   `json:"tool"`
-	Root    string   `json:"root,omitempty"`
-	Rev     string   `json:"rev,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	Outcome string   `json:"outcome,omitempty"`
+	TS          string               `json:"ts"`
+	StartedAt   string               `json:"started_at,omitempty"`
+	Correlation *frictionCorrelation `json:"correlation,omitempty"`
+	Host        string               `json:"host"`
+	Session     string               `json:"session"`
+	Proc        string               `json:"proc"`
+	Client      string               `json:"client,omitempty"`
+	Ver         string               `json:"ver,omitempty"`
+	Seq         int                  `json:"seq"`
+	Tool        string               `json:"tool"`
+	Root        string               `json:"root,omitempty"`
+	Rev         string               `json:"rev,omitempty"`
+	Args        []string             `json:"args,omitempty"`
+	Outcome     string               `json:"outcome,omitempty"`
 	// Code is the envelope's machine-readable reason for a reply that is
 	// not ok. A spool with outcomes and no codes says that a quarter of
 	// edits were provisional and cannot say why, which is the question a
 	// usability pass asks first. It is a fixed identifier, never content.
 	Code string `json:"code,omitempty"`
-	OK   bool   `json:"ok"`
-	Err  string `json:"err,omitempty"`
-	Ms   int64  `json:"ms"`
+	// SubCodes counts each failed batch target once, without its path or error.
+	SubCodes map[string]int `json:"sub_codes,omitempty"`
+	// HasResults is set for partial replies; metadata alone is not a result.
+	HasResults *bool `json:"has_results,omitempty"`
+	// ClientCapabilities appears only on the connection's initialize event.
+	// A pointer preserves an explicitly empty advertised set as [].
+	ClientCapabilities *[]string `json:"client_capabilities,omitempty"`
+	OK                 bool      `json:"ok"`
+	Err                string    `json:"err,omitempty"`
+	Ms                 int64     `json:"ms"`
 	// ReasonCodes describe diagnostic gaps independently of mutation success.
 	ReasonCodes            []string `json:"reason_codes,omitempty"`
 	VerificationConfidence string   `json:"verification_confidence,omitempty"`
@@ -308,7 +323,8 @@ func resultText(res map[string]any) string {
 // something to run on every call, and because the answer only has to be true
 // of the session rather than of the instant.
 func workspaceRev(root string) string {
-	if root == "" {
+	// A relative root would inspect the daemon's working directory.
+	if !filepath.IsAbs(root) {
 		return ""
 	}
 	revMu.Lock()
@@ -342,7 +358,7 @@ func gitRev(root string) string {
 // logFriction appends one event for a finished call. session is the agent
 // session the connection announced, empty for a caller that announced none;
 // root is the workspace that answered, empty when the call never got that far.
-func logFriction(session, name, root string, args, res map[string]any, started time.Time) {
+func logFriction(session, name, root string, args, res map[string]any, started time.Time, correlations ...frictionCorrelation) {
 	if !frictionEnabled() {
 		return
 	}
@@ -370,7 +386,18 @@ func logFriction(session, name, root string, args, res map[string]any, started t
 		Ms:      time.Since(started).Milliseconds(),
 	}
 	frictionMu.Unlock()
+	if !started.IsZero() {
+		ev.StartedAt = started.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	if len(correlations) > 0 && correlations[0].V == frictionCorrelationVersion {
+		correlation := correlations[0] // copy immutable metadata, never raw inputs
+		ev.Correlation = &correlation
+	}
 	ev.ReasonCodes, ev.VerificationConfidence, ev.CanonicalChanged = frictionDiagnosticState(res["data"])
+	ev.SubCodes, ev.HasResults = frictionResultState(name, outcome, res["data"])
+	if capabilities, ok := res["client_capabilities"].([]string); ok {
+		ev.ClientCapabilities = &capabilities
+	}
 
 	// Only the last element of the root: which project a call ran in is
 	// worth knowing, the rest of the path is not the spool's business.
@@ -399,6 +426,139 @@ func frictionOutcomeOK(outcome string, isError bool) bool {
 	default:
 		return !isError
 	}
+}
+
+// frictionResultState inspects only result containers, never argument values,
+// source bodies, error messages or recovery candidates. Batch read entries
+// duplicate the codes in files; count only files so each target counts once.
+func frictionResultState(tool, outcome string, value any) (map[string]int, *bool) {
+	data, _ := value.(map[string]any)
+	var codes map[string]int
+	hasResults := false
+	if tool == "read" {
+		visitFrictionItems(data["files"], func(item map[string]any) {
+			code, _ := item["code"].(string)
+			if code != "" {
+				if codes == nil {
+					codes = make(map[string]int)
+				}
+				codes[code]++
+			} else if _, failed := item["error"]; !failed {
+				for _, key := range []string{"content", "sections", "result"} {
+					if _, delivered := item[key]; delivered {
+						hasResults = true
+					}
+				}
+			}
+		})
+	}
+	// These fields contain delivered records, not counts or coverage claims.
+	// Inspect container lengths only; do not serialize or retain their contents.
+	var resultFields []string
+	switch tool {
+	case "symbol_find":
+		resultFields = []string{"ranked_handles"}
+	case "search":
+		resultFields = []string{"hits"}
+	case "revision_diff":
+		resultFields = []string{"diffs", "known_segments", "inferred_segments"}
+	}
+	for _, key := range resultFields {
+		switch items := data[key].(type) {
+		case []any:
+			hasResults = hasResults || len(items) > 0
+		case []map[string]any:
+			hasResults = hasResults || len(items) > 0
+		}
+	}
+	if outcome == "partial" {
+		return codes, &hasResults
+	}
+	return codes, nil
+}
+
+func visitFrictionItems(value any, visit func(map[string]any)) {
+	switch items := value.(type) {
+	case []map[string]any:
+		for _, item := range items {
+			visit(item)
+		}
+	case []any:
+		for _, value := range items {
+			if item, ok := value.(map[string]any); ok {
+				visit(item)
+			}
+		}
+	}
+}
+
+// frictionCapabilitiesMiddleware observes both legacy initialize and modern
+// server/discover. Modern clients do not send notifications/initialized. Track
+// SDK connections, not announced adapter IDs or the shared HTTP server, and
+// release the deduplication entry when its connection closes.
+func frictionCapabilitiesMiddleware(session string) mcp.Middleware {
+	var seen sync.Map
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
+			result, err := next(ctx, method, request)
+			if (method != "initialize" && method != "server/discover") || err != nil || !frictionEnabled() {
+				return result, err
+			}
+			connection, ok := request.GetSession().(*mcp.ServerSession)
+			if !ok || connection == nil {
+				return result, err
+			}
+			params := connection.InitializeParams()
+			if params == nil {
+				return result, err
+			}
+			if _, loaded := seen.LoadOrStore(connection, struct{}{}); !loaded {
+				logClientCapabilities(session, params.Capabilities, params.ClientInfo)
+				go func() {
+					_ = connection.Wait()
+					seen.Delete(connection)
+				}()
+			}
+			return result, err
+		}
+	}
+}
+
+// Only standard top-level capability names are recorded; private experimental/
+// extension names and all capability settings stay private. No capabilities are
+// inferred from the deprecated, non-pointer Roots field.
+func logClientCapabilities(session string, capabilities *mcp.ClientCapabilities, info *mcp.Implementation) {
+	if !frictionEnabled() {
+		return
+	}
+	names := []string{}
+	if capabilities != nil {
+		if capabilities.Elicitation != nil {
+			names = append(names, "elicitation")
+		}
+		if capabilities.Experimental != nil {
+			names = append(names, "experimental")
+		}
+		if capabilities.Extensions != nil {
+			names = append(names, "extensions")
+		}
+		if capabilities.RootsV2 != nil {
+			names = append(names, "roots")
+		}
+		if capabilities.Sampling != nil {
+			names = append(names, "sampling")
+		}
+	}
+	client := ""
+	if info != nil {
+		client = info.Name
+		if info.Version != "" {
+			client += "/" + info.Version
+		}
+	}
+	logFriction(session, "initialize", "", nil, map[string]any{
+		"outcome": "ok", "client": client, "client_capabilities": names,
+	}, time.Now())
 }
 
 func writeFriction(ev frictionEvent) {

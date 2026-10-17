@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HUYANG_FRICTION_DIR", spool)
+	// Ambient opt-in settings must not turn ordinary test clients into
+	// feedback producers. Spool tests explicitly opt in with their own dir.
+	os.Setenv("HUYANG_FRICTION", "0")
 	code := m.Run()
 	os.RemoveAll(spool)
 	os.Exit(code)

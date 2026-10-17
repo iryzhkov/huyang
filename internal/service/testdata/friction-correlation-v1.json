@@ -1,0 +1,79 @@
+{
+  "protocol": "tf-call-v1",
+  "kind": "mcp",
+  "source": "huyang",
+  "tool": "read",
+  "public_test_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "public_test_kid": "00112233445566778899aabbccddeeff",
+  "mcp_prefix": "a5:s10:tf-call-v1s3:mcps6:huyangs4:read",
+  "vectors": [
+    {
+      "name": "null",
+      "input_json": "null",
+      "canonical": "z"
+    },
+    {
+      "name": "booleans",
+      "input_json": "[false,true]",
+      "canonical": "a2:ft"
+    },
+    {
+      "name": "ordered_object",
+      "input_json": "{\"z\":1,\"a\":[true,null,\"é\"]}",
+      "canonical": "o2:s1:aa3:tzs2:és1:zn3:1e0"
+    },
+    {
+      "name": "escapes_and_surrogate_pair",
+      "input_json": "[\"\\u0061\",\"\\uD83D\\uDE00\",\"\\n\\t\\\"\\\\\"]",
+      "canonical": "a3:s1:as4:😀s4:\n\t\"\\"
+    },
+    {
+      "name": "unicode_key_order",
+      "input_json": "{\"😀\":1,\"\\uE000\":2,\"a\":3}",
+      "canonical": "o3:s1:an3:3e0s3:n3:2e0s4:😀n3:1e0"
+    },
+    {
+      "name": "decimal_equivalence",
+      "input_json": "[1,1.0,1e0,-0,-0.00e+123,123.4500,-0.0012300,1000e-3]",
+      "canonical": "a8:n3:1e0n3:1e0n3:1e0n1:0n1:0n8:12345e-2n7:-123e-5n3:1e0"
+    },
+    {
+      "name": "large_exact_numbers",
+      "input_json": "[9007199254740993,1e999999999999999999999999,1e-999999999999999999999999]",
+      "canonical": "a3:n18:9007199254740993e0n26:1e999999999999999999999999n27:1e-999999999999999999999999"
+    },
+    {
+      "name": "no_unicode_normalization",
+      "input_json": "[\"é\",\"e\\u0301\"]",
+      "canonical": "a2:s2:és3:é"
+    },
+    {
+      "name": "explicit_relative_root",
+      "input_json": "{\"root\":\".\"}",
+      "canonical": "o1:s4:roots1:."
+    },
+    {
+      "name": "omitted_root",
+      "input_json": "{}",
+      "canonical": "o0:"
+    },
+    {
+      "name": "json_in_string",
+      "input_json": "{\"targets\":\"[]\"}",
+      "canonical": "o1:s7:targetss2:[]"
+    }
+  ],
+  "invalid_json": [
+    "{\"a\":1,\"a\":2}",
+    "{\"a\":1,\"\\u0061\":2}",
+    "\"\\ud800\"",
+    "\"\\udc00\"",
+    "\"\\ud800\\u0041\"",
+    "NaN",
+    "Infinity",
+    "1 2",
+    "[01]",
+    "1e",
+    "true false"
+  ]
+}
