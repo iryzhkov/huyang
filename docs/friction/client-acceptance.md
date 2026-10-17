@@ -703,15 +703,101 @@ original assertion into success.
 The synthetic reply-presentation regressions are source-level preparation.
 Job 93ac5d3e and all earlier failed jobs remain FAIL. This change grants no
 OpenCode readiness or IPC credit and does not affect Python decision 8596.
-Independent final review, root-owned checks and fresh complete actual workflows
-for all three pinned clients are still required.
+The later 948f functional results and remaining audit failures are recorded below.
+Independent final review and root-owned checks remain required for new changes.
+
+## Codex native analytics correction after job 948f
+
+Actual job `948f91d7-c8ab-42f9-9a93-37aba317c687` completed Codex's 14-call
+workflow, then failed the destination audit on nine native outbound operations
+associated with `ab.chatgpt.com` during shutdown. Generic `DISABLE_TELEMETRY=1`
+did not suppress them. The failed job and its full diagnostics/raw traces remain
+failed evidence; no runtime pass follows from this correction.
+
+The generated case-local `codex/config.toml` now sets `[analytics] enabled=false`
+after all root keys and before `[features]`, preserving TOML table membership.
+Official Codex 0.163.0 source at commit
+`83086188ae0614bd882818ff1aa23f3194962012` defines the
+[native analytics boolean](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/config/src/types.rs#L244-L252).
+[Exec defaults analytics to true](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/exec/src/lib.rs#L174);
+[explicit false disables the default Statsig exporter](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/otel_init.rs#L68-L79)
+and [prevents the separate analytics queue](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/analytics/src/client.rs#L314-L332).
+There is no custom OTLP exporter in this config, so a metrics override is redundant.
+
+The retained diagnosis is
+`/home/igor/.cache/huyang-friction/client948-codex-outbound-diagnosis.md`.
+Its companion `client948-codex-outbound-source/provenance.tsv` records immutable
+official URLs, matching Git blobs and SHA-256s for the cached primary sources;
+the TSV SHA-256 is `f2b1d48cf74174af8221e0585a8149e061b7b483d99e522123475fe040755243`.
+Source-to-native reproducibility is not cryptographically attested.
+The config-shape regression is source-only preparation for root-owned Python
+suites on agent-a and independent review. A fresh actual run must complete the
+workflow and establish the outbound result with full raw traces. Destination,
+DNS, trace and IPC audit gates are unchanged. Coverage remains limited to
+explicit direct tools with `gpt-6.1-sol`; default code mode is unqualified.
+
+## Client selection and current native evidence
+
+The runner defaults to all three clients in canonical order: Claude, Codex,
+OpenCode. `--clients` accepts one or more of `claude`, `codex`, `opencode`.
+For example, append `--clients codex` to the runner command above for a
+Codex-only diagnostic. Input order does not change execution order. Repeated
+names run once; if the option itself is repeated, argparse uses its last list.
+Unknown names and an empty list are argument errors. Bootstrap and every runner
+preflight remain unchanged, including verification of all bootstrapped binaries.
+
+Both J/report.json and J/runtime-manifest.json record `selected_clients` in
+canonical order and `scope` as `all` or `partial`. The report's `cases` contains
+only actual selected cases. All-three results retain `passed` or `failed`.
+A subset always reports `partial-passed` or `partial-failed`, even when every
+selected case passes. Exit 0 means every selected case passed; a selected case
+failure exits nonzero after retaining the scoped report. A partial success is
+never full acceptance. Per-case workflows, raw retention, the 14-call checks,
+destination and IPC audits, and unknown-syscall parser rules are unchanged.
+
+Actual job `948f91d7-c8ab-42f9-9a93-37aba317c687` used source
+`9bd5cd9a6873c0c4089f384802ad2f8088d63695`. It supplies functional evidence
+for M8's read, guarded edit follow-up, search refinement, late finding and replay:
+
+- Claude's case passed.
+- Codex completed 14/14 steps and matched all 14 replies, including late finding,
+  stale refusal and replay. Its case FAILED on the auxiliary destination audit.
+  Nine real outbound analytics attempts associated with `ab.chatgpt.com`
+  occurred. Accepted source `9d8348a24326b8bcaf5ca71fa7a5ea99ad35af09` sets
+  case-local `analytics.enabled=false`, but has no native effect proof yet.
+- OpenCode completed 7/7 workflows and all 41 calls with 41 mapped replies,
+  including both full workflows' late findings, stale refusal and replay.
+  Its case FAILED on the auxiliary trace/IPC/destination audit. Every identified
+  destination in the retained traces is local. Two syscalls in the selected
+  trace set, both in service-side Go children near thread-group exit, have no
+  recoverable identity, so complete destination coverage is not established.
+  Do not infer that these syscalls were benign or external network calls.
+
+Job 948f and older job 93ac5d3e remain FAIL. These functional results do not grant
+an audit PASS or proof of no external traffic. The retained diagnoses are
+`/home/igor/.cache/huyang-friction/client948-codex-outbound-diagnosis.md` and
+`/home/igor/.cache/huyang-friction/client948-opencode-trace-diagnosis.md`.
+The analytics source report and accepted main review are
+`/home/igor/.cache/huyang-friction/codex-native-analytics-disable/report.md` and
+`/home/igor/.cache/huyang-friction/codex-native-analytics-disable/main-review-r1.md`.
+The adopted authority assessment is
+`/home/igor/.cache/huyang-friction/native-audit-roadmap-scope-dispute.md`.
+
+A future Codex-only run can establish only the analytics effect and Codex workflow
+on its exact source and retained evidence. It is not overall M8 acceptance,
+OpenCode requalification or a revision of 948f's verdict. Custom tracer engineering
+is outside the approved M8 scope and stopped; this selection adds no tracer work.
+The final user deployment handoff must carry the same audit limitations.
+The selection regressions are source-only preparation. Root owns independent
+review, the entire Python suite on agent-a and any separately admitted native run.
 
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,
 J/bootstrap-report.json, J/home-*-preflight.json, J/plugin-preflight.json,
-J/bootstrap/*, J/tools/package*.json, and every
-J/c/{claude,codex,opencode} case directory. Case directories include:
+J/bootstrap/*, J/tools/package*.json, and every selected client's
+J/c/CLIENT case directory. The default selection retains all three case directories.
+Case directories include:
 
 - case-manifest.json, home-preflight.json, generated nonsecret client configs, init.lua, synthetic
   fixture bytes and private durable Huyang state;
@@ -737,15 +823,13 @@ All process/request waits are bounded, process groups are job-owned, cases have
 a default 300-second deadline and model traffic has a 500-request ceiling.
 
 No bootstrap/client/producer/ACP execution, build, test, push, installation or
-service restart was performed in the implementation session. Runtime must still
-establish the native package paths/loader behavior, Claude's bare MCP behavior
-under UID0, Codex's exact namespace and SSE parser contract, ACP response/optional-notification
-shape and ordering, gopls's versioned empty baseline/push and Huyang late ingestion.
-The OpenCode provider/config keys, witness ctx.session.hook API, any runtime
-package-resolution attempt, Claude --permission-prompts none, and strict Codex
-feature keys remain runtime compatibility questions. HOME discovery and ambient
-Unix-socket refusals may expose additional client behavior; those failures remain
-explicit artifacts, not reasons to use installed configuration or broaden access. Unsupported shapes fail;
+service restart was performed in the source-only selection implementation session.
+The 948f results above establish functional behavior on their recorded source and
+pins. They do not establish the native effect of the later analytics correction,
+complete OpenCode destination coverage or compatibility with other client versions.
+HOME discovery and ambient Unix-socket refusals may expose additional client behavior.
+Those failures remain explicit artifacts, not reasons to use installed configuration
+or broaden access. Unsupported shapes fail;
 no SDK/stub success is substituted. The harness covers these specified protocols,
 not every client extension, compression encoding or auxiliary model operation.
 Binary-to-source provenance is the parent's build responsibility; hashes and the
