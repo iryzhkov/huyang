@@ -158,17 +158,25 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := newDirectWorkspaces(t.TempDir())
-	// 300ms leaves margin for workspace_open (tree walk, Git, provider probe) under
-	// suite load while keeping the blocked call below well under the one-second bound.
-	direct.setToolTimeout(300 * time.Millisecond)
+	// The workspace is opened under the default budget: workspace_open walks
+	// the tree, asks Git and probes for a provider, and under full-suite load
+	// that can outlast a short deadline, which is not what this test measures.
 	opened := direct.call(context.Background(), "workspace_open", map[string]any{"kind": "project", "root": root})
 	identity, ok := opened["workspace"].(workspacecore.Identity)
-	if !ok {
-		t.Fatalf("workspace identity = %#v", opened["workspace"])
+	if opened["outcome"] != "ok" || !ok {
+		t.Fatalf("setup workspace_open = %#v", opened)
 	}
-	limits := opened["data"].(map[string]any)["service_limits"].(map[string]any)
-	if got := limits["tool_call_timeout_ms"]; got != int64(300) {
-		t.Fatalf("advertised timeout = %#v, want 300", got)
+	// Only the blocked calls below run under the short deadline, which keeps
+	// them well under the one-second bound.
+	direct.setToolTimeout(300 * time.Millisecond)
+	// The advertisement is the handlers' answer, so it is read from them
+	// directly; the dispatcher's enforcement of the same value is what the
+	// blocked edit measures.
+	reopened := direct.handlers.Execute(context.Background(), "req_advertised_timeout", "workspace_open", map[string]any{"kind": "project", "root": root})
+	data, _ := reopened["data"].(map[string]any)
+	limits, _ := data["service_limits"].(map[string]any)
+	if got := limits["tool_call_timeout_ms"]; reopened["outcome"] != "ok" || got != int64(300) {
+		t.Fatalf("advertised timeout = %#v, want 300: %#v", got, reopened)
 	}
 
 	release, err := direct.scheduler.acquire(context.Background(), string(identity.ID), mcpapi.ClassCanonicalWrite)
