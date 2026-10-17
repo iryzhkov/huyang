@@ -50,8 +50,18 @@ def snapshot(path):
     return {"sha256": file_hash(path), "size": s.st_size, "mtime_ns": s.st_mtime_ns,
             "inode": s.st_ino}
 
-def clean_home_preflight(report_path):
+def guard_scratch_job(job, namespace_guard):
+    namespace_guard()
+    home = Path("/home/job")
+    require(os.environ.get("HOME") == str(home), "HOME must remain /home/job")
+    require(home.is_dir() and not home.is_symlink() and home.resolve() == home, "scratch HOME must be a real directory")
+    job = Path(job).resolve()
+    require(job != home and job.is_relative_to(home), "job write root must resolve below scratch HOME")
+    return job
+
+def clean_home_preflight(report_path, namespace_guard):
     """Check discovery-path names only; never read auth/config contents or alter HOME."""
+    report_path = guard_scratch_job(report_path, namespace_guard)
     raw_home = os.environ.get("HOME")
     report = {"home": raw_home, "checked_paths": [], "existing_paths": [],
               "patterns": [".claude*"], "contents_read": False}
@@ -78,6 +88,7 @@ def environment(case, tool_path):
     case = Path(case)
     env = {"PATH": tool_path, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
            "TERM": "dumb", "CI": "1", "NO_COLOR": "1",
+           "PYTHONDONTWRITEBYTECODE": "1",
            "DO_NOT_TRACK": "1", "GOTOOLCHAIN": "local", "GOPROXY": "off",
            "GOSUMDB": "off", "GOTELEMETRY": "off", "GIT_TERMINAL_PROMPT": "0",
            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",

@@ -9,8 +9,10 @@ import shutil
 import signal
 import re
 import subprocess
+import sys
 
-from common import HERE, clean_home_preflight, environment, file_hash, require, write_json
+sys.dont_write_bytecode = True
+from common import HERE, clean_home_preflight, guard_scratch_job, environment, file_hash, require, write_json
 
 PINS = {
     "claude": ("2.1.301", "node_modules/@anthropic-ai/claude-code-linux-x64/claude"),
@@ -50,8 +52,7 @@ def main():
     p.add_argument("--gopls-artifact", type=Path)
     p.add_argument("--gopls-sha256")
     args = p.parse_args()
-    namespace_required()
-    job = args.job.resolve()
+    job = guard_scratch_job(args.job, namespace_required)
     require(not job.exists(), "bootstrap --job must be new (retain prior artifacts on failure)")
     job.mkdir(parents=True, mode=0o700)
     tools, logs = job / "tools", job / "bootstrap"
@@ -59,7 +60,7 @@ def main():
     logs.mkdir()
     write_json(job / "bootstrap-report.json", {"status": "running"})
     try:
-        home_preflight = clean_home_preflight(job / "home-bootstrap-preflight.json")
+        home_preflight = clean_home_preflight(job / "home-bootstrap-preflight.json", namespace_required)
         env = environment(job / "bootstrap-env", args.tool_path)
         for name in ("package.json", "package-lock.json"):
             shutil.copyfile(HERE / name, tools / name)

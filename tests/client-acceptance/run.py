@@ -11,9 +11,10 @@ import re
 import shutil
 import sys
 
+sys.dont_write_bytecode = True
 from bootstrap import namespace_required
 from common import (HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_home_preflight,
-                    canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
+                    guard_scratch_job, canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
 from model_server import Controller
 import opencode
 from workflow import Workflow
@@ -75,7 +76,7 @@ def recorder(case, candidate, control_path):
               + "for i, arg in enumerate(args):\n"
               + "    if arg == '--profile': profile = args[i + 1]\n"
               + "    elif arg.startswith('--profile='): profile = arg.split('=', 1)[1]\n"
-              + "os.execv(sys.executable, [sys.executable, " + repr(str(HERE / "wire.py"))
+              + "os.execv(sys.executable, [sys.executable, '-B', " + repr(str(HERE / "wire.py"))
               + ", '--log', " + repr(str(case / "mcp-wire.jsonl"))
               + ", '--profile', profile, 'mcp', '--', " + repr(str(candidate)) + ", *args])\n")
     path.write_text(source)
@@ -83,7 +84,7 @@ def recorder(case, candidate, control_path):
     return path
 
 def headless_init(case, gopls):
-    cmd = [sys.executable, str(HERE / "wire.py"), "--log", str(case / "lsp-wire.jsonl"),
+    cmd = [sys.executable, "-B", str(HERE / "wire.py"), "--log", str(case / "lsp-wire.jsonl"),
            "lsp", "--", str(gopls)]
     # JSON strings are valid Lua strings for these absolute Linux paths (reject exotic escapes).
     require(all("\\" not in part and "\n" not in part for part in cmd), "unsupported escaped job path")
@@ -201,7 +202,7 @@ async def run_case(client, args, manifest, candidate, runtime):
     case.mkdir(parents=True)
     (case / "fixture").mkdir()
     tool_path = str(args.job / "bin") + ":" + str(args.nvim.parent) + ":" + args.tool_path
-    home_preflight = clean_home_preflight(case / "home-preflight.json")
+    home_preflight = clean_home_preflight(case / "home-preflight.json", namespace_required)
     env = environment(case, tool_path)
     owner = await Controller(case, json.loads((HERE / "lean-schemas.json").read_text())).start()
     env.update(ACCEPTANCE_CONTROL=str(owner.control_path),
@@ -274,13 +275,12 @@ async def run_case(client, args, manifest, candidate, runtime):
     return success and not owner.failures
 
 async def main(args):
-    namespace_required()
-    args.job = args.job.resolve()
+    args.job = guard_scratch_job(args.job, namespace_required)
     for name in ("candidate", "runtime", "nvim", "plugin", "strace"):
         setattr(args, name, getattr(args, name).resolve())
     manifest = json.loads((args.job / "bootstrap-report.json").read_text())
     require(manifest["status"] == "bootstrapped-not-accepted", "bootstrap did not complete")
-    manifest["runtime_home_preflight"] = clean_home_preflight(args.job / "home-runtime-preflight.json")
+    manifest["runtime_home_preflight"] = clean_home_preflight(args.job / "home-runtime-preflight.json", namespace_required)
     require(file_hash(args.job / "tools/package-lock.json") == manifest["package_lock_sha256"],
             "bootstrap lock changed")
     for value in manifest["binaries"].values():
@@ -342,6 +342,7 @@ if __name__ == "__main__":
     p.add_argument("--tool-path", default=os.defpath)
     p.add_argument("--case-deadline", type=int, default=300)
     a = p.parse_args()
+    a.job = guard_scratch_job(a.job, namespace_required)
     try:
         asyncio.run(main(a))
     except BaseException as error:

@@ -18,8 +18,8 @@ a successful bootstrap.
 
 Run inside a new disposable **Chaldea agent-a job**, Linux x86_64 glibc, UID0 in a
 user namespace with a clean ordinary home and no credentials. Both entry points
-refuse the initial host user namespace. HOME must identify the namespace’s normal
-absolute home and is never rewritten. Before bootstrap and each client, a name-only
+refuse the initial host user namespace. HOME must equal `/home/job`, a real directory with no symlink.
+Before any write, J must resolve strictly below it; HOME is never rewritten. Before bootstrap and each client, a name-only
 preflight refuses `.codex`, `.agents`, `.opencode`, `.claude*`, `.npmrc` and the
 corresponding OpenCode/Codex/Claude discovery paths under `.config` and
 `.local`/`.cache`, including dangling links. It records checked/existing paths,
@@ -51,13 +51,14 @@ The job image/input must provide:
   Chaldea does not transfer ignored builds, symlinks, installed clients or host
   configuration.
 
+Root provisions the cache under HOME; only the post-test artifact bundle returns to `/work`.
 With those inputs already present in the job, the complete invocation is:
 
 ```sh
-J="$PWD/.ca"
-python3 tests/client-acceptance/bootstrap.py \
+J="$HOME/.cache/hf/ca"
+python3 -B tests/client-acceptance/bootstrap.py \
   --job-isolated --job "$J" --tool-path "$PATH"
-python3 tests/client-acceptance/run.py \
+python3 -B tests/client-acceptance/run.py \
   --job-isolated --job "$J" --tool-path "$PATH" \
   --candidate "$PWD/acceptance-input/huyang-candidate" \
   --runtime "$PWD" \
