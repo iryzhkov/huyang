@@ -124,18 +124,21 @@ CODEX_HOME/custom Responses provider and no approval prompts. Its supported
 `[features] plugins=false` disables curated-plugin startup sync without redirecting
 chatgpt.com or exempting external traffic. The Codex case explicitly covers **direct
 tools**, not the bundled model's default `code_mode_only` mode. The same pinned
-binary and `gpt-6.1-sol` slug use a job-local `model_catalog_json`: the exact bundled
-entry from [rust-v0.163.0](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/models-manager/models.json)
-is preserved byte-for-byte except `tool_mode="direct"` and
-`supports_search_tool=false`. Its source file SHA is
-`8f32fc36f69a37b095edb86fd91e569876de89ee6c4de08bcafe1660027aa06e`, and the committed
-entry SHA is `84908db89e40af232436afe55da355d33b73d5c653ef402b2a820ce3012340f8`.
-The runner guards the entry bytes and records original/override/catalog hashes,
-source URL and the two overrides in the case manifest and
-codex-model-catalog-provenance.json. MCP uses supported
-`omit_tools_from=["deferred","code_mode"]`, `startup_readiness="catalog"` and a
-131072-byte input-schema threshold to preserve the actual schemas. All 13 formal
-Huyang descriptors and exact schema comparisons remain required. Job-local
+binary and `gpt-6.1-sol` slug use a job-local `model_catalog_json`. The committed
+entry comes from the reader's saved source copy attributed to
+[rust-v0.163.0](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/models-manager/models.json).
+Only `tool_mode="direct"` and `supports_search_tool=false` change; a full parsed-object
+equality check enforces those two changes, and the remaining bytes are preserved.
+The exact source-copy and entry proof is recorded below. The runner guards the
+entry bytes and records saved-copy provenance, original/override/catalog hashes,
+the upstream reference URL and the two overrides in the case manifest and
+codex-model-catalog-provenance.json. The URL is a reference, not an independent
+verification of upstream raw bytes. MCP uses supported
+`omit_tools_from=["deferred","code_mode"]`, `startup_readiness="connection"` and a
+131072-byte input-schema threshold to preserve the actual schemas. Connection
+readiness requires the live startup path rather than allowing a cached catalog
+to satisfy startup. All 13 actual formal Huyang descriptors and exact schema
+comparisons remain required. Job-local
 `RUST_LOG=codex_core=debug,codex_mcp=debug` and `log_dir` retain startup/exposure
 diagnostics for these synthetic cases only. Default code-mode execution is not
 qualified by this case. OpenCode uses
@@ -160,6 +163,11 @@ strace records timestamped network, process, namespace and FD lifecycle syscalls
 for the actual client and service process trees (`-ff -ttt -T -y`, retained exit
 records). A bounded parser reconstructs unfinished/resumed calls and retains each
 exact original line. Any parser error or unsupported outbound socket shape fails.
+Parser-validated incomplete calls immediately terminated by a killed record retain
+raw records and any known destination; they cannot establish a model connection
+or receive an ACP exemption. A terminal unknown syscall has no inferred destination
+and is accepted only at the parser-validated terminal position. Such records are
+also retained in `terminal_incomplete_records`.
 Only connect/sendto/sendmsg destination arguments are audited; payload text and
 bind/listen/getsockname metadata cannot masquerade as outbound destinations.
 Failed connects and EINPROGRESS remain audited, and a separate actual connect to
@@ -175,8 +183,14 @@ timestamped process/bind/listen/getsockname/FD lifecycle evidence must agree thr
 the last connect, including TID mappings. A clean proof returns exact original
 (path,line) records; only those client connect records are exempt. Every returned
 record must match the independently audited trace. Any proof error grants nothing.
-No service/sendto/sendmsg, discovery, external or ambient-socket exemption exists.
-Every observed AF_UNIX
+The ACP exemption never covers service/sendto/sendmsg, discovery, external or
+ambient sockets. Separately, only the exact sockaddr
+`{sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}` is recorded in
+`local_kernel_queries`: it addresses the local kernel, not an IP endpoint. This
+classification grants no ACP exemption, model-connect count or workflow progress.
+Nonzero netlink PIDs/groups, any other netlink shape and unknown address families
+remain violations, as do external/provider ports such as 1234/8000 and ambient Unix
+sockets. Every observed AF_UNIX
 destination must be an absolute path resolving inside J; external, abstract,
 unnamed and undecodable addresses fail. This includes failed ambient socket
 lookups. The complete destination report, including violations, is retained.
@@ -313,6 +327,29 @@ only exact connects proven by the native ACP ownership procedure above; no port
 number, API payload, or loopback address alone supplies ownership. Runtime must
 confirm the configured discovery and remote-fetch controls remove their respective
 ambient destinations. No substitute MCP/diagnostic result is introduced.
+
+Focused review round 1 verified the committed Codex entry without changing it:
+
+- Saved source copy: `/home/igor/.cache/huyang-friction/executor/cx-src/models.json`,
+  472072 bytes, SHA-256
+  `943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`.
+- `tests/client-acceptance/codex-model-entry.json`: 66833 bytes, no final LF, SHA-256
+  `873c956b8ef4766fb4e059d25924ee2c672e29149c99e1fa936e89e83410c518`.
+  Its bytes occur exactly once in the saved copy at zero-based byte offset 66362
+  (half-open range `[66362, 133195)`); that copy has exactly one matching slug,
+  and its parsed object equals the committed entry.
+- The two-field override is 66826 bytes, SHA-256
+  `fddf0cf41d3c971e4734caeff58be51ed2ad25570fd0dbe6bc815b86cb3891b4`.
+  The generated 66840-byte catalog has SHA-256
+  `2bd3950c9f255abedd4cf7bdfb31e5091d80b4034db100a3c1e8e2eb50275558`.
+
+These are actual UTF-8 content hashes, not Huyang document revisions. The saved
+copy is the provenance evidence; upstream raw bytes were not independently
+verified during this fix. The previous guard/provenance digests were incorrect
+and are replaced. The exact c237 `audit-client.9239` RTM_GETADDR kernel query fits
+the local-kernel classification above; c237 still fails its other gates.
+`test_runtime_audit.py` adds synthetic destination/grant and real-entry catalog
+regression coverage for the parent to run; no tests ran in this fix session.
 
 ROOT separately reported all 14 helper-only synthetic tests passing on agent-a
 job `69bc9da9-7452-4f98-bb50-e2b876e7c666`, exact helper source `cc7207e`.

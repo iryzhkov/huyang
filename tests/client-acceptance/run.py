@@ -111,7 +111,8 @@ def network_audit(case, port, job, ipc_proof=None):
     from ipc_audit import destination_text, read_trace_records
     parsed = read_trace_records(case)
     report = {"ip_destinations": [], "unix_destinations": [], "execve_recorded": [],
-              "model_connects": [], "acp_ipc_records": [],
+              "model_connects": [], "acp_ipc_records": [], "local_kernel_queries": [],
+              "terminal_incomplete_records": [],
               "execve_policy": "recorded only; no executable allowlist asserted",
               "unix_allowed_root": str(job.resolve()), "violations": list(parsed["violations"])}
     allowed = set()
@@ -125,16 +126,19 @@ def network_audit(case, port, job, ipc_proof=None):
                 allowed.clear()
     used = set()
     for syscall in parsed["records"]:
+        if syscall.get("complete") is False:
+            report["terminal_incomplete_records"].append(syscall)
         if "call" not in syscall:
-            continue  # Parser-validated signal/exit metadata has no destination.
+            continue  # Parser-validated signal/exit/terminal unknown records have no destination.
         originals = syscall["original_records"]
         entry = {"tid": syscall["tid"], "call": syscall["call"], "result": syscall["result"],
                  "start_ns": syscall["start_ns"], "end_ns": syscall["end_ns"],
-                 "text": syscall["text"], "original_records": originals}
+                 "text": syscall["text"], "original_records": originals, "complete": syscall["complete"]}
         if syscall["call"] in ("execve", "execveat"):
             report["execve_recorded"].append(entry)
         try:
-            require(syscall["complete"] is True, "incomplete syscall destination evidence")
+            # Terminal killed calls still have audited destinations, but cannot
+            # establish a model connection or receive an ACP ownership exemption.
             address = destination_text(syscall)
             if address is None:
                 continue
@@ -147,11 +151,12 @@ def network_audit(case, port, job, ipc_proof=None):
                 loopback = ("AF_INET6" not in address and host is not None
                             and host[1] == "127.0.0.1" and port_number is not None)
                 if loopback and port_number == port:
-                    if syscall["call"] == "connect":
+                    if syscall["complete"] is True and syscall["call"] == "connect":
                         report["model_connects"].append(entry)
                     continue
                 keys = {(r["path"], r["line"]) for r in originals}
-                if loopback and syscall["call"] == "connect" and keys and keys <= allowed:
+                if (syscall["complete"] is True and loopback and syscall["call"] == "connect"
+                        and keys and keys <= allowed):
                     used.update(keys)
                     entry["classification"] = "proven-native-acp-private-api"
                     report["acp_ipc_records"].append(entry)
@@ -169,6 +174,10 @@ def network_audit(case, port, job, ipc_proof=None):
                         "AF_UNIX destination escaped the job allowlist")
                 entry["resolved_destination"] = str(Path(destination).resolve())
                 continue
+            if address == "{sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}":
+                entry["classification"] = "local-kernel-query"
+                report["local_kernel_queries"].append(entry)
+                continue
             raise AssertionError("unknown non-NULL socket destination")
         except (AssertionError, ValueError, SyntaxError, OSError, RuntimeError) as error:
             report["violations"].append(str(error) + ": " + canonical(entry))
@@ -182,7 +191,7 @@ def codex_direct_catalog(case):
     """Explicit direct-tool coverage using the otherwise unchanged pinned entry."""
     source_path = HERE / "codex-model-entry.json"
     raw = source_path.read_bytes()
-    require(digest(raw) == "84908db89e40af232436afe55da355d33b73d5c653ef402b2a820ce3012340f8",
+    require(digest(raw) == "873c956b8ef4766fb4e059d25924ee2c672e29149c99e1fa936e89e83410c518",
             "pinned Codex source model entry changed")
     source = raw.decode("utf-8")
     original = json.loads(source)
@@ -195,11 +204,18 @@ def codex_direct_catalog(case):
         "Codex model override changed more than its two authorized fields")
     path = case / "codex" / "model-catalog.json"
     path.write_bytes(b'{"models":[' + override.encode("utf-8") + b']}\n')
+    # Saved-copy provenance was verified during review; it is not a runtime
+    # dependency or an independent attestation of the upstream URL bytes.
     provenance = {
         "coverage": "explicit-direct-tools-only", "model_slug": original["slug"],
-        "source_url": "https://raw.githubusercontent.com/openai/codex/rust-v0.163.0/codex-rs/models-manager/models.json",
-        "source_sha256": "8f32fc36f69a37b095edb86fd91e569876de89ee6c4de08bcafe1660027aa06e",
+        "upstream_reference_url": "https://raw.githubusercontent.com/openai/codex/rust-v0.163.0/codex-rs/models-manager/models.json",
+        "source_verification": "exact-unique-byte-slice-of-saved-source-copy; upstream-raw-not-independently-verified",
+        "source_copy": "/home/igor/.cache/huyang-friction/executor/cx-src/models.json",
+        "source_copy_sha256": "943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b",
+        "source_copy_bytes": 472072,
+        "source_entry_offset_bytes": 66362,
         "source_entry": str(source_path), "source_entry_sha256": digest(raw),
+        "source_entry_bytes": len(raw),
         "override_entry_sha256": digest(override.encode("utf-8")),
         "catalog": str(path), "catalog_sha256": file_hash(path),
         "overrides": {"tool_mode": "direct", "supports_search_tool": False}}
@@ -237,7 +253,7 @@ async def cli(client, args, case, env, owner, binary, wrapper):
             'supports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0\n'
             '[mcp_servers.huyang]\ncommand = ' + json.dumps(mcp[0]) + "\nargs = " + json.dumps(mcp[1:])
             + '\nrequired = true\nstartup_timeout_sec = 30\ntool_timeout_sec = 30\n'
-            'startup_readiness = "catalog"\nomit_tools_from = ["deferred", "code_mode"]\n'
+            'startup_readiness = "connection"\nomit_tools_from = ["deferred", "code_mode"]\n'
             'tool_input_schema_max_bytes = 131072\n'
             'default_tools_approval_mode = "auto"\n')
         (case / "codex" / "config.toml").write_text(config)
