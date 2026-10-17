@@ -98,7 +98,9 @@ def tool_catalog(body):
             schema = definition.get("input_schema", definition.get("parameters"))
             require(isinstance(schema, dict), "missing direct model input schema " + qualified)
             require(not definition.get("defer_loading"), "deferred tool discovery unsupported: " + qualified)
-            answer[base] = {"name": name, "namespace": namespace, "schema": schema}
+            answer[base] = {"name": name, "namespace": namespace, "schema": schema,
+                            "description": definition.get("description"),
+                            "strict": definition.get("strict"), "type": definition.get("type")}
     visit(body.get("tools", []))
     # Responses can carry formal declarations in developer additional_tools items.
     # Inspect those descriptors only, never tool descriptions or orchestration text.
@@ -115,6 +117,119 @@ def shape(schema):
         return {k: shape(v) for k, v in schema.items()
                 if k not in ("description", "$schema", "title")}
     return schema
+
+
+# Saved rust-v0.163.0 source copies, read through Huyang during implementation.
+# These identify the reviewed copies, not an independent upstream/binary attestation.
+CODEX_SCHEMA_PROVENANCE = {
+    "client_version": "0.163.0", "upstream_reference_tag": "rust-v0.163.0",
+    "conversion": "bounded-pinned-sanitize-and-JsonSchema-serde; no-compaction",
+    "source_verification": "saved-source-copies-read-through-huyang; upstream-raw-not-independently-verified",
+    "source_directory": "/home/igor/.cache/huyang-friction/executor/cx-src",
+    "sources": {
+        "tools_json_schema_types.rs": {
+            "upstream_path": "codex-rs/tools/src/json_schema/types.rs",
+            "sha256": "17b11a7cf8530b9df722d382cad8066aca6c2a5d27d593e937ffdd3304f64d4a"},
+        "tools_json_schema.rs": {
+            "upstream_path": "codex-rs/tools/src/json_schema.rs",
+            "sha256": "f129a1fc19bcd20f7112c5e83f6e9f39e9b8e5f7698891c029d36527bb0387f1"}},
+    "allowed_dropped_keys": ["$schema", "minimum", "maximum", "maxLength", "maxItems"],
+    "unsupported": ["$ref", "$defs", "definitions", "const", "boolean schemas", "compaction"]}
+CODEX_SCHEMA_KEYS = {
+    "$ref", "type", "description", "encrypted", "enum", "items", "minItems",
+    "properties", "required", "additionalProperties", "anyOf", "oneOf", "allOf",
+    "$defs", "definitions"}
+CODEX_SCHEMA_DROPS = set(CODEX_SCHEMA_PROVENANCE["allowed_dropped_keys"])
+CODEX_SCHEMA_TYPES = {"string", "number", "boolean", "integer", "object", "array", "null"}
+CODEX_COMPOSITIONS = ("anyOf", "oneOf", "allOf")
+
+def codex_schema(schema):
+    """Pinned sanitizer + serde projection for the bounded Huyang catalog subset.
+
+    Fail closed on reference pruning, const/boolean lowering and other unreviewed
+    shapes. Neither arbitrary metadata removal nor large-schema compaction is
+    authorized. Recurse only at schema positions, never through enum JSON data.
+    Return the projection and every allowed lost keyword's JSON-pointer path/value.
+    """
+    dropped = []
+    def pointer(path, key):
+        return path + "/" + str(key).replace("~", "~0").replace("/", "~1")
+    def visit(node, path):
+        require(isinstance(node, dict), "outside bounded Codex schema subset at " + path)
+        require(not (set(node) & {"$ref", "$defs", "definitions"}),
+                "reference pruning outside bounded Codex schema subset at " + path)
+        unknown = set(node) - CODEX_SCHEMA_KEYS
+        require(unknown <= CODEX_SCHEMA_DROPS,
+                "unapproved Codex schema loss at " + path + ": " + str(sorted(unknown - CODEX_SCHEMA_DROPS)))
+        out = copy.deepcopy(node)
+        for key in sorted(unknown):
+            dropped.append({"path": pointer(path, key), "value": out.pop(key)})
+        # JsonSchema Option fields with null would disappear on serialization.
+        # None occur in this catalog; do not quietly approve new losses.
+        require(all(value is not None for value in out.values()),
+                "null field outside bounded Codex schema subset at " + path)
+        if "properties" in out:
+            require(isinstance(out["properties"], dict), "invalid Codex properties at " + path)
+            out["properties"] = {key: visit(value, pointer(pointer(path, "properties"), key))
+                                 for key, value in out["properties"].items()}
+        if "items" in out:
+            out["items"] = visit(out["items"], pointer(path, "items"))
+        if "additionalProperties" in out and not isinstance(out["additionalProperties"], bool):
+            out["additionalProperties"] = visit(out["additionalProperties"], pointer(path, "additionalProperties"))
+        for key in CODEX_COMPOSITIONS:
+            if key in out:
+                require(isinstance(out[key], list), "invalid Codex composition at " + path)
+                out[key] = [visit(value, pointer(pointer(path, key), index))
+                            for index, value in enumerate(out[key])]
+        raw_types = out.get("type", [])
+        types = [raw_types] if isinstance(raw_types, str) else raw_types
+        require(isinstance(types, list) and all(isinstance(t, str) and t in CODEX_SCHEMA_TYPES for t in types),
+                "invalid Codex schema type at " + path)
+        # Match sanitize_json_schema's early return for ref/composition without
+        # a type (refs are deliberately refused above).
+        if not types and any(key in out for key in CODEX_COMPOSITIONS):
+            return out
+        if not types:
+            if any(key in out for key in ("properties", "required", "additionalProperties")):
+                types = ["object"]
+            elif "items" in out:
+                types = ["array"]
+            elif "enum" in out:
+                types = ["string"]
+            elif any(key in node for key in ("minimum", "maximum")):
+                types = ["number"]
+            else:
+                # The pinned sanitizer clears this map. Only an empty result
+                # is supported here; losing e.g. description is unapproved.
+                require(not out, "unapproved Codex sanitizer loss at " + path)
+                return {}
+        out["type"] = types[0] if len(types) == 1 else types
+        if "object" in types and "properties" not in out:
+            out["properties"] = {}
+        if "array" in types and "items" not in out:
+            out["items"] = {"type": "string"}
+        return out
+    projected = visit(schema, "")
+    require(projected.get("type") != "null", "Codex rejects singleton null tool schema")
+    return projected, dropped
+
+def check_codex_catalog(catalog, tools):
+    """Responses only: exact formal names, strict=false, descriptions and schema."""
+    require(set(catalog) == FULL and {t["name"] for t in tools} == FULL and len(tools) == len(FULL),
+            "wrong full Codex formal tool catalog")
+    expected = {tool["name"]: tool for tool in tools}
+    evidence = {}
+    for base, definition in catalog.items():
+        require(definition["name"] == base and definition["namespace"] == "mcp__huyang"
+                and definition["type"] == "function", "wrong Codex formal tool name/type: " + base)
+        require(definition["strict"] is False, "Codex tool must declare strict=false: " + base)
+        require(definition["description"] == expected[base]["description"],
+                "Codex tool description differs from actual MCP catalog for " + base)
+        projected, dropped = codex_schema(expected[base]["inputSchema"])
+        require(canonical(definition["schema"]) == canonical(projected),
+                "model schema differs from pinned Codex conversion for " + base)
+        evidence[base] = {"dropped": dropped, "projected_sha256": digest(canonical(projected).encode())}
+    return evidence
 
 class Workflow:
     def __init__(self, owner, nonce, root, profile="full", session=None, provider="acceptance", probe=False):
@@ -154,11 +269,15 @@ class Workflow:
         if self.session is not None:
             require(all(v["name"].startswith(expected_prefix) for v in catalog.values()),
                     "plugin exposed wrong registration")
+        if protocol == "responses":
+            projection = check_codex_catalog(catalog, self.owner.catalogs[self.profile])
+            record(self.log, nonce=self.nonce, codex_schema_projection=projection)
         for base, definition in catalog.items():
             expected = self.owner.schemas.get((self.profile, base))
             require(expected is not None, "no actual MCP tools/list schema for " + self.profile + "/" + base)
-            require(shape(definition["schema"]) == shape(expected),
-                    "model schema differs from actual MCP catalog for " + base)
+            if protocol != "responses":
+                require(shape(definition["schema"]) == shape(expected),
+                        "model schema differs from actual MCP catalog for " + base)
             if self.profile == "lean":
                 require(shape(expected) == shape(self.owner.lean_schemas[base]),
                         "candidate lean schema differs from M7 closed schema: " + base)

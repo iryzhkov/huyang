@@ -35,7 +35,7 @@ def write_json(path, value):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
-def record(path, **entry):
+def record(path, /, **entry):
     entry = {"time_ns": time.monotonic_ns(), "pid": os.getpid(), **entry}
     # One append write, also safe for independent recorder processes.
     data = (canonical(entry) + "\n").encode()

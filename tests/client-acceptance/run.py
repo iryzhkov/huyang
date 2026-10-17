@@ -17,7 +17,7 @@ from common import (HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_
                     guard_scratch_job, canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
 from model_server import Controller
 import opencode
-from workflow import Workflow
+from workflow import CODEX_SCHEMA_PROVENANCE, Workflow
 
 async def capture(command, env, cwd, path, timeout=20):
     with Path(path).open("wb") as output:
@@ -306,6 +306,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         "binary": manifest["binaries"][client], "candidate_sha256": file_hash(candidate),
         "plugin_sha256": args.plugin_sha256 if client == "opencode" else None,
         "home_preflight": home_preflight, "codex_model_catalog": model_catalog,
+        "codex_schema_conversion": CODEX_SCHEMA_PROVENANCE if client == "codex" else None,
         "recorder_sha256": file_hash(wrapper), "runtime_files": manifest["candidate_runtime_files"]})
     stdout = (case / "service.stdout").open("wb")
     stderr = (case / "service.stderr").open("wb")

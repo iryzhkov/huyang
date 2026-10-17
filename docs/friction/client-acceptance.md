@@ -356,6 +356,76 @@ job `69bc9da9-7452-4f98-bb50-e2b876e7c666`, exact helper source `cc7207e`.
 The companion cherry-pick `7ac7c71` preserves the same tree. This is helper-unit
 evidence only; no integrated or actual-client pass is claimed here.
 
+## Bounded job 026f harness corrections
+
+Job `026f8582` against source `893bad523d5aaa6b6a7f2021978936f0471375f0`
+exposed Codex's pinned schema conversion and an OpenCode discovery-log argument
+collision. This correction owns only the client harness. Its implementation parent
+is `ed06ae1ff721c997fcae1387f2b95531248980d9`; apply only this commit's owned-file
+delta onto M8, without importing the parent's M9 production history.
+
+For **Responses only**, compare the raw MCP schema against the bounded port of
+Codex 0.163.0's `sanitize_json_schema` followed by `JsonSchema` serde serialization.
+The permitted losses are exactly `$schema`, `minimum`, `maximum`, `maxLength` and
+`maxItems`, at schema positions. Every loss is recorded with its JSON-pointer path
+and original value in `workflow.jsonl` under `codex_schema_projection`, together
+with the projected schema hash. The port preserves compositions, infers types
+using the reviewed sanitizer's hint order and fills missing object `properties`
+with `{}` and array `items` with `{"type":"string"}`. It never walks enum payloads
+as schemas or mistakes property names for schema keywords.
+
+Every surviving key/value is compared exactly, including nested descriptions,
+`required`, `additionalProperties`, `enum`, composition branches and `minItems`.
+Tool descriptions must also match the actual MCP catalog. Require all 13 formal
+function names exactly, the `mcp__huyang` namespace and an explicit boolean
+`strict:false`. Missing, extra, duplicated, renamed or deferred Huyang tools fail.
+Compaction has no exemption: shortened descriptions, removed properties or
+constraints fail the same exact comparison. Raw `mcp-catalogs.jsonl`,
+`mcp-catalog-full.json`, `http-catalogs.jsonl` and model HTTP bytes remain intact;
+the projection is separate evidence, never a rewrite of either raw catalog.
+
+This is a port for the reviewed Huyang catalog subset. Reference/definition
+pruning, `const`, boolean schemas, null Option fields and any other unapproved
+keyword loss fail closed. These forms are absent from the observed 13 schemas;
+the pinned source supports additional lowering, but this harness does not
+authorize it without new evidence. Claude and OpenCode schema comparison is
+unchanged. Claude's late `document_revision=wsrev_2` failure remains a production
+bug: its document-revision assertions and receipt proof are unchanged.
+
+The two source copies were read through Huyang from
+`/home/igor/.cache/huyang-friction/executor/cx-src`, a non-repository documents
+workspace. Saved `tree.txt` confirms their upstream filenames under
+`codex-rs/tools/src`. The case manifest's `codex_schema_conversion` records the
+version, paths, allowed losses, bounded coverage and these exact SHA-256s:
+
+- `tools_json_schema_types.rs` → `codex-rs/tools/src/json_schema/types.rs`:
+  `17b11a7cf8530b9df722d382cad8066aca6c2a5d27d593e937ffdd3304f64d4a`.
+- `tools_json_schema.rs` → `codex-rs/tools/src/json_schema.rs`:
+  `f129a1fc19bcd20f7112c5e83f6e9f39e9b8e5f7698891c029d36527bb0387f1`.
+
+The reference tag is `rust-v0.163.0`. These hashes identify the saved copies
+actually inspected; upstream raw contents and binary/source correspondence
+were not independently attested. The pinned model entry remains unchanged.
+
+`record(path, /, **entry)` now accepts the destination positionally, so the
+OpenCode discovery entry's `path` remains the native HTTP route. The exact
+discovery routes/responses are unchanged. The new `test_native_schema.py`
+contains an actual MCP/Responses `read` schema pair from the retained job, with
+the raw artifact hashes. Negative vectors cover unapproved losses, descriptions,
+required/enum/additionalProperties changes, branch loss, minItems loss,
+compaction, registration names and strictness. Workflow-level vectors exercise
+Responses acceptance/rejection and preserve Claude\'s unprojected comparison.
+Its in-memory HTTP regression
+exercises all four existing discovery routes through `Controller.http_request`
+and the real record encoder; it proves the route field survives and no workflow
+advances. It creates no disk files, processes, sockets or services.
+
+For the parent's disposable verification job, the focused command is
+`python3 -B -m unittest discover -s tests/client-acceptance -p test_native_schema.py`.
+No tests, runtime, builds, linters, generators, clients, Chaldea jobs, SSH,
+installations or services were run in this implementation session. No push or
+review was performed. IPC and destination-audit code and proof were not changed.
+
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,
