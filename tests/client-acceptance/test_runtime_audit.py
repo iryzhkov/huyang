@@ -1,8 +1,10 @@
 """Synthetic runtime-audit and pinned-catalog regressions; no writes or processes."""
 import copy
 import sys
+import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.dont_write_bytecode = True
@@ -219,6 +221,51 @@ class ExactUnixDestinationTests(unittest.TestCase):
         self.assertIn("no real model-port connect captured", report["violations"])
         self.assertIn("ACP IPC proof records do not exactly match audited connect records",
                       report["violations"])
+
+
+class CodexConfigTests(unittest.IsolatedAsyncioTestCase):
+    async def test_case_config_disables_analytics_without_reparenting_other_settings(self):
+        owner = SimpleNamespace(workflows={}, port=MODEL_PORT)
+        wrapper = Path("/synthetic/bin/huyang")
+        with patch.object(acceptance, "fixture", return_value=CASE / "fixture"), \
+                patch.object(acceptance, "Workflow") as workflow, \
+                patch.object(Path, "write_text", autospec=True,
+                             side_effect=RuntimeError("config captured")) as write:
+            workflow.return_value.nonce = "codex-full"
+            # Stop at the config write, before opening logs or spawning a client.
+            with self.assertRaisesRegex(RuntimeError, "^config captured$"):
+                await acceptance.cli("codex", None, CASE, {}, owner,
+                                     Path("/synthetic/bin/codex"), wrapper)
+        write.assert_called_once()
+        path, text = write.call_args.args
+        self.assertEqual(path, CASE / "codex/config.toml")
+        config = tomllib.loads(text)
+        self.assertEqual(config, {
+            "model": "gpt-6.1-sol", "model_provider": "acceptance",
+            "approval_policy": "never", "sandbox_mode": "danger-full-access",
+            "web_search": "disabled", "project_root_markers": [],
+            "cli_auth_credentials_store": "file",
+            "model_catalog_json": str(CASE / "codex/model-catalog.json"),
+            "log_dir": str(CASE / "codex/log"),
+            "analytics": {"enabled": False},
+            "features": {"enable_request_compression": False, "apps": False,
+                         "multi_agent": False, "hooks": False, "plugins": False},
+            "model_providers": {"acceptance": {
+                "name": "Private deterministic mock",
+                "base_url": "http://127.0.0.1:" + str(MODEL_PORT) + "/v1",
+                "env_key": "HUYANG_MOCK_KEY", "wire_api": "responses",
+                "requires_openai_auth": False, "supports_websockets": False,
+                "request_max_retries": 0, "stream_max_retries": 0}},
+            "mcp_servers": {"huyang": {
+                "command": str(wrapper),
+                "args": ["mcp", "--socket", str(CASE / "h.sock"),
+                         "--profile", "full", "--reply-style", "plain"],
+                "required": True, "startup_timeout_sec": 30, "tool_timeout_sec": 30,
+                "startup_readiness": "connection",
+                "omit_tools_from": ["deferred", "code_mode"],
+                "tool_input_schema_max_bytes": 131072,
+                "default_tools_approval_mode": "auto"}},
+        })
 
 
 class CodexCatalogTests(unittest.TestCase):

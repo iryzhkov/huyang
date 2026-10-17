@@ -706,6 +706,36 @@ OpenCode readiness or IPC credit and does not affect Python decision 8596.
 Independent final review, root-owned checks and fresh complete actual workflows
 for all three pinned clients are still required.
 
+## Codex native analytics correction after job 948f
+
+Actual job `948f91d7-c8ab-42f9-9a93-37aba317c687` completed Codex's 14-call
+workflow, then failed the destination audit on nine native outbound operations
+associated with `ab.chatgpt.com` during shutdown. Generic `DISABLE_TELEMETRY=1`
+did not suppress them. The failed job and its full diagnostics/raw traces remain
+failed evidence; no runtime pass follows from this correction.
+
+The generated case-local `codex/config.toml` now sets `[analytics] enabled=false`
+after all root keys and before `[features]`, preserving TOML table membership.
+Official Codex 0.163.0 source at commit
+`83086188ae0614bd882818ff1aa23f3194962012` defines the
+[native analytics boolean](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/config/src/types.rs#L244-L252).
+[Exec defaults analytics to true](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/exec/src/lib.rs#L174);
+[explicit false disables the default Statsig exporter](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/otel_init.rs#L68-L79)
+and [prevents the separate analytics queue](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/analytics/src/client.rs#L314-L332).
+There is no custom OTLP exporter in this config, so a metrics override is redundant.
+
+The retained diagnosis is
+`/home/igor/.cache/huyang-friction/client948-codex-outbound-diagnosis.md`.
+Its companion `client948-codex-outbound-source/provenance.tsv` records immutable
+official URLs, matching Git blobs and SHA-256s for the cached primary sources;
+the TSV SHA-256 is `f2b1d48cf74174af8221e0585a8149e061b7b483d99e522123475fe040755243`.
+Source-to-native reproducibility is not cryptographically attested.
+The config-shape regression is source-only preparation for root-owned Python
+suites on agent-a and independent review. A fresh actual run must complete the
+workflow and establish the outbound result with full raw traces. Destination,
+DNS, trace and IPC audit gates are unchanged. Coverage remains limited to
+explicit direct tools with `gpt-6.1-sol`; default code mode is unqualified.
+
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,

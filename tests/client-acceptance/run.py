@@ -265,7 +265,8 @@ async def cli(client, args, case, env, owner, binary, wrapper):
             'cli_auth_credentials_store = "file"\n'
             + "model_catalog_json = " + json.dumps(str(case / "codex/model-catalog.json")) + "\n"
             + "log_dir = " + json.dumps(str(case / "codex/log")) + "\n"
-            + '[features]\nenable_request_compression = false\napps = false\nmulti_agent = false\nhooks = false\nplugins = false\n'
+            + '[analytics]\nenabled = false\n'
+            '[features]\nenable_request_compression = false\napps = false\nmulti_agent = false\nhooks = false\nplugins = false\n'
             '[model_providers.acceptance]\nname = "Private deterministic mock"\n'
             + "base_url = " + json.dumps(base + "/v1") + "\n"
             + 'env_key = "HUYANG_MOCK_KEY"\nwire_api = "responses"\nrequires_openai_auth = false\n'
