@@ -25,8 +25,10 @@
 #           environment (for example: run go vet ./...)
 #   env     print the environment exports for an interactive shell
 #   submit [MODE [ARGS]]
-#           run MODE (default probe) on a job host through chaldea exec,
-#           retrying only immediate busy refusals, and return the report
+#           run MODE (default probe) once on a job host through chaldea
+#           exec and return the report; never retries, and passes the exit
+#           status through (a busy refusal is reported for the caller to
+#           schedule a Chaldea wait)
 #
 # Every mode writes tests/.deps/langprobe/out/summary.txt and
 # tests/.deps/langprobe/out/langprobe-report.tar.gz, which submit requests
@@ -601,7 +603,7 @@ begin() {
 }
 
 submit() {
-	local inner=${1:-probe} host=${LANGPROBE_HOST:-agent-a} scratch attempt rc
+	local inner=${1:-probe} host=${LANGPROBE_HOST:-agent-a} scratch rc
 	local -a env_args=(HUYANG_FRICTION=0)
 	local name
 	[ $# -gt 0 ] && shift
@@ -613,24 +615,22 @@ submit() {
 	scratch=${TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/huyang-langprobe}
 	mkdir -p "$scratch"
 	cd "$repo"
-	for attempt in $(seq 1 "${LANGPROBE_SUBMIT_ATTEMPTS:-30}"); do
-		set +e
-		chaldea exec --host "$host" \
-			--artifact tests/.deps/langprobe/out/summary.txt \
-			--artifact tests/.deps/langprobe/out/langprobe-report.tar.gz \
-			-- env "${env_args[@]}" bash tests/langprobe-chaldea.sh "$inner" "$@" 2>&1 | tee "$scratch/submit.log"
-		rc=${PIPESTATUS[0]}
-		set -e
-		# Only a definitive refusal before dispatch is retried. Anything else,
-		# including an uncertain outcome, is reported and never re-run.
-		if [ "$rc" != 0 ] && grep -qE '^chaldea: host .* refused: .*nothing dispatched' "$scratch/submit.log"; then
-			log "host $host busy (attempt $attempt); retrying in 60 s"
-			sleep 60
-			continue
-		fi
-		return "$rc"
-	done
-	die "host $host stayed busy for ${LANGPROBE_SUBMIT_ATTEMPTS:-30} attempts"
+	# One dispatch only. A busy refusal is reported so the caller can register
+	# a Chaldea wait; an uncertain outcome is never re-run, and the journal
+	# entry chaldea names is the place to resolve it.
+	set +e
+	chaldea exec --host "$host" \
+		--artifact tests/.deps/langprobe/out/summary.txt \
+		--artifact tests/.deps/langprobe/out/langprobe-report.tar.gz \
+		-- env "${env_args[@]}" bash tests/langprobe-chaldea.sh "$inner" "$@" 2>&1 | tee "$scratch/submit.log"
+	rc=${PIPESTATUS[0]}
+	set -e
+	if [ "$rc" != 0 ] && grep -qE '^chaldea: host .* refused: .*nothing dispatched' "$scratch/submit.log"; then
+		log "BUSY: host $host refused before dispatch, nothing ran (exit $rc); not retried"
+	elif [ "$rc" != 0 ]; then
+		log "chaldea exec exit $rc; if the outcome is uncertain, inspect the journal it names and do not re-run"
+	fi
+	return "$rc"
 }
 
 mode=${1:-}

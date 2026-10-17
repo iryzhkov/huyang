@@ -78,9 +78,11 @@ tests/langprobe-chaldea.sh submit race ./internal/...
 tests/langprobe-chaldea.sh submit run go vet ./...
 ```
 
-`submit` calls `chaldea exec --host ${LANGPROBE_HOST:-agent-a}`. It retries only a
-refusal that reports nothing was dispatched, waiting 60 s between attempts. Any
-other outcome is reported and never re-run, including an uncertain one.
+`submit` calls `chaldea exec --host ${LANGPROBE_HOST:-agent-a}` once and passes its
+exit status through. It never retries and never sleeps. A busy refusal that
+dispatched nothing is reported as `BUSY`, so the caller can register a Chaldea
+wait and submit again. An uncertain outcome is never re-run: resolve it from the
+journal entry that chaldea names.
 
 `probe` runs the test with `HUYANG_LANGPROBE=1` and `HUYANG_LANGPROBE_STRICT=1`. It
 succeeds only if each of the nine subtests reports `--- PASS`. A `SKIP`, `FAIL` or
