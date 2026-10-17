@@ -39,7 +39,8 @@ func TestPreEditBaselineDoesNotAnnouncePreexistingFinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(before.New) != 0 || len(w.DiagnosticNotices(20)) != 0 {
+	notices := w.DiagnosticNotices(20)
+	if len(before.New) != 0 || len(notices) != 1 || notices[0].Kind != "persisting" {
 		t.Fatalf("baseline announced as new: %+v", before)
 	}
 	batch.Baseline = false

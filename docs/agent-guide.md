@@ -277,15 +277,26 @@ Keep both transport representations for compatible consumers and deduplicate for
   entering the ledger. Unversioned positive findings remain provisional;
   unversioned emptiness cannot resolve a finding. Rust may explicitly report `rust_diagnostics_pending`;
   its later findings arrive through `diagnostic_updates` on subsequent tool replies.
-- A pre-edit snapshot seeds or refreshes findings without announcing them as new
-  or resolving omitted findings. Any open producer progress vetoes the snapshot,
+- A pre-edit snapshot seeds or refreshes findings without resolving omissions.
+  First-observed preexisting findings and stale refreshes produce `persisting`
+  notices with bodies through `diagnostic_updates`; already-current repeats are silent.
+  A verified resolved finding returning produces `new`, with historical attribution
+  cleared. These baseline observations carry no mutation transaction and are excluded
+  from the upcoming edit's introduced count. Any open producer progress vetoes the snapshot,
   including work started before the call. A known baseline must name the exact
   pre-edit document revision; an external write or checkout invalidates older evidence. When no matching baseline exists, findings
   carry `baseline_missing` (new or pre-existing), rather than claiming introduction.
 - Default `diagnostics` reports notice deltas. After `since` acknowledges notices,
   counts can remain without bodies. Use `diagnostics {root, full: true}` to recover
   `current` bodies after acknowledgement or a transport reconnect. `persisting`
-  means a stale finding became current again; it is neither new nor resolved.
+  means a stale finding became current again, or a baseline first observed a
+  preexisting finding; it is neither new nor resolved.
+- Equivalent proven baseline payloads reuse stored evidence while lifecycle transitions
+  still run. Each provider RPC uses one atomic ledger save. Items and coverage owners
+  retain at most eight recent evidence references; old exact preimage proof can expire,
+  in which case `baseline_missing` applies. Evidence IDs never substitute newer proof.
+  Retained preparations keep their referenced evidence readable. Receipt replay keeps
+  its original envelope; an expired evidence ID is an explicit lookup failure.
 - The diagnostic ledger upgrades version 1 to version 2 on open and persists the
   per-document coverage migration before returning. A version-1 binary refuses the
   upgraded ledger; keep a state backup for rollback or rebuild diagnostic state.

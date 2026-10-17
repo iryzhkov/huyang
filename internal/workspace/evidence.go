@@ -90,6 +90,9 @@ type DiagnosticBatch struct {
 	// Baseline seeds or refreshes proven-current pre-edit findings without
 	// announcing them as introduced by a mutation or resolving omitted findings.
 	Baseline bool `json:"baseline,omitempty"`
+	// nativeContentChanged is an ingestion hint from the native preimage read,
+	// not wire evidence or persisted publication proof.
+	nativeContentChanged bool
 	// Staged marks evidence about bytes that only exist inside a preparation.
 	// It is recorded as evidence and kept out of the ledger's current set: a
 	// proposal nobody applied must not change what the workspace believes
@@ -154,6 +157,9 @@ const (
 	// unacknowledged notices are dropped and the notice floor records the
 	// gap so cursors older than the floor are reported as truncated.
 	maxDiagnosticNotices = 1000
+	// Each owner retains a bounded recent proof history. Older exact revisions
+	// may become unavailable; lookup must then report a missing baseline.
+	maxDiagnosticEvidenceReferences = 8
 )
 
 type DiagnosticDimension struct {
@@ -163,8 +169,10 @@ type DiagnosticDimension struct {
 	Reasons     []string             `json:"reasons,omitempty"`
 }
 
-// DiagnosticNotice records new, stale, persisting (stale refreshed as current),
-// and resolved transitions. Persistence does not imply a new finding.
+// DiagnosticNotice records new, stale, persisting and resolved transitions.
+// Persisting covers stale refreshes and first-observed preexisting baseline
+// findings. A baseline recurrence after verified resolution is new, but carries
+// no mutation attribution and is excluded from the mutation report's New set.
 type DiagnosticNotice struct {
 	BaselineMissing bool               `json:"baseline_missing,omitempty"`
 	Cursor          string             `json:"cursor"`
@@ -232,6 +240,10 @@ type diagnosticStore struct {
 	// restart unacknowledged notices are delivered again, which is the
 	// conservative direction.
 	delivered uint64
+	// writeFile is normally atomicWriteFile; tests can count or fail persistence.
+	writeFile func(string, []byte, os.FileMode) error
+	// baselineIndex is a rebuildable storage index, not persisted lifecycle state.
+	baselineIndex map[string]string
 }
 
 func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, error) {
@@ -351,7 +363,11 @@ func (s *diagnosticStore) save() error {
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(s.path, append(content, '\n'), 0o600)
+	write := s.writeFile
+	if write == nil {
+		write = atomicWriteFile
+	}
+	return write(s.path, append(content, '\n'), 0o600)
 }
 
 func normalizeFinding(f DiagnosticFinding) DiagnosticFinding {
@@ -486,18 +502,99 @@ func rankCulprit(candidates []CulpritCandidate) CulpritAttribution {
 }
 
 func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error) {
+	reports, err := s.recordBatches([]DiagnosticBatch{batch})
+	if err != nil {
+		return DiagnosticReport{}, err
+	}
+	return reports[0], nil
+}
+
+// recordBatches publishes all transitions together, only after one successful
+// persistence. Validation precedes mutation; every batch still runs lifecycle
+// processing even when its immutable evidence payload is already stored.
+func (s *diagnosticStore) recordBatches(batches []DiagnosticBatch, retained ...string) ([]DiagnosticReport, error) {
+	if len(batches) == 0 {
+		return nil, nil
+	}
+	batches = append([]DiagnosticBatch(nil), batches...)
+	now := time.Now().UTC()
+	for i := range batches {
+		batch := &batches[i]
+		if batch.ProviderID == "" || batch.Producer == "" {
+			return nil, errors.New("diagnostic evidence requires provider_id and producer")
+		}
+		if !batch.Selected {
+			return nil, errors.New("diagnostic evidence from an unselected provider is rejected")
+		}
+		if batch.ObservedAt.IsZero() {
+			batch.ObservedAt = now
+		}
+		batch.Document = filepath.ToSlash(filepath.Clean(batch.Document))
+		if batch.Baseline {
+			batch.TransactionID, batch.Candidates = "", nil
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if batch.ProviderID == "" || batch.Producer == "" {
-		return DiagnosticReport{}, errors.New("diagnostic evidence requires provider_id and producer")
+	previous := s.state
+	s.state = cloneDiagnosticState(previous)
+	committed := false
+	defer func() {
+		if !committed {
+			s.state = previous
+			s.baselineIndex = nil
+		}
+	}()
+	var reports []DiagnosticReport
+	keep := append([]string(nil), retained...)
+	for _, batch := range batches {
+		report, err := s.recordLocked(batch)
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, report)
+		keep = append(keep, report.EvidenceIDs...)
 	}
-	if !batch.Selected {
-		return DiagnosticReport{}, errors.New("diagnostic evidence from an unselected provider is rejected")
+	s.pruneLocked(now, keep...)
+	if err := s.save(); err != nil {
+		return nil, err
 	}
-	if batch.ObservedAt.IsZero() {
-		batch.ObservedAt = time.Now().UTC()
+	committed = true
+	return reports, nil
+}
+
+// cloneDiagnosticState detaches every slice/map mutated by ingestion or pruning.
+// Payloads and attribution slices are immutable after construction.
+func cloneDiagnosticState(source diagnosticState) diagnosticState {
+	cloned := source
+	cloned.Items = make(map[string]DiagnosticItem, len(source.Items))
+	for id, item := range source.Items {
+		item.EvidenceIDs = append([]string(nil), item.EvidenceIDs...)
+		item.EvidenceKinds = append([]DiagnosticEvidenceKind(nil), item.EvidenceKinds...)
+		cloned.Items[id] = item
 	}
-	batch.Document = filepath.ToSlash(filepath.Clean(batch.Document))
+	cloneIDs := func(source map[string][]string) map[string][]string {
+		result := make(map[string][]string, len(source))
+		for key, ids := range source {
+			result[key] = append([]string(nil), ids...)
+		}
+		return result
+	}
+	cloned.Active, cloned.Stale = cloneIDs(source.Active), cloneIDs(source.Stale)
+	cloned.Evidence = make(map[string]DiagnosticEvidence, len(source.Evidence))
+	for id, evidence := range source.Evidence {
+		cloned.Evidence[id] = evidence
+	}
+	cloned.Notices = append([]DiagnosticNotice(nil), source.Notices...)
+	cloned.Dimensions = cloneDimensions(source.Dimensions)
+	cloned.ProviderDimensions = cloneDimensions(source.ProviderDimensions)
+	return cloned
+}
+
+func (s *diagnosticStore) recordLocked(batch DiagnosticBatch) (DiagnosticReport, error) {
+	if batch.Baseline && !batch.Staged && batch.nativeContentChanged {
+		s.documentChangedLocked([]string{batch.Document}, batch.DocumentRevision)
+	}
 	confidence, reasons := confidenceFor(batch)
 	if batch.Staged {
 		return s.recordStagedLocked(batch, confidence, reasons)
@@ -513,7 +610,8 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		for _, id := range prior.EvidenceIDs {
 			var previous DiagnosticBatch
 			if evidence, ok := s.state.Evidence[id]; ok && json.Unmarshal(evidence.Payload, &previous) == nil &&
-				previous.DocumentRevision == batch.PreEditDocumentRevision {
+				previous.DocumentRevision == batch.PreEditDocumentRevision && !previous.Staged &&
+				previous.Producer == batch.Producer && previous.ProducerVersion == batch.ProducerVersion {
 				if proof, _ := confidenceFor(previous); proof != ConfidenceAuthoritative {
 					continue
 				}
@@ -546,10 +644,6 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		s.state.Active[key] = appendUnique(previous, idsOf(current)...)
 		s.state.Stale[key] = withoutIDs(previousStale, seen)
 	}
-	s.pruneLocked(batch.ObservedAt)
-	if err := s.save(); err != nil {
-		return DiagnosticReport{}, err
-	}
 	report := s.reportLocked(added, resolved, evID, reasons)
 	// Mutation-time verification needs the confidence of this observation. The
 	// persisted coverage remains historical and is returned by diagnostics queries.
@@ -575,10 +669,6 @@ func (s *diagnosticStore) recordStagedLocked(batch DiagnosticBatch, confidence D
 	evID := evidenceID(batch, s.state.Sequence)
 	payload, _ := json.Marshal(batch)
 	s.state.Evidence[evID] = DiagnosticEvidence{ID: evID, Kind: string(batch.Kind), RecordedAt: batch.ObservedAt, Payload: payload}
-	s.pruneLocked(batch.ObservedAt)
-	if err := s.save(); err != nil {
-		return DiagnosticReport{}, err
-	}
 	current := stagedItems(batch, evID)
 	return DiagnosticReport{
 		Confidence: confidence, Coverage: cloneDimensions(s.state.Dimensions),
@@ -615,15 +705,82 @@ func stagedItems(batch DiagnosticBatch, evID string) []DiagnosticItem {
 	return items
 }
 
+// baselineProofKey deduplicates only proven canonical baseline storage.
+// Observation time/state and mutation hints are not proof. All other publication
+// fields, exact native revision, finding placement and multiplicity are retained.
+func baselineProofKey(batch DiagnosticBatch, confidence DiagnosticConfidence) string {
+	if !batch.Baseline || batch.Staged || batch.DocumentRevision == "" || confidence != ConfidenceAuthoritative {
+		return ""
+	}
+	batch.ObservedAt, batch.StateSeq = time.Time{}, 0
+	batch.TransactionID, batch.Candidates, batch.PreEditDocumentRevision = "", nil, ""
+	if batch.Dimension == "" {
+		batch.Dimension = "edited_documents"
+	}
+	batch.Findings = append([]DiagnosticFinding(nil), batch.Findings...)
+	for i := range batch.Findings {
+		batch.Findings[i] = normalizeFinding(batch.Findings[i])
+	}
+	sort.Slice(batch.Findings, func(i, j int) bool {
+		left, _ := json.Marshal(batch.Findings[i])
+		right, _ := json.Marshal(batch.Findings[j])
+		return string(left) < string(right)
+	})
+	payload, _ := json.Marshal(batch)
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:])
+}
+
+// recentEvidenceIDs moves observed IDs to the end and bounds each owner's
+// history. Missing older exact proof is deliberately not inferred from this set.
+func recentEvidenceIDs(existing []string, ids ...string) []string {
+	if len(existing) > maxDiagnosticEvidenceReferences {
+		existing = existing[len(existing)-maxDiagnosticEvidenceReferences:]
+	}
+	result := append([]string(nil), existing...)
+	for _, id := range ids {
+		kept := result[:0]
+		for _, previous := range result {
+			if previous != id {
+				kept = append(kept, previous)
+			}
+		}
+		result = append(kept, id)
+		if len(result) > maxDiagnosticEvidenceReferences {
+			result = result[len(result)-maxDiagnosticEvidenceReferences:]
+		}
+	}
+	return result
+}
+
 func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence DiagnosticConfidence, reasons []string) string {
 	dimension := batch.Dimension
 	if dimension == "" {
 		dimension = "edited_documents"
 	}
-	s.state.Sequence++
-	evID := evidenceID(batch, s.state.Sequence)
-	payload, _ := json.Marshal(batch)
-	s.state.Evidence[evID] = DiagnosticEvidence{ID: evID, Kind: string(batch.Kind), RecordedAt: batch.ObservedAt, Payload: payload}
+	proofKey := baselineProofKey(batch, confidence)
+	if proofKey != "" && s.baselineIndex == nil {
+		s.baselineIndex = map[string]string{}
+		for id, evidence := range s.state.Evidence {
+			var previous DiagnosticBatch
+			if json.Unmarshal(evidence.Payload, &previous) == nil {
+				proof, _ := confidenceFor(previous)
+				if key := baselineProofKey(previous, proof); key != "" {
+					s.baselineIndex[key] = id
+				}
+			}
+		}
+	}
+	evID := s.baselineIndex[proofKey]
+	if _, exists := s.state.Evidence[evID]; evID == "" || !exists {
+		s.state.Sequence++
+		evID = evidenceID(batch, s.state.Sequence)
+		payload, _ := json.Marshal(batch)
+		s.state.Evidence[evID] = DiagnosticEvidence{ID: evID, Kind: string(batch.Kind), RecordedAt: batch.ObservedAt, Payload: payload}
+		if proofKey != "" {
+			s.baselineIndex[proofKey] = evID
+		}
+	}
 	dimensionState := "complete"
 	if confidence == ConfidenceProvisional || confidence == ConfidenceUnavailable {
 		dimensionState = "incomplete"
@@ -635,7 +792,7 @@ func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence
 	}
 	providerDimension := dimension + "\x00" + batch.ProviderID + "\x00" + batch.Document
 	if prior, ok := s.state.ProviderDimensions[providerDimension]; ok {
-		updated.EvidenceIDs = appendUnique(prior.EvidenceIDs, evID)
+		updated.EvidenceIDs = recentEvidenceIDs(prior.EvidenceIDs, evID)
 	}
 	s.state.ProviderDimensions[providerDimension] = updated
 	if confidence == ConfidenceAuthoritative && batch.Kind != EvidenceUnavailable {
@@ -651,11 +808,26 @@ func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence
 // weakest confidence and its state.
 func (s *diagnosticStore) aggregateDimensionLocked(dimension string) DiagnosticDimension {
 	aggregate := DiagnosticDimension{State: "complete", Confidence: ConfidenceAuthoritative}
-	for key, providerEvidence := range s.state.ProviderDimensions {
+	keys := make([]string, 0, len(s.state.ProviderDimensions))
+	for key := range s.state.ProviderDimensions {
+		keys = append(keys, key)
+	}
+	// Keep representative proof for the weakest confidence when the global
+	// dimension has more providers/documents than its reference budget.
+	sort.Slice(keys, func(i, j int) bool {
+		left := confidenceRank(s.state.ProviderDimensions[keys[i]].Confidence)
+		right := confidenceRank(s.state.ProviderDimensions[keys[j]].Confidence)
+		if left != right {
+			return left > right
+		}
+		return keys[i] < keys[j]
+	})
+	for _, key := range keys {
+		providerEvidence := s.state.ProviderDimensions[key]
 		if !strings.HasPrefix(key, dimension+"\x00") {
 			continue
 		}
-		aggregate.EvidenceIDs = appendUnique(aggregate.EvidenceIDs, providerEvidence.EvidenceIDs...)
+		aggregate.EvidenceIDs = recentEvidenceIDs(aggregate.EvidenceIDs, providerEvidence.EvidenceIDs...)
 		aggregate.Reasons = appendUnique(aggregate.Reasons, providerEvidence.Reasons...)
 		if confidenceRank(providerEvidence.Confidence) < confidenceRank(aggregate.Confidence) {
 			aggregate.Confidence = providerEvidence.Confidence
@@ -698,13 +870,15 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		if announce {
 			item.BaselineMissing = !baselineKnown
 		}
-		if batch.Baseline {
-			announce = false
-			if !existed {
-				item.BaselineMissing = false
-			}
-		}
 		persisting := existed && item.Status == DiagnosticStatusStale
+		if batch.Baseline {
+			// A baseline is observed before this mutation. Its first sightings
+			// are preexisting; a verified recurrence must still reach cursors.
+			announce = existed && item.Status == DiagnosticStatusResolved
+			persisting = persisting || !existed
+			item.BaselineMissing = false
+			item.Attribution = rankCulprit(nil)
+		}
 		item.Status = DiagnosticStatusCurrent
 		item.StaleReason, item.StaleRevision, item.ResolvedAt = "", "", time.Time{}
 		// The provenance follows the latest observation so a re-published
@@ -717,11 +891,13 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		item.TransactionID = batch.TransactionID
 		item.StateSeq = batch.StateSeq
 		item.LastSeen = batch.ObservedAt
-		item.EvidenceIDs = appendUnique(item.EvidenceIDs, evID)
+		item.EvidenceIDs = recentEvidenceIDs(item.EvidenceIDs, evID)
 		item.EvidenceKinds = appendUniqueKind(item.EvidenceKinds, batch.Kind)
 		s.state.Items[id] = item
 		if announce {
-			added = append(added, item)
+			if !batch.Baseline {
+				added = append(added, item)
+			}
 			s.addNotice("new", item)
 		} else if persisting {
 			// Preserve the freshness transition for cursor consumers without
@@ -753,15 +929,20 @@ func (s *diagnosticStore) resolveAbsentLocked(ids []string, seen map[string]bool
 	return resolved
 }
 
-// documentChanged marks every current finding recorded for document as stale
-// unless it was already recorded against revision. It reports whether the
-// ledger changed. Stale findings leave the active set, are announced with a
-// "stale" notice and stay visible as stale until the producer re-publishes
-// for the new content (current again) or a complete observation omits them
-// (resolved). They are never silently promoted to resolved.
-func (s *diagnosticStore) documentChanged(documents []string, revision string, observedAt time.Time) (bool, error) {
+// documentChanged marks old current findings stale and persists the transition.
+func (s *diagnosticStore) documentChanged(documents []string, revision string, observedAt time.Time, retained ...string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.documentChangedLocked(documents, revision) {
+		return false, nil
+	}
+	s.pruneLocked(observedAt, retained...)
+	return true, s.save()
+}
+
+// documentChangedLocked also serves bulk baseline ingestion: external changes
+// must stale omitted old findings without publishing a save per loaded buffer.
+func (s *diagnosticStore) documentChangedLocked(documents []string, revision string) bool {
 	names := map[string]bool{}
 	for _, document := range documents {
 		names[filepath.ToSlash(filepath.Clean(document))] = true
@@ -801,11 +982,7 @@ func (s *diagnosticStore) documentChanged(documents []string, revision string, o
 			s.state.Active[key] = remaining
 		}
 	}
-	if !changed {
-		return false, nil
-	}
-	s.pruneLocked(observedAt)
-	return true, s.save()
+	return changed
 }
 
 func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
@@ -819,10 +996,10 @@ func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
 // pruneLocked applies the retention bounds. Evidence referenced by a current
 // or stale item, or by a coverage dimension, is never dropped. The caller
 // holds s.mu.
-func (s *diagnosticStore) pruneLocked(now time.Time) {
+func (s *diagnosticStore) pruneLocked(now time.Time, retained ...string) {
 	noticed := s.pruneNoticesLocked()
 	s.pruneItemsLocked(now, noticed)
-	s.pruneEvidenceLocked(now)
+	s.pruneEvidenceLocked(now, retained...)
 }
 
 // pruneNoticesLocked drops acknowledged notices and the oldest beyond the cap, and
@@ -890,8 +1067,25 @@ func (s *diagnosticStore) pruneItemsLocked(now time.Time, noticed map[string]boo
 
 // pruneEvidenceLocked keeps evidence an item or a dimension references; unreferenced
 // evidence stays for the retention window, then up to the cap, oldest first.
-func (s *diagnosticStore) pruneEvidenceLocked(now time.Time) {
+func (s *diagnosticStore) pruneEvidenceLocked(now time.Time, retained ...string) {
 	referenced := map[string]bool{}
+	for _, id := range retained {
+		referenced[id] = true
+	}
+	// Apply bounds to restored older ledgers too, rather than waiting for
+	// each owner to receive another observation.
+	for id, item := range s.state.Items {
+		item.EvidenceIDs = recentEvidenceIDs(nil, item.EvidenceIDs...)
+		s.state.Items[id] = item
+	}
+	for name, dimension := range s.state.Dimensions {
+		dimension.EvidenceIDs = recentEvidenceIDs(nil, dimension.EvidenceIDs...)
+		s.state.Dimensions[name] = dimension
+	}
+	for key, dimension := range s.state.ProviderDimensions {
+		dimension.EvidenceIDs = recentEvidenceIDs(nil, dimension.EvidenceIDs...)
+		s.state.ProviderDimensions[key] = dimension
+	}
 	for _, item := range s.state.Items {
 		for _, id := range item.EvidenceIDs {
 			referenced[id] = true
@@ -921,6 +1115,11 @@ func (s *diagnosticStore) pruneEvidenceLocked(now time.Time) {
 	dropOldest(unreferenced, len(unreferenced)-maxUnreferencedDiagnosticEvidence,
 		func(id string) time.Time { return s.state.Evidence[id].RecordedAt },
 		func(id string) { delete(s.state.Evidence, id) })
+	for key, id := range s.baselineIndex {
+		if _, exists := s.state.Evidence[id]; !exists {
+			delete(s.baselineIndex, key)
+		}
+	}
 }
 
 // dropOldest drops the excess oldest IDs, breaking equal timestamps by ID.
@@ -984,7 +1183,7 @@ func (s *diagnosticStore) reportLocked(added, resolved []DiagnosticItem, evID st
 		EvidenceIDs: []string{evID}, Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence)}
 }
 
-func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
+func (s *diagnosticStore) query(since string, retained ...string) (DiagnosticReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seq, err := parseDiagnosticCursor(since)
@@ -1015,7 +1214,7 @@ func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
 			// Restores freshness; it is neither new nor resolved.
 		}
 	}
-	s.pruneLocked(time.Now().UTC())
+	s.pruneLocked(time.Now().UTC(), retained...)
 	if err := s.save(); err != nil {
 		return DiagnosticReport{}, err
 	}
@@ -1229,17 +1428,94 @@ func (w *Workspace) DiagnosticPreEditRevision(file PlanStageFile) (string, error
 	return string(revisionFor(snapshot)), nil
 }
 
-func (w *Workspace) RecordDiagnosticEvidence(batch DiagnosticBatch) (DiagnosticReport, error) {
+// diagnosticBaselineRevision reads the native preimage without publishing a
+// separate workspace/ledger observation for every loaded buffer. The RPC and
+// this disk read remain separate observations, not an atomic source proof.
+func (w *Workspace) diagnosticBaselineRevision(path string) (string, bool, error) {
+	absolute, err := w.confinedPath(path)
+	if err != nil {
+		return "", false, err
+	}
+	disk, content, err := inspectPath(absolute)
+	if err != nil {
+		return "", false, err
+	}
+	if disk.Kind != ObjectRegularText {
+		return "", false, fmt.Errorf("baseline document %s is not native regular text", absolute)
+	}
+	contentHash := hashBytes(content)
 	w.mu.Lock()
+	previous, known := w.documents[absolute]
 	identity := w.identity
 	w.mu.Unlock()
-	if batch.StateSeq == 0 {
-		batch.StateSeq = identity.StateSeq
+	snapshot := DocumentSnapshot{Workspace: identity, URI: (&url.URL{Scheme: "file", Path: absolute}).String(), Disk: disk, ContentSHA256: contentHash}
+	return string(revisionFor(snapshot)), known && previous.contentHash != contentHash, nil
+}
+
+// RecordDiagnosticBaselines filters missing native proof before bulk ingestion.
+// Content-change invalidations are folded into that same ledger transaction.
+func (w *Workspace) RecordDiagnosticBaselines(batches []DiagnosticBatch) ([]DiagnosticReport, error) {
+	var accepted []DiagnosticBatch
+	for _, batch := range batches {
+		if proof, _ := confidenceFor(batch); batch.Staged || proof != ConfidenceAuthoritative {
+			continue
+		}
+		batch.Baseline = true
+		revision, changed, err := w.diagnosticBaselineRevision(batch.Document)
+		if err != nil {
+			continue
+		}
+		batch.DocumentRevision, batch.nativeContentChanged = revision, changed
+		accepted = append(accepted, batch)
 	}
-	return w.diagnostics.record(batch)
+	return w.RecordDiagnosticEvidenceBatches(accepted)
+}
+
+func (w *Workspace) RecordDiagnosticEvidence(batch DiagnosticBatch) (DiagnosticReport, error) {
+	reports, err := w.RecordDiagnosticEvidenceBatches([]DiagnosticBatch{batch})
+	if err != nil {
+		return DiagnosticReport{}, err
+	}
+	return reports[0], nil
+}
+
+// RecordDiagnosticEvidenceBatches ingests one provider RPC's accepted batches
+// atomically, with one ledger persistence regardless of loaded document count.
+func (w *Workspace) RecordDiagnosticEvidenceBatches(batches []DiagnosticBatch) ([]DiagnosticReport, error) {
+	w.mu.Lock()
+	stateSeq := w.identity.StateSeq
+	w.mu.Unlock()
+	batches = append([]DiagnosticBatch(nil), batches...)
+	for i := range batches {
+		if batches[i].StateSeq == 0 {
+			batches[i].StateSeq = stateSeq
+		}
+	}
+	return w.diagnostics.recordBatches(batches, w.retainedDiagnosticEvidence()...)
+}
+
+// Preparations and retained plan invariants name immutable proof IDs. Keep the
+// exact payloads while those owners survive; never replace an expired ID with
+// evidence for a newer revision. Receipt replay stores its original envelope
+// separately and does not use the ledger to reconstruct that result.
+func (w *Workspace) retainedDiagnosticEvidence() []string {
+	w.plansMu.Lock()
+	defer w.plansMu.Unlock()
+	var ids []string
+	for _, plan := range w.plans {
+		if plan.Preparation != nil {
+			for _, stage := range plan.Preparation.Verification {
+				ids = append(ids, stage.EvidenceIDs...)
+			}
+		}
+		for _, invariant := range plan.Invariants {
+			ids = append(ids, invariant.EvidenceIDs...)
+		}
+	}
+	return ids
 }
 func (w *Workspace) Diagnostics(since string) (DiagnosticReport, error) {
-	return w.diagnostics.query(since)
+	return w.diagnostics.query(since, w.retainedDiagnosticEvidence()...)
 }
 
 // DiagnosticFindings returns the recorded finding of each id that is still
@@ -1284,7 +1560,7 @@ func (w *Workspace) noteDocumentContentChanged(absolute string, revision Revisio
 		return nil
 	}
 	documents := []string{absolute, displayPath(w.identity.Root, absolute)}
-	_, err := w.diagnostics.documentChanged(documents, string(revision), time.Now().UTC())
+	_, err := w.diagnostics.documentChanged(documents, string(revision), time.Now().UTC(), w.retainedDiagnosticEvidence()...)
 	return err
 }
 func (w *Workspace) Evidence(id string) (DiagnosticEvidence, error) {

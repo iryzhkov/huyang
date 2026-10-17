@@ -231,20 +231,21 @@ func RecordDiagnosticBaseline(ctx context.Context, workspace *workspacecore.Work
 	if err != nil {
 		return err
 	}
+	var batches []workspacecore.DiagnosticBatch
 	for _, batch := range payload.Batches {
-		if !publicationProven(batch) {
+		if batch.Staged || !publicationProven(batch) {
 			continue
 		}
 		batch.Selected, batch.Baseline = true, true
+		batch.TransactionID, batch.Candidates = "", nil
 		if relative, relErr := filepath.Rel(backend.Descriptor().Root, batch.Document); relErr == nil {
 			batch.Document = filepath.Join(workspace.Identity().Root, relative)
 		}
-		if snapshot, snapErr := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); snapErr == nil {
-			batch.DocumentRevision = string(snapshot.Revision)
-		}
-		if _, err := workspace.RecordDiagnosticEvidence(batch); err != nil {
-			return err
-		}
+		batches = append(batches, batch)
+	}
+	_, err = workspace.RecordDiagnosticBaselines(selectDiagnosticBatches(batches))
+	if err != nil {
+		return err
 	}
 	return nil
 }

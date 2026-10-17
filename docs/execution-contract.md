@@ -294,6 +294,14 @@ cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proo
 is incomplete and delivers late findings via `diagnostic_updates` on later calls.
 
 Baselines only seed or refresh findings; they never resolve omitted findings.
+The existing `persisting` notice covers both stale-to-current refreshes and
+first-observed preexisting baseline findings. These notices carry finding bodies
+through `diagnostic_updates`; already-current repeats are silent. A baseline
+finding returning after verified resolution emits the existing `new` notice,
+clears historical attribution and has no mutation transaction. Baseline records
+contribute zero `DiagnosticReport.New` entries, including recurrences, so the
+upcoming edit's introduced count and summary exclude them. A later diagnostics
+query can still report a recurrence as a new transition since its cursor.
 Any currently open producer progress vetoes a baseline, even if it started before
 the call. Baseline validity is bound to the exact pre-edit document revision,
 including object identity and content. An older authoritative coverage dimension
@@ -301,6 +309,24 @@ alone is insufficient after checkout or external writes. Findings without a matc
 baseline retain `baseline_missing`. Refreshing a stale finding produces
 `persisting`, never a new-finding transition. Staged multi-document counts sum
 staged observations without changing the canonical current set.
+
+Baseline ingestion filters publication/native-proof failures before ledger processing,
+then validates and processes the accepted batches under one lock, prunes once and
+persists once per RPC. A failed save restores the previous in-memory state and cursor.
+Reading native baseline revisions does not publish separate per-buffer observations.
+The provider RPC and native disk read remain separate snapshots: the existing narrow
+external-write race is not an atomic proof and remains a follow-up.
+
+Deduplication reuses immutable stored proof, never skips lifecycle processing. Its
+key covers provider, document, dimension, producer/version, exact native revision,
+finding placement and multiplicity, and equivalent publication proof. Canonical and
+staged evidence remain separate. Items, dimensions and provider dimensions each
+retain at most eight recent references; older unreferenced proof follows the existing
+age/count retention. Exact preimage lookup fails closed when old proof is missing;
+it never substitutes a newer revision. Retained preparation verification and invariant
+IDs protect their exact payloads. Replayed receipts preserve the original envelope
+independently of diagnostic retention; an expired evidence ID fails retrieval and
+is never rebound to a new observation.
 
 The compact `diagnostics` result is a notice delta. `since` acknowledges notices
 workspace-wide; after acknowledgement or reconnect, `full: true` recovers current

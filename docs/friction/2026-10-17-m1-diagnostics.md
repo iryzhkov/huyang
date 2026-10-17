@@ -84,6 +84,10 @@ Follow-up passed: workspace 0.281 s, cmd/huyang 0.004 s, formatting clean; job e
 
 ## Baseline measurement
 
+The numbers below are historical measurements of the pre-round-2 implementation,
+whose repeated baseline storage grew by roughly 1.3 KB per call. They do not measure
+the storage deduplication and bulk ingestion correction described below.
+
 `TestDiagnosticBaselineTotalLatencyPopulatedLedger` measures the entire
 `RecordDiagnosticBaseline` hook: real embedded Neovim RPC, decoding,
 native document snapshot, ledger pruning, JSON serialization and atomic disk
@@ -97,8 +101,12 @@ takes 30 warm samples. The populated ledger remains populated throughout.
 | 1,000 | 1,752,314 | 29.274385 ms | 32.029564 ms | 39.528068 ms | 45.082221 ms |
 
 This supersedes the earlier kernel-only ~0.3 ms claim. It is baseline-hook
-overhead, not total edit latency or a production-latency guarantee. Multiple
-loaded baseline documents each incur ledger work; that scaling is not measured.
+overhead, not total edit latency or a production-latency guarantee. The old path
+saved the whole ledger for every loaded baseline document; those figures did not
+measure multi-document scaling. The revised opt-in measurement now covers 0/1,000
+populated findings crossed with 1/20 loaded documents, 30 warm latency samples and
+500 repeated baseline calls, checking warm/final bytes and evidence counts. It
+has not been run for this correction; no revised benchmark claim is made.
 The pre-existing two-second RPC timeout remains a worst-case limitation.
 
 ## Integration prerequisites and nine-language outcomes
@@ -200,3 +208,56 @@ baseline binding during an external write; incomplete immediate publications
 are not retained for later completion; Phase C's probe reannouncement exemption
 needs separate judgment. No provider-cap/debug-lifecycle files were changed.
 No push, PR, merge, installation, service restart, Ollama or evaluation occurred.
+
+## Main review round 2: focused baseline corrections
+
+Status: fixed in source; runtime validation pending the lead's Chaldea slot.
+No Chaldea job was dispatched by this worker.
+
+- Blocker 1: first-observed baseline findings emit existing `persisting` notices
+  with finding bodies and zero mutation `DiagnosticReport.New` entries. Stale
+  refreshes also emit `persisting`; already-current repeats stay silent. A
+  verified resolved finding returning emits existing `new`, clears historical
+  attribution and has no upcoming mutation transaction. The later mutation's
+  introduced count excludes all baseline observations. Seed-only omission
+  behavior remains: baselines never resolve absent findings.
+- Blocker 2: equivalent authoritative canonical baselines reuse immutable stored
+  proof. The key includes producer/provider/document/dimension, exact native
+  revision, finding placements/multiplicity and publication proof; observation
+  bookkeeping is excluded. Every observation still runs lifecycle processing.
+  Expired proof IDs are never reused for a later observation.
+- Items, dimensions and provider dimensions retain at most eight recent evidence
+  references. The storage index is bounded by retained proof. Older exact
+  preimages may expire and then fail closed with `baseline_missing`.
+  Retained plan verification/invariant references protect their exact evidence;
+  receipt replay independently preserves its original envelope, while expired
+  evidence lookup explicitly fails rather than substituting new proof.
+- Accepted batches from one baseline RPC are filtered/validated first, processed
+  under one lock, pruned once and persisted once. Failed persistence restores
+  the previous in-memory state and cursor. Native content-change invalidations
+  join that same transaction, so omitted old findings become stale without a
+  save for each loaded buffer. Native workspace observation remains separate.
+- Prepared regressions cover cross-file resolution/recurrence followed by an
+  unrelated mutation; first touch, bodies, reconnect/ack, stale refresh, silent
+  repeats and cursor paging; equivalent proof after resolution; 10,000 repeated
+  observations across 20 buffers; 2,000 unique observations and all reference
+  owners; one persistence per bulk ingestion, including native invalidations
+  and save failure; retained preparation proof through churn and ledger reopen.
+- The opt-in populated-ledger measurement now crosses 0/1,000 retained findings
+  with 1/20 loaded buffers and 500 repeated calls. Warm/final bytes and evidence
+  counts are checked. Revised latency and scaling results remain pending:
+  `HUYANG_BASELINE_MEASURE=1 HUYANG_FRICTION=0 go test ./internal/providerpool -run '^TestDiagnosticBaselineTotalLatencyPopulatedLedger$' -count=1 -v`.
+  Run it only through the lead's agent-a Chaldea job with its established private
+  Neovim/toolchain prerequisites.
+
+Validation performed here: Huyang revision-guarded edits/preparations, native Go
+formatting and `git diff --check`. No Go build/test/race/vet, Lua suite or live
+probe was run for this correction. Previous pass claims above apply to their
+named earlier commits, not this pending source change.
+
+Deferred: the narrow provider-RPC/native-preimage race and unknown disk
+fingerprints remain; no atomic source-proof claim is added. Existing pending
+late-attribution TTL, unknown expected-version late attach, incomplete immediate
+publication retention and Phase C reannouncement notes remain outside scope.
+No Lua, resource/provider lifecycle, shared roadmap, installed service or other
+host was changed.
