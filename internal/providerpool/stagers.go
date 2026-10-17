@@ -288,7 +288,7 @@ func (s *SandboxStager) stageIntoSandbox(ctx context.Context, request workspacec
 		return nil, err
 	}
 	s.setResources(sandbox, nil, nil)
-	backend, err := s.pool.Open(sandbox.Tree, false)
+	backend, err := s.pool.Open(sandbox.Tree)
 	if err != nil {
 		_ = sandbox.Cleanup()
 		s.setResources(nil, nil, nil)
@@ -370,7 +370,7 @@ func (s *SandboxStager) transformStaged(ctx context.Context, sandbox *workspacec
 // records the diagnostics of the staged files, corroborates them with a
 // passing project check, and appends the diagnostics stage.
 func (s *SandboxStager) recordStagedDiagnostics(ctx context.Context, sandbox *workspacecore.Sandbox, files []workspacecore.PlanStageFile, verification workspacecore.VerificationResult) (workspacecore.VerificationResult, error) {
-	replacement, err := s.pool.Open(sandbox.Tree, false)
+	replacement, err := s.pool.Open(sandbox.Tree)
 	if err != nil {
 		return verification, err
 	}

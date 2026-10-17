@@ -944,7 +944,7 @@ func (w *Workspace) normalizeEditTarget(operation *PlanOperation) error {
 		operation.Target.FileRange = &handle
 	}
 	if operation.Target.FileRange == nil {
-		return fmt.Errorf("%s requires a resolvable handle or file_range", operation.OpID)
+		return fmt.Errorf("%s requires a resolvable handle or symbol_locator", operation.OpID)
 	}
 	if operation.Kind == OperationDeleteSymbol {
 		operation.Content = ""

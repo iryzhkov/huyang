@@ -167,9 +167,6 @@ type Workspace struct {
 	// advanced on an observation rather than a write of its own.
 	observed []ObservedChange
 
-	tracesMu sync.Mutex
-	traces   *executionTraceStore
-
 	handlesMu   sync.Mutex
 	handles     *handleStore
 	git         *gitState

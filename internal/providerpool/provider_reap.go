@@ -40,7 +40,6 @@ func providerRootMissing(root string) bool {
 
 // ReapIdle closes unused canonical providers. Slots remain in the map:
 // deleting one could orphan a provider opened by a caller holding its pointer.
-// Live debug sessions and trace targets are pinned, including in reused providers.
 // Sandbox stagers have a separate plan lifetime and are never reaped here;
 // ExpireIdlePlans releases them with their plan.
 func (p *Pool) ReapIdle() int {
@@ -74,7 +73,7 @@ func (p *Pool) reapSlotLocked(slot *providerSlot) bool {
 	} else if idle >= missingRootIdleTimeout && p.rootMissing(slot.root) {
 		reason = "root removed"
 	}
-	if reason == "" || p.debugActiveLocked(context.Background(), slot) {
+	if reason == "" {
 		return false
 	}
 	slot.epoch = slot.backend.Descriptor().Epoch

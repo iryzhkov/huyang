@@ -104,7 +104,7 @@ func (h *Handlers) readOneUnbounded(ctx context.Context, requestID string, works
 	case request.HasRange:
 		return h.readPath(ctx, requestID, workspace, request)
 	default:
-		return mcpapi.Envelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle, target.symbol_locator, or target.file_range", map[string]any{})
+		return mcpapi.Envelope(requestID, workspace, "unavailable", "target_kind_unavailable", "read requires target.path, target.handle or target.symbol_locator", map[string]any{})
 	}
 }
 

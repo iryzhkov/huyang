@@ -69,13 +69,13 @@ required = true
 	if policy["trusted"] != true {
 		t.Fatalf("pipeline policy not visibly trusted: %#v", inspected)
 	}
-	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal", "include_ranges": true})
+	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal", "include_handles": true})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "pipeline-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA", "indentation": "formatter",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "DELTA", "indentation": "formatter",
 		}},
 	})
 	plan := created["data"].(map[string]any)["plan"].(map[string]any)

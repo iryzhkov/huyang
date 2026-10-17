@@ -65,7 +65,6 @@ func TestResolveClientPathsLeavesAmbiguousCallsAlone(t *testing.T) {
 		{"absolute read path", "read", map[string]any{"target": map[string]any{"path": "/etc/hosts"}}, repository},
 		{"absolute path among targets", "read", map[string]any{"targets": []any{map[string]any{"path": "a.go"}, map[string]any{"path": "/etc/hosts"}}}, repository},
 		{"absolute edit path", "edit_apply", map[string]any{"operation": map[string]any{"kind": "create_file", "path": "/tmp/x"}}, repository},
-		{"debugger", "debug_session", map[string]any{"action": "start"}, repository},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

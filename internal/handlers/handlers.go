@@ -216,8 +216,6 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 		return h.navigateProvider(ctx, requestID, workspace, arguments)
 	case "code_actions":
 		return h.codeActionsProvider(ctx, requestID, workspace, arguments)
-	case "debug_session", "debug_breakpoints", "debug_control", "debug_inspect":
-		return h.debug(ctx, requestID, name, workspace, arguments)
 	default:
 		result := mcpapi.Envelope(requestID, workspace, "unavailable", "semantic_provider_unavailable",
 			fmt.Sprintf("%s requires a semantic provider that is not available for this workspace", name),

@@ -1,5 +1,5 @@
 {
-  "fixture_version": "huyang.tools/v1alpha1-s20b",
+  "fixture_version": "huyang.tools/v1alpha1-m4",
   "catalogs": {
     "full": [
       "workspace_open",
@@ -16,11 +16,7 @@
       "revision_diff",
       "evidence_get",
       "language_server_status",
-      "language_server_setup",
-      "debug_session",
-      "debug_breakpoints",
-      "debug_control",
-      "debug_inspect"
+      "language_server_setup"
     ],
     "orient": [
       "workspace_open",
@@ -46,30 +42,10 @@
       "change_plan",
       "verify_run",
       "revision_diff"
-    ],
-    "debug": [
-      "workspace_open",
-      "workspace_inspect",
-      "search",
-      "symbol_find",
-      "navigate",
-      "read",
-      "diagnostics",
-      "evidence_get",
-      "debug_session",
-      "debug_breakpoints",
-      "debug_control",
-      "debug_inspect"
-    ],
-    "debugger": [
-      "debug_session",
-      "debug_breakpoints",
-      "debug_control",
-      "debug_inspect"
     ]
   },
   "catalog_rules": {
-    "default": "full",
+    "default": "edit",
     "selection": "fixed startup argument or fixed HTTP route",
     "profile_is_permission": false,
     "workspace_health_changes_catalog": false,
@@ -79,7 +55,6 @@
     "api_version": "huyang.workspace/v1alpha1",
     "target": [
       "handle",
-      "file_range",
       "symbol_locator"
     ],
     "outcome": [
@@ -388,69 +363,6 @@
         "install",
         "restart"
       ]
-    },
-    "debug_session": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "action"
-      ],
-      "action": [
-        "start",
-        "attach",
-        "restart",
-        "stop"
-      ]
-    },
-    "debug_breakpoints": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "action"
-      ],
-      "action": [
-        "list",
-        "set",
-        "remove",
-        "clear"
-      ]
-    },
-    "debug_control": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "action"
-      ],
-      "action": [
-        "continue",
-        "pause",
-        "step_over",
-        "step_into",
-        "step_out",
-        "run_to"
-      ]
-    },
-    "debug_inspect": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "action"
-      ],
-      "action": [
-        "threads",
-        "stack",
-        "scopes",
-        "variables",
-        "evaluate"
-      ],
-      "evaluate_policy": [
-        "read_only",
-        "allow_side_effects"
-      ],
-      "default_evaluate_policy": "read_only"
     }
   },
   "frozen_assertions": {
@@ -458,8 +370,7 @@
     "compact_search_rendering": "one outcome line, one path line per file, one physical line per hit, optional cursor/coverage line",
     "structural_search": "search mode branch, not a separate tool",
     "hover": "navigate relation, not a separate tool",
-    "launch": "huyang mcp --profile full|orient|edit|debug; full default; fixed HTTP routes",
-    "debug_evaluate": "potentially side-effecting unless runtime enforces read-only",
+    "launch": "huyang mcp --profile edit|full|orient|experimental; edit default; fixed HTTP routes /mcp (full), /mcp/orient and /mcp/edit",
     "byte_preserving_default": true,
     "git_mutation_tools": false
   }

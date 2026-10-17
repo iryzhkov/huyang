@@ -3,7 +3,7 @@
 //
 // Huyang starts two kinds of long or heavy children: the embedded Neovim
 // provider, which in turn starts language servers, their helpers (cargo check,
-// proc-macro servers, tsserver, Gradle) and debug adapters, and verification
+// proc-macro servers, tsserver, Gradle), and verification
 // commands such as go test or cargo test, which start their own subprocesses.
 // None of those descendants are direct children of Huyang, so neither a
 // SIGKILL of the direct child nor a death signal on it reaches them, and when

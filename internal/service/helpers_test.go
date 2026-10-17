@@ -35,13 +35,13 @@ func openProbeProject(t *testing.T, files map[string]string) (*directWorkspaces,
 }
 
 // applyLiteralProbeEdit searches for one literal occurrence of query and
-// replaces its exact range through edit_apply.
+// replaces the bytes its handle names through edit_apply.
 func applyLiteralProbeEdit(t *testing.T, direct *directWorkspaces, workspaceID, query, replacement, key string) map[string]any {
 	t.Helper()
 	session, cleanup := connectOfficialClient(t, mcpapi.ProfileEdit, direct)
 	defer cleanup()
 	searched := callModern(t, session, "search", map[string]any{
-		"workspace_id": workspaceID, "query": query, "mode": "literal", "include_ranges": true,
+		"workspace_id": workspaceID, "query": query, "mode": "literal", "include_handles": true,
 	})
 	hits := searched["data"].(map[string]any)["hits"].([]any)
 	if len(hits) != 1 {
@@ -51,7 +51,7 @@ func applyLiteralProbeEdit(t *testing.T, direct *directWorkspaces, workspaceID, 
 		"workspace_id": workspaceID, "idempotency_key": key,
 		"operation": map[string]any{
 			"kind":    "replace_range",
-			"target":  map[string]any{"file_range": hits[0].(map[string]any)["range"]},
+			"target":  map[string]any{"handle": hits[0].(map[string]any)["handle"]},
 			"content": replacement,
 		},
 	})

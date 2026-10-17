@@ -140,8 +140,4 @@ func TestExecutionPathsRefuseDynamicAbsenceAndStaleContent(t *testing.T) {
 	if outcome(stale) == "ok" || data(stale)["paths"] != nil {
 		t.Fatalf("stale content accepted: %v", stale)
 	}
-	combined := call(t, session, "path_explain", map[string]any{"root": root, "from": "leaf", "to": "main", "mode": "combined"})
-	if outcome(combined) == "ok" {
-		t.Fatal("missing trace overlay pretended to succeed")
-	}
 }

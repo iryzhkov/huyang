@@ -14,7 +14,6 @@ type OpenConfig struct {
 	Root               string
 	InitFile           string
 	RuntimePath        string
-	Debug              bool
 	AfterEpoch         uint64
 	MaxLanguageServers int
 	PinLanguageServers bool
@@ -36,7 +35,7 @@ func (f ConfiguredFactory) Open(config OpenConfig) (provider.Provider, error) {
 	case "", "embed":
 		return embedprovider.Open(embedprovider.Config{
 			Root: config.Root, InitFile: config.InitFile,
-			RuntimePath: config.RuntimePath, Debug: config.Debug, AfterEpoch: config.AfterEpoch,
+			RuntimePath: config.RuntimePath, AfterEpoch: config.AfterEpoch,
 			MaxLanguageServers: config.MaxLanguageServers, PinLanguageServers: config.PinLanguageServers,
 		})
 	default:

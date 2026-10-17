@@ -65,7 +65,6 @@ local function reset(n, held)
     for _, c in ipairs(all) do exit(c) end
     stop_delay, fail_create, nested, peak = 0, false, nil, 0
     package.loaded["huyang.transaction"] = nil
-    package.loaded["huyang.dap"] = nil
     limits.setup(n or 2, held)
 end
 limits.setup(2, false)
@@ -195,8 +194,8 @@ assert(coroutine.resume(co))
 assert(start("replacement") and not live[a.id])
 vim.api.nvim_buf_delete(buf, { force = true })
 
-for _, hold in ipairs({ "starting", "request", "progress", "transaction", "modified", "debug" }) do
-    reset(1, hold == "debug")
+for _, hold in ipairs({ "starting", "request", "progress", "transaction", "modified", "pinned" }) do
+    reset(1, hold == "pinned")
     a = start("a")
     if hold == "starting" then a.initialized = false
     elseif hold == "request" then a.requests[1] = { type = "pending" }
@@ -211,18 +210,6 @@ for _, hold in ipairs({ "starting", "request", "progress", "transaction", "modif
     denied(function() start("busy") end, hold)
     assert(live[a.id], hold .. " client evicted")
     if hold == "modified" then vim.api.nvim_buf_delete(buf, { force = true }) end
-end
-
--- Session/trace activity pins clients only while ownership is live.
-for _, owner in ipairs({ "session", "trace_targets" }) do
-    reset(1)
-    a = start("a")
-    local active = true
-    package.loaded["huyang.dap"] = { active = function() return active end }
-    denied(function() start("during_" .. owner) end, owner)
-    assert(live[a.id], owner .. " lost client")
-    active = false
-    assert(start("after_" .. owner) and not live[a.id], owner .. " did not release client")
 end
 
 -- Stopping counts until the process-exit callback, not is_stopped().
@@ -305,81 +292,6 @@ end)
 assert(coroutine.resume(co))
 denied(function() start("async", { filetypes = { "lua" } }) end)
 assert(coroutine.resume(co))
-vim.api.nvim_buf_delete(buf, { force = true })
-reset()
-
--- Exercise the real debug ownership query without installing nvim-dap.
-local user_session
-package.loaded["dap"] = { session = function() return user_session end }
-local debug_runtime = require("huyang.dap")
-local state = debug_runtime._state()
-assert(not debug_runtime.active(), "debug module discovery claimed ownership")
-assert(debug_runtime.dispatch("debug_breakpoints", {}).count == 0)
-assert(not debug_runtime.active(), "breakpoint listing claimed ownership")
-assert(debug_runtime.dispatch("debug_stop", {}).stopped == false)
-assert(not debug_runtime.active(), "no-op stop claimed ownership")
-
-state.session = { closed = false }
-state.stop = { reason = "breakpoint" }
-assert(debug_runtime.active(), "paused session was not retained")
-state.stop = nil
-assert(debug_runtime.active(), "running session was not retained")
-state.exit = { reason = "exited" }
-assert(not debug_runtime.active(), "exited session retained ownership")
-state.exit = nil
-state.session.closed = true
-assert(not debug_runtime.active(), "closed session retained ownership")
-state.session = nil
-state.claiming = true
-assert(debug_runtime.active(), "starting session was not retained")
-state.claiming = false
-local child = { closed = false }
-state.children[child] = true
-assert(debug_runtime.active(), "live child session was not retained")
-state.exit = { reason = "exited" }
-user_session = child
-assert(not debug_runtime.active(), "exited child retained ownership")
-user_session = { closed = false }
-assert(debug_runtime.active(), "unrelated live session lost protection after child exit")
-user_session = child
-state.session = { closed = true }
-state.exit = nil
-assert(debug_runtime.active(), "live child of a closed root was not retained")
-state.exit = { reason = "exited" }
-assert(not debug_runtime.active(), "exited child of a closed root retained ownership")
-state.session, state.exit, user_session = nil, nil, nil
-child.closed = true
-assert(not debug_runtime.active(), "closed child retained ownership")
-state.children = {}
-user_session = { closed = false }
-assert(debug_runtime.active(), "unadopted user session was not retained")
-state.finished = user_session
-assert(not debug_runtime.active(), "finished session was resurrected")
-user_session = nil
-
--- Ordinary breakpoint configuration is not ownership. A temporary trace
--- target holds both provider and clients until its sign or owner is removed.
-buf = vim.api.nvim_create_buf(false, false)
-vim.fn.sign_define("huyang_activity_test", { text = "X" })
-local sign = vim.fn.sign_place(0, "dap_breakpoints", "huyang_activity_test", buf, { lnum = 1 })
-local target = { bufnr = buf, line = 1, sign_id = sign }
-state.breakpoints = { target }
-assert(not debug_runtime.active(), "ordinary breakpoints pinned provider")
-target.trace_owner = "trace_test"
-assert(debug_runtime.active(), "trace target did not retain provider")
-limits.setup(1, false)
-a = start("trace_held")
-denied(function() start("trace_denied") end)
-package.loaded["dap.breakpoints"] = { remove = function()
-    vim.fn.sign_unplace("dap_breakpoints", { buffer = buf, id = sign })
-    return true
-end }
-assert(debug_runtime.dispatch("debug_breakpoints", { clear_trace = true, trace_owner = "trace_test" }).cleared == 1)
-assert(not debug_runtime.active(), "trace cleanup retained ownership")
-assert(start("after_trace_cleanup") and not live[a.id], "trace cleanup did not unpin clients")
-state.breakpoints = { target }
-assert(not debug_runtime.active(), "removed trace sign retained ownership")
-state.breakpoints = {}
 vim.api.nvim_buf_delete(buf, { force = true })
 reset()
 print("huyang language-server limits: OK")

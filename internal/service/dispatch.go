@@ -289,7 +289,7 @@ func (d *directWorkspaces) replayReceipt(requestID, name, idempotencyKey, argume
 
 func isStatefulModernTool(name string) bool {
 	switch name {
-	case "edit_apply", "change_plan", "verify_run", "language_server_setup", "debug_session", "debug_breakpoints", "debug_control":
+	case "edit_apply", "change_plan", "verify_run", "language_server_setup":
 		return true
 	default:
 		return false

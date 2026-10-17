@@ -13,9 +13,6 @@ import (
 func (h *Handlers) pathExplain(ctx context.Context, requestID string, w *workspacecore.Workspace, args map[string]any, view *providerpool.PreparedView) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(workspacecore.MaxExecutionAnalysisMillis)*time.Millisecond)
 	defer cancel()
-	if args["mode"] == "combined" {
-		return h.combinedPathExplain(ctx, requestID, w, args, view)
-	}
 	maxPaths, maxDepth := argInt(args, "max_paths", workspacecore.MaxExecutionPaths), argInt(args, "max_depth", workspacecore.MaxExecutionDepth)
 	if maxPaths < 1 || maxPaths > workspacecore.MaxExecutionPaths || maxDepth < 1 || maxDepth > workspacecore.MaxExecutionDepth {
 		return mcpapi.Failure(requestID, w, "graph_budget_invalid", workspacecore.Codedf("graph_budget_invalid", "path/depth limits must be within 1..16 and 1..64"))

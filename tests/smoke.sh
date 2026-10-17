@@ -25,7 +25,7 @@ done
 
 if $run_lua; then
     command -v nvim >/dev/null || { echo "nvim not found"; exit 1; }
-    for unit in unit_edit unit_check unit_index unit_dap; do
+    for unit in unit_edit unit_check unit_index; do
         nvim --clean --headless -u "$REPO/tests/minimal_init.lua" -l "$REPO/tests/$unit.lua"
     done
     nvim --clean --headless -u NONE -l "$REPO/tests/unit_limits.lua"

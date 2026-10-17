@@ -155,8 +155,6 @@ func TestEveryRegisteredToolDeclaresASchedulerClass(t *testing.T) {
 		"edit_apply": ClassCanonicalWrite, "change_plan": ClassSandboxWrite, "verify_run": ClassExternalJob,
 		"revision_diff": ClassCanonicalWrite, "evidence_get": ClassPureRead,
 		"language_server_status": ClassProviderRead, "language_server_setup": ClassCanonicalWrite,
-		"debug_session": ClassProviderRead, "debug_breakpoints": ClassProviderRead,
-		"debug_control": ClassProviderRead, "debug_inspect": ClassProviderRead,
 	}
 	for _, descriptor := range Tools {
 		if !KnownClass(descriptor.Class) {

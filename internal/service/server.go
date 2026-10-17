@@ -72,9 +72,6 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 		if err := mcpapi.ValidateCall(descriptor.Name, descriptor.InputSchema, arguments); err != nil {
 			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
 		}
-		if err := mcpapi.ValidateDebugArguments(descriptor.Name, arguments); err != nil {
-			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
-		}
 		aliased = append(aliased, resolveClientPaths(descriptor.Name, arguments, connection.cwd)...)
 		envelope := direct.call(handlers.WithClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"

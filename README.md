@@ -2,11 +2,12 @@
 
 Huyang is a local transactional semantic workspace for coding agents. It combines a
 long-lived Go service with isolated Neovim providers so MCP clients can navigate, edit,
-verify, debug, and recover changes against an explicit workspace revision.
+verify, and recover changes against an explicit workspace revision.
 
-The MCP surface is `huyang.workspace/v1alpha1`. It exposes 19 tools through the portable
-`full` profile, with fixed `orient`, `edit`, and `debug` profiles for smaller tool
-catalogs. There is no legacy or compatibility surface: the embedded Neovim provider is the
+The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (15
+tools), `edit` (13 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
+`experimental`, is `full` plus the input shapes still being designed; a caller asks for it
+by name. There is no legacy or compatibility surface: the embedded Neovim provider is the
 only backend and the tools below are the only tools.
 
 ## What Huyang provides
@@ -16,11 +17,10 @@ only backend and the tools below are the only tools.
 - Isolated multi-operation preparation with formatter, diagnostic, check, and test evidence.
 - Journaled canonical apply, crash recovery, and compensating undo.
 - Bounded impact analysis and a strict distinction between affected and full test coverage.
-- A four-tool DAP facade with explicit evaluation side-effect policy.
 - A native text path that still works when Git, Neovim, parsers, or language servers are absent.
 
 The service owns durability, policy, scheduling, sandboxes, and recovery. A small embedded
-Lua kernel under `lua/huyang` owns Neovim buffer, Tree-sitter, LSP, and DAP operations and
+Lua kernel under `lua/huyang` owns Neovim buffer, Tree-sitter, and LSP operations and
 speaks kernel protocol version 2 to the service.
 
 ## Agent guide
@@ -34,9 +34,10 @@ an agent's instructions.
 
 ## Tools
 
-The `full` profile lists all 19 tools in this order. Each smaller profile is a fixed subset.
+The `full` profile lists all 15 tools in this order. `edit` and `orient` are fixed subsets
+of it.
 
-Orientation, in every profile (`full`, `orient`, `edit`, `debug`):
+Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
 
 - `workspace_open`, `workspace_inspect`, `search`, `symbol_find`, `navigate`, `read`,
   `diagnostics`, `evidence_get`.
@@ -45,50 +46,32 @@ Editing and verification, in `full` and `edit`:
 
 - `code_actions`, `edit_apply`, `change_plan`, `verify_run`, `revision_diff`.
 
-Language-server administration, in `full` only:
+Language-server administration, in `full` (and `experimental`) only. A session on the
+default `edit` profile does not see these two tools:
 
 - `language_server_status`, `language_server_setup`.
 
-Debugging, in `full` and `debug`:
+That gives 15 tools in `full`, 8 in `orient`, and 13 in `edit`. The service refuses to start
+if the registered catalog differs from those counts, and every tool declares the scheduler
+class it runs under. The `experimental` profile adds `execution_graph` and `path_explain`
+and a few experimental arguments to `full`; it is not a contract. The contract is described
+in [docs/plans/huyang-tools-v1alpha1.md](docs/plans/huyang-tools-v1alpha1.md).
 
-- `debug_session`, `debug_breakpoints`, `debug_control`, `debug_inspect`.
-
-That gives 19 tools in `full`, 8 in `orient`, 13 in `edit`, and 12 in `debug`. The service
-refuses to start if the registered catalog differs from those counts, and every tool
-declares the scheduler class it runs under. The contract is described in
-[docs/plans/huyang-tools-v1alpha1.md](docs/plans/huyang-tools-v1alpha1.md).
+The debugger tools (`debug_session`, `debug_breakpoints`, `debug_control`, `debug_inspect`),
+the `debug` and `debugger` profiles, the `/mcp/debug` route and the nvim-dap dependency were
+removed on 2026-10-17, together with `file_range` targets and the `include_ranges` search
+option. Both are breaking changes inside `v1alpha1`; see
+[the contract's change log](docs/plans/huyang-tools-v1alpha1.md#change-log).
 
 ## Requirements
 
 - Go 1.27 or newer to build.
-- Neovim with API level 13 or newer for the semantic and debugger providers. The service
+- Neovim with API level 13 or newer for the semantic provider. The service
   reads `nvim_get_api_info` at provider start and refuses an older Neovim with an
   `incompatible` failure. API level 13 is Neovim 0.11, which introduced the
   `vim.lsp.config` and `vim.lsp.enable` functions the kernel depends on; Neovim 0.12 also
   satisfies the check.
-- The language servers, parsers, formatters, and debugger adapters required by your projects.
-- [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap) installed in the host
-  Neovim for the four debugger tools (`debug_session`, `debug_breakpoints`,
-  `debug_control`, `debug_inspect`). nvim-dap is GPL-3.0 and is not distributed with
-  Huyang; the kernel discovers it at provider start, first hit wins:
-  1. `HUYANG_NVIM_DAP_PATH` (alias `AGENT99_NVIM_DAP_PATH`), a checkout directory holding
-     `lua/dap.lua`. When set it is authoritative: nothing else is searched.
-  2. A `lua/dap.lua` already on the runtimepath, for example loaded by a
-     `HUYANG_HEADLESS_INIT` file, or a `require("dap")` that already succeeds.
-  3. `$XDG_DATA_HOME/nvim/lazy/nvim-dap` (lazy.nvim; `$XDG_DATA_HOME` defaults to
-     `~/.local/share`).
-  4. `$XDG_DATA_HOME/nvim/site/pack/*/start/nvim-dap` and
-     `$XDG_DATA_HOME/nvim/site/pack/*/opt/nvim-dap` (packer, paq, `vim.pack`, manual packs).
-
-  The outcome is recorded in the provider health detail shown by `workspace_inspect`
-  (`nvim-dap runtime: <path> (<commit>)` or `nvim-dap runtime: absent (...)`). Without
-  nvim-dap the provider still starts and every other tool works; the four debugger tools
-  answer `unavailable` with a message that lists the searched locations and the override
-  variable. The test harness resolves nvim-dap the same way from `HUYANG_NVIM_DAP_PATH`,
-  then `tests/.deps/nvim-dap`, then the lazy.nvim clone; `tests/fetch-nvim-dap.sh` clones
-  the pinned upstream commit into `tests/.deps/` (gitignored, network needed), and
-  `.luarc.json` points lua-language-server at that test dependency for editor diagnostics
-  only.
+- The language servers, parsers, and formatters required by your projects.
 
 The native text core does not require Neovim or an LSP.
 
@@ -113,7 +96,7 @@ client at all, because the renderer that puts an envelope on the wire did not co
 
 The suite includes a contract walk that calls every operation kind and navigation relation
 the catalog advertises. An advertised value with no implementation behind it fails there.
-The four frozen catalogs are also compared byte for byte against
+The three frozen catalogs and the experimental one are also compared byte for byte against
 `docs/plans/fixtures/huyang-v1alpha1/catalog-*.json`; a deliberate schema change is adopted
 with `go test ./internal/mcpapi -run TestFrozenCatalog -update` and reviewed as a diff.
 
@@ -133,10 +116,10 @@ Start the long-lived service:
 |---|---|---|
 | `--socket PATH` | `$HUYANG_SOCKET`, else `<runtime dir>/huyang/control.sock` | Private Unix control socket, mode 0600. The runtime directory is `$XDG_RUNTIME_DIR` when it is set to an absolute path, else `/run/user/<uid>` when that is a real directory (not a symbolic link) owned by the current user and not group- or world-writable, else `$TMPDIR/huyang-<uid>`. |
 | `--state-dir PATH` | `$HUYANG_STATE_DIR`, else `$XDG_STATE_HOME/huyang`, else `~/.local/state/huyang` | Durable service state directory, mode 0700. |
-| `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Routes are `/mcp` (`full`), `/mcp/orient`, `/mcp/edit`, and `/mcp/debug`; every request needs `Authorization: Bearer <token>`. The transport is stateless. |
+| `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Routes are `/mcp` (`full`), `/mcp/orient` and `/mcp/edit`; there is no route for `experimental`. Every request needs `Authorization: Bearer <token>`. The transport is stateless. |
 | `--pprof LOOPBACK:PORT` | unset | Optional `net/http/pprof` listener behind the same bearer token, for heap and goroutine profiles of the live service. |
 | `--provider-quota N` | 4 | Maximum concurrent provider-backed jobs. |
-| `--max-providers N` | 4 | Maximum live providers, including canonical, debug and sandbox providers. |
+| `--max-providers N` | 4 | Maximum live providers, including canonical and sandbox providers. |
 | `--max-language-servers N` | 4 | Maximum language-server clients per provider (at most 16 across the default pool). |
 | `--external-job-quota N` | 2 | Maximum concurrent external jobs (repository checks and tests). |
 
@@ -144,10 +127,8 @@ The process limits are independent of job quotas. Zero selects the bounded defau
 limits are refused. Opening and closing processes count toward capacity. When the provider
 pool is full, it closes the least recently used idle canonical provider before admitting a
 replacement. A lease lasts until its caller releases it, including cancellation cleanup and
-background work. Leased or locked slots, providers with a live debug session or temporary
-trace targets, and sandbox providers held by a plan are never evicted for capacity.
-Debug list and no-op stop calls do not claim ownership; session stop/exit and final
-trace-target cleanup release it. If every slot is held, opening fails with
+background work. Leased or locked slots and sandbox providers held by a plan are never
+evicted for capacity. If every slot is held, opening fails with
 `provider capacity exhausted`; finish or discard work before retrying, or raise
 `--max-providers`. The existing 15 minute idle reaper and plan expiry also release capacity.
 Workspace IDs survive eviction, and reopening advances the provider epoch.
@@ -156,9 +137,7 @@ Language servers use a separate LRU within each provider, installed before the h
 init can auto-attach servers. Revisiting a loaded buffer restarts its evicted server on demand.
 Clients used by active tool calls, clients with outstanding
 requests or work progress, clients still initializing, and clients attached to unsaved
-buffers are held. Transactions, sandbox providers, live debug sessions and temporary trace
-targets pin their clients. Debug protection ends with the session or final trace target.
-An eviction waits for the server's exit callback before reusing its slot; a slow exit or
+buffers are held. Transactions and sandbox providers pin their clients. An eviction waits for the server's exit callback before reusing its slot; a slow exit or
 an all-held pool returns `language_server_capacity` instead of exceeding the bound. Retry
 after work finishes, or raise `--max-language-servers` for a plan that needs more languages
 simultaneously. The bound counts LSP clients; servers may spawn their own helper processes
@@ -173,7 +152,7 @@ Connect an MCP client through the stdio adapter:
 ./bin/huyang mcp --profile full
 ```
 
-`huyang mcp` accepts `--profile full|orient|edit|debug` (default `full`) and
+`huyang mcp` accepts `--profile edit|full|orient|experimental` (default `edit`) and
 `--socket PATH` (default as for `serve`, derived the same way, so the adapter finds the
 service's socket even when a harness starts it without `XDG_RUNTIME_DIR`). It refuses any
 other profile name. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
@@ -217,7 +196,7 @@ when the client was started outside any working tree (Codex starts every MCP ser
 home directory), or when it was started in a subdirectory, where a relative path would
 mean one file to the agent and another to the workspace. An explicit `workspace_id` or
 absolute `root` always wins. **Mutations are never defaulted:** `edit_apply`,
-`change_plan`, `verify_run` and the debugger need the workspace named, because their
+`change_plan` and `verify_run` need the workspace named, because their
 guards check content, not intent, and an edit meant for another repository could land in
 this one. A replay key is built after a root is adopted into a `workspace_id`, so a retry
 that names the same workspace by `"."`, by its absolute root or by its ID replays the
@@ -245,8 +224,6 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_FORMAT` | off | Formatting after a provider-side symbol edit: `range`, `file`, or off. Read by the Lua kernel from the provider's environment. | `AGENT99_FORMAT` |
 | `HUYANG_POST_EDIT_WAIT` | wait | `0`, `false`, or `off` defers the provider's post-edit diagnostic verdict. Read by the Lua kernel. | `AGENT99_POST_EDIT_WAIT` |
 | `HUYANG_DEBUG_VERDICT` | unset | Any value makes the kernel report which signal ended a post-edit wait. Read by the Lua kernel. | `AGENT99_DEBUG_VERDICT` |
-| `HUYANG_DEBUG_IDLE_MS` | 600000 | Idle timeout of a debugger session in milliseconds. Read by the Lua kernel. | `AGENT99_DEBUG_IDLE_MS` |
-| `HUYANG_NVIM_DAP_PATH` | unset | nvim-dap checkout for the debugger tools; when set, the discovery in [Requirements](#requirements) searches nothing else. Read by the Lua kernel. | `AGENT99_NVIM_DAP_PATH` |
 | `HUYANG_CARGO_TARGET_MAX_AGE_DAYS` | 30 | For a Cargo project the provider points `CARGO_TARGET_DIR` (unless already set) at `$XDG_CACHE_HOME/huyang/cargo-target/<name>-<hash of root>`, else `~/.cache/...`, shared by every session on that root, so rust-analyzer's builds stay out of both the project's `target/` and `/tmp`. Directories no session has used for this many days, or whose project root no longer exists, are removed when a provider starts. Read by the Lua kernel. | no |
 | `CLAUDE_CODE_SESSION_ID` | random per process | Session identifier recorded in friction events when the client is Claude Code. | no |
 | `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | XDG defaults | Bases for the socket, state directory, friction spool, `huyang/config.toml` trust policy, and private `toolfeedback/correlation` keys. | no |
@@ -302,7 +279,7 @@ systemctl --user enable --now huyang.service
 ```
 
 Register the MCP command in each harness as
-`~/.local/share/huyang/bin/huyang mcp -profile full`, with no socket. The service and the
+`~/.local/share/huyang/bin/huyang mcp --profile full`, with no socket. The service and the
 adapter derive the same socket for the same user: `$XDG_RUNTIME_DIR/huyang/control.sock`,
 else `/run/user/<uid>/huyang/control.sock` when that directory is a real directory owned by
 the user and not group- or world-writable, else `$TMPDIR/huyang-<uid>/huyang/control.sock`.
@@ -342,7 +319,8 @@ for instance - is a disconnection like any other, so run `make live` against the
 before restarting the service that agents are using.
 
 Wait for `$XDG_RUNTIME_DIR/huyang/control.sock` to reappear, then confirm with a
-`workspace_open` and a `language_server_status` call. On the first start after an upgrade
+`workspace_open` and a `workspace_inspect` call; a session on the `full` profile can also
+call `language_server_status`, which the default `edit` profile does not carry. On the first start after an upgrade
 from a pre-S20b build the service migrates the receipts out of `registry.json` and splits
 the plan files into per-plan records; it logs the counts it kept and dropped.
 
@@ -357,7 +335,7 @@ is a named constant in the code:
 | `receipts/<workspace>.json` | Idempotency receipts, file version 1. A receipt keeps its full result for 15 minutes (`PayloadWindow`), then is trimmed to provenance fields. | 256 receipts per workspace (`PerWorkspace`), 32 MiB in total (`TotalBytes`), 4096 tombstones per workspace (`Tombstones`); an evicted receipt leaves a tombstone so a late retry is refused with `idempotency_receipt_evicted` rather than re-executed |
 | `plans/<workspace>/<plan>.json` | One plan record per file, format version 2 (`planRecordVersion`). The version 1 layout, one file per workspace holding every plan, is read on open, split into per-plan files, and removed. | terminal plans: newest 200 kept (`planRetainCount`), dropped after 30 days (`planRetainAge`), bulky payloads stripped after 1 hour (`planCompactAge`); events per plan: first 8 and last 56 (`planEventsHead`, `planEventsTail`) |
 | `commit-journals/<workspace>/` | Commit journals, format version 1 (`commitJournalVersion`). Prepared, applying, and recovery-required journals are never collected. | completed journals dropped after 7 days (`commitJournalRetention`), newest 64 kept beyond that (`commitJournalRetainCount`) |
-| `diagnostics/<workspace>.json` | Diagnostic ledger, format version 1 (`diagnosticStateVersion`). Findings whose document changed are marked `stale`. A finding is identified by what it says (producer, document, severity, code, source, message, and its occurrence among identical ones in that document) rather than by where it sits, so an edit above an untouched warning moves it without retiring it and announcing an identical one; the reported range follows the latest observation. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
+| `diagnostics/<workspace>.json` | Diagnostic ledger, format version 2 (`diagnosticStateVersion`); a version 1 ledger is migrated on open, and a version-1 binary refuses the upgraded file. Findings whose document changed are marked `stale`. A finding is identified by what it says (producer, document, severity, code, source, message, and its occurrence among identical ones in that document) rather than by where it sits, so an edit above an untouched warning moves it without retiring it and announcing an identical one; the reported range follows the latest observation. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
 | `test-history/<workspace>.json` | Revision-keyed test history, format version 1 (`testHistoryVersion`). | last 1000 entries |
 | `sandboxes/sandbox-*/` | Isolated preparation trees, each with an `owner.json` marker (version 1). Sandboxes whose plan is no longer referenced are removed on service start. | one per prepared plan |
 | `command-cache/` | The toolchain caches every verification command shares, so a repeated `verify_run` neither recompiles nor re-downloads: `xdg/` is the cache home for everything that follows the XDG specification, and `go-build/`, `golangci-lint/`, `ccache/`, `sccache/`, `zig/`, `npm/`, `yarn/`, `pip/`, `uv/`, `deno/` and `composer/` cover the toolchains that keep a cache elsewhere. HOME stays throwaway per run, and package or registry homes still come from the user. | removed whole when it passes 4 GiB (`commandCacheMaxBytes`) or when nothing has used it for 30 days (`commandCacheMaxAge`), checked at most daily (`commandCachePruneInterval`) at service start; every entry is reproducible, so deleting the directory only costs a cold build. `HUYANG_COMMAND_CACHE=off` gives each run a throwaway cache instead |
@@ -443,6 +421,7 @@ those commands can execute:
 huyang trust /path/to/repository   # appends the resolved root to [trust].roots
 huyang trust --list
 huyang trust --remove /path/to/repository
+huyang trust --config PATH ...     # any of the above against another policy file
 ```
 
 `huyang trust` edits the file textually, keeps its comments, validates the result before
@@ -488,9 +467,11 @@ Never delete a journal to force progress.
 
 The MCP API (`huyang.workspace/v1alpha1`), the provider-kernel protocol (version 2), and
 every durable record format (registry 2, plan record 2, receipts 1, commit journal 1,
-diagnostics 1, test history 1, sandbox marker 1) carry explicit versions. The service refuses
+diagnostics 2, test history 1, sandbox marker 1) carry explicit versions. The service refuses
 an unknown version rather than guessing. No Agent99 executable, interactive UI, or harness
-endpoint is shipped, and no compatibility profile exists.
+endpoint is shipped, and no compatibility profile exists. Tool removals and input-shape cuts
+inside `v1alpha1` are deliberate, documented breaking changes; the frozen catalog fixtures
+are regenerated with them and the contract's change log records each one.
 
 See:
 
@@ -503,11 +484,3 @@ See:
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-Huyang does not distribute [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap),
-which is licensed under the GNU General Public License version 3. It is a runtime
-dependency discovered from the host Neovim installation at provider start (search order
-and the `HUYANG_NVIM_DAP_PATH` override are listed under [Requirements](#requirements));
-without it the four debugger tools report `unavailable` and everything else works. The
-clone that `tests/fetch-nvim-dap.sh` makes under `tests/.deps/` is a test dependency and
-is not part of the repository.

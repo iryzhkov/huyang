@@ -52,20 +52,20 @@ func TestServiceProcessLimits(t *testing.T) {
 	}
 	defer service.Close()
 	pool := service.direct.handlers.ProviderPool()
-	backend, err := pool.Open("one", false)
+	backend, err := pool.Open("one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if factory.config.MaxLanguageServers != 2 || !factory.config.PinLanguageServers {
 		t.Fatalf("factory config=%+v", factory.config)
 	}
-	if _, err := pool.Open("two", false); !errors.Is(err, providerpool.ErrProviderCapacity) {
+	if _, err := pool.Open("two"); !errors.Is(err, providerpool.ErrProviderCapacity) {
 		t.Fatalf("service cap not wired: %v", err)
 	}
 	if err := backend.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Open("two", false); err != nil {
+	if _, err := pool.Open("two"); err != nil {
 		t.Fatal(err)
 	}
 }

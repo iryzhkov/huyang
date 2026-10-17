@@ -55,8 +55,6 @@ local function held(entry)
     if client.progress and next(client.progress.pending or {}) then return true end
     local transaction = package.loaded["huyang.transaction"]
     if transaction and transaction.status().active then return true end
-    local dap = package.loaded["huyang.dap"]
-    if dap and dap.active() then return true end
     for _, request in pairs(requests) do
         if request.clients[client.id] then return true end
         for buf in pairs(client.attached_buffers or {}) do

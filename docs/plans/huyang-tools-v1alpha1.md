@@ -1,6 +1,7 @@
 # Huyang model-facing tool contract
 
-Status: S00-reviewed v1alpha1 surface, amended by S20b and re-frozen (see the amendment at the end)
+Status: S00-reviewed v1alpha1 surface, amended by S20b and S20c and re-frozen, then cut by a
+documented breaking change on 2026-10-17 (see the [change log](#change-log) at the end)
 Prepared: 2026-09-10
 Amended: 2026-09-11
 Upstream inspected: `iryzhkov/agent99@947f5b1`
@@ -22,13 +23,12 @@ when debugging is enabled. Several differ only by navigation relation or edit ta
 their individual schemas are useful compatibility contracts but too much simultaneous
 choice for the new default.
 
-The complete modern coding catalog is 19 tools: 13 shared orientation/editing tools, two
-language-server administration tools added after the S00 freeze, and four debugging tools.
-Its portable default is `full`, so an agent can move through orientation, editing and
-debugging without a harness-specific capability. Optional fixed `orient`, `edit` and
-`debug` launch profiles reduce context when an orchestrator already knows the session's
-job. Profiles filter presentation only; they are not permissions or separate implementations.
-A large-change plan is part of editing, not a fourth mode.
+The complete modern coding catalog is 15 tools: 13 shared orientation/editing tools and two
+language-server administration tools added after the S00 freeze. It was 19 until the four
+debugging tools were removed on 2026-10-17. `full` carries all 15; `huyang mcp` defaults to
+`edit`, and a fixed `orient` profile reduces context further when an orchestrator already
+knows the session's job. Profiles filter presentation only; they are not permissions or
+separate implementations. A large-change plan is part of editing, not a separate mode.
 
 ## Design rules
 
@@ -89,18 +89,20 @@ from the model-facing roster. The adapter releases its lease on clean disconnect
   `read`, `diagnostics`, `evidence_get`.
 - `edit`: the orientation foundation plus `code_actions`, `edit_apply`, `change_plan`,
   `verify_run` and `revision_diff`.
-- `debug`: the orientation foundation plus the four-tool debug roster described
-  below. Once the cause is understood, a new edit-profile connection may reuse the same
-  service workspace ID and revision-bound handles.
-- `full` (portable default): all 19 tools, allowing one session to move among all three
-  workflows. It is the only profile that carries `language_server_status` and
-  `language_server_setup`.
+- `full`: all 15 tools. It is the only frozen profile that carries
+  `language_server_status` and `language_server_setup`.
+- `experimental`: `full` plus the tools and arguments still being designed. It is opt-in
+  by name and is not a contract.
+
+The `debug` and `debugger` profiles were removed with the debugger on 2026-10-17. The
+`huyang mcp` default is `edit`.
 
 The profile is selected by a fixed server startup argument or HTTP endpoint, not a custom MCP
 negotiation. Switching profile is a client/session boundary, never a hidden server-side mode
-toggle. The long-lived service retains workspace state across adapters. The three acceptance
-budgets are measured independently: first useful orientation, guarded edit through evidence,
-and fault localization from a reproducible stop.
+toggle. The long-lived service retains workspace state across adapters. The acceptance
+budgets are measured independently: first useful orientation and guarded edit through
+evidence. The original third budget, fault localization from a reproducible stop, went with
+the debugger.
 
 Profiles must not be required for correctness. Harnesses with deferred tool discovery may
 defer non-current tools, but Huyang never assumes that facility exists. Machine
@@ -118,12 +120,10 @@ coding capability.
   amendment). They are the one administration surface in the catalog, because an agent that
   finds semantic coverage missing needs a way to repair it that is visible, keyed by
   idempotency key and never triggered by an ordinary read or edit.
-- **Debug in the `full` and `debug` profiles:** four cohesive tools: `debug_session` for
-  start/attach/restart/stop,
-  `debug_breakpoints` for breakpoint state, `debug_control` for continue/pause/step/run-to,
-  and `debug_inspect` for threads/stacks/scopes/variables/evaluate. Each uses a discriminated
-  action union. Debug session state is orthogonal to workspace edit plans.
-- **Administration:** debugger-adapter installation, trust changes, recovery and service
+- **Debug (removed 2026-10-17):** `debug_session`, `debug_breakpoints`, `debug_control` and
+  `debug_inspect` were in `full` and `debug`. No agent called them in the 30 days before
+  their removal; see the [change log](#change-log).
+- **Administration:** trust changes, recovery and service
   maintenance. These mutate machine configuration and are never ordinary coding tools; they
   are CLI and configuration-file operations, not MCP tools.
 
@@ -695,9 +695,10 @@ diff and undo/recover it.
 
 The following concepts each have one schema definition used everywhere:
 
-- **Target:** `handle | file_range | symbol_locator`. Search matches, symbols, diagnostics,
-  code actions, edit operations, breakpoints and debugger stack locations return or consume
-  this target without renaming its fields. Handles are opaque, revision-bound and always have
+- **Target:** `handle | symbol_locator` (`read` also takes `path`). Search matches,
+  symbols, diagnostics, code actions and edit operations return or consume this target
+  without renaming its fields. The `file_range` alternative was removed from the input
+  schemas on 2026-10-17; exact byte ranges stay internal to handles and receipts. Handles are opaque, revision-bound and always have
   a compact human display fallback. Exact byte offsets are authoritative; displayed lines
   and columns are one-based Unicode-scalar coordinates. Provider-specific UTF-16/UTF-8
   position conversion is internal and never leaks into mutation preconditions.
@@ -719,20 +720,6 @@ The following concepts each have one schema definition used everywhere:
   kinds. Encoding/BOM, newline convention, final newline, executable bit and symlink target
   participate in preconditions and diffs. Modern edits never follow a symlink for mutation or
   overwrite a special file implicitly.
-
-Debugging reuses normal source handles and evidence. `debug_session(start|attach)` may accept
-initial breakpoints, and every stop/control response includes the stop reason, top source
-location, compact top-frame locals and changes since the previous stop. `debug_inspect` is
-needed only for deeper stacks/scopes/variables/evaluation. Missing adapters, stale source maps,
-optimized-away variables and evaluation side-effect risk are explicit coverage states rather
-than generic debugger errors.
-
-Arbitrary debugger evaluation is considered potentially side-effecting; expression syntax is
-not proof of purity. `debug_inspect(action="evaluate")` defaults to `policy="read_only"` and
-executes only when the adapter/runtime can enforce that guarantee. Otherwise it returns
-`approval_required` without evaluating. `policy="allow_side_effects"` is explicit, never
-inherited by later/watch evaluations, and the result records that debuggee state may have
-changed. Ordinary scope/variable reads do not use evaluate as a shortcut.
 
 These consolidations are deliberately internal schema reuse, not additional model-facing
 tools. Generate JSON Schema, SDK types, compact rendering and conformance fixtures from the
@@ -929,13 +916,13 @@ durability protocol when the context cannot be confused with Git.
    `syntax_query` tool.
 2. Hover remains `navigate(relation="hover")`; no overlapping `symbol_inspect` is added.
 3. Search's compact fallback is the fixed file-grouped rendering specified above.
-4. Portable stdio launch is `huyang mcp --profile full|orient|edit|debug`, defaulting to
-   `full`. Streamable HTTP routes are `/mcp`, `/mcp/orient`, `/mcp/edit` and `/mcp/debug`,
-   with `/mcp` equal to `full`. These are fixed catalogs, not protocol negotiation. There is
-   no legacy endpoint; administration beyond the two language-server tools remains CLI and
-   configuration.
-5. Debugger evaluate is potentially side-effecting unless the adapter/runtime enforces
-   read-only execution. Lack of that proof requires explicit per-call side-effect policy.
+4. Portable stdio launch is `huyang mcp --profile edit|full|orient|experimental`,
+   defaulting to `edit` (as amended; the S00 text said `full|orient|edit|debug` defaulting
+   to `full`). Streamable HTTP routes are `/mcp`, `/mcp/orient` and `/mcp/edit`, with `/mcp`
+   equal to `full`; `/mcp/debug` was removed with the debugger. These are fixed catalogs,
+   not protocol negotiation. There is no legacy endpoint; administration beyond the two
+   language-server tools remains CLI and configuration.
+5. (Removed 2026-10-17 with the debugger: the debugger-evaluate side-effect policy.)
 
 S00 conformance/model-selection review found no measurable ambiguity or portability failure.
 These decisions are frozen for v1alpha1; later implementation stages do not casually redesign
@@ -1048,7 +1035,7 @@ contract above.
 
 `fixtures/huyang-v1alpha1/contract-schema.json` is exercised by
 `TestModernRegistryMatchesFrozenProfiles` in `internal/bridge/modern_mcp_test.go`, which
-holds the four profile catalogs to the fixture's `catalogs` object and checks that catalog
+holds the profile catalogs (four at the time; three since 2026-10-17) to the fixture's `catalogs` object and checks that catalog
 generation is deterministic; its `tools` object was extended with the two language-server
 tools in this amendment. `fixtures/huyang-v1alpha1/golden-results.json` and
 `fixtures/huyang-v1alpha1/multi-provider.json` are S00 design artifacts: no test reads them
@@ -1564,3 +1551,50 @@ reconnect. This is not part of the MCP surface; an older adapter simply sends ne
   `path_prefix` as an alias of `paths`, and an integral search `limit` above the maximum is
   clamped. A string that does not parse as JSON where an object or array is expected is
   refused with the syntax error's byte offset and none of the caller's text.
+
+## Change log
+
+Amendments 1 (S20b), 2 (S20c) and 3 (client friction) above were additive, compacting or
+compatible. The entries here are
+deliberate breaking changes made inside `v1alpha1` rather than under a new namespace: every
+consumer is maintained alongside Huyang and tracks main, and each change regenerates the
+frozen catalog fixtures (`go test ./internal/mcpapi -run TestFrozenCatalog -update`) so the
+diff is reviewed with it.
+
+### 2026-10-17: debugger removed, input schema slimmed (amendment 4)
+
+Removed, because no agent called them in the 30 days before (fleet friction spool):
+
+- The tools `debug_session`, `debug_breakpoints`, `debug_control` and `debug_inspect`.
+  A client with a cached catalog that still calls one gets the unknown-tool refusal.
+- The `debug` and `debugger` profiles, the `/mcp/debug` HTTP route, and the
+  `--profile debug|debugger` names (`debugger` was advertised but never accepted).
+- The execution-trace stack behind them: `trace_policy`, trace inspection, overlays,
+  value origins, mutation facts and trace comparison, and `path_explain`'s
+  `mode=combined` and `trace_id` in the experimental catalog. Trace records left in an
+  older state directory are no longer read.
+- The nvim-dap integration: discovery at provider start, the `nvim-dap runtime` text in
+  provider health, `HUYANG_NVIM_DAP_PATH` and `HUYANG_DEBUG_IDLE_MS`, the `debugger`
+  field of `language_server_status`, and the debugger holds on providers and language
+  servers. Every other capacity protection is unchanged.
+
+Input schema changes in every profile:
+
+- `target.file_range` is no longer accepted by `read`, `navigate`, `code_actions`,
+  `edit_apply` and `change_plan`. It was never sent in the mined fleet data. Use the
+  `handle` from `search` (`include_handles: true`) or `symbol_find`; `handle` targets are
+  unchanged. Exact byte ranges stay internal to handles, plan records and receipts.
+- `search.include_ranges` is removed with it; it existed only to produce `file_range`
+  inputs. A hit's byte anchors are no longer returned.
+- `$schema` is stated once, on each tool's top-level input schema, instead of on every
+  nested object.
+- `symbol_locator.name_path` is described once, on `symbol_find.query`; the other
+  occurrences say "Declaration name path.".
+
+Counts: 15 tools in `full`, 8 in `orient`, 13 in `edit`. `fixtures/huyang-v1alpha1/`
+`catalog-debug.json` and `catalog-debugger.json` are deleted and the remaining catalog
+fixtures are regenerated; `contract-schema.json` moves to `fixture_version`
+`huyang.tools/v1alpha1-m4`.
+
+Amendment 3's read-only default workspace list is unchanged; its mention of the debugger as
+never defaulted no longer applies, because the debugger no longer exists.

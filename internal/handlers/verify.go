@@ -452,7 +452,7 @@ func (h *Handlers) openDiagnosticProbe(ctx context.Context, requestID string, wo
 	if !wanted {
 		return probe
 	}
-	backend, err := h.pool.Open(tree, false)
+	backend, err := h.pool.Open(tree)
 	if err != nil {
 		return probe
 	}

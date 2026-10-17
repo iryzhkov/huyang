@@ -38,14 +38,14 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "prepare-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "DELTA",
 		}},
 	})
 	plan := created["data"].(map[string]any)["plan"].(map[string]any)
@@ -61,8 +61,8 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, original) {
 		t.Fatalf("prepare changed canonical disk: %q, %v", current, err)
 	}
-	unblocked := callModern(t, session, "debug_session", map[string]any{
-		"workspace_id": workspaceID, "idempotency_key": "non-owner-provider-call", "action": "start",
+	unblocked := callModern(t, session, "symbol_find", map[string]any{
+		"workspace_id": workspaceID, "query": "beta",
 	})
 	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
 		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
@@ -121,14 +121,14 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "apply-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "DELTA",
 		}},
 	})
 	plan := created["data"].(map[string]any)["plan"].(map[string]any)
