@@ -1,0 +1,149 @@
+[
+  {
+    "description": "Read a path or line window; returns revision_id. max_lines caps output; view=outline lists declarations.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_lines": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "root": {
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "view": {
+          "enum": [
+            "source",
+            "outline"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "name": "read"
+  },
+  {
+    "description": "Find literal text (default) or regex. paths scopes hits; context_lines adds up to 20 lines. Empty query lists paths.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "context_lines": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "literal",
+            "regex"
+          ],
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "search"
+  },
+  {
+    "description": "Edit one file. replace_literal requires old/new and exact expected_count (default 1). create_file needs content; overwrite needs replace and revision_id. delete_file needs revision_id from read or expected_sha256. Returns revisions and diagnostics. Pass root for repository writes.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "additionalProperties": false,
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "expected_count": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "expected_sha256": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "replace_literal",
+                "create_file",
+                "delete_file"
+              ],
+              "type": "string"
+            },
+            "new": {
+              "type": "string"
+            },
+            "old": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "revision_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "type": "object"
+    },
+    "name": "edit_apply"
+  }
+]

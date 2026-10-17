@@ -1,6 +1,6 @@
 [
   {
-    "description": "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files; run builds and tests in the shell.",
+    "description": "Open a project or exact documents workspace; return overview, capabilities and preparation commands. Other tools accept root directly.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -38,13 +38,13 @@
     "name": "workspace_open"
   },
   {
-    "description": "Inspect revision, provider health, semantic coverage, pipeline availability, and limits without mutation.",
+    "description": "Inspect workspace revision, provider health, coverage and limits.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "view": {
@@ -56,7 +56,7 @@
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -65,13 +65,13 @@
     "name": "workspace_inspect"
   },
   {
-    "description": "Find text or symbols in the workspace. Literal by default (exact bytes; multi-line queries must match whitespace exactly), regex with mode=regex (^ and $ match at each line); mode=references, definition, implementation, type_definition, incoming_calls or outgoing_calls asks the language server about the symbol named by query and falls back to literal matches when no server answers. paths scopes the hits, context_lines adds the surrounding lines; refine a large result set instead of repeating the search; git_history searches commits. To change text you already know, call edit_apply kind=replace_literal directly instead of searching first.",
+    "description": "Search text (literal default, regex per line) or ask the language server about a symbol; semantic modes fall back to literal. Scope with paths; context_lines adds context. Refine result sets or search git_history.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
         "context_lines": {
-          "description": "Lines of numbered context around each hit, like grep -C; at most 20, and a larger value is reduced to 20 with a warning.",
+          "description": "Context lines per hit; at most 20 (larger values reduced to 20 with a warning).",
           "minimum": 0,
           "type": "integer"
         },
@@ -171,11 +171,11 @@
           "type": "string"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -184,7 +184,7 @@
     "name": "search"
   },
   {
-    "description": "Find declarations by name (substring match) and return handles that read and edit_apply accept. Go and Python resolve natively without a language server; other languages go through the semantic provider and merge into the native results.",
+    "description": "Find declarations by name substring; return read/edit handles. Go and Python resolve natively; other languages use the provider.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -193,15 +193,15 @@
           "type": "boolean"
         },
         "query": {
-          "description": "Declaration name or name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+          "description": "Name path: Name, Parent/Name, Parent.Name, Parent::Name or (*Parent).Name.",
           "type": "string"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -213,7 +213,7 @@
     "name": "symbol_find"
   },
   {
-    "description": "Ask the language server for the definition, references, implementation, type, callers, callees or hover of a declaration. Name it with symbol (one call, resolved to its declaration) or target it with symbol_locator {path, name_path}. Needs an attached language server (language_server_status); for a plain text search use search.",
+    "description": "Ask the language server for a declaration's definition, references, callers or hover. Supply symbol or target; use search for text.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -231,7 +231,7 @@
           "type": "string"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "symbol": {
@@ -284,7 +284,7 @@
           "type": "object"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -296,7 +296,7 @@
     "name": "navigate"
   },
   {
-    "description": "Read source: a whole file by path, a line window (start_line/end_line, no size cap unless max_lines is set), a declaration by name (symbol_locator; Go and Python resolve natively, other languages through the language server), or several of those at once with targets. Responses carry the content, the document revision and the line count; a multi-target reply lists every target's size under entries before the bodies. max_lines caps a delivery and the reply says truncated with the total, so read a big file with max_lines or view=outline first, then window what matters.",
+    "description": "Read a path, declaration or handle; targets batches reads. Returns revision_id and line count. Window with start_line/end_line; max_lines caps delivery, view=outline lists declarations.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -311,7 +311,7 @@
           "type": "integer"
         },
         "max_lines": {
-          "description": "Deliver at most this many lines per source target; a capped reply says truncated and reports the total line count.",
+          "description": "Line cap per target; reports truncation and total lines.",
           "minimum": 1,
           "type": "integer"
         },
@@ -320,7 +320,7 @@
           "type": "boolean"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "start_line": {
@@ -386,7 +386,7 @@
           "type": "object"
         },
         "targets": {
-          "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.",
+          "description": "Batch reads; per-target options override call defaults.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -453,7 +453,7 @@
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -462,7 +462,7 @@
     "name": "read"
   },
   {
-    "description": "Inspect normalized diagnostic evidence, confidence, coverage, and provenance.",
+    "description": "Inspect diagnostic evidence, coverage and provenance; full includes finding bodies.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -472,7 +472,7 @@
           "type": "boolean"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "since": {
@@ -480,7 +480,7 @@
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },
@@ -489,7 +489,7 @@
     "name": "diagnostics"
   },
   {
-    "description": "Page pending or final diff, diagnostic, command, or provenance evidence.",
+    "description": "Page diff, diagnostic, command or provenance evidence.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -503,11 +503,11 @@
           "type": "string"
         },
         "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
+          "description": "Project root; opens or reuses its workspace.",
           "type": "string"
         },
         "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
+          "description": "Workspace ID; alternatively pass root.",
           "type": "string"
         }
       },

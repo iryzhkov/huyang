@@ -1,6 +1,44 @@
 {
-  "fixture_version": "huyang.tools/v1alpha1-m6",
+  "catalog_rules": {
+    "aliases": {
+      "edit": "full (one release)"
+    },
+    "default": "full",
+    "profile_is_permission": false,
+    "selection": "fixed startup argument or fixed HTTP route",
+    "workspace_health_changes_catalog": false
+  },
   "catalogs": {
+    "edit": [
+      "workspace_open",
+      "workspace_inspect",
+      "search",
+      "symbol_find",
+      "navigate",
+      "read",
+      "diagnostics",
+      "edit_apply",
+      "change_plan",
+      "revision_diff",
+      "evidence_get",
+      "language_server_status",
+      "language_server_setup"
+    ],
+    "experimental": [
+      "workspace_open",
+      "workspace_inspect",
+      "search",
+      "symbol_find",
+      "navigate",
+      "read",
+      "diagnostics",
+      "edit_apply",
+      "change_plan",
+      "revision_diff",
+      "evidence_get",
+      "language_server_status",
+      "language_server_setup"
+    ],
     "full": [
       "workspace_open",
       "workspace_inspect",
@@ -16,6 +54,11 @@
       "language_server_status",
       "language_server_setup"
     ],
+    "lean": [
+      "read",
+      "search",
+      "edit_apply"
+    ],
     "orient": [
       "workspace_open",
       "workspace_inspect",
@@ -25,316 +68,4392 @@
       "read",
       "diagnostics",
       "evidence_get"
-    ],
-    "edit": [
-      "workspace_open",
-      "workspace_inspect",
-      "search",
-      "symbol_find",
-      "navigate",
-      "read",
-      "diagnostics",
-      "evidence_get",
-      "edit_apply",
-      "change_plan",
-      "revision_diff"
     ]
   },
-  "catalog_rules": {
-    "default": "edit",
-    "selection": "fixed startup argument or fixed HTTP route",
-    "profile_is_permission": false,
-    "workspace_health_changes_catalog": false,
-    "legacy_and_administration_opt_in": true
-  },
-  "shared": {
-    "api_version": "huyang.workspace/v1alpha1",
-    "target": [
-      "handle",
-      "symbol_locator"
-    ],
-    "outcome": [
-      "ok",
-      "partial",
-      "provisional",
-      "conflict",
-      "unavailable",
-      "failed"
-    ],
-    "operation": [
-      "replace_symbol",
-      "delete_symbol",
-      "insert_before",
-      "insert_after",
-      "replace_range",
-      "create_file",
-      "move_file",
-      "copy_file",
-      "delete_file",
-      "rename_symbol",
-      "move_symbols",
-      "replace_matches",
-      "apply_code_action"
-    ],
-    "verification_status": [
-      "selected",
-      "running",
-      "passed",
-      "failed",
-      "unavailable",
-      "cancelled",
-      "timed_out"
-    ],
-    "filesystem_kind": [
-      "regular_text",
-      "binary",
-      "symlink",
-      "directory",
-      "missing"
-    ],
-    "stateful_requirements": [
-      "workspace_id",
-      "idempotency_key"
-    ],
-    "mutation_precondition": "revision_or_handle",
-    "coordinates": "one-based Unicode-scalar display; exact byte offsets authoritative",
-    "pagination": "cursor; never split primary failure or selected target",
-    "next_limit": 2
-  },
-  "tools": {
-    "workspace_open": {
-      "read_only": true,
-      "required": [
-        "kind"
-      ],
-      "kind": [
-        "project",
-        "documents"
-      ],
-      "returns": [
-        "workspace",
-        "revision",
-        "capabilities",
-        "overview",
-        "recent_commits",
-        "next"
-      ]
-    },
-    "workspace_inspect": {
-      "read_only": true,
-      "required": [
-        "workspace_id"
-      ],
-      "view": [
-        "status",
-        "overview",
-        "map"
-      ],
-      "returns": [
-        "revision",
-        "dirty_state",
-        "providers",
-        "coverage",
-        "pipeline",
-        "variants",
-        "limits"
-      ]
-    },
-    "search": {
-      "read_only": true,
-      "required_by_source": {
-        "workspace": [
-          "workspace_id",
+  "fixture_version": "huyang.tools/v1alpha1-m7",
+  "input_schemas": {
+    "edit": {
+      "change_plan": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "accept_provisional": {
+            "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence.",
+            "type": "boolean"
+          },
+          "action": {
+            "enum": [
+              "create",
+              "edit",
+              "preview",
+              "inspect",
+              "prepare",
+              "apply",
+              "discard"
+            ],
+            "type": "string"
+          },
+          "edit": {
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "enum": [
+                  "add",
+                  "update",
+                  "remove",
+                  "reorder",
+                  "replace_all"
+                ],
+                "type": "string"
+              },
+              "op_ids": {
+                "items": {
+                  "description": "Operation identifier.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "operations": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "maxLength": 4194304,
+                      "type": "string"
+                    },
+                    "depends_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "destination_revision_id": {
+                      "type": "string"
+                    },
+                    "expected_sha256": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "indentation": {
+                      "enum": [
+                        "exact",
+                        "syntax_anchor",
+                        "formatter"
+                      ],
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "replace_symbol",
+                        "delete_symbol",
+                        "insert_before",
+                        "insert_after",
+                        "replace_range",
+                        "create_file",
+                        "move_file",
+                        "copy_file",
+                        "delete_file",
+                        "rename_symbol",
+                        "safe_delete_symbol",
+                        "inline_symbol",
+                        "replace_matches",
+                        "apply_code_action"
+                      ],
+                      "type": "string"
+                    },
+                    "op_id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "revision_id": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "handle": {
+                              "description": "Opaque revision-bound handle.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "handle"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "symbol_locator": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "name_path": {
+                                  "description": "Declaration name path.",
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "description": "File path.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "name_path"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "symbol_locator"
+                          ],
+                          "type": "object"
+                        }
+                      ],
+                      "type": "object"
+                    },
+                    "to": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "op_id",
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 32,
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "operations": {
+            "description": "At most 32 operations; extend with action=edit and edit.mode=add.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
+                  "maxLength": 4194304,
+                  "type": "string"
+                },
+                "depends_on": {
+                  "items": {
+                    "description": "Predecessor op_id.",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "destination_revision_id": {
+                  "description": "Expected destination document revision for move_file and copy_file.",
+                  "type": "string"
+                },
+                "expected_sha256": {
+                  "description": "copy_file: hash the source must have; bound at creation when omitted. The source may be an absolute path outside the workspace.",
+                  "type": "string"
+                },
+                "from": {
+                  "description": "Source path for move_file or copy_file.",
+                  "type": "string"
+                },
+                "indentation": {
+                  "enum": [
+                    "exact",
+                    "syntax_anchor",
+                    "formatter"
+                  ],
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_symbol",
+                    "delete_symbol",
+                    "insert_before",
+                    "insert_after",
+                    "replace_range",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file",
+                    "rename_symbol",
+                    "safe_delete_symbol",
+                    "inline_symbol",
+                    "replace_matches",
+                    "apply_code_action"
+                  ],
+                  "type": "string"
+                },
+                "op_id": {
+                  "description": "Stable operation identifier unique within the plan.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Workspace path for create_file or delete_file.",
+                  "type": "string"
+                },
+                "revision_id": {
+                  "description": "Expected document revision; create binds missing-target revision if omitted.",
+                  "type": "string"
+                },
+                "target": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "handle": {
+                          "description": "Opaque revision-bound handle.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "handle"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "symbol_locator": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name_path": {
+                              "description": "Declaration name path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "File path.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "name_path"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "symbol_locator"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "type": "object"
+                },
+                "to": {
+                  "description": "Destination path for move_file or copy_file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op_id",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "plan_id": {
+            "description": "Required after creation unless prepare supplies operations inline.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Required with plan_id.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prepared_revision": {
+            "description": "Required when action=apply.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "diagnostics": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "full": {
+            "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Optional diagnostic cursor.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "edit_apply": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "description": "Format edits (default true); false preserves bytes. Transfers and deletes are never formatted.",
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "operation": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "description": "create_file: the file content; replace_range: exact replacement bytes.",
+                "type": "string"
+              },
+              "destination_revision_id": {
+                "description": "Optional missing-destination revision.",
+                "type": "string"
+              },
+              "expected_count": {
+                "description": "Required match count (default 1); mismatch changes nothing.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expected_sha256": {
+                "description": "Delete guard (alternative to revision_id); optional copy source guard.",
+                "type": "string"
+              },
+              "from": {
+                "description": "Source; copy_file also accepts external absolute paths.",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "replace_literal",
+                  "create_file",
+                  "move_file",
+                  "copy_file",
+                  "delete_file",
+                  "replace_range"
+                ],
+                "type": "string"
+              },
+              "new": {
+                "description": "replace_literal: replacement text.",
+                "type": "string"
+              },
+              "old": {
+                "description": "Exact old text; uniform indentation differences are reported.",
+                "type": "string"
+              },
+              "path": {
+                "description": "File path; replace_literal searches the workspace if omitted.",
+                "type": "string"
+              },
+              "replace": {
+                "description": "Overwrite only with its current revision_id.",
+                "type": "boolean"
+              },
+              "revision_id": {
+                "description": "Read revision; required for overwrite or delete (unless hash).",
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "handle": {
+                        "description": "Opaque revision-bound handle.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "handle"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              },
+              "to": {
+                "description": "Missing destination; parents are created.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "operations": {
+            "description": "Sequential edits, excluding replace_range; earlier edits remain on refusal. One formatter pass and receipt.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "destination_revision_id": {
+                  "type": "string"
+                },
+                "expected_count": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "expected_sha256": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_literal",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file"
+                  ],
+                  "type": "string"
+                },
+                "new": {
+                  "type": "string"
+                },
+                "old": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "replace": {
+                  "type": "boolean"
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "preview_only": {
+            "description": "Compute the diff without changing canonical bytes.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Add the full change record, hashes and handle resolution to the response.",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "evidence_get": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Optional page cursor.",
+            "type": "string"
+          },
+          "evidence_id": {
+            "description": "Evidence identifier.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "language_server_setup": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "restart"
+            ],
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "language_server_status": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "languages": {
+            "description": "Start the servers for these languages now instead of on first use.",
+            "items": {
+              "description": "Filetype, such as python or typescript.",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "navigate": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "enum": [
+              "definition",
+              "type_definition",
+              "implementation",
+              "references",
+              "incoming_calls",
+              "outgoing_calls",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Declaration name; resolved to its one declaration so no target is needed.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation"
+        ],
+        "type": "object"
+      },
+      "read": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "history and changes views: number of entries.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "description": "Line cap per target; reports truncation and total lines.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "numbered": {
+            "description": "Prefix each line with its number and a tab.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Workspace-relative or absolute text file path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "targets": {
+            "description": "Batch reads; per-target options override call defaults.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "end_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "max_lines": {
+                  "description": "Cap for this target; overrides the call-level max_lines.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "numbered": {
+                  "description": "Prefix each line with its number; overrides the call-level numbered.",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Workspace-relative file path.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "symbol_locator": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                },
+                "view": {
+                  "enum": [
+                    "source",
+                    "outline"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "view": {
+            "enum": [
+              "source",
+              "outline",
+              "history",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "revision_diff": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "from_revision": {
+            "description": "Earlier revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "to_revision_or_current": {
+            "description": "Later revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_revision",
+          "to_revision_or_current"
+        ],
+        "type": "object"
+      },
+      "search": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "description": "Context lines per hit; at most 20 (larger values reduced to 20 with a warning).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "git_history": {
+            "additionalProperties": false,
+            "properties": {
+              "fields": {
+                "items": {
+                  "enum": [
+                    "message",
+                    "path",
+                    "diff"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "query": {
+                "description": "Literal query over bounded local history.",
+                "type": "string"
+              },
+              "ref": {
+                "description": "Local revision or range; defaults to HEAD.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "include_handles": {
+            "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "literal",
+              "regex",
+              "references",
+              "definition",
+              "implementation",
+              "type_definition",
+              "incoming_calls",
+              "outgoing_calls"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "description": "Keep only hits under these paths.",
+            "items": {
+              "description": "Path substring or glob (whole path or base name).",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "description": "Text, regular expression, or for the semantic modes a symbol name.",
+            "type": "string"
+          },
+          "refine": {
+            "additionalProperties": false,
+            "properties": {
+              "matched_text": {
+                "additionalProperties": false,
+                "properties": {
+                  "literal": {
+                    "description": "Additional literal match constraint.",
+                    "type": "string"
+                  },
+                  "regex": {
+                    "description": "Additional regular-expression constraint.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "path": {
+                "description": "Additional path substring.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "result_set_handle": {
+            "description": "Frozen current-source result set.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "symbol_find": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include_source": {
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Name path: Name, Parent/Name, Parent.Name, Parent::Name or (*Parent).Name.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
           "query"
         ],
-        "result_set": [
-          "workspace_id",
-          "result_set_handle"
-        ],
-        "git_history": [
-          "workspace_id",
-          "git_history"
-        ]
+        "type": "object"
       },
-      "mode": [
-        "literal",
-        "regex",
-        "structure"
-      ],
-      "detail": [
-        "compact",
-        "context"
-      ],
-      "result_set_types": [
-        "current_source",
-        "historical"
-      ]
+      "workspace_inspect": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "status",
+              "overview",
+              "map"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workspace_open": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "description": "Allowlisted document.",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "description": "Defaults to project when root is given and to documents when only files are.",
+            "enum": [
+              "project",
+              "documents"
+            ],
+            "type": "string"
+          },
+          "overview": {
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; required for kind=project.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
-    "symbol_find": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "query"
-      ],
-      "batch": true,
-      "returns": [
-        "ranked_handles",
-        "coverage"
-      ]
+    "experimental": {
+      "change_plan": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "accept_provisional": {
+            "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence.",
+            "type": "boolean"
+          },
+          "action": {
+            "enum": [
+              "create",
+              "edit",
+              "preview",
+              "inspect",
+              "prepare",
+              "apply",
+              "discard"
+            ],
+            "type": "string"
+          },
+          "edit": {
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "enum": [
+                  "add",
+                  "update",
+                  "remove",
+                  "reorder",
+                  "replace_all"
+                ],
+                "type": "string"
+              },
+              "op_ids": {
+                "items": {
+                  "description": "Operation identifier.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "operations": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "maxLength": 4194304,
+                      "type": "string"
+                    },
+                    "depends_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "destination_revision_id": {
+                      "type": "string"
+                    },
+                    "expected_sha256": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "indentation": {
+                      "enum": [
+                        "exact",
+                        "syntax_anchor",
+                        "formatter"
+                      ],
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "replace_symbol",
+                        "delete_symbol",
+                        "insert_before",
+                        "insert_after",
+                        "replace_range",
+                        "create_file",
+                        "move_file",
+                        "copy_file",
+                        "delete_file",
+                        "rename_symbol",
+                        "safe_delete_symbol",
+                        "inline_symbol",
+                        "replace_matches",
+                        "apply_code_action"
+                      ],
+                      "type": "string"
+                    },
+                    "op_id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "revision_id": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "handle": {
+                              "description": "Opaque revision-bound handle.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "handle"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "symbol_locator": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "name_path": {
+                                  "description": "Declaration name path.",
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "description": "File path.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "name_path"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "symbol_locator"
+                          ],
+                          "type": "object"
+                        }
+                      ],
+                      "type": "object"
+                    },
+                    "to": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "op_id",
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 32,
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "include_diagnostics": {
+            "description": "In compact mode include diagnostic bodies/notices; otherwise return their availability and verification status, with diagnostics as the follow-up.",
+            "type": "boolean"
+          },
+          "invariants": {
+            "description": "Assertions on the prepared revision. Required violations or unknown results block apply; advisory ones are provisional. Edits invalidate proofs. api_compatible compares Go/TypeScript exports.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "enforcement": {
+                  "enum": [
+                    "required",
+                    "advisory"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Stable identifier, so the answer can be matched to the assertion. Assigned when omitted.",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "no_new_diagnostics",
+                    "tests_pass",
+                    "no_references",
+                    "symbol_exists",
+                    "symbol_absent",
+                    "api_compatible"
+                  ],
+                  "type": "string"
+                },
+                "scope": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "paths": {
+                      "description": "Narrows a diagnostic assertion to these files; every staged file when omitted.",
+                      "items": {
+                        "description": "Workspace-relative path.",
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "severity": {
+                      "enum": [
+                        "error",
+                        "warning",
+                        "info",
+                        "hint"
+                      ],
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "name_path": {
+                          "description": "Declaration name path.",
+                          "type": "string"
+                        },
+                        "path": {
+                          "description": "File path.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "name_path"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "operations": {
+            "description": "At most 32 operations; extend with action=edit and edit.mode=add.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
+                  "maxLength": 4194304,
+                  "type": "string"
+                },
+                "depends_on": {
+                  "items": {
+                    "description": "Predecessor op_id.",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "destination_revision_id": {
+                  "description": "Expected destination document revision for move_file and copy_file.",
+                  "type": "string"
+                },
+                "expected_sha256": {
+                  "description": "copy_file: hash the source must have; bound at creation when omitted. The source may be an absolute path outside the workspace.",
+                  "type": "string"
+                },
+                "from": {
+                  "description": "Source path for move_file or copy_file.",
+                  "type": "string"
+                },
+                "indentation": {
+                  "enum": [
+                    "exact",
+                    "syntax_anchor",
+                    "formatter"
+                  ],
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_symbol",
+                    "delete_symbol",
+                    "insert_before",
+                    "insert_after",
+                    "replace_range",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file",
+                    "rename_symbol",
+                    "safe_delete_symbol",
+                    "inline_symbol",
+                    "replace_matches",
+                    "apply_code_action"
+                  ],
+                  "type": "string"
+                },
+                "op_id": {
+                  "description": "Stable operation identifier unique within the plan.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Workspace path for create_file or delete_file.",
+                  "type": "string"
+                },
+                "revision_id": {
+                  "description": "Expected document revision; create binds missing-target revision if omitted.",
+                  "type": "string"
+                },
+                "target": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "handle": {
+                          "description": "Opaque revision-bound handle.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "handle"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "symbol_locator": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name_path": {
+                              "description": "Declaration name path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "File path.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "name_path"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "symbol_locator"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "type": "object"
+                },
+                "to": {
+                  "description": "Destination path for move_file or copy_file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op_id",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "plan_id": {
+            "description": "Required after creation unless prepare supplies operations inline.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Required with plan_id.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prepared_revision": {
+            "description": "Required when action=apply.",
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "plan",
+              "impact",
+              "semantic"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "diagnostics": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "full": {
+            "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
+            "type": "boolean"
+          },
+          "plan_id": {
+            "description": "Plan whose prepared revision to answer about, as an alternative to naming the revision.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Expected plan revision; a preparation replaced since is refused rather than answered.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Optional diagnostic cursor.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "edit_apply": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "description": "Format edits (default true); false preserves bytes. Transfers and deletes are never formatted.",
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "include_diagnostics": {
+            "description": "In compact mode include diagnostic bodies/notices; otherwise return their availability and verification status, with diagnostics as the follow-up.",
+            "type": "boolean"
+          },
+          "operation": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "description": "create_file: the file content; replace_range: exact replacement bytes.",
+                "type": "string"
+              },
+              "destination_revision_id": {
+                "description": "Optional missing-destination revision.",
+                "type": "string"
+              },
+              "expected_count": {
+                "description": "Required match count (default 1); mismatch changes nothing.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expected_sha256": {
+                "description": "Delete guard (alternative to revision_id); optional copy source guard.",
+                "type": "string"
+              },
+              "from": {
+                "description": "Source; copy_file also accepts external absolute paths.",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "replace_literal",
+                  "create_file",
+                  "move_file",
+                  "copy_file",
+                  "delete_file",
+                  "replace_range"
+                ],
+                "type": "string"
+              },
+              "new": {
+                "description": "replace_literal: replacement text.",
+                "type": "string"
+              },
+              "old": {
+                "description": "Exact old text; uniform indentation differences are reported.",
+                "type": "string"
+              },
+              "path": {
+                "description": "File path; replace_literal searches the workspace if omitted.",
+                "type": "string"
+              },
+              "replace": {
+                "description": "Overwrite only with its current revision_id.",
+                "type": "boolean"
+              },
+              "revision_id": {
+                "description": "Read revision; required for overwrite or delete (unless hash).",
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "handle": {
+                        "description": "Opaque revision-bound handle.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "handle"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              },
+              "to": {
+                "description": "Missing destination; parents are created.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "operations": {
+            "description": "Sequential edits, excluding replace_range; earlier edits remain on refusal. One formatter pass and receipt.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "destination_revision_id": {
+                  "type": "string"
+                },
+                "expected_count": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "expected_sha256": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_literal",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file"
+                  ],
+                  "type": "string"
+                },
+                "new": {
+                  "type": "string"
+                },
+                "old": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "replace": {
+                  "type": "boolean"
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "preview_only": {
+            "description": "Compute the diff without changing canonical bytes.",
+            "type": "boolean"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Add the full change record, hashes and handle resolution to the response.",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "evidence_get": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Optional page cursor.",
+            "type": "string"
+          },
+          "evidence_id": {
+            "description": "Evidence identifier.",
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "language_server_setup": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "restart"
+            ],
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "language_server_status": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "languages": {
+            "description": "Start the servers for these languages now instead of on first use.",
+            "items": {
+              "description": "Filetype, such as python or typescript.",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "navigate": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "description": "Plan whose prepared revision to answer about, as an alternative to naming the revision.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Expected plan revision; a preparation replaced since is refused rather than answered.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "relation": {
+            "enum": [
+              "definition",
+              "type_definition",
+              "implementation",
+              "references",
+              "incoming_calls",
+              "outgoing_calls",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Declaration name; resolved to its one declaration so no target is needed.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation"
+        ],
+        "type": "object"
+      },
+      "read": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "byte_offset": {
+            "description": "Zero-based byte offset into the same selected/rendered source. Nonzero offsets require expected_revision_id. Use returned next_byte_offset to preserve UTF-8 characters.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expected_revision_id": {
+            "description": "Document revision from the preceding read; a changed document refuses continuation instead of mixing versions.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "history and changes views: number of entries.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_bytes": {
+            "description": "Maximum UTF-8 content bytes per source target, including numbering. Metadata/JSON escaping are additional. Explicit opt-in; compact mode defaults to 65536. Does not bound acquisition memory.",
+            "maximum": 1048576,
+            "minimum": 4,
+            "type": "integer"
+          },
+          "max_lines": {
+            "description": "Line cap per target; reports truncation and total lines.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "numbered": {
+            "description": "Prefix each line with its number and a tab.",
+            "type": "boolean"
+          },
+          "plan_id": {
+            "description": "Plan whose prepared revision to answer about, as an alternative to naming the revision.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Expected plan revision; a preparation replaced since is refused rather than answered.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "description": "Prepared revision (prep_...) to answer about; omit, or pass current, for the canonical workspace.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Workspace-relative or absolute text file path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "targets": {
+            "description": "Batch reads; per-target options override call defaults.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "byte_offset": {
+                  "description": "Zero-based byte offset into the same selected/rendered source. Nonzero offsets require expected_revision_id. Use returned next_byte_offset to preserve UTF-8 characters.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "end_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "expected_revision_id": {
+                  "description": "Document revision from the preceding read; a changed document refuses continuation instead of mixing versions.",
+                  "type": "string"
+                },
+                "max_bytes": {
+                  "description": "Maximum UTF-8 content bytes per source target, including numbering. Metadata/JSON escaping are additional. Explicit opt-in; compact mode defaults to 65536. Does not bound acquisition memory.",
+                  "maximum": 1048576,
+                  "minimum": 4,
+                  "type": "integer"
+                },
+                "max_lines": {
+                  "description": "Cap for this target; overrides the call-level max_lines.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "numbered": {
+                  "description": "Prefix each line with its number; overrides the call-level numbered.",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Workspace-relative file path.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "symbol_locator": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                },
+                "view": {
+                  "enum": [
+                    "source",
+                    "outline"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "view": {
+            "enum": [
+              "source",
+              "outline",
+              "history",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "revision_diff": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "from_revision": {
+            "description": "Earlier revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "to_revision_or_current": {
+            "description": "Later revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "exact",
+              "semantic"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_revision",
+          "to_revision_or_current"
+        ],
+        "type": "object"
+      },
+      "search": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "description": "Context lines per hit; at most 20 (larger values reduced to 20 with a warning).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "git_history": {
+            "additionalProperties": false,
+            "properties": {
+              "fields": {
+                "items": {
+                  "enum": [
+                    "message",
+                    "path",
+                    "diff"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "query": {
+                "description": "Literal query over bounded local history.",
+                "type": "string"
+              },
+              "ref": {
+                "description": "Local revision or range; defaults to HEAD.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "include_handles": {
+            "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "literal",
+              "regex",
+              "references",
+              "definition",
+              "implementation",
+              "type_definition",
+              "incoming_calls",
+              "outgoing_calls"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "description": "Keep only hits under these paths.",
+            "items": {
+              "description": "Path substring or glob (whole path or base name).",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "description": "Text, regular expression, or for the semantic modes a symbol name.",
+            "type": "string"
+          },
+          "refine": {
+            "additionalProperties": false,
+            "properties": {
+              "matched_text": {
+                "additionalProperties": false,
+                "properties": {
+                  "literal": {
+                    "description": "Additional literal match constraint.",
+                    "type": "string"
+                  },
+                  "regex": {
+                    "description": "Additional regular-expression constraint.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "path": {
+                "description": "Additional path substring.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "result_set_handle": {
+            "description": "Frozen current-source result set.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "symbol_find": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include_source": {
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Name path: Name, Parent/Name, Parent.Name, Parent::Name or (*Parent).Name.",
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "workspace_inspect": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "status",
+              "overview",
+              "map",
+              "revision"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workspace_open": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "description": "Allowlisted document.",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "description": "Defaults to project when root is given and to documents when only files are.",
+            "enum": [
+              "project",
+              "documents"
+            ],
+            "type": "string"
+          },
+          "overview": {
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "type": "string"
+          },
+          "response_format": {
+            "description": "both preserves text and structured payloads; text omits their duplicate structured copy; structured returns structured data with a short text receipt. Overrides the response_mode transport default.",
+            "enum": [
+              "both",
+              "text",
+              "structured"
+            ],
+            "type": "string"
+          },
+          "response_mode": {
+            "description": "compact returns one text payload by default, concise edit receipts, and read source windows of 64 KiB unless max_bytes is supplied. full preserves the existing response. Refusal and verification information is retained.",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; required for kind=project.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
-    "navigate": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "relation",
-        "target"
-      ],
-      "relation": [
-        "definition",
-        "type_definition",
-        "implementation",
-        "references",
-        "incoming_calls",
-        "outgoing_calls",
-        "hover"
-      ],
-      "batch": true
+    "full": {
+      "change_plan": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "accept_provisional": {
+            "description": "With action=apply, commit a PROVISIONAL plan by explicitly accepting its incomplete diagnostic evidence.",
+            "type": "boolean"
+          },
+          "action": {
+            "enum": [
+              "create",
+              "edit",
+              "preview",
+              "inspect",
+              "prepare",
+              "apply",
+              "discard"
+            ],
+            "type": "string"
+          },
+          "edit": {
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "enum": [
+                  "add",
+                  "update",
+                  "remove",
+                  "reorder",
+                  "replace_all"
+                ],
+                "type": "string"
+              },
+              "op_ids": {
+                "items": {
+                  "description": "Operation identifier.",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "operations": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "maxLength": 4194304,
+                      "type": "string"
+                    },
+                    "depends_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "destination_revision_id": {
+                      "type": "string"
+                    },
+                    "expected_sha256": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "indentation": {
+                      "enum": [
+                        "exact",
+                        "syntax_anchor",
+                        "formatter"
+                      ],
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "replace_symbol",
+                        "delete_symbol",
+                        "insert_before",
+                        "insert_after",
+                        "replace_range",
+                        "create_file",
+                        "move_file",
+                        "copy_file",
+                        "delete_file",
+                        "rename_symbol",
+                        "safe_delete_symbol",
+                        "inline_symbol",
+                        "replace_matches",
+                        "apply_code_action"
+                      ],
+                      "type": "string"
+                    },
+                    "op_id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "revision_id": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "handle": {
+                              "description": "Opaque revision-bound handle.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "handle"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "symbol_locator": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "name_path": {
+                                  "description": "Declaration name path.",
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "description": "File path.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "name_path"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "symbol_locator"
+                          ],
+                          "type": "object"
+                        }
+                      ],
+                      "type": "object"
+                    },
+                    "to": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "op_id",
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 32,
+                "type": "array"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "operations": {
+            "description": "At most 32 operations; extend with action=edit and edit.mode=add.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "Exact UTF-8 content for the declared operation (maximum 4 MiB).",
+                  "maxLength": 4194304,
+                  "type": "string"
+                },
+                "depends_on": {
+                  "items": {
+                    "description": "Predecessor op_id.",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "destination_revision_id": {
+                  "description": "Expected destination document revision for move_file and copy_file.",
+                  "type": "string"
+                },
+                "expected_sha256": {
+                  "description": "copy_file: hash the source must have; bound at creation when omitted. The source may be an absolute path outside the workspace.",
+                  "type": "string"
+                },
+                "from": {
+                  "description": "Source path for move_file or copy_file.",
+                  "type": "string"
+                },
+                "indentation": {
+                  "enum": [
+                    "exact",
+                    "syntax_anchor",
+                    "formatter"
+                  ],
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_symbol",
+                    "delete_symbol",
+                    "insert_before",
+                    "insert_after",
+                    "replace_range",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file",
+                    "rename_symbol",
+                    "safe_delete_symbol",
+                    "inline_symbol",
+                    "replace_matches",
+                    "apply_code_action"
+                  ],
+                  "type": "string"
+                },
+                "op_id": {
+                  "description": "Stable operation identifier unique within the plan.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Workspace path for create_file or delete_file.",
+                  "type": "string"
+                },
+                "revision_id": {
+                  "description": "Expected document revision; create binds missing-target revision if omitted.",
+                  "type": "string"
+                },
+                "target": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "handle": {
+                          "description": "Opaque revision-bound handle.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "handle"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "symbol_locator": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name_path": {
+                              "description": "Declaration name path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "File path.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "name_path"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "symbol_locator"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "type": "object"
+                },
+                "to": {
+                  "description": "Destination path for move_file or copy_file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op_id",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "plan_id": {
+            "description": "Required after creation unless prepare supplies operations inline.",
+            "type": "string"
+          },
+          "plan_revision": {
+            "description": "Required with plan_id.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prepared_revision": {
+            "description": "Required when action=apply.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "diagnostics": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "full": {
+            "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Optional diagnostic cursor.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "edit_apply": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "description": "Format edits (default true); false preserves bytes. Transfers and deletes are never formatted.",
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "operation": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "description": "create_file: the file content; replace_range: exact replacement bytes.",
+                "type": "string"
+              },
+              "destination_revision_id": {
+                "description": "Optional missing-destination revision.",
+                "type": "string"
+              },
+              "expected_count": {
+                "description": "Required match count (default 1); mismatch changes nothing.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expected_sha256": {
+                "description": "Delete guard (alternative to revision_id); optional copy source guard.",
+                "type": "string"
+              },
+              "from": {
+                "description": "Source; copy_file also accepts external absolute paths.",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "replace_literal",
+                  "create_file",
+                  "move_file",
+                  "copy_file",
+                  "delete_file",
+                  "replace_range"
+                ],
+                "type": "string"
+              },
+              "new": {
+                "description": "replace_literal: replacement text.",
+                "type": "string"
+              },
+              "old": {
+                "description": "Exact old text; uniform indentation differences are reported.",
+                "type": "string"
+              },
+              "path": {
+                "description": "File path; replace_literal searches the workspace if omitted.",
+                "type": "string"
+              },
+              "replace": {
+                "description": "Overwrite only with its current revision_id.",
+                "type": "boolean"
+              },
+              "revision_id": {
+                "description": "Read revision; required for overwrite or delete (unless hash).",
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "handle": {
+                        "description": "Opaque revision-bound handle.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "handle"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              },
+              "to": {
+                "description": "Missing destination; parents are created.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "operations": {
+            "description": "Sequential edits, excluding replace_range; earlier edits remain on refusal. One formatter pass and receipt.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "destination_revision_id": {
+                  "type": "string"
+                },
+                "expected_count": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "expected_sha256": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "replace_literal",
+                    "create_file",
+                    "move_file",
+                    "copy_file",
+                    "delete_file"
+                  ],
+                  "type": "string"
+                },
+                "new": {
+                  "type": "string"
+                },
+                "old": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "replace": {
+                  "type": "boolean"
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "preview_only": {
+            "description": "Compute the diff without changing canonical bytes.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Add the full change record, hashes and handle resolution to the response.",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "evidence_get": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Optional page cursor.",
+            "type": "string"
+          },
+          "evidence_id": {
+            "description": "Evidence identifier.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "language_server_setup": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "restart"
+            ],
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Stable retry key; generated if omitted.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "language_server_status": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "languages": {
+            "description": "Start the servers for these languages now instead of on first use.",
+            "items": {
+              "description": "Filetype, such as python or typescript.",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "navigate": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "enum": [
+              "definition",
+              "type_definition",
+              "implementation",
+              "references",
+              "incoming_calls",
+              "outgoing_calls",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Declaration name; resolved to its one declaration so no target is needed.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation"
+        ],
+        "type": "object"
+      },
+      "read": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "history and changes views: number of entries.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "description": "Line cap per target; reports truncation and total lines.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "numbered": {
+            "description": "Prefix each line with its number and a tab.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Workspace-relative or absolute text file path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "targets": {
+            "description": "Batch reads; per-target options override call defaults.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "end_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "max_lines": {
+                  "description": "Cap for this target; overrides the call-level max_lines.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "numbered": {
+                  "description": "Prefix each line with its number; overrides the call-level numbered.",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Workspace-relative file path.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "symbol_locator": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                },
+                "view": {
+                  "enum": [
+                    "source",
+                    "outline"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "view": {
+            "enum": [
+              "source",
+              "outline",
+              "history",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "revision_diff": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "from_revision": {
+            "description": "Earlier revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "to_revision_or_current": {
+            "description": "Later revision: wsrev_N or current.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_revision",
+          "to_revision_or_current"
+        ],
+        "type": "object"
+      },
+      "search": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "description": "Context lines per hit; at most 20 (larger values reduced to 20 with a warning).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "git_history": {
+            "additionalProperties": false,
+            "properties": {
+              "fields": {
+                "items": {
+                  "enum": [
+                    "message",
+                    "path",
+                    "diff"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "query": {
+                "description": "Literal query over bounded local history.",
+                "type": "string"
+              },
+              "ref": {
+                "description": "Local revision or range; defaults to HEAD.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "include_handles": {
+            "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "literal",
+              "regex",
+              "references",
+              "definition",
+              "implementation",
+              "type_definition",
+              "incoming_calls",
+              "outgoing_calls"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "description": "Keep only hits under these paths.",
+            "items": {
+              "description": "Path substring or glob (whole path or base name).",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "description": "Text, regular expression, or for the semantic modes a symbol name.",
+            "type": "string"
+          },
+          "refine": {
+            "additionalProperties": false,
+            "properties": {
+              "matched_text": {
+                "additionalProperties": false,
+                "properties": {
+                  "literal": {
+                    "description": "Additional literal match constraint.",
+                    "type": "string"
+                  },
+                  "regex": {
+                    "description": "Additional regular-expression constraint.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "path": {
+                "description": "Additional path substring.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "result_set_handle": {
+            "description": "Frozen current-source result set.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "symbol_find": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include_source": {
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Name path: Name, Parent/Name, Parent.Name, Parent::Name or (*Parent).Name.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "workspace_inspect": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "status",
+              "overview",
+              "map"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workspace_open": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "description": "Allowlisted document.",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "description": "Defaults to project when root is given and to documents when only files are.",
+            "enum": [
+              "project",
+              "documents"
+            ],
+            "type": "string"
+          },
+          "overview": {
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; required for kind=project.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
-    "read": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "target"
-      ],
-      "view": [
-        "source",
-        "outline",
-        "history",
-        "changes"
-      ],
-      "batch": true
+    "lean": {
+      "edit_apply": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "expected_count": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "expected_sha256": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "replace_literal",
+                  "create_file",
+                  "delete_file"
+                ],
+                "type": "string"
+              },
+              "new": {
+                "type": "string"
+              },
+              "old": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "replace": {
+                "type": "boolean"
+              },
+              "revision_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "path"
+            ],
+            "type": "object"
+          },
+          "root": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      "read": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "root": {
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "view": {
+            "enum": [
+              "source",
+              "outline"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "search": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "literal",
+              "regex"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
-    "diagnostics": {
-      "read_only": true,
-      "required": [
-        "workspace_id"
-      ],
-      "batch": true,
-      "returns": [
-        "items",
-        "confidence",
-        "coverage",
-        "provenance",
-        "cursor"
-      ]
-    },
-    "edit_apply": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "operation"
-      ],
-      "operation_count": 1,
-      "operations_sequence": "in order, non-atomic, no sandbox; every kind but replace_range",
-      "kinds": [
-        "replace_literal",
-        "create_file",
-        "move_file",
-        "copy_file",
-        "delete_file",
-        "replace_range"
-      ],
-      "preview_only": true,
-      "returns": [
-        "patch",
-        "revision",
-        "tool_delta",
-        "diagnostic_delta",
-        "verification",
-        "receipt",
-        "git"
-      ]
-    },
-    "change_plan": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "action"
-      ],
-      "action": [
-        "create",
-        "edit",
-        "preview",
-        "prepare",
-        "inspect",
-        "apply",
-        "discard"
-      ],
-      "apply_requires": [
-        "plan_id",
-        "plan_revision",
-        "prepared_revision"
-      ],
-      "inline_prepare": true
-    },
-    "revision_diff": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "from_revision",
-        "to_revision_or_current"
-      ],
-      "automatic_rebase": false
-    },
-    "evidence_get": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "evidence_id"
-      ],
-      "returns": [
-        "pending_or_final_state",
-        "cursor"
-      ]
-    },
-    "language_server_status": {
-      "read_only": true,
-      "required": [
-        "workspace_id"
-      ],
-      "profiles": [
-        "full"
-      ],
-      "returns": [
-        "provider",
-        "languages",
-        "install_options"
-      ]
-    },
-    "language_server_setup": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "action"
-      ],
-      "profiles": [
-        "full"
-      ],
-      "action": [
-        "restart"
-      ]
+    "orient": {
+      "diagnostics": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "full": {
+            "description": "Return the complete report including finding bodies and per-dimension evidence IDs.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Optional diagnostic cursor.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "evidence_get": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Optional page cursor.",
+            "type": "string"
+          },
+          "evidence_id": {
+            "description": "Evidence identifier.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "navigate": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "enum": [
+              "definition",
+              "type_definition",
+              "implementation",
+              "references",
+              "incoming_calls",
+              "outgoing_calls",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Declaration name; resolved to its one declaration so no target is needed.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation"
+        ],
+        "type": "object"
+      },
+      "read": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "history and changes views: number of entries.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "description": "Line cap per target; reports truncation and total lines.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "numbered": {
+            "description": "Prefix each line with its number and a tab.",
+            "type": "boolean"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "handle": {
+                    "description": "Opaque revision-bound handle.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "handle"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "symbol_locator": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name_path": {
+                        "description": "Declaration name path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "File path.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "name_path"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "symbol_locator"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "Workspace-relative or absolute text file path.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "targets": {
+            "description": "Batch reads; per-target options override call defaults.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "end_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "max_lines": {
+                  "description": "Cap for this target; overrides the call-level max_lines.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "numbered": {
+                  "description": "Prefix each line with its number; overrides the call-level numbered.",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Workspace-relative file path.",
+                  "type": "string"
+                },
+                "start_line": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "symbol_locator": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name_path": {
+                      "description": "Declaration name path.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "File path.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "name_path"
+                  ],
+                  "type": "object"
+                },
+                "view": {
+                  "enum": [
+                    "source",
+                    "outline"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "view": {
+            "enum": [
+              "source",
+              "outline",
+              "history",
+              "changes"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "search": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "description": "Context lines per hit; at most 20 (larger values reduced to 20 with a warning).",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "git_history": {
+            "additionalProperties": false,
+            "properties": {
+              "fields": {
+                "items": {
+                  "enum": [
+                    "message",
+                    "path",
+                    "diff"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "query": {
+                "description": "Literal query over bounded local history.",
+                "type": "string"
+              },
+              "ref": {
+                "description": "Local revision or range; defaults to HEAD.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "include_handles": {
+            "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "literal",
+              "regex",
+              "references",
+              "definition",
+              "implementation",
+              "type_definition",
+              "incoming_calls",
+              "outgoing_calls"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "description": "Keep only hits under these paths.",
+            "items": {
+              "description": "Path substring or glob (whole path or base name).",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "description": "Text, regular expression, or for the semantic modes a symbol name.",
+            "type": "string"
+          },
+          "refine": {
+            "additionalProperties": false,
+            "properties": {
+              "matched_text": {
+                "additionalProperties": false,
+                "properties": {
+                  "literal": {
+                    "description": "Additional literal match constraint.",
+                    "type": "string"
+                  },
+                  "regex": {
+                    "description": "Additional regular-expression constraint.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "path": {
+                "description": "Additional path substring.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "result_set_handle": {
+            "description": "Frozen current-source result set.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "symbol_find": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "include_source": {
+            "type": "boolean"
+          },
+          "query": {
+            "description": "Name path: Name, Parent/Name, Parent.Name, Parent::Name or (*Parent).Name.",
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "workspace_inspect": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "description": "Project root; opens or reuses its workspace.",
+            "type": "string"
+          },
+          "view": {
+            "enum": [
+              "status",
+              "overview",
+              "map"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "description": "Workspace ID; alternatively pass root.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workspace_open": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "description": "Allowlisted document.",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "description": "Defaults to project when root is given and to documents when only files are.",
+            "enum": [
+              "project",
+              "documents"
+            ],
+            "type": "string"
+          },
+          "overview": {
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "type": "string"
+          },
+          "root": {
+            "description": "Project root; required for kind=project.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     }
   },
-  "frozen_assertions": {
-    "search_refinement": "AND-only monotonic intersection with typed parent lineage",
-    "compact_search_rendering": "one outcome line, one path line per file, one physical line per hit, optional cursor/coverage line",
-    "structural_search": "search mode branch, not a separate tool",
-    "hover": "navigate relation, not a separate tool",
-    "launch": "huyang mcp --profile edit|full|orient|experimental; edit default; fixed HTTP routes /mcp (full), /mcp/orient and /mcp/edit",
-    "byte_preserving_default": true,
-    "git_mutation_tools": false
+  "output_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "api_version": {
+        "const": "huyang.workspace/v1alpha1"
+      },
+      "code": {
+        "description": "Stable application outcome code.",
+        "type": "string"
+      },
+      "data": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "diagnostic_updates": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "attribution": {
+              "type": "object"
+            },
+            "baseline_missing": {
+              "description": "First observation: finding may be new or pre-existing because no pre-edit baseline exists.",
+              "type": "boolean"
+            },
+            "id": {
+              "description": "Stable diagnostic ID.",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "new",
+                "persisting",
+                "resolved"
+              ],
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            },
+            "message": {
+              "description": "What the finding says, bounded.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Affected document, workspace-relative.",
+              "type": "string"
+            },
+            "severity": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "diagnostic_updates_truncated": {
+        "type": "boolean"
+      },
+      "evidence": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "description": "Evidence ID.",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "guide": {
+        "items": {
+          "description": "One rule for calling this server at its cheapest, sent once when a workspace is first opened.",
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "idempotency": {
+        "enum": [
+          "created",
+          "replayed"
+        ],
+        "type": "string"
+      },
+      "idempotency_persisted": {
+        "type": "boolean"
+      },
+      "next": {
+        "maxItems": 2,
+        "type": "array"
+      },
+      "outcome": {
+        "enum": [
+          "ok",
+          "partial",
+          "provisional",
+          "conflict",
+          "unavailable",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "request_id": {
+        "description": "Server request identifier.",
+        "type": "string"
+      },
+      "retryable": {
+        "description": "Whether the same call, unchanged, can succeed later; present only where that is known.",
+        "type": "boolean"
+      },
+      "summary": {
+        "description": "Compact deterministic result summary.",
+        "type": "string"
+      },
+      "transaction": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Opaque plan or transaction identifier.",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "PREVIEWED",
+              "PREPARING",
+              "CONFLICTED",
+              "FAILED",
+              "PROVISIONAL",
+              "READY",
+              "COMMITTING",
+              "COMMITTED",
+              "RECOVERY_REQUIRED",
+              "ROLLING_BACK",
+              "ROLLED_BACK",
+              "EXPIRED",
+              "DISCARDED"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "type": "object"
+      },
+      "warnings": {
+        "items": {
+          "description": "Warning.",
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "workspace": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "api_version",
+      "request_id",
+      "outcome",
+      "summary",
+      "data",
+      "warnings",
+      "next"
+    ],
+    "type": "object"
   }
 }
