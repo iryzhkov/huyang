@@ -243,11 +243,13 @@ fake discovery or SDK fallback.
 The read's exact body drives the postimage. Replay and stale refusal must retain
 file SHA, inode, size and mtime; replay must retain the original workspace and
 document receipt guards. Actual MCP params/replies are matched to the mock's
-calls and client-visible text; unmatched calls fail. Successful text is exact.
-OpenCode's stale refusal alone may use its observed `tool.execution` JSON envelope:
-exact error/content keys, empty content, and message equal to the real MCP error
-text after removing its single final newline. Both raw texts and the checked mapping
-are retained; the real MCP result must still be isError with one TextContent.
+calls and client-visible text; unmatched calls fail. Successful payload text is exact.
+The admitted native representations are enumerated below: Codex 0.163.0's lossless
+two-block Responses output, OpenCode 2.0.30's stale-error envelope, and Claude Code
+2.1.301's stale-error string with exactly one terminal LF lost. Both error mappings
+require the actual MCP isError flag and retain the actual visible text. Claude
+also requires Anthropic is_error=true and the originating tool-use identity.
+The real MCP result must still have one TextContent and no structuredContent.
 Refined output must reveal the second real frozen hit. The final client transcript
 must carry the observed
 revision/result-set/finding tokens.
@@ -626,6 +628,83 @@ Pure tests are in `test_telemetry_control.py`. Parent should run
 on agent-a with guarded scratch HOME. No tests, imports, syntax checks, runtime,
 formatter, generator, Go, client, Chaldea job, download, SSH, service, install,
 push or review agent was run for this source-only implementation.
+
+## Bounded native reply presentation
+
+The service wire contract remains one TextContent and no structuredContent.
+The comparison preserves raw HTTP/MCP recordings and their decoded typed values.
+Follow-up guards come only from actual model-visible payload text.
+
+- Codex CLI `0.163.0`, binary SHA-256
+  `399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215`,
+  uses the existing `explicit-direct-tools-only` case on POST /v1/responses.
+  The frozen gpt-6.1-sol entry and its two reviewed direct-tool overrides are
+  required. Default `code_mode_only` remains unqualified. The output must have
+  exactly two ordered blocks, each with exactly `type: input_text` and string
+  `text`. The complete first string must match
+  `Wall time: [0-9]+\.[0-9]{4} seconds\nOutput:`, with one interior LF and no
+  trailing LF. The second string must equal all MCP text bytes, including the
+  terminal LF. Header metadata is retained separately. No flattening, stripping,
+  prefix search or truncation allowance is applied.
+- Claude Code `2.1.301`, binary SHA-256
+  `bc1aad9982c7b59c7d889ff92595d61cf46e0a6eae074cb551d932a989bcd222`,
+  uses POST /v1/messages, the internal `anthropic` protocol. Exact equality is
+  checked first, including the observed single text block on successful replies.
+  Only the known `document_content_changed` stale create-file
+  replacement refusal for main.go may lose one terminal LF. Both MCP isError
+  and HTTP tool_result is_error must be true. The result content must be a
+  string, equal to the complete wire text minus exactly its one final LF.
+  CRLF and double terminal LFs are excluded. This is an observed traffic rule;
+  no closed-client implementation or general trimming rule is claimed.
+  Visible refusal, revision, finding
+  and recovery bytes retain their order. No LF is added to the saved text.
+- OpenCode `2.0.30`, binary SHA-256
+  `3eb9af9b4ab07d4de85b68a2678a1e17534f9cfa833ade80b80831e51972da72`,
+  retains its Chat stale-error mapping. The JSON envelope must have exactly
+  error/content keys, empty content, and exactly type/message error keys with
+  type `tool.execution`. Its message equals the MCP error text minus its single
+  final LF. CRLF and double terminal LFs are excluded. Exact text is also accepted.
+  No model-call metadata is assumed for OpenCode.
+
+Codex and Claude require a unique originating model call with exact tool name and
+arguments. Codex output call_id must equal MCP _meta.callId; the originating
+function item ID must equal _meta.itemId and the emitted function ID. The output
+item ID is retained separately and need not equal either. Claude tool_use_id must
+equal the originating tool-use ID and _meta["claudecode/toolUseId"]. Each match
+retains the MCP connection, profile, JSON-RPC request/response identity, original
+typed request/reply, and raw-frame SHA-256/length. Duplicate, ambiguous, reused,
+absent or contradictory identities fail. The timing header never establishes
+success; Codex error status comes independently from MCP isError.
+
+The presentation evidence records the mapping, lost-byte count, raw typed output,
+header, visible/wire text hashes and lengths, native pin/catalog provenance, model
+HTTP request hash/length and same-call identifiers. MCP frame evidence scans the
+existing recorder without changing it, checks chunk hashes, and reconstructs
+newline-delimited frames across chunks. It is bounded to 128 MiB, 100,000 records
+and 8 MiB per buffered frame.
+
+The formatter is explained by official Codex commit
+`83086188ae0614bd882818ff1aa23f3194962012`:
+[context.rs:184-214](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/tools/context.rs#L184-L214)
+inserts the header, and
+[models.rs:2362-2374](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/protocol/src/models.rs#L2362-L2374)
+serializes the content vector. Official tag rust-v0.163.0 resolves through tag
+object `129b8ec7ee6f4511557a4856279f529025c25af4` to that commit. Both tag and
+commit are unsigned. Official source-byte correlation and the binary hash do
+not establish binary-to-source attestation. Later native truncation can change
+or omit content; every accepted call must prove complete payload equality.
+
+A workflow assertion is terminal. A failed consumption records its pending call,
+keeps the failed step, and cannot consume a matched receipt again or emit another
+call. An existing global fatal blocks advancement before matching. Fatal reports
+retain the first failure and at most 16 distinct errors; retries do not turn the
+original assertion into success.
+
+The synthetic reply-presentation regressions are source-level preparation.
+Job 93ac5d3e and all earlier failed jobs remain FAIL. This change grants no
+OpenCode readiness or IPC credit and does not affect Python decision 8596.
+Independent final review, root-owned checks and fresh complete actual workflows
+for all three pinned clients are still required.
 
 ## Artifacts and remaining limitations
 

@@ -8,7 +8,31 @@ import re
 from urllib.parse import urlsplit
 
 from common import FULL, LEAN, canonical, digest, raw_record, record, require, write_json
-from workflow import results
+from reply_presentation import present_reply
+
+def wire_evidence(path, connection, direction, message):
+    """Find one complete original MCP frame across recorder chunk boundaries."""
+    require(path.stat().st_size <= 128 * 1024 * 1024, "MCP recording exceeds evidence bound")
+    buffer, matches = b"", []
+    with path.open() as source:
+        for number, line in enumerate(source, 1):
+            require(number <= 100000, "MCP recording exceeds record bound")
+            entry = json.loads(line)
+            if entry.get("pid") != connection or entry.get("direction") != direction:
+                continue
+            raw = base64.b64decode(entry["bytes_b64"], validate=True)
+            require(digest(raw) == entry["sha256"], "MCP recorder chunk hash changed")
+            buffer += raw
+            require(len(buffer) <= 8 * 1024 * 1024, "MCP evidence frame exceeds bound")
+            while b"\n" in buffer:
+                frame, buffer = buffer.split(b"\n", 1)
+                if frame and canonical(json.loads(frame)) == canonical(message):
+                    matches.append({"sha256": digest(frame + b"\n"), "bytes": len(frame) + 1,
+                                    "connection": connection, "direction": direction,
+                                    "ending_record": number})
+    require(len(matches) == 1, "missing/ambiguous original MCP wire frame")
+    return matches[0]
+
 
 class Controller:
     def __init__(self, case, lean_schemas):
@@ -44,10 +68,13 @@ class Controller:
         self.lsp_registrations = []
         self.lsp_pull_requests = []
         self.listed = set()
+        self.call_requests = set()
 
     def fail(self, error):
-        self.failures.append(repr(error))
-        record(self.events, fatal=repr(error))
+        failure = repr(error)
+        if failure not in self.failures and len(self.failures) < 16:
+            self.failures.append(failure)
+            record(self.events, fatal=failure)
 
     async def start(self):
         self.control_path = self.case / "control.sock"
@@ -113,6 +140,8 @@ class Controller:
                             "io.modelcontextprotocol/protocolVersion") == version,
                             "stateless MCP request changed negotiated protocol version")
                 if method == "tools/call":
+                    require(key not in self.call_requests, "reused MCP connection/request ID")
+                    self.call_requests.add(key)
                     p = m["params"]
                     require(p["name"] in (FULL if profile == "full" else LEAN), "unexpected MCP tool")
                     root = Path(p["arguments"]["root"]).resolve()
@@ -165,8 +194,13 @@ class Controller:
                             "candidate did not emit exactly one TextContent")
                     receipt = {"connection": event["connection"], "request_id": m["id"],
                                "params": request["message"]["params"], "result": result,
-                               "before": request.get("before"), "after": event.get("after"), "matched": False}
+                               "before": request.get("before"), "after": event.get("after"), "matched": False,
+                               "profile": profile, "request": request["message"], "response": m,
+                               "request_connection": request["connection"],
+                               "response_connection": event["connection"]}
                     self.receipts.append(receipt)
+            elif key in self.call_requests:
+                raise AssertionError("reused MCP response identity")
         elif kind == "lsp-initialize":
             self.lsp_initializations.append(event)
             caps = event["message"]["params"]["capabilities"]["textDocument"]
@@ -243,35 +277,63 @@ class Controller:
                 for event in self.deliveries.get(uri, [])) or self.failures)
         require(not self.failures, str(self.failures))
 
-    def match_reply(self, call, visible, protocol):
-        for receipt in self.receipts:
-            if not receipt["matched"] and receipt["params"].get("name") == call["base"] and (
-                    receipt["params"].get("arguments") == call["arguments"]):
-                text = receipt["result"]["content"][0]["text"]
-                plain = visible
-                mapping = "exact-text"
-                if (protocol == "chat" and call["step"] == "stale"
-                        and receipt["result"].get("isError") is True):
-                    # OpenCode 2.0.30 renders MCP errors as tool.execution JSON,
-                    # removing the single final newline from the error message.
-                    envelope = json.loads(visible)
-                    require(isinstance(envelope, dict) and set(envelope) == {"error", "content"}
-                            and envelope["content"] == [], "unknown client error envelope")
-                    error = envelope["error"]
-                    require(isinstance(error, dict) and set(error) == {"type", "message"}
-                            and error["type"] == "tool.execution"
-                            and error["message"] == text.removesuffix("\n"),
-                            "client error message differs from real MCP refusal")
-                    plain = error["message"]
-                    mapping = "opencode-tool.execution-single-final-newline"
-                else:
-                    require(text == visible, "client model-visible result differs from real MCP text")
-                receipt["model_visible_text"] = visible
-                receipt["model_visible_plain_text"] = plain
-                receipt["model_visible_mapping"] = mapping
-                receipt["matched"] = True
-                return receipt
-        raise AssertionError("no exact MCP call/reply matches actual model result " + call["call_id"])
+    def match_reply(self, call, visible, protocol, body, http_evidence=None):
+        require(not self.failures, "case already fatal: " + str(self.failures[:1]))
+        manifest = json.loads((self.case / "case-manifest.json").read_text())
+        meta_key = {"responses": "callId", "anthropic": "claudecode/toolUseId"}.get(protocol)
+        if meta_key:
+            candidates = [r for r in self.receipts
+                          if r["params"].get("_meta", {}).get(meta_key) == call["call_id"]]
+        else:
+            require(protocol == "chat" and manifest.get("client") == "opencode"
+                    and manifest.get("binary", {}).get("version") == "opencode v2.0.30"
+                    and manifest["binary"].get("sha256")
+                    == "3eb9af9b4ab07d4de85b68a2678a1e17534f9cfa833ade80b80831e51972da72",
+                    "unsupported native client/API")
+            # OpenCode has no evidenced model-call metadata. Do not invent it.
+            candidates = [r for r in self.receipts if not r["matched"]
+                          and r["profile"] == call["profile"]
+                          and r["params"].get("name") == call["base"]
+                          and canonical(r["params"].get("arguments")) == canonical(call["arguments"])]
+        require(len(candidates) == 1, "missing/ambiguous exact MCP call/reply for " + call["call_id"])
+        receipt = candidates[0]
+        require(not receipt["matched"], "MCP receipt already consumed")
+        if meta_key:
+            endpoint = "/v1/responses" if protocol == "responses" else "/v1/messages"
+            require(http_evidence is not None and http_evidence.get("method") == "POST"
+                    and urlsplit(http_evidence.get("target", "")).path == endpoint,
+                    "wrong native HTTP API")
+            plain, presentation = present_reply(manifest, protocol, call, visible, body, receipt)
+            mapping = presentation["mapping"]
+            # Hash the original newline-delimited frames, not reserialized JSON.
+            presentation["wire_request"] = wire_evidence(
+                self.case / "mcp-wire.jsonl", receipt["connection"], "to-candidate", receipt["request"])
+            presentation["wire_response"] = wire_evidence(
+                self.case / "mcp-wire.jsonl", receipt["connection"], "to-client", receipt["response"])
+            presentation["http_request"] = http_evidence
+            receipt["presentation"] = presentation
+        else:
+            text = receipt["result"]["content"][0]["text"]
+            plain, mapping = visible, "exact-text"
+            if visible != text:
+                require(call["step"] == "stale" and receipt["result"].get("isError") is True,
+                        "client model-visible result differs from real MCP text")
+                envelope = json.loads(visible)
+                require(isinstance(envelope, dict) and set(envelope) == {"error", "content"}
+                        and envelope["content"] == [], "unknown client error envelope")
+                error = envelope["error"]
+                require(isinstance(error, dict) and set(error) == {"type", "message"}
+                        and error["type"] == "tool.execution"
+                        and text.endswith("\n") and not text.endswith(("\n\n", "\r\n"))
+                        and error["message"] == text[:-1],
+                        "client error message differs from real MCP refusal")
+                plain = error["message"]
+                mapping = "opencode-tool.execution-single-final-newline"
+        receipt["model_visible_text"] = visible
+        receipt["model_visible_plain_text"] = plain
+        receipt["model_visible_mapping"] = mapping
+        receipt["matched"] = True
+        return receipt
 
     async def http_request(self, reader, writer):
         try:
@@ -296,6 +358,7 @@ class Controller:
                     require(length <= 16*1024*1024, "HTTP body exceeds bound")
                     raw = await reader.readexactly(length)
                 raw_record(self.http_log, "request", raw, method=method, target=target, headers=headers)
+                http_evidence = {"method": method, "target": target, "sha256": digest(raw), "bytes": len(raw)}
                 encoding = headers.get("content-encoding", "identity")
                 require(encoding in ("identity", "gzip"), "unknown client protocol encoding: " + encoding)
                 if encoding == "gzip":
@@ -340,6 +403,7 @@ class Controller:
                     protocol, provider = "chat", path.split("/")[1]
                 else:
                     raise AssertionError("unknown primary client HTTP endpoint: " + target)
+                require(method == "POST", "primary inference must use POST")
                 self.count += 1
                 require(self.count <= 500, "model request count exceeded 500")
                 # Auxiliary title requests are explicitly classified; never advance a workflow.
@@ -361,7 +425,7 @@ class Controller:
                     require(wf.provider == provider, "providerID misrouting: expected " + wf.provider + " got " + provider)
                     record(self.http_log, primary=nonce, protocol=protocol, providerID=provider,
                            sessionId=wf.session, request=body)
-                    answer = await wf.advance(body, protocol)
+                    answer = await wf.advance(body, protocol, http_evidence)
                 self.serial += 1
                 if not body.get("stream"):
                     require(auxiliary, "unknown primary non-streaming protocol")
@@ -464,7 +528,8 @@ class Controller:
             event("response.created", response=response)
             event("response.in_progress", response=response)
             if tool:
-                item = {"id": "fc_" + ident, "type": "function_call", "status": "in_progress",
+                answer["model_item_id"] = "fc_" + ident
+                item = {"id": answer["model_item_id"], "type": "function_call", "status": "in_progress",
                         "call_id": answer["call_id"], "name": answer["name"], "arguments": ""}
                 if answer.get("namespace"):
                     item["namespace"] = answer["namespace"]

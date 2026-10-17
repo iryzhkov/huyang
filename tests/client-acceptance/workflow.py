@@ -67,14 +67,17 @@ def results(body, protocol):
         for message in body.get("messages", []):
             for block in message.get("content", []) if isinstance(message.get("content"), list) else []:
                 if block.get("type") == "tool_result":
-                    found[block["tool_use_id"]] = flatten_text(block.get("content"))
+                    require(block["tool_use_id"] not in found, "duplicate Anthropic tool result")
+                    found[block["tool_use_id"]] = copy.deepcopy(block)
     elif protocol == "responses":
         for item in body.get("input", []) if isinstance(body.get("input"), list) else []:
             if item.get("type") == "function_call_output":
-                found[item["call_id"]] = plain_result(item.get("output", ""))
+                require(item["call_id"] not in found, "duplicate Responses tool result")
+                found[item["call_id"]] = copy.deepcopy(item)
     else:
         for message in body.get("messages", []):
             if message.get("role") == "tool":
+                require(message["tool_call_id"] not in found, "duplicate Chat tool result")
                 found[message["tool_call_id"]] = flatten_text(message.get("content"))
     return found
 
@@ -239,6 +242,8 @@ class Workflow:
         self.step = "probe" if probe else ("open" if profile == "full" else "read")
         self.calls, self.replies, self.catalogs = [], [], []
         self.pending = None
+        self.terminal_error = None
+        self.failed_call = None
         self.done = False
         self.late_gate_delivered = False
         self.notice_occurrences = []
@@ -257,7 +262,23 @@ class Workflow:
     def prompt(self):
         return "HUYANG_ACCEPTANCE case=" + self.nonce + "; use only the scripted Huyang tools."
 
-    async def advance(self, body, protocol):
+    async def advance(self, body, protocol, http_evidence=None):
+        if self.terminal_error is not None:
+            raise self.terminal_error.with_traceback(None)
+        step = self.step
+        try:
+            require(not self.owner.failures, "case already fatal: " + str(self.owner.failures[:1]))
+            return await self._advance(body, protocol, http_evidence)
+        except Exception as error:
+            self.terminal_error = error
+            self.failed_call = copy.deepcopy(self.pending)
+            self.pending = None
+            self.step, self.done = step, False
+            record(self.log, nonce=self.nonce, step=step, workflow_failure=repr(error),
+                   failed_call=self.failed_call)
+            raise
+
+    async def _advance(self, body, protocol, http_evidence):
         require(not self.done, "primary request after workflow completion")
         catalog = tool_catalog(body)
         self.catalogs.append({"sha256": digest(canonical(catalog).encode()), "tools": catalog,
@@ -286,7 +307,7 @@ class Workflow:
             call_id = self.pending["call_id"]
             require(call_id in outputs, "missing real client tool output for " + call_id)
             text = outputs[call_id]
-            wire = self.owner.match_reply(self.pending, text, protocol)
+            wire = self.owner.match_reply(self.pending, text, protocol, body, http_evidence)
             text = wire["model_visible_plain_text"]
             self.replies.append({"call_id": call_id, "text": text, "mcp": wire})
             record(self.log, nonce=self.nonce, step=self.step, call_id=call_id, plain=text, mcp=wire)
@@ -308,7 +329,8 @@ class Workflow:
         definition = catalog[name]
         call_id = "call_" + self.nonce + "_" + str(len(self.calls) + 1)
         call = {"name": definition["name"], "namespace": definition["namespace"],
-                "arguments": arguments, "call_id": call_id, "base": name, "step": self.step}
+                "arguments": arguments, "call_id": call_id, "base": name, "step": self.step,
+                "profile": self.profile, "current_revision": self.current}
         self.calls.append(copy.deepcopy(call))
         self.pending = call
         record(self.log, nonce=self.nonce, emit=call)
@@ -517,4 +539,5 @@ class Workflow:
                 "finding_id": self.finding_id, "diagnostic_item": self.diagnostic_item,
                 "edit_evidence": self.edit_evidence, "before": self.before, "after": self.after,
                 "calls": self.calls, "replies": self.replies, "catalogs": self.catalogs,
-                "final": self.final}
+                "final": self.final, "failed_call": self.failed_call,
+                "terminal_failure": repr(self.terminal_error) if self.terminal_error is not None else None}
