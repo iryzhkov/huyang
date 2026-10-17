@@ -930,13 +930,15 @@ func (s *diagnosticStore) resolveAbsentLocked(ids []string, seen map[string]bool
 }
 
 // documentChanged marks old current findings stale and persists the transition.
-func (s *diagnosticStore) documentChanged(documents []string, revision string, observedAt time.Time, retained ...string) (bool, error) {
+func (s *diagnosticStore) documentChanged(documents []string, revision string, _ time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.documentChangedLocked(documents, revision) {
 		return false, nil
 	}
-	s.pruneLocked(observedAt, retained...)
+	// Snapshot can reach this path while EditPlan holds plansMu. Persist
+	// staleness now; defer pruning to record/query, where retained plan proof
+	// can be collected without re-entering that lock.
 	return true, s.save()
 }
 
@@ -1560,7 +1562,7 @@ func (w *Workspace) noteDocumentContentChanged(absolute string, revision Revisio
 		return nil
 	}
 	documents := []string{absolute, displayPath(w.identity.Root, absolute)}
-	_, err := w.diagnostics.documentChanged(documents, string(revision), time.Now().UTC(), w.retainedDiagnosticEvidence()...)
+	_, err := w.diagnostics.documentChanged(documents, string(revision), time.Now().UTC())
 	return err
 }
 func (w *Workspace) Evidence(id string) (DiagnosticEvidence, error) {

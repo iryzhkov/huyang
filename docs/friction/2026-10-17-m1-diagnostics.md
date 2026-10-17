@@ -261,3 +261,27 @@ late-attribution TTL, unknown expected-version late attach, incomplete immediate
 publication retention and Phase C reannouncement notes remain outside scope.
 No Lua, resource/provider lifecycle, shared roadmap, installed service or other
 host was changed.
+
+## Lead-selected correction after main review round 4
+
+Source fix pending validation: `EditPlan` holds `plansMu` while normalizing
+operations. Revalidating a frozen `replace_matches` result set can read a file
+changed externally, reach `Snapshot`'s content-change callback, and previously
+re-enter `plansMu` through retained-proof collection.
+
+The content-change callback no longer collects retained plan evidence. Its
+ledger path still marks findings stale and saves that transition immediately,
+but defers pruning to normal record/query paths, where retained evidence is
+already collected safely. No plan-lock redesign or separate cache was added.
+Existing retained-preparation regressions remain unchanged.
+
+Added `TestEditPlanReplaceMatchesExternalChangeDoesNotReenterPlansLock`: freeze
+matches over a file, create a plan, write new bytes externally, and require
+`EditPlan` to return the expected stale-result-set conflict within five seconds.
+Before any diagnostics query can save again, reopen the ledger and require the
+finding to be persisted as stale. Then require a fresh result-set plan edit and
+diagnostics query to finish within another five-second bounded wait.
+
+Static checks only: Go formatting and `git diff --check`. No tests, builds,
+Chaldea jobs, delegation, push or installation were run for this correction;
+runtime validation remains deferred while the global job slot is occupied.
