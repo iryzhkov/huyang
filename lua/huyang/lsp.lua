@@ -334,7 +334,7 @@ local function diagnostics(args)
             .. "instead of editing by hand"
             or silent and ("nothing is reported for this file, but %s has published no "
                 .. "diagnostics %s, so this is not evidence that the file "
-                .. "is clean; verify_run runs the project's own build or check")
+                .. "is clean; run the project's own build or check in the shell")
                 :format(silent, silent_scope)
             or nil,
     }

@@ -1,7 +1,7 @@
 # Huyang model-facing tool contract
 
-Status: S00-reviewed v1alpha1 surface, amended by S20b and S20c and re-frozen, then cut by a
-documented breaking change on 2026-10-17 (see the [change log](#change-log) at the end)
+Status: S00-reviewed v1alpha1 surface, amended by S20b and S20c and re-frozen, then cut by
+documented breaking changes from 2026-10-17 (see the [change log](#change-log) at the end)
 Prepared: 2026-09-10
 Amended: 2026-09-11
 Upstream inspected: `iryzhkov/agent99@947f5b1`
@@ -70,11 +70,13 @@ separate implementations. A large-change plan is part of editing, not a separate
 | --- | --- |
 | `edit_apply` | Resolve, prepare, verify and apply one small operation through an internal transaction; optional preview-only mode. |
 | `change_plan` | Create, edit, preview, prepare, inspect, apply or discard one multi-operation editing plan through an explicit action union. |
-| `verify_run` | Run named formatter gate, parser, diagnostics, check or test stages against a canonical revision or prepared transaction. |
 | `revision_diff` | Explain canonical changes between two revisions or why a mutation precondition is stale. |
 | `evidence_get` | Page detailed diffs, diagnostics, command output or provenance by evidence ID. |
 
-This is 13 tools. `workspace_inspect` replaces separate tree/map/status/capabilities tools;
+This is 12 tools (13 until `verify_run` was removed; see the [change log](#change-log)).
+Builds and tests run in the agent's shell; `change_plan` prepare still runs a trusted
+root's configured format gate, check and tests against the staged sandbox bytes.
+`workspace_inspect` replaces separate tree/map/status/capabilities tools;
 `read(view=outline)` replaces `skim` and `document_symbols`; `navigate` replaces eight
 nearly identical position tools; `change_plan` owns one plan state machine rather than
 advertising seven lifecycle tools. These are bounded enums over one conceptual operation,
@@ -87,9 +89,9 @@ from the model-facing roster. The adapter releases its lease on clean disconnect
 
 - `orient`: `workspace_open`, `workspace_inspect`, `search`, `symbol_find`, `navigate`,
   `read`, `diagnostics`, `evidence_get`.
-- `edit`: the orientation foundation plus `code_actions`, `edit_apply`, `change_plan`,
-  `verify_run` and `revision_diff`.
-- `full`: all 15 tools. It is the only frozen profile that carries
+- `edit`: the orientation foundation plus `code_actions`, `edit_apply`, `change_plan`
+  and `revision_diff`.
+- `full`: all 14 tools. It is the only frozen profile that carries
   `language_server_status` and `language_server_setup`.
 - `experimental`: `full` plus the tools and arguments still being designed. It is opt-in
   by name and is not a contract.
@@ -295,36 +297,16 @@ After viewing the diff, the caller uses `change_plan(action="edit")` to update/r
 responsible operations and prepares the new plan revision. The old diff and evidence remain
 addressable for comparison but cannot be applied once superseded.
 
-## Affected-test verification
+## Test gate in preparation
 
-`verify_run(stages=["tests"], scope="affected")` selects and runs likely affected tests
-against the exact prepared sandbox bytes. Selection combines:
-
-- changed symbol handles and public-signature deltas;
-- LSP references, implementations and call hierarchy where reliable;
-- language-specific import/package/module dependency edges;
-- tests colocated with affected packages/modules;
-- prior test failures/durations and optional coverage associations at compatible revisions;
-- explicit project variant and test-suite configuration.
-
-Each selected test or suite carries reasons such as `direct_reference`,
-`affected_package`, `importer_of_changed_module`, `coverage_association` or
-`configured_required_suite`. The result separately reports:
-
-- selected and executed tests;
-- affected graph nodes with no associated test;
-- capped/unavailable graph edges;
-- dynamic/reflection/generated/configuration risks;
-- project variants included and omitted;
-- whether a broader package, integration or full gate is recommended.
-
-LSP availability improves precision but is neither required nor sufficient. A language
-adapter may prove a safe package-level boundary; otherwise `scope=affected` is advisory.
-Its success is named `affected_tests_passed`, never `full_tests_passed`.
-
-Preparation policy may require affected tests before a plan reaches READY. A user/model can
-then revise the plan and rerun only the invalidated affected tests. `scope=full` remains a
-separate explicit gate, normally run before applying high-risk or release-bound changes.
+Affected-test selection was removed with `verify_run` on 2026-10-17 (see the
+[change log](#change-log)). The only place Huyang runs a repository's tests is
+`change_plan` prepare: in a root trusted by the user policy it runs the configured or
+detected format gate, parser corroboration, check and the whole configured test suite
+against the staged sandbox bytes, and a failing command fails the preparation. The tests
+stage always reports `test_scope: full`; there is no affected scope. In an untrusted root
+the stages are skipped and say so. Agents run tests against the canonical tree in their
+own shell.
 
 ## Search contract
 
@@ -507,7 +489,7 @@ structured fields; requested context/detail is retrieved through `read` or `evid
 | Interactive multi-file plan | `change_plan(action=create)` | edit → preview/prepare → inspect/revise → apply |
 | Fix a diagnostic | `code_actions` | add `apply_code_action` to a transaction or use `edit_apply` |
 | Explain a stale refusal | `revision_diff` | reread/repreview; no automatic rebase |
-| Run tests/checks without editing | `verify_run` | `evidence_get` on failures |
+| Run tests/checks without editing | the agent's shell | none; Huyang runs no command outside a preparation |
 
 ## Result and recovery ergonomics
 
@@ -598,7 +580,8 @@ names ships; this table is a reading aid, not a promise.
 - `find_symbol`, `workspace_symbols` → `symbol_find`
 - definition/type/implementation/references/hover/call tools → `navigate`
 - existing edit/file/refactor tools → `edit_apply` or a one-operation transaction
-- `run_tests`, `check_project` → `verify_run`
+- `run_tests`, `check_project` → the agent's shell (`verify_run`, which once replaced them, was
+  removed on 2026-10-17)
 - `undo_edit` → discard before apply, or a compensating plan after apply
 
 The mapping is behavioral: modern schemas do not repeat every historical parameter.
@@ -739,7 +722,7 @@ that choice without making the model route every request manually:
 - Navigation, rename and a single code-action application route to one primary provider per
   capability. Diagnostics and verification may aggregate an explicitly configured set. Every
   item and coverage claim records its provider ID; conflicting results remain separate.
-- `navigate`, `diagnostics`, `code_actions` and `verify_run` accept an optional provider or
+- `navigate`, `diagnostics` and `code_actions` accept an optional provider or
   analysis-profile override when meaningful. The normal call omits it. Overrides name
   discovered/configured provider IDs, never arbitrary executable commands.
 - Fallback order is part of the visible profile. Huyang may follow that declared order after
@@ -1598,3 +1581,36 @@ fixtures are regenerated; `contract-schema.json` moves to `fixture_version`
 
 Amendment 3's read-only default workspace list is unchanged; its mention of the debugger as
 never defaulted no longer applies, because the debugger no longer exists.
+
+### 2026-10-17: verify_run removed (amendment 5)
+
+Removed, because almost every call came from one benchmark and one orchestrator whose
+prompts offered it as an alternative to the shell (469 calls in 30 days, 67% of them
+failed or partial), and agents run builds and tests through their shell anyway:
+
+- The tool `verify_run`, from `full` and `edit`. A client with a cached catalog that still
+  calls it gets the unknown-tool refusal. Run builds and tests in the shell.
+- Affected-test selection (`test_scope=affected`), the per-workspace test history that fed
+  it, and the result fields that reported it (`targeted_tests`, `impact`,
+  `selected_tests`, `selected_test_count`). The `selected` list in a semantic summary's
+  tests block is gone with them.
+- The `external_job` scheduler class, the `external_job_quota` entry in
+  `workspace_inspect` scheduler limits, and `huyang serve --external-job-quota`. A service
+  unit that still passes the flag fails to start with an unknown-flag error; drop it.
+- Every recovery hint that named `verify_run`. An edit or `diagnostics` reply whose
+  evidence is incomplete now points at `workspace_inspect` and, for an edit, at
+  `diagnostics` to read late evidence; `workspace_open`'s `commands` block says that
+  `change_plan` prepare runs the commands and that the shell checks the canonical tree.
+
+Unchanged: `change_plan` prepare still runs the format gate, parser corroboration, check
+and the full configured test suite in its sandbox for a trusted root, and a failure still
+fails the preparation. `.huyang.toml`, repository command detection, `huyang trust` and
+the user trust policy are unchanged. `workspace_open` and `workspace_inspect` still report
+the commands and whether the root is trusted.
+
+Counts: 14 tools in `full`, 8 in `orient`, 12 in `edit`. The catalog fixtures are
+regenerated; `contract-schema.json` moves to `fixture_version` `huyang.tools/v1alpha1-m5`.
+State directories from earlier builds may hold `test-history/`; it is no longer read and
+is removed with a forgotten workspace's other state. Amendment 3's list of tools that are
+never defaulted keeps `edit_apply` and `change_plan`; its mention of `verify_run` no longer
+applies, and a relative `root` is resolved for those two only.

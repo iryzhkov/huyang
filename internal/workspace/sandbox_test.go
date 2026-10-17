@@ -39,13 +39,6 @@ func TestSandboxMaterializesExactTreeAndPreparedBytesWithoutAliases(t *testing.T
 	if sandbox.Backend != "reflink" && sandbox.Backend != "safe_copy" {
 		t.Fatalf("backend = %q", sandbox.Backend)
 	}
-	baseFiles, err := sandbox.BaseStageFiles()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(baseFiles) != 1 || baseFiles[0].Path != "dirty.txt" {
-		t.Fatalf("verification base files included metadata or binary content: %+v", baseFiles)
-	}
 	if target, err := os.Readlink(filepath.Join(sandbox.Tree, "link")); err != nil || target != "dirty.txt" {
 		t.Fatalf("symlink = %q, %v", target, err)
 	}

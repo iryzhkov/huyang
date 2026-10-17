@@ -13,10 +13,6 @@ func (s *session) runHuyang(spec languageSpec) {
 	root := s.fixtureDir(language)
 	opened := s.call("W0", language, "workspace_open", map[string]any{"kind": "project", "root": root}, "open the fixture once per session")
 	s.workspaces[language] = workspaceID(opened)
-	// The commands block says whether verify_run may run them; the
-	// capabilities block only lists what is not available.
-	commands, _ := data(opened)["commands"].(map[string]any)
-	s.pipelines[language] = commands["trusted"] == true && (commands["check"] != nil || commands["tests"] != nil)
 	s.readScenarios(spec)
 	s.editScenarios(spec)
 }
@@ -170,20 +166,11 @@ func (s *session) createFile(spec languageSpec) {
 		"plan_id": plan["plan_id"], "plan_revision": plan["plan_revision"], "prepared_revision": preparation["prepared_revision"], "accept_provisional": true}, "apply the prepared plan")
 }
 
-// verify runs the named stages through verify_run when the workspace has
-// executable commands, and otherwise falls back to the shell the agent
-// would have to use.
+// verify runs the named stages the way an agent using Huyang does: in the
+// shell, because Huyang runs no build or test command outside a plan
+// preparation.
 func (s *session) verify(scenario string, spec languageSpec, stages string) {
-	language, ws := spec.Language, s.workspaces[spec.Language]
-	if s.pipelines[language] {
-		list := []any{}
-		for _, stage := range strings.Split(stages, "+") {
-			list = append(list, stage)
-		}
-		s.call(scenario, language, "verify_run", map[string]any{"workspace_id": ws, "idempotency_key": fmt.Sprintf("%s-%s-verify-%d", scenario, language, len(s.calls)),
-			"stages": list, "revision_or_transaction": "current", "test_scope": "full"}, "declared or detected commands")
-		return
-	}
+	language := spec.Language
 	command := spec.Build
 	if strings.Contains(stages, "tests") {
 		command = spec.Test
@@ -192,13 +179,13 @@ func (s *session) verify(scenario string, spec languageSpec, stages string) {
 	s.modelledFallback(scenario, language, command, output)
 }
 
-// modelledFallback records the shell call an agent makes when verify_run is
-// unavailable; it is attributed to the huyang family because that is what
-// the agent using Huyang pays.
+// modelledFallback records the shell call an agent makes to build or test;
+// it is attributed to the huyang family because that is what the agent
+// using Huyang pays.
 func (s *session) modelledFallback(scenario, language, command, output string) {
 	request := fmt.Sprintf(`{"name":"bash","arguments":{"command":%q}}`, command)
-	s.appendCall(Call{Scenario: scenario, Language: language, Family: "huyang", Tool: "bash (verify_run unavailable)",
-		Note: "no .huyang.toml, no detected commands", RequestBytes: len(request), RequestTokens: s.tokens(request),
+	s.appendCall(Call{Scenario: scenario, Language: language, Family: "huyang", Tool: "bash",
+		Note: "builds and tests run in the shell", RequestBytes: len(request), RequestTokens: s.tokens(request),
 		ResponseBytes: len(output), ResponseTokens: s.tokens(output)})
-	s.notes = append(s.notes, fmt.Sprintf("%s/%s: verify_run unavailable, fell back to `%s` in %s", scenario, language, command, filepath.Base(s.fixtureDir(language))))
+	s.notes = append(s.notes, fmt.Sprintf("%s/%s: ran `%s` in the shell in %s", scenario, language, command, filepath.Base(s.fixtureDir(language))))
 }

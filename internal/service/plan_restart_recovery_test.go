@@ -74,13 +74,6 @@ func TestPreparedPlanRecoversAcrossServiceRestart(t *testing.T) {
 	if got := reopened["workspace"].(map[string]any)["id"]; got != workspaceID {
 		t.Fatalf("workspace id changed across restart: got %v want %v", got, workspaceID)
 	}
-	verified := callModern(t, restartedSession, "verify_run", map[string]any{
-		"workspace_id": workspaceID, "idempotency_key": "restart-verify",
-		"revision_or_transaction": preparedRevision, "stages": []any{"format_gate"},
-	})
-	if verified["outcome"] == "conflict" || verified["code"] == "revision_changed" {
-		t.Fatalf("prepared verification was not recovered: %#v", verified)
-	}
 	applied := callModern(t, restartedSession, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "restart-apply", "action": "apply",
 		"plan_id": createdPlan["plan_id"], "plan_revision": createdPlan["plan_revision"],

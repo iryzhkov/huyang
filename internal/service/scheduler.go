@@ -14,26 +14,19 @@ type workspaceScheduler struct {
 	sandboxLanes  map[string]chan struct{}
 	providerSlots chan struct{}
 	sandboxSlots  chan struct{}
-	externalSlots chan struct{}
 	providerQuota int
-	externalQuota int
 }
 
-func newWorkspaceScheduler(providerQuota, externalJobQuota int) *workspaceScheduler {
+func newWorkspaceScheduler(providerQuota int) *workspaceScheduler {
 	if providerQuota < 1 {
 		providerQuota = 1
-	}
-	if externalJobQuota < 1 {
-		externalJobQuota = 1
 	}
 	return &workspaceScheduler{
 		lanes:         make(map[string]chan struct{}),
 		sandboxLanes:  make(map[string]chan struct{}),
 		providerSlots: make(chan struct{}, providerQuota),
 		sandboxSlots:  make(chan struct{}, 4),
-		externalSlots: make(chan struct{}, externalJobQuota),
 		providerQuota: providerQuota,
-		externalQuota: externalJobQuota,
 	}
 }
 
@@ -44,10 +37,8 @@ func (s *workspaceScheduler) description() map[string]any {
 			string(mcpapi.ClassProviderRead),
 			string(mcpapi.ClassCanonicalWrite),
 			string(mcpapi.ClassSandboxWrite),
-			string(mcpapi.ClassExternalJob),
 		},
 		"provider_quota":          s.providerQuota,
-		"external_job_quota":      s.externalQuota,
 		"sandbox_service_quota":   cap(s.sandboxSlots),
 		"sandbox_workspace_quota": 2,
 	}
@@ -94,8 +85,6 @@ func (s *workspaceScheduler) acquire(ctx context.Context, workspaceID string, cl
 			releaseService()
 			releaseProvider()
 		}, nil
-	case mcpapi.ClassExternalJob:
-		return acquireSlot(ctx, s.externalSlots)
 	default:
 		return nil, fmt.Errorf("unknown scheduler class %q", class)
 	}

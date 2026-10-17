@@ -297,7 +297,7 @@ func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *
 		result["evidence"] = map[string]any{"ids": evidenceIDs, "truncated": false}
 	}
 	if outcome != "ok" && !repeatedUnavailability(data) {
-		result["next"] = editDiagnosticRecovery(data["revision"])
+		result["next"] = editDiagnosticRecovery()
 	} else if len(applied.next) > 0 {
 		result["next"] = applied.next
 	}
@@ -328,8 +328,8 @@ func compactEditData(workspace *workspacecore.Workspace, request editRequest, ap
 	for _, file := range applied.files {
 		changed = append(changed, file.Path)
 	}
-	// The diffs stay in the receipt this data becomes: revision_diff and the
-	// affected-test coverage read the content hashes back out of it. The
+	// The diffs stay in the receipt this data becomes: revision_diff reads
+	// the content hashes back out of it. The
 	// wire copy drops them unless the caller asked, which is where they cost
 	// a third of an ordinary edit reply and buy the agent nothing.
 	data := map[string]any{
@@ -386,7 +386,7 @@ func (h *Handlers) checkpointEdit(ctx context.Context, requestID string, workspa
 	checkpoint := mcpapi.Envelope(requestID, workspace, "provisional", "",
 		"Edit applied; canonical receipt persisted before semantic diagnostics", data)
 	checkpoint["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
-	checkpoint["next"] = editDiagnosticRecovery(data["revision"])
+	checkpoint["next"] = editDiagnosticRecovery()
 	persistErr := checkpointStatefulReceipt(ctx, checkpoint)
 	if persistErr == nil {
 		return nil
@@ -581,9 +581,9 @@ func repeatedUnavailability(data map[string]any) bool {
 	return repeated
 }
 
-func editDiagnosticRecovery(revision any) []any {
+func editDiagnosticRecovery() []any {
 	return []any{
 		map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status", "note": "Detailed attachment and install options are available through language_server_status in the full profile."},
-		map[string]any{"tool": "verify_run", "action": "retry_diagnostics_for_exact_revision", "revision_or_transaction": revision, "stages": []string{"diagnostics"}, "note": "The mutation already applied; refresh diagnostic evidence without repeating it."},
+		map[string]any{"tool": "diagnostics", "action": "read_late_diagnostic_evidence", "note": "The mutation already applied; read late diagnostic evidence without repeating it."},
 	}
 }

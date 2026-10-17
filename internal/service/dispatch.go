@@ -41,14 +41,10 @@ type directWorkspaces struct {
 }
 
 func newDirectWorkspaces(stateDir string) *directWorkspaces {
-	return newDirectWorkspacesWithQuotas(stateDir, 4, 2)
+	return newDirectWorkspacesWithLimits(stateDir, 4, providerpool.Limits{})
 }
 
-func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
-	return newDirectWorkspacesWithLimits(stateDir, providerQuota, externalJobQuota, providerpool.Limits{})
-}
-
-func newDirectWorkspacesWithLimits(stateDir string, providerQuota, externalJobQuota int, limits providerpool.Limits) *directWorkspaces {
+func newDirectWorkspacesWithLimits(stateDir string, providerQuota int, limits providerpool.Limits) *directWorkspaces {
 	// The caches every verification command shares follow this service's
 	// state directory rather than the ambient environment.
 	workspacecore.SetCommandCacheRoot(filepath.Join(stateDir, "command-cache"))
@@ -57,7 +53,7 @@ func newDirectWorkspacesWithLimits(stateDir string, providerQuota, externalJobQu
 	workspacecore.SetCommandScratchRoot(filepath.Join(stateDir, "scratch"))
 	registry := newWorkspaceRegistry(stateDir)
 	receipts := newReceiptStore(stateDir, defaultReceiptLimits())
-	scheduler := newWorkspaceScheduler(providerQuota, externalJobQuota)
+	scheduler := newWorkspaceScheduler(providerQuota)
 	direct := &directWorkspaces{
 		registry:    registry,
 		receipts:    receipts,
@@ -161,9 +157,8 @@ func (d *directWorkspaces) callUnfinalized(ctx context.Context, name string, arg
 	// built, not later in executeScheduled: the key starts with the workspace
 	// ID, and a receipt filed under an empty one is invisible to everything
 	// that reads receipts back by workspace - revision_diff answered
-	// diff_evidence_incomplete and verify_run test_scope=affected refused
-	// with changed_file_evidence_incomplete, for edits that had been applied
-	// through the cheapest documented call.
+	// diff_evidence_incomplete for edits that had been applied through the
+	// cheapest documented call.
 	namedWorkspace, _ := arguments["workspace_id"].(string)
 	if root, _ := arguments["root"].(string); strings.TrimSpace(namedWorkspace) == "" && strings.TrimSpace(root) != "" {
 		if failure := d.handlers.AdoptProjectRoot(ctx, requestID, arguments); failure != nil {
@@ -289,7 +284,7 @@ func (d *directWorkspaces) replayReceipt(requestID, name, idempotencyKey, argume
 
 func isStatefulModernTool(name string) bool {
 	switch name {
-	case "edit_apply", "change_plan", "verify_run", "language_server_setup":
+	case "edit_apply", "change_plan", "language_server_setup":
 		return true
 	default:
 		return false
@@ -329,25 +324,20 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	}
 	workspaceID, _ := arguments["workspace_id"].(string)
 	// A root instead of a workspace_id is resolved here, before the
-	// scheduler lane and the verify phases need the ID.
+	// scheduler lane needs the ID.
 	if root, _ := arguments["root"].(string); strings.TrimSpace(workspaceID) == "" && strings.TrimSpace(root) != "" {
 		if failure := d.handlers.AdoptProjectRoot(ctx, requestID, arguments); failure != nil {
 			return failure
 		}
 		workspaceID, _ = arguments["workspace_id"].(string)
 	}
-	var result map[string]any
-	if name == "verify_run" {
-		result = d.executeVerify(ctx, requestID, workspaceID, arguments)
-	} else {
-		class := mcpapi.ClassForCall(name, arguments)
-		release, err := d.scheduler.acquire(ctx, workspaceID, class)
-		if err != nil {
-			return schedulerCancelled(requestID, workspaceID, class, err)
-		}
-		result = d.handlers.Execute(ctx, requestID, name, arguments)
-		release()
+	class := mcpapi.ClassForCall(name, arguments)
+	release, err := d.scheduler.acquire(ctx, workspaceID, class)
+	if err != nil {
+		return schedulerCancelled(requestID, workspaceID, class, err)
 	}
+	result := d.handlers.Execute(ctx, requestID, name, arguments)
+	release()
 	// A root given instead of a workspace_id opened the workspace inside
 	// Execute; read the ID it settled on.
 	if workspaceID == "" {
@@ -374,34 +364,6 @@ func schedulerCancelled(requestID, workspaceID string, class mcpapi.SchedulerCla
 		"workspace_id": workspaceID,
 		"class":        class,
 	})
-}
-
-// executeVerify runs verify_run in two scheduler phases: the canonical
-// document refresh and stager recovery hold the workspace lane, then the
-// pipeline itself runs as an external job without blocking the workspace.
-func (d *directWorkspaces) executeVerify(ctx context.Context, requestID, workspaceID string, arguments map[string]any) map[string]any {
-	if err := ctx.Err(); err != nil {
-		return mcpapi.Envelope(requestID, nil, "failed", "request_cancelled", err.Error(), map[string]any{})
-	}
-	workspace := d.registry.Lookup(workspacecore.ID(workspaceID))
-	if workspace == nil {
-		return mcpapi.WorkspaceNotFound(requestID, workspaceID)
-	}
-	releaseLane, err := d.scheduler.acquire(ctx, workspaceID, mcpapi.ClassCanonicalWrite)
-	if err != nil {
-		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassCanonicalWrite, err)
-	}
-	job, early := d.handlers.VerifyPrepare(ctx, requestID, workspace, arguments)
-	releaseLane()
-	if early != nil {
-		return early
-	}
-	releaseJob, err := d.scheduler.acquire(ctx, workspaceID, mcpapi.ClassExternalJob)
-	if err != nil {
-		return schedulerCancelled(requestID, workspaceID, mcpapi.ClassExternalJob, err)
-	}
-	defer releaseJob()
-	return d.handlers.VerifyRun(ctx, requestID, workspace, job)
 }
 
 func directStateDir() (string, error) {

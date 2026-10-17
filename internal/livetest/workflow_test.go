@@ -150,16 +150,11 @@ func TestTheWholeWorkflowFromOpenToApplied(t *testing.T) {
 	}
 	plan, revision, _ = preparedPlan(t, prepared)
 
-	// What it means, then what the tests say, then the exact revision applied.
+	// What it means, then the exact revision applied.
 	meaning := semanticSummary(t, session, workspaceID, "workflow-semantic", plan)
 	if len(anySlice(meaning["files"])) != 3 {
 		t.Fatalf("the summary does not index every affected file: %#v", meaning["files"])
 	}
-	verified := call(t, session, "verify_run", map[string]any{
-		"workspace_id": workspaceID, "idempotency_key": "workflow-verify",
-		"stages": []any{"parser"}, "revision_or_transaction": "current",
-	})
-	t.Logf("verify: %s/%v %s", outcome(verified), verified["code"], summary(verified))
 
 	applied := planAction(t, session, workspaceID, "workflow-apply", map[string]any{
 		"action": "apply", "plan_id": planID, "plan_revision": plan["plan_revision"],

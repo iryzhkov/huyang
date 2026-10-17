@@ -4,8 +4,8 @@ Huyang is a local transactional semantic workspace for coding agents. It combine
 long-lived Go service with isolated Neovim providers so MCP clients can navigate, edit,
 verify, and recover changes against an explicit workspace revision.
 
-The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (15
-tools), `edit` (13 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
+The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (14
+tools), `edit` (12 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
 `experimental`, is `full` plus the input shapes still being designed; a caller asks for it
 by name. There is no legacy or compatibility surface: the embedded Neovim provider is the
 only backend and the tools below are the only tools.
@@ -16,7 +16,7 @@ only backend and the tools below are the only tools.
 - Semantic handles backed by Tree-sitter, LSP, and exact text anchors.
 - Isolated multi-operation preparation with formatter, diagnostic, check, and test evidence.
 - Journaled canonical apply, crash recovery, and compensating undo.
-- Bounded impact analysis and a strict distinction between affected and full test coverage.
+- Bounded impact analysis, and the full configured test suite as a gate on every trusted preparation.
 - A native text path that still works when Git, Neovim, parsers, or language servers are absent.
 
 The service owns durability, policy, scheduling, sandboxes, and recovery. A small embedded
@@ -34,7 +34,7 @@ an agent's instructions.
 
 ## Tools
 
-The `full` profile lists all 15 tools in this order. `edit` and `orient` are fixed subsets
+The `full` profile lists all 14 tools in this order. `edit` and `orient` are fixed subsets
 of it.
 
 Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
@@ -44,14 +44,14 @@ Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
 
 Editing and verification, in `full` and `edit`:
 
-- `code_actions`, `edit_apply`, `change_plan`, `verify_run`, `revision_diff`.
+- `code_actions`, `edit_apply`, `change_plan`, `revision_diff`.
 
 Language-server administration, in `full` (and `experimental`) only. A session on the
 default `edit` profile does not see these two tools:
 
 - `language_server_status`, `language_server_setup`.
 
-That gives 15 tools in `full`, 8 in `orient`, and 13 in `edit`. The service refuses to start
+That gives 14 tools in `full`, 8 in `orient`, and 12 in `edit`. The service refuses to start
 if the registered catalog differs from those counts, and every tool declares the scheduler
 class it runs under. The `experimental` profile adds `execution_graph` and `path_explain`
 and a few experimental arguments to `full`; it is not a contract. The contract is described
@@ -60,8 +60,10 @@ in [docs/plans/huyang-tools-v1alpha1.md](docs/plans/huyang-tools-v1alpha1.md).
 The debugger tools (`debug_session`, `debug_breakpoints`, `debug_control`, `debug_inspect`),
 the `debug` and `debugger` profiles, the `/mcp/debug` route and the nvim-dap dependency were
 removed on 2026-10-17, together with `file_range` targets and the `include_ranges` search
-option. Both are breaking changes inside `v1alpha1`; see
-[the contract's change log](docs/plans/huyang-tools-v1alpha1.md#change-log).
+option. `verify_run`, its affected-test selection and the `--external-job-quota` flag were
+removed the same day: run builds and tests in the shell, and `change_plan` prepare still
+runs a trusted root's commands against its sandbox. These are breaking changes inside
+`v1alpha1`; see [the contract's change log](docs/plans/huyang-tools-v1alpha1.md#change-log).
 
 ## Requirements
 
@@ -121,7 +123,6 @@ Start the long-lived service:
 | `--provider-quota N` | 4 | Maximum concurrent provider-backed jobs. |
 | `--max-providers N` | 4 | Maximum live providers, including canonical and sandbox providers. |
 | `--max-language-servers N` | 4 | Maximum language-server clients per provider (at most 16 across the default pool). |
-| `--external-job-quota N` | 2 | Maximum concurrent external jobs (repository checks and tests). |
 
 The process limits are independent of job quotas. Zero selects the bounded default; negative
 limits are refused. Opening and closing processes count toward capacity. When the provider
@@ -195,8 +196,8 @@ Nothing is defaulted when the connection announced no directory (HTTP, an older 
 when the client was started outside any working tree (Codex starts every MCP server in the
 home directory), or when it was started in a subdirectory, where a relative path would
 mean one file to the agent and another to the workspace. An explicit `workspace_id` or
-absolute `root` always wins. **Mutations are never defaulted:** `edit_apply`,
-`change_plan` and `verify_run` need the workspace named, because their
+absolute `root` always wins. **Mutations are never defaulted:** `edit_apply` and
+`change_plan` need the workspace named, because their
 guards check content, not intent, and an edit meant for another repository could land in
 this one. A replay key is built after a root is adopted into a `workspace_id`, so a retry
 that names the same workspace by `"."`, by its absolute root or by its ID replays the
@@ -336,9 +337,9 @@ is a named constant in the code:
 | `plans/<workspace>/<plan>.json` | One plan record per file, format version 2 (`planRecordVersion`). The version 1 layout, one file per workspace holding every plan, is read on open, split into per-plan files, and removed. | terminal plans: newest 200 kept (`planRetainCount`), dropped after 30 days (`planRetainAge`), bulky payloads stripped after 1 hour (`planCompactAge`); events per plan: first 8 and last 56 (`planEventsHead`, `planEventsTail`) |
 | `commit-journals/<workspace>/` | Commit journals, format version 1 (`commitJournalVersion`). Prepared, applying, and recovery-required journals are never collected. | completed journals dropped after 7 days (`commitJournalRetention`), newest 64 kept beyond that (`commitJournalRetainCount`) |
 | `diagnostics/<workspace>.json` | Diagnostic ledger, format version 2 (`diagnosticStateVersion`); a version 1 ledger is migrated on open, and a version-1 binary refuses the upgraded file. Findings whose document changed are marked `stale`. A finding is identified by what it says (producer, document, severity, code, source, message, and its occurrence among identical ones in that document) rather than by where it sits, so an edit above an untouched warning moves it without retiring it and announcing an identical one; the reported range follows the latest observation. | inactive items dropped after 24 hours (`diagnosticRetentionWindow`), 1000 inactive items (`maxInactiveDiagnosticItems`), 500 unreferenced evidence records (`maxUnreferencedDiagnosticEvidence`), 1000 notices (`maxDiagnosticNotices`) |
-| `test-history/<workspace>.json` | Revision-keyed test history, format version 1 (`testHistoryVersion`). | last 1000 entries |
+| `test-history/<workspace>.json` | No longer written: it fed the affected-test selection of the removed `verify_run`. A state directory from an earlier build may still hold it. | removed with the rest of a forgotten workspace's state |
 | `sandboxes/sandbox-*/` | Isolated preparation trees, each with an `owner.json` marker (version 1). Sandboxes whose plan is no longer referenced are removed on service start. | one per prepared plan |
-| `command-cache/` | The toolchain caches every verification command shares, so a repeated `verify_run` neither recompiles nor re-downloads: `xdg/` is the cache home for everything that follows the XDG specification, and `go-build/`, `golangci-lint/`, `ccache/`, `sccache/`, `zig/`, `npm/`, `yarn/`, `pip/`, `uv/`, `deno/` and `composer/` cover the toolchains that keep a cache elsewhere. HOME stays throwaway per run, and package or registry homes still come from the user. | removed whole when it passes 4 GiB (`commandCacheMaxBytes`) or when nothing has used it for 30 days (`commandCacheMaxAge`), checked at most daily (`commandCachePruneInterval`) at service start; every entry is reproducible, so deleting the directory only costs a cold build. `HUYANG_COMMAND_CACHE=off` gives each run a throwaway cache instead |
+| `command-cache/` | The toolchain caches every verification command shares, so a repeated preparation neither recompiles nor re-downloads: `xdg/` is the cache home for everything that follows the XDG specification, and `go-build/`, `golangci-lint/`, `ccache/`, `sccache/`, `zig/`, `npm/`, `yarn/`, `pip/`, `uv/`, `deno/` and `composer/` cover the toolchains that keep a cache elsewhere. HOME stays throwaway per run, and package or registry homes still come from the user. | removed whole when it passes 4 GiB (`commandCacheMaxBytes`) or when nothing has used it for 30 days (`commandCacheMaxAge`), checked at most daily (`commandCachePruneInterval`) at service start; every entry is reproducible, so deleting the directory only costs a cold build. `HUYANG_COMMAND_CACHE=off` gives each run a throwaway cache instead |
 | `http-token` | Bearer token for `--http` and `--pprof`. | one file |
 
 The per-workspace stores (`receipts/`, `diagnostics/`, `plans/`, `commit-journals/`,
@@ -410,7 +411,9 @@ client that announces nothing is still spooled under the servicing process.
 ## Trust and repository commands
 
 Huyang preserves bytes by default and never runs a discovered repository command merely
-because it exists. Checked-in `.huyang.toml` declares formatter/check/test stages; without
+because it exists. Commands run only inside `change_plan` prepare, against the staged
+sandbox; builds and tests of the canonical tree belong to the agent's shell. Checked-in
+`.huyang.toml` declares formatter/check/test stages; without
 one, the commands are detected from the repository (a Makefile's `test`, `lint` and
 `check` targets, `go.mod`, a Python project's declared pytest and ruff through its own
 `.venv`, `uv.lock` or `poetry.lock` environment, a `package.json` test script). User
@@ -426,8 +429,9 @@ huyang trust --config PATH ...     # any of the above against another policy fil
 
 `huyang trust` edits the file textually, keeps its comments, validates the result before
 writing and creates the file with mode 0600 when absent; the running service reads the
-policy on the next `verify_run`. Verification always reports its exact revision, scope,
-environment, writes, and coverage.
+policy on the next `change_plan` prepare. A preparation always reports each stage's exact
+revision, scope, environment, writes, and coverage; in a trusted root a failing check or
+test fails it.
 
 ## File lifecycle and Git
 
@@ -467,7 +471,7 @@ Never delete a journal to force progress.
 
 The MCP API (`huyang.workspace/v1alpha1`), the provider-kernel protocol (version 2), and
 every durable record format (registry 2, plan record 2, receipts 1, commit journal 1,
-diagnostics 2, test history 1, sandbox marker 1) carry explicit versions. The service refuses
+diagnostics 2, sandbox marker 1) carry explicit versions. The service refuses
 an unknown version rather than guessing. No Agent99 executable, interactive UI, or harness
 endpoint is shipped, and no compatibility profile exists. Tool removals and input-shape cuts
 inside `v1alpha1` are deliberate, documented breaking changes; the frozen catalog fixtures

@@ -60,14 +60,13 @@ func TestModernEditSpoolsDiagnosticStateOnRepeatedProvisionalResults(t *testing.
 			if len(next) != 2 {
 				t.Fatalf("missing initial recovery: %#v", next)
 			}
-			recovery := next[1].(map[string]any)
-			if !reflect.DeepEqual(recovery["stages"], []any{"diagnostics"}) || recovery["revision_or_transaction"] != data["revision"] {
-				t.Fatalf("invalid exact-revision recovery: %#v", recovery)
+			if recovery := next[1].(map[string]any); recovery["tool"] != "diagnostics" {
+				t.Fatalf("invalid diagnostic recovery: %#v", recovery)
 			}
 		} else {
 			for _, step := range next {
 				tool := step.(map[string]any)["tool"]
-				if tool == "verify_run" || tool == "language_server_status" || tool == "workspace_inspect" {
+				if tool == "diagnostics" || tool == "language_server_status" || tool == "workspace_inspect" {
 					t.Fatalf("repeated diagnostic recovery: %#v", next)
 				}
 			}

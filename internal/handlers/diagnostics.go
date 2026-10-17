@@ -48,7 +48,6 @@ func diagnostics(requestID string, workspace *workspacecore.Workspace, arguments
 	if outcome == "unavailable" {
 		result["next"] = []any{
 			map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status"},
-			map[string]any{"tool": "verify_run", "action": "run_configured_diagnostics_for_exact_revision"},
 		}
 	}
 	return result
@@ -65,7 +64,6 @@ func emptyDiagnostics(requestID string, workspace *workspacecore.Workspace, repo
 	result["warnings"] = []string{"No diagnostic evidence has been recorded for this workspace; an absence of findings here is not a clean bill of health."}
 	result["evidence"] = map[string]any{"ids": []string{}, "truncated": false}
 	result["next"] = []any{
-		map[string]any{"tool": "verify_run", "action": "run_configured_diagnostics_for_exact_revision", "stages": []string{"diagnostics"}, "revision_or_transaction": "current"},
 		map[string]any{"tool": "workspace_inspect", "action": "inspect_provider_and_pipeline_status", "view": "status"},
 	}
 	return result

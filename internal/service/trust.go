@@ -10,8 +10,8 @@ import (
 )
 
 // runTrust is the huyang trust subcommand: administration of the user
-// policy that lets verify_run and prepared plans execute a repository's
-// commands. It is a CLI and not a tool, because trust is configuration.
+// policy that lets change_plan prepare execute a repository's commands in
+// its sandbox. It is a CLI and not a tool, because trust is configuration.
 //
 //	huyang trust <root>            add a root (stored absolute, symlink-resolved)
 //	huyang trust --list            print the trusted roots
@@ -60,7 +60,7 @@ func runTrust(arguments []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "trusted %s in %s; the running service picks it up on the next verify_run\n", resolved, path)
+		fmt.Fprintf(stdout, "trusted %s in %s; the running service picks it up on the next change_plan prepare\n", resolved, path)
 		return nil
 	}
 }

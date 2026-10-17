@@ -210,38 +210,6 @@ func (s *SandboxStager) SetPreparedRevision(revision string) {
 	s.verification.Revision = revision
 }
 
-func (s *SandboxStager) Verify(ctx context.Context, request workspacecore.VerificationRequest) (workspacecore.VerificationResult, error) {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.MarkUsed()
-	sandbox, prepared, done := s.snapshot()
-	if sandbox == nil || done {
-		return workspacecore.VerificationResult{}, workspacecore.Coded(workspacecore.CodeProviderUnavailable, errors.New("prepared sandbox is not available"))
-	}
-	policy, err := workspacecore.LoadPipelinePolicyForTrustedRoot(sandbox.Tree, s.workspace.Identity().Root, "")
-	if err != nil {
-		return workspacecore.VerificationResult{}, err
-	}
-	var diagnosticReport *workspacecore.DiagnosticReport
-	request.DiagnosticVerifier = func(verifyCtx context.Context, revision string, files []workspacecore.PlanStageFile) (workspacecore.VerificationStage, error) {
-		report, evidenceErr := RecordStagedDiagnostics(verifyCtx, s.workspace, s.provider, files, revision, s.planID)
-		diagnosticReport = &report
-		return DiagnosticVerificationStage(revision, report), evidenceErr
-	}
-	result, err := workspacecore.RunVerificationPipeline(ctx, sandbox, policy, request, prepared.Files)
-	if err == nil && diagnosticReport != nil {
-		if report, evidenceErr := CorroborateStagedWithProjectCheck(s.workspace, request.Revision, s.planID, result.Stages, *diagnosticReport); evidenceErr == nil {
-			ReplaceDiagnosticVerificationStage(&result, request.Revision, report)
-		}
-	}
-	if len(result.Stages) > 0 {
-		s.stateMu.Lock()
-		s.verification.Stages = append(s.verification.Stages, result.Stages...)
-		s.stateMu.Unlock()
-	}
-	return result, err
-}
-
 // Stage prepares the plan in three phases: the operations are written into
 // a fresh sandbox through a disposable provider transaction, the
 // configured formatter and pipeline transform the staged files, and a
@@ -432,7 +400,7 @@ func (s *SandboxStager) finished() bool {
 }
 
 // release finishes the provider transaction, closes the provider and removes
-// the sandbox. It runs under opMu so it cannot interleave with Stage or Verify.
+// the sandbox. It runs under opMu so it cannot interleave with Stage.
 func (s *SandboxStager) release(ctx context.Context, planID string, commit bool) error {
 	s.stateMu.Lock()
 	done, stager, backend, sandbox := s.done, s.stager, s.provider, s.sandbox
@@ -464,17 +432,6 @@ func (s *SandboxStager) release(ctx context.Context, planID string, commit bool)
 	return result
 }
 
-func ReplaceDiagnosticVerificationStage(result *workspacecore.VerificationResult, revision string, report workspacecore.DiagnosticReport) {
-	replacement := DiagnosticVerificationStage(revision, report)
-	for index := range result.Stages {
-		if result.Stages[index].Stage == "diagnostics" {
-			result.Stages[index] = replacement
-			return
-		}
-	}
-	result.Stages = append(result.Stages, replacement)
-}
-
 func (s *SandboxStager) Commit(ctx context.Context, planID string) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -492,39 +449,6 @@ func (s *SandboxStager) Rollback(ctx context.Context, planID string) error {
 type stagerKey struct {
 	workspace workspacecore.ID
 	planID    string
-}
-
-// preparedStager returns the stager of one workspace whose plan ID or prepared
-// revision matches reference. The map is snapshotted under p.mu and
-// inspected after it is released; PreparedRequest only takes the stager's
-// short state lock, so a stager inside a long Stage never blocks the lookup.
-func (p *Pool) PreparedStager(workspace *workspacecore.Workspace, reference string) *SandboxStager {
-	workspaceID := workspace.Identity().ID
-	p.mu.Lock()
-	candidates := make([]*SandboxStager, 0, len(p.stagers))
-	if exact := p.stagers[stagerKey{workspace: workspaceID, planID: reference}]; exact != nil {
-		candidates = append(candidates, exact)
-	}
-	for key, candidate := range p.stagers {
-		if key.workspace == workspaceID && key.planID != reference {
-			candidates = append(candidates, candidate)
-		}
-	}
-	p.mu.Unlock()
-	for _, candidate := range candidates {
-		if candidate.workspace.Identity().ID != workspaceID {
-			continue
-		}
-		if candidate.planID == reference {
-			candidate.MarkUsed()
-			return candidate
-		}
-		if _, result, available := candidate.PreparedRequest(); available && result.Revision == reference {
-			candidate.MarkUsed()
-			return candidate
-		}
-	}
-	return nil
 }
 
 func (p *Pool) PlanStager(workspace *workspacecore.Workspace, planID string, planRevision uint64, create bool) (workspacecore.PlanStager, error) {

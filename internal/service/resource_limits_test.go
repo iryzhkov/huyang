@@ -76,7 +76,6 @@ func TestServiceRejectsNegativeProcessLimits(t *testing.T) {
 		limits.SocketPath = "unused"
 		limits.StateDir = t.TempDir()
 		limits.ProviderQuota = 4
-		limits.ExternalJobQuota = 2
 		if _, err := newHuyangService(limits); err == nil {
 			t.Fatal("negative process limit accepted")
 		}

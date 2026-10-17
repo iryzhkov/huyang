@@ -391,7 +391,7 @@ func compactPlanRecord(plan workspacecore.PlanRecord) map[string]any {
 }
 
 // compactPreparation renders a preparation with its verification stages
-// compacted the way verify_run compacts them. A prepared plan carried the
+// compacted to the record an agent acts on. A prepared plan carried the
 // verbose record of every stage -- the command argv, the mode, the started
 // revision and a coverage object of zeros for each -- which was two
 // thirds of a prepare reply and none of it the answer to "did it prepare".
@@ -449,7 +449,7 @@ func CompactTextChange(change workspacecore.TextChange) map[string]any {
 }
 
 // VerificationListLimit and VerificationOutputLimit bound the lists and the
-// command output a compacted verification result carries per stage.
+// command output a compacted verification stage carries.
 const (
 	VerificationListLimit   = 20
 	VerificationOutputLimit = 4096
@@ -460,77 +460,6 @@ func boundedVerificationStrings(values []string) ([]string, bool) {
 		return NonNilStrings(values), false
 	}
 	return append([]string(nil), values[:VerificationListLimit]...), true
-}
-
-func compactVerificationImpact(graph *workspacecore.ImpactGraph) (map[string]any, bool) {
-	if graph == nil {
-		return nil, false
-	}
-	changed, changedTruncated := boundedVerificationStrings(graph.Changed)
-	affected, affectedTruncated := boundedVerificationStrings(graph.Affected)
-	untested, untestedTruncated := boundedVerificationStrings(graph.Untested)
-	riskKinds := map[string]int{}
-	for _, risk := range graph.Risks {
-		riskKinds[risk.Kind]++
-	}
-	truncated := changedTruncated || affectedTruncated || untestedTruncated ||
-		len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Risks) > 0
-	return map[string]any{
-		"revision": graph.Revision,
-		// Which analysis this answer came from and who contributed to it: an
-		// impact claim is only as good as the snapshot beneath it, and a
-		// caller cannot weigh it without knowing whether a language server
-		// was one of the voices.
-		"snapshot": graph.Snapshot, "producers": NonNilStrings(graph.Producers),
-		"changed": changed, "changed_count": len(graph.Changed), "changed_truncated": changedTruncated,
-		"affected": affected, "affected_count": len(graph.Affected), "affected_truncated": affectedTruncated,
-		"affected_without_tests": untested, "affected_without_tests_count": len(graph.Untested),
-		"affected_without_tests_truncated": untestedTruncated,
-		"node_count":                       len(graph.Nodes), "edge_count": len(graph.Edges),
-		"risk_count": len(graph.Risks), "risk_kind_counts": riskKinds,
-		"coverage": graph.Coverage, "adapters": NonNilStrings(graph.Adapters),
-		"variants_included": NonNilStrings(graph.Included), "variants_omitted": NonNilStrings(graph.Omitted),
-		"recommend_full": graph.RecommendFull, "details_truncated": truncated,
-	}, truncated
-}
-
-// CompactVerificationResult bounds every list and output a verification
-// result carries; the second result is the sorted set of evidence IDs
-// across its stages.
-func CompactVerificationResult(result workspacecore.VerificationResult, verbose bool) (map[string]any, []string) {
-	compacted := map[string]any{"revision": result.Revision}
-	var evidenceIDs []string
-	detailsTruncated := false
-	stages := make([]any, 0, len(result.Stages))
-	for _, stage := range result.Stages {
-		stageData, truncated := compactVerificationStage(stage, verbose)
-		detailsTruncated = detailsTruncated || truncated
-		stages = append(stages, stageData)
-		evidenceIDs = append(evidenceIDs, stage.EvidenceIDs...)
-	}
-	compacted["stages"] = stages
-	compacted["stage_count"] = len(result.Stages)
-	if impact, truncated := compactVerificationImpact(result.Impact); impact != nil {
-		compacted["impact"] = impact
-		detailsTruncated = detailsTruncated || truncated
-	}
-	if result.Targeted != nil {
-		targeted, truncated := compactTargetedTests(result.Targeted)
-		compacted["targeted_tests"] = targeted
-		detailsTruncated = detailsTruncated || truncated
-	}
-	if len(result.ToolDelta) > 0 {
-		compacted["tool_delta"] = compactToolDelta(result.ToolDelta)
-		compacted["tool_delta_count"] = len(result.ToolDelta)
-		compacted["tool_delta_truncated"] = len(result.ToolDelta) > VerificationListLimit
-		detailsTruncated = true
-	}
-	if result.FullTestGate != "" {
-		compacted["full_test_gate"] = result.FullTestGate
-	}
-	compacted["details_truncated"] = detailsTruncated
-	sort.Strings(evidenceIDs)
-	return compacted, NonNilStrings(UniqueStrings(evidenceIDs))
 }
 
 // compactVerificationStage bounds one stage's output and lists; the second
@@ -544,8 +473,7 @@ func compactVerificationStage(stage workspacecore.VerificationStage, verbose boo
 	scope, scopeTruncated := boundedVerificationStrings(stage.Scope)
 	writes, writesTruncated := boundedVerificationStrings(stage.Writes)
 	executed, executedTruncated := boundedVerificationStrings(stage.ExecutedTests)
-	selected, selectedTruncated := compactSelectedTests(stage.SelectedTests)
-	truncated := outputTruncated || scopeTruncated || writesTruncated || executedTruncated || selectedTruncated
+	truncated := outputTruncated || scopeTruncated || writesTruncated || executedTruncated
 	if !verbose {
 		// The default stage record is what an agent acts on: the verdict,
 		// the output when the stage did not pass, why it was skipped, and
@@ -569,10 +497,10 @@ func compactVerificationStage(stage workspacecore.VerificationStage, verbose boo
 			record["skipped"] = stage.Coverage.Skipped
 		}
 		record["test_scope"], record["test_verdict"] = stage.TestScope, stage.TestVerdict
-		record["executed_test_count"], record["selected_test_count"] = len(stage.ExecutedTests), len(stage.SelectedTests)
+		record["executed_test_count"] = len(stage.ExecutedTests)
 		record["writes"], record["writes_count"] = writes, len(stage.Writes)
-		// The affected scope says which files the stage covered; it is
-		// short and it is the answer to "did this check my change".
+		// The scope says which files the stage covered; it is short and it
+		// is the answer to "did this check my change".
 		record["scope"], record["scope_count"] = scope, len(stage.Scope)
 		return pruneEmpty(record), outputTruncated || scopeTruncated || writesTruncated
 	}
@@ -584,9 +512,7 @@ func compactVerificationStage(stage workspacecore.VerificationStage, verbose boo
 		"writes": writes, "writes_count": len(stage.Writes), "writes_truncated": writesTruncated,
 		"output": output, "output_bytes": len(stage.Output), "output_truncated": outputTruncated,
 		"test_scope": stage.TestScope, "test_verdict": stage.TestVerdict,
-		"selected_tests": selected, "selected_test_count": len(stage.SelectedTests),
-		"selected_tests_truncated": selectedTruncated,
-		"executed_tests":           executed, "executed_test_count": len(stage.ExecutedTests),
+		"executed_tests": executed, "executed_test_count": len(stage.ExecutedTests),
 		"executed_tests_truncated": executedTruncated,
 	}), truncated
 }
@@ -730,49 +656,4 @@ func pruneEmpty(record map[string]any) map[string]any {
 		}
 	}
 	return record
-}
-
-// compactSelectedTests keeps the first VerificationListLimit selected
-// tests with their reasons and variants.
-func compactSelectedTests(tests []workspacecore.SelectedTest) ([]any, bool) {
-	kept := min(len(tests), VerificationListLimit)
-	selected := make([]any, 0, kept)
-	for _, test := range tests[:kept] {
-		selected = append(selected, map[string]any{
-			"name": test.Name, "reasons": NonNilStrings(test.Reasons), "variants": NonNilStrings(test.Variants),
-		})
-	}
-	return selected, len(tests) > VerificationListLimit
-}
-
-func compactTargetedTests(targeted *workspacecore.TargetedTestResult) (map[string]any, bool) {
-	selected, selectedTruncated := compactSelectedTests(targeted.Selected)
-	executed, executedTruncated := boundedVerificationStrings(targeted.Executed)
-	truncated := selectedTruncated || executedTruncated || len(targeted.Graph.Nodes) > 0 ||
-		len(targeted.Graph.Edges) > 0 || len(targeted.Graph.Risks) > 0
-	return map[string]any{
-		"status": targeted.Status, "selected": selected,
-		"selected_count": len(targeted.Selected), "selected_truncated": selectedTruncated,
-		"executed": executed, "executed_count": len(targeted.Executed),
-		"executed_truncated": executedTruncated,
-		"graph_revision":     targeted.Graph.Revision,
-	}, truncated
-}
-
-// compactToolDelta describes each tool-written path by its kinds, modes and
-// sizes, never its bytes, and keeps the first VerificationListLimit.
-func compactToolDelta(deltas []workspacecore.ToolDelta) []any {
-	kept := min(len(deltas), VerificationListLimit)
-	compact := make([]any, 0, kept)
-	for _, delta := range deltas[:kept] {
-		compact = append(compact, map[string]any{
-			"path": delta.Path, "classification": delta.Classification,
-			"before_exists": delta.BeforeExists, "after_exists": delta.AfterExists,
-			"before_kind": delta.BeforeKind, "after_kind": delta.AfterKind,
-			"before_mode": delta.BeforeMode, "after_mode": delta.AfterMode,
-			"before_target": delta.BeforeTarget, "after_target": delta.AfterTarget,
-			"before_bytes": len(delta.Before), "after_bytes": len(delta.After),
-		})
-	}
-	return compact
 }

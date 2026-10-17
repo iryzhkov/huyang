@@ -16,8 +16,8 @@
 //     startup recovery and compensation (commit.go, recovery.go, prepare.go).
 //   - Sandboxes: exact copies of the canonical tree in which prepared bytes are
 //     materialized and verified without touching canonical files (sandbox.go).
-//   - Pipeline policy: the trusted verification stages, their resource caps and the
-//     impact graph that selects affected tests (pipeline.go, impact.go).
+//   - Pipeline policy: the trusted verification stages change_plan prepare runs,
+//     their resource caps, and the impact graph (pipeline.go, impact.go).
 //   - Evidence: diagnostic evidence, coverage dimensions, confidence and the bounded
 //     notice stream that callers page through (evidence.go, errors.go).
 //

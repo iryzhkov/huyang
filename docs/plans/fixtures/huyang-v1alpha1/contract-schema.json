@@ -1,5 +1,5 @@
 {
-  "fixture_version": "huyang.tools/v1alpha1-m4",
+  "fixture_version": "huyang.tools/v1alpha1-m5",
   "catalogs": {
     "full": [
       "workspace_open",
@@ -12,7 +12,6 @@
       "code_actions",
       "edit_apply",
       "change_plan",
-      "verify_run",
       "revision_diff",
       "evidence_get",
       "language_server_status",
@@ -40,7 +39,6 @@
       "code_actions",
       "edit_apply",
       "change_plan",
-      "verify_run",
       "revision_diff"
     ]
   },
@@ -294,26 +292,6 @@
         "prepared_revision"
       ],
       "inline_prepare": true
-    },
-    "verify_run": {
-      "read_only": false,
-      "required": [
-        "workspace_id",
-        "idempotency_key",
-        "stages",
-        "revision_or_transaction"
-      ],
-      "stages": [
-        "format_gate",
-        "parser",
-        "diagnostics",
-        "check",
-        "tests"
-      ],
-      "test_scope": [
-        "affected",
-        "full"
-      ]
     },
     "revision_diff": {
       "read_only": true,

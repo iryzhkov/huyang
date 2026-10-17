@@ -26,7 +26,7 @@ func startTestHuyangService(t *testing.T, stateDir, socketPath, httpAddress stri
 	t.Helper()
 	service, err := newHuyangService(serviceConfig{
 		SocketPath: socketPath, StateDir: stateDir, HTTPAddress: httpAddress,
-		ProviderQuota: 2, ExternalJobQuota: 1,
+		ProviderQuota: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -318,8 +318,8 @@ func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 13 {
-		t.Fatalf("default adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
+	if len(listed.Tools) != 12 {
+		t.Fatalf("default adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
 	}
 	_ = session.Close()
 	_ = toAdapterWriter.Close()
@@ -372,8 +372,8 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after service restart: %v", err)
 	}
-	if len(listed.Tools) != 13 {
-		t.Fatalf("reconnected adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
+	if len(listed.Tools) != 12 {
+		t.Fatalf("reconnected adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
 	}
 
 	stopSecond()
@@ -382,8 +382,8 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after second service restart: %v", err)
 	}
-	if len(listed.Tools) != 13 {
-		t.Fatalf("twice-reconnected adapter catalog = %d tools, want the 13 of the edit profile", len(listed.Tools))
+	if len(listed.Tools) != 12 {
+		t.Fatalf("twice-reconnected adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
 	}
 }
 
@@ -403,7 +403,7 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", response.StatusCode)
 	}
 
-	for route, expected := range map[string]int{"/mcp": 15, "/mcp/orient": 8, "/mcp/edit": 13} {
+	for route, expected := range map[string]int{"/mcp": 14, "/mcp/orient": 8, "/mcp/edit": 12} {
 		httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 		client := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
 		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
@@ -427,7 +427,7 @@ func TestServiceRejectsNonLoopbackHTTPAndProtectsSocketPath(t *testing.T) {
 	base := t.TempDir()
 	config := serviceConfig{
 		SocketPath: filepath.Join(base, "control.sock"), StateDir: filepath.Join(base, "state"),
-		HTTPAddress: "0.0.0.0:0", ProviderQuota: 1, ExternalJobQuota: 1,
+		HTTPAddress: "0.0.0.0:0", ProviderQuota: 1,
 	}
 	if _, err := newHuyangService(config); err == nil {
 		t.Fatal("non-loopback HTTP address was accepted")

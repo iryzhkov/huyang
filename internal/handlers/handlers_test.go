@@ -68,9 +68,6 @@ func (r *memoryRegistry) PersistIdentity(workspacecore.ID) error { return nil }
 type noProvenance struct{}
 
 func (noProvenance) RecordedRevisionDiffs(string, uint64, uint64) []RecordedRevisionDiff { return nil }
-func (noProvenance) CanonicalChangedPaths(workspacecore.ID, uint64) ([]string, error) {
-	return nil, fmt.Errorf("changed_file_evidence_incomplete: no receipts")
-}
 
 // fixedFactory hands out one provider for every open.
 type fixedFactory struct{ backend provider.Provider }

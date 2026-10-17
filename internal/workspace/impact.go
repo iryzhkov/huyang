@@ -1,19 +1,12 @@
 package workspace
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 )
-
-const testHistoryVersion = 1
 
 type VariantPolicy struct {
 	Name     string   `toml:"name" json:"name"`
@@ -70,35 +63,6 @@ type ImpactGraph struct {
 	Included      []string     `json:"variants_included,omitempty"`
 	Omitted       []string     `json:"variants_omitted,omitempty"`
 	RecommendFull bool         `json:"recommend_full"`
-}
-
-type SelectedTest struct {
-	Name     string   `json:"name"`
-	Command  []string `json:"command"`
-	Reasons  []string `json:"reasons"`
-	Variants []string `json:"variants,omitempty"`
-}
-
-type TargetedTestResult struct {
-	Status   string         `json:"status"`
-	Selected []SelectedTest `json:"selected,omitempty"`
-	Executed []string       `json:"executed,omitempty"`
-	Graph    ImpactGraph    `json:"graph"`
-}
-
-type TestHistoryEntry struct {
-	Revision   string   `json:"revision"`
-	Scope      string   `json:"scope"`
-	Test       string   `json:"test"`
-	Variants   []string `json:"variants,omitempty"`
-	Status     string   `json:"status"`
-	DurationMS int64    `json:"duration_ms"`
-	RecordedAt string   `json:"recorded_at"`
-}
-
-type testHistoryState struct {
-	Version int                `json:"version"`
-	Entries []TestHistoryEntry `json:"entries"`
 }
 
 var (
@@ -247,163 +211,6 @@ func untestedAffected(affected []string, sources map[string]impactSource) []stri
 		}
 	}
 	return untested
-}
-
-func SelectAffectedTests(graph ImpactGraph, tests []CommandPolicy, history []TestHistoryEntry) []SelectedTest {
-	var selected []SelectedTest
-	for index, test := range tests {
-		reasons := []string{}
-		for _, pattern := range test.Covers {
-			for _, path := range graph.Affected {
-				if pathPattern(pattern, path) {
-					reasons = append(reasons, "affected_package")
-					break
-				}
-			}
-		}
-		for _, variant := range test.Variants {
-			if containsString(graph.Included, variant) {
-				reasons = append(reasons, "configured_variant")
-			}
-		}
-		if test.Required {
-			reasons = append(reasons, "configured_required_suite")
-		}
-		for _, prior := range history {
-			if prior.Test == test.Name && prior.Status == string(VerificationFailed) {
-				reasons = append(reasons, "prior_failure")
-				break
-			}
-		}
-		if len(test.Covers) == 0 && len(test.Variants) == 0 {
-			for _, path := range graph.Affected {
-				if isTestPath(path) {
-					reasons = append(reasons, "colocated_test")
-					break
-				}
-			}
-		}
-		if len(reasons) == 0 {
-			continue
-		}
-		name := test.Name
-		if name == "" {
-			name = "test_" + strconv.Itoa(index+1)
-		}
-		selected = append(selected, SelectedTest{Name: name, Command: append([]string(nil), test.Command...), Reasons: uniqueSorted(reasons), Variants: append([]string(nil), test.Variants...)})
-	}
-	return selected
-}
-
-func runAffectedTests(ctx context.Context, sandbox *Sandbox, policy PipelinePolicy, request VerificationRequest, affected []string) ([]VerificationStage, *TargetedTestResult, error) {
-	// The impact model is now derived from a snapshot: the import reader is
-	// one contributor to it, and the graph carries the snapshot it came from
-	// so a later answer can say which analysis it trusted.
-	_, graph, err := AnalyzeImpact(ctx, AnalysisRequest{
-		Key: AnalysisKey{
-			WorkspaceID: request.WorkspaceID, Epoch: request.ProviderEpoch, Revision: request.Revision,
-			Profile: "impact/v1", ConfigHash: PipelineFingerprint(policy),
-		},
-		Root: sandbox.Tree, Changed: affected,
-	}, policy.Impact, policy.Variants, request.Contributors...)
-	if err != nil {
-		return nil, nil, err
-	}
-	priorHistory, err := readTestHistory(request.TestHistoryPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	selected := SelectAffectedTests(graph, policy.Tests, priorHistory)
-	targeted := &TargetedTestResult{Status: "unavailable", Selected: selected, Graph: graph}
-	if len(selected) == 0 {
-		stage := VerificationStage{
-			Stage: "tests", Mode: "check", StartedRevision: request.Revision, Exit: -1,
-			Status: VerificationSkipped, TestScope: "affected", TestVerdict: "affected_tests_unavailable",
-			Coverage: graph.Coverage,
-		}
-		stage.Coverage.Complete = false
-		stage.Coverage.Skipped = append(stage.Coverage.Skipped, "no_affected_test_association")
-		return []VerificationStage{stage}, targeted, nil
-	}
-	var stages []VerificationStage
-	var history []TestHistoryEntry
-	targeted.Status = "affected_tests_passed"
-	for _, test := range selected {
-		command := CommandPolicy{Name: test.Name, Command: test.Command}
-		stage, _, runErr := commandStage(ctx, sandbox.Tree, request.Revision, "tests", "check", command, policy, false)
-		stage.TestScope = "affected"
-		stage.SelectedTests = []SelectedTest{test}
-		stage.ExecutedTests = []string{test.Name}
-		stage.TestVerdict = "affected_tests_passed"
-		stage.Coverage = graph.Coverage
-		stage.Coverage.Complete = graph.Coverage.Complete && len(graph.Untested) == 0 && len(graph.Omitted) == 0
-		stages = append(stages, stage)
-		targeted.Executed = append(targeted.Executed, test.Name)
-		history = append(history, historyEntry(request.Revision, "affected", test.Name, test.Variants, stage))
-		if runErr != nil {
-			targeted.Status = "affected_tests_failed"
-			stages[len(stages)-1].TestVerdict = targeted.Status
-			_ = recordTestHistory(request.TestHistoryPath, history)
-			return stages, targeted, runErr
-		}
-	}
-	if err := recordTestHistory(request.TestHistoryPath, history); err != nil {
-		return stages, targeted, err
-	}
-	return stages, targeted, nil
-}
-
-func readTestHistory(path string) ([]TestHistoryEntry, error) {
-	if path == "" {
-		return nil, nil
-	}
-	content, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var state testHistoryState
-	if err := json.Unmarshal(content, &state); err != nil {
-		return nil, err
-	}
-	if state.Version != testHistoryVersion {
-		return nil, errors.New("unsupported test history version")
-	}
-	return append([]TestHistoryEntry(nil), state.Entries...), nil
-}
-
-func recordTestHistory(path string, entries []TestHistoryEntry) error {
-	if path == "" || len(entries) == 0 {
-		return nil
-	}
-	var state testHistoryState
-	content, err := os.ReadFile(path)
-	if err == nil {
-		if decodeErr := json.Unmarshal(content, &state); decodeErr != nil {
-			return decodeErr
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	state.Version = testHistoryVersion
-	state.Entries = append(state.Entries, entries...)
-	if len(state.Entries) > 1000 {
-		state.Entries = state.Entries[len(state.Entries)-1000:]
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	content, err = json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWriteFile(path, append(content, '\n'), 0o600)
-}
-
-func historyEntry(revision, scope, name string, variants []string, stage VerificationStage) TestHistoryEntry {
-	return TestHistoryEntry{Revision: revision, Scope: scope, Test: name, Variants: append([]string(nil), variants...), Status: string(stage.Status), DurationMS: stage.DurationMS, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 }
 
 func impactLanguage(path string) string {

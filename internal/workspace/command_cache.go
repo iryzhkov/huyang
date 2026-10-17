@@ -15,7 +15,7 @@ import (
 // A repository command runs with a throwaway HOME so it can neither read the
 // user's configuration nor leave anything behind in it. Caches were part of
 // that throwaway home, which meant every stage compiled and downloaded from
-// scratch: one verify_run of a Go module paid a cold build twice, 7.7 s
+// scratch: one verification of a Go module paid a cold build twice, 7.7 s
 // against 0.06 s warm on the benchmark fixture, and the same is true of every
 // other toolchain that keeps a cache under the home or the cache directory.
 //
