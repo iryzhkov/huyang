@@ -90,18 +90,17 @@ def headless_init(case, gopls, nss=False):
     # JSON strings are valid Lua strings for these absolute Linux paths (reject exotic escapes).
     require(all("\\" not in part and "\n" not in part for part in cmd), "unsupported escaped job path")
     quoted = ", ".join(json.dumps(part) for part in cmd)
-    command = nss_control.producer_command(quoted) if nss else "{" + quoted + "}"
     text = ("vim.opt.swapfile = false\nvim.opt.shadafile = 'NONE'\n"
             + "local caps = vim.lsp.protocol.make_client_capabilities()\n"
             + "caps.textDocument.diagnostic = nil\n"
             + "caps.textDocument.publishDiagnostics.versionSupport = true\n"
-            + "vim.lsp.config('gopls', {\n  cmd = " + command + ",\n"
+            + "vim.lsp.config('gopls', {\n  cmd = {" + quoted + "},\n"
             + "  filetypes = {'go', 'gomod'}, root_markers = {'go.mod'}, capabilities = caps,\n"
             + "  before_init = function(params) params.capabilities.textDocument.diagnostic = nil end,\n"
             + "  settings = {gopls = {diagnosticsDelay = '0s'}},\n"
             + "})\nvim.lsp.enable('gopls')\n")
     path = case / "init.lua"
-    path.write_text((nss_control.PRODUCER_LUA if nss else "") + text)
+    path.write_text((nss_control.NATIVE_INIT_LUA if nss else "") + text)
     if nss:
         write_json(case / "nss-init.json", {"sha256": file_hash(path)})
     return path

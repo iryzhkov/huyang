@@ -506,24 +506,54 @@ The existing bin/nvim Python launcher stays free of NSS until its final native
 execve. It requires the pinned executable and owned, sealed headless init.
 Only that exec environment receives LD_PRELOAD, the two fixture variables and
 binding diagnostics. Service, model clients and tracer environments remain clean.
-The init uses Neovim's public function-form LSP cmd to remove all NSS_WRAPPER_*
-and loader controls during synchronous vim.lsp.rpc.start, then restores them in
-Nvim even on a spawn error. Its exact Python/wire/gopls argv, native RPC transport,
-capabilities, before_init and gopls settings remain the same. No shell, extra
-producer process or diagnostic producer is substituted. The relay checks its
-environment and memory maps before spawning the same gopls, so Go inherits no NSS
-control. This cleanup is source-inspected implementation, pending fresh runtime
-verification with the actual clients and independent tracer experiment.
+The first owned native-init prefix initializes the loaded wrapper, permanently
+unsets every NSS_WRAPPER_* and loader control, and checks that none remain.
+Nvim's LSP, git, rg and other later execs all inherit this clean environment.
+There is no restoration window or LSP-only cleanup. The original table-form
+Python/wire/gopls command, argv, native RPC transport, capabilities, before_init
+and gopls settings are preserved. The relay still checks its environment and
+memory maps before spawning the same gopls. No producer bytes are rewritten.
+
+The versioned [nss_wrapper 1.1.16 source](https://gitlab.com/cwrap/nss_wrapper/-/raw/nss_wrapper-1.1.16/src/nss_wrapper.c)
+makes initialization lazy: its constructor avoids nwrap_init. That function
+caches the passwd/group getenv pointers once; nss_wrapper_enabled checks those
+cached paths. The prefix explicitly initializes before unsetting, then requires
+enabled state and a full native getpwuid(0) result afterwards. A failed prefix
+exits Nvim immediately so startup cannot continue with an inherited preload.
+This uses the loaded wrapper through LuaJIT FFI and produces no substitute LSP
+process or diagnostics.
+
+In [glibc 2.41 setenv.c](https://raw.githubusercontent.com/bminor/glibc/glibc-2.41/stdlib/setenv.c),
+unsetenv shifts environment pointers without freeing their strings. In
+[rtld.c](https://raw.githubusercontent.com/bminor/glibc/glibc-2.41/elf/rtld.c),
+preloads and debug state are established at loader startup. Unsetting environment
+entries neither unloads the wrapper nor clears that internal binding-log state.
+[Neovim 0.12.5 env.c](https://raw.githubusercontent.com/neovim/neovim/v0.12.5/src/nvim/os/env.c)
+routes removal through uv_os_unsetenv. These versioned sources explain the
+cleanup on the measured glibc 2.41 job; they do not attest correspondence between
+every distro patch and the pinned binaries. Runtime assertions and raw binding
+evidence must still establish the actual native behavior after cleanup.
+
+Fix round 1 addresses the main review of adopted 11450640b210baff56ce622544fee77c1a446a25,
+whose owned delta equals this branch's dd5ac7a421d95550af662adea056b02a10fbfaf3.
+The prior producer-only restore leaked to non-LSP children such as git during
+workspace_open's warm probe. Root reported 78 synthetic checks passing at that
+base, with no actual native qualification. This fix has not been executed.
 
 Retain J/nss/manifest.json, J/nss/{passwd,group}, acquisition logs and every
-case's nss-init.json, raw nss-bindings.<pid>, nss-producer-<pid>.{json,maps} and
+case's nss-init.json, nss-native-<pid>.json, raw nss-bindings.<pid>,
+nss-producer-<pid>.{json,maps} and
 nss-binding-proof.json, alongside all existing raw traces and artifacts.
 Manifests bind package/library/native/fixture hashes and exact job identity,
 mountinfo and public NSS policy. Each raw binding file is limited to 8 MiB when
 read; boundary files are limited to 1 MiB maps and 64 KiB JSON. Complete NSS case
 evidence above 55 MiB fails and stays on disk without truncation. Native
-getpwuid-to-wrapper proof and clean producer boundary evidence are required;
-missing, changed or oversized evidence fails. These bounds validate retained
+getpwuid-to-wrapper proof, same-PID post-cleanup native lookup proof and clean
+producer boundary evidence are required. Loader initialize/transfer markers
+must identify that same native executable and PID. A non-native program marker
+is an explicit NSS/loader environment leak, including a git or rg log with a
+misleading native binding line. Missing, mixed, changed or oversized evidence
+fails; native init JSON is bounded to 4 KiB. These bounds validate retained
 outputs; they do not impose a new process limit on gopls or Go.
 
 network_audit and ipc_audit retain their exact proof, destination rules and
@@ -534,7 +564,12 @@ credit. A fresh actual workflow must still pass every existing gate.
 Prepared synthetic checks cover slot0/1/2 and slot3 refusal, mount provenance,
 identity/maps, full account bytes, files-only policy, pin/fixture tampering,
 native exec isolation, changed init, symlinks, binding attribution and relay
-leaks. Parent's focused agent-a command is
+leaks. The added non-LSP git-log fixture requires an explicit leak failure even
+with a native binding decoy. Source-contract checks require permanent cleanup
+before producer enable, no restore, and identical original command/settings.
+These synthetic checks do not execute native cleanup or a real git/rg child;
+Parent still owns fresh native and actual-workflow qualification. Its focused
+agent-a command is
 python3 -B -m unittest discover -s tests/client-acceptance -p test_nss_control.py.
 All syntax checks, tests, builds, linters, generators, provisioning, downloads,
 clients, Chaldea, SSH and services are NOT RUN in this implementation session.

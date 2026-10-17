@@ -180,31 +180,56 @@ def verify(job, native=None):
     return report
 
 
-# rpc.start spawns synchronously. Restore Nvim's NSS configuration even on spawn
-# failure; only the exact producer exec receives the cleaned environment.
-PRODUCER_LUA = """local function acceptance_producer(cmd, dispatchers, config)
-  assert(config.cmd_env == nil, 'unexpected producer environment override')
-  local saved = {}
-  for key, value in pairs(vim.fn.environ()) do
-    if key:match('^NSS_WRAPPER_') or key == 'LD_PRELOAD' or key == 'LD_AUDIT'
-      or key == 'LD_LIBRARY_PATH' or key == 'LD_DEBUG' or key == 'LD_DEBUG_OUTPUT' then
-      saved[key] = value
-      vim.env[key] = nil
-    end
+# nss_wrapper 1.1.16 nwrap_init caches getenv pointers once; its constructor
+# deliberately does not initialize them. glibc 2.41 unsetenv retains the strings.
+# Initialize before permanent cleanup, then require the same full lookup after it.
+# This prefix runs before LSP enable and every workspace warm-probe child.
+NATIVE_INIT_LUA = """local ok, err = pcall(function()
+local ffi = require('ffi')
+ffi.cdef[[
+  bool nss_wrapper_enabled(void);
+  struct passwd {
+    char *pw_name; char *pw_passwd; unsigned int pw_uid; unsigned int pw_gid;
+    char *pw_gecos; char *pw_dir; char *pw_shell;
+  };
+  struct passwd *getpwuid(unsigned int uid);
+]]
+assert(ffi.C.nss_wrapper_enabled(), 'NSS wrapper not initialized')
+for key, _ in pairs(vim.fn.environ()) do
+  if key:match('^NSS_WRAPPER_') or key == 'LD_PRELOAD' or key == 'LD_AUDIT'
+    or key == 'LD_LIBRARY_PATH' or key == 'LD_DEBUG' or key == 'LD_DEBUG_OUTPUT' then
+    vim.env[key] = nil
   end
-  local ok, result = pcall(vim.lsp.rpc.start, cmd, dispatchers, {
-    cwd = config.cmd_cwd, env = config.cmd_env, detached = config.detached,
-  })
-  for key, value in pairs(saved) do vim.env[key] = value end
-  if not ok then error(result) end
-  return result
+end
+local remaining = {}
+for key, _ in pairs(vim.fn.environ()) do
+  if key:match('^NSS_WRAPPER_') or key == 'LD_PRELOAD' or key == 'LD_AUDIT'
+    or key == 'LD_LIBRARY_PATH' or key == 'LD_DEBUG' or key == 'LD_DEBUG_OUTPUT' then
+    remaining[#remaining + 1] = key
+  end
+end
+assert(#remaining == 0, 'NSS/loader environment survived native init')
+assert(ffi.C.nss_wrapper_enabled(), 'cached NSS wrapper disabled after cleanup')
+local pw = ffi.C.getpwuid(0)
+assert(pw ~= nil, 'native getpwuid failed after environment cleanup')
+local passwd = {ffi.string(pw.pw_name), ffi.string(pw.pw_passwd),
+  tonumber(pw.pw_uid), tonumber(pw.pw_gid), ffi.string(pw.pw_gecos),
+  ffi.string(pw.pw_dir), ffi.string(pw.pw_shell)}
+assert(vim.deep_equal(passwd, {'job', 'x', 0, 0, '', '/home/job', '/bin/sh'}),
+  'native passwd record changed after environment cleanup')
+assert(vim.env.HOME == '/home/job', 'native HOME changed')
+local proof = vim.fn.fnamemodify(vim.env.HUYANG_HEADLESS_INIT, ':h')
+  .. '/nss-native-' .. vim.uv.os_getpid() .. '.json'
+local output = assert(io.open(proof, 'w'))
+assert(output:write(vim.json.encode({pid = vim.uv.os_getpid(), HOME = vim.env.HOME,
+  cached_wrapper_enabled = true, loader_nss_keys = remaining, passwd = passwd})))
+assert(output:close())
+end)
+if not ok then
+  io.stderr:write('native NSS init failed: ' .. tostring(err))
+  os.exit(1)
 end
 """
-
-
-def producer_command(quoted):
-    return ("function(dispatchers, config) return acceptance_producer({"
-            + quoted + "}, dispatchers, config) end")
 
 
 def launcher_source(native, job):
@@ -224,11 +249,11 @@ def exec_native(native, job, argv):
             "NSS native exec requires the owned case init")
     require("--embed" in argv and "--headless" in argv and "--clean" in argv
             and argv.count("-u") == 1 and argv.index("-u") + 1 < len(argv)
-            and argv[argv.index("-u") + 1] == str(init), "native exec bypasses producer cleanup init")
+            and argv[argv.index("-u") + 1] == str(init), "native exec bypasses owned NSS cleanup init")
     seal = json.loads(bounded(init.parent / "nss-init.json", 4096))
     raw = bounded(init, 65536)
-    require(raw.startswith(PRODUCER_LUA.encode()) and digest(raw) == seal["sha256"],
-            "producer cleanup init changed")
+    require(raw.startswith(NATIVE_INIT_LUA.encode()) and digest(raw) == seal["sha256"],
+            "native NSS cleanup init changed")
     root, _, library = paths(job)
     env = dict(os.environ, LD_PRELOAD=str(library), NSS_WRAPPER_PASSWD=str(root / "passwd"),
                NSS_WRAPPER_GROUP=str(root / "group"), LD_DEBUG="bindings",
@@ -242,6 +267,21 @@ def native_binding_lines(raw, native, library):
             and line.endswith("normal symbol " + chr(96) + "getpwuid' [GLIBC_2.2.5]")]
 
 
+def binding_program(raw, native, pid):
+    """Loader startup markers identify the executable, independent of symbol lines."""
+    markers = []
+    for line in raw.decode("utf-8").splitlines():
+        match = re.fullmatch(r"\s*(\d+):\s+(initialize program|transferring control): (.+)", line)
+        if match:
+            markers.append({"pid": int(match[1]), "kind": match[2], "program": match[3]})
+    foreign = sorted({m["program"] for m in markers if m["program"] != str(native)})
+    require(not foreign, "NSS/loader environment leak to non-native process: " + ", ".join(foreign))
+    require(markers == [{"pid": pid, "kind": kind, "program": str(native)}
+                        for kind in ("initialize program", "transferring control")],
+            "missing/mixed native loader program identity; possible NSS/loader environment leak")
+    return markers
+
+
 def finish_case(case, job, native):
     manifest = verify(job, native)
     _, _, library = paths(job)
@@ -253,9 +293,24 @@ def finish_case(case, job, native):
         raw = bounded(path, 8 << 20)
         total += len(raw)
         require(total <= 55 << 20, "NSS evidence exceeds bound; preserve all raw files")
+        pid = int(path.suffix[1:])
+        try:
+            programs = binding_program(raw, native, pid)
+        except AssertionError as error:
+            raise AssertionError(path.name + ": " + str(error)) from error
         matched = native_binding_lines(raw, native, library)
         require(matched, "native Nvim getpwuid binding to pinned library absent")
-        evidence.append({"file": path.name, "bytes": len(raw), "sha256": digest(raw), "matched": matched})
+        native_proof = Path(case) / ("nss-native-" + str(pid) + ".json")
+        native_raw = bounded(native_proof, 4096)
+        total += len(native_raw)
+        require(total <= 55 << 20, "NSS evidence exceeds bound; preserve all raw files")
+        require(json.loads(native_raw) == {"pid": pid, "HOME": "/home/job",
+                "cached_wrapper_enabled": True, "loader_nss_keys": [],
+                "passwd": ["job", "x", 0, 0, "", "/home/job", "/bin/sh"]},
+                "missing/changed native lookup proof after permanent NSS environment cleanup")
+        evidence.append({"file": path.name, "bytes": len(raw), "sha256": digest(raw), "matched": matched,
+                         "programs": programs, "native_init_file": native_proof.name,
+                         "native_init_sha256": digest(native_raw)})
     producers = sorted(Path(case).glob("nss-producer-*.json"))
     require(0 < len(producers) <= 512, "missing/overlarge producer NSS boundary evidence")
     producer_evidence = []

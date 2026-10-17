@@ -144,7 +144,7 @@ class PinnedInputs(unittest.TestCase):
 class NativeBoundary(unittest.TestCase):
     def test_native_exec_alone_gets_nss_and_preserves_argv_home(self):
         init = JOB / "c/claude/init.lua"
-        raw = nss.PRODUCER_LUA.encode() + b"-- synthetic init\n"
+        raw = nss.NATIVE_INIT_LUA.encode() + b"-- synthetic init\n"
         argv = ["--embed", "--headless", "--clean", "-u", str(init)]
         env = {"HOME": "/home/job", "HUYANG_HEADLESS_INIT": str(init), "PATH": "/usr/bin"}
         data = {init: raw, init.parent / "nss-init.json": json.dumps({"sha256": nss.digest(raw)}).encode()}
@@ -176,7 +176,7 @@ class NativeBoundary(unittest.TestCase):
 
     def test_changed_init_seal_refuses_exec(self):
         init = JOB / "c/claude/init.lua"
-        data = {init: nss.PRODUCER_LUA.encode() + b"-- modified",
+        data = {init: nss.NATIVE_INIT_LUA.encode() + b"-- modified",
                 init.parent / "nss-init.json": b'{"sha256":"' + b"0" * 64 + b'"}'}
         with patch.dict(nss.os.environ, {"HUYANG_HEADLESS_INIT": str(init)}, clear=True), \
              patch.object(nss, "verify"), patch.object(nss.Path, "resolve", lambda p: p), \
@@ -211,6 +211,81 @@ class NativeBoundary(unittest.TestCase):
         for old, new in ((str(NATIVE), "/usr/bin/python3"), (str(library), "/other/libnss_wrapper.so"),
                          ("getpwuid'", "getpwuid_r'"), ("GLIBC_2.2.5", "OTHER")):
             self.assertEqual(nss.native_binding_lines(line.replace(old, new).encode(), NATIVE, library), [])
+
+    def test_owned_init_clears_environment_before_non_lsp_warm_probe(self):
+        # Source contract only: this test never starts Nvim, git, rg or a shell.
+        import run as acceptance
+        case = JOB / "c/claude"
+        with patch.object(nss.Path, "write_text") as write, \
+             patch.object(acceptance, "file_hash", return_value="sealed"), \
+             patch.object(acceptance, "write_json"):
+            acceptance.headless_init(case, JOB / "bin/gopls")
+            original = write.call_args.args[0]
+            acceptance.headless_init(case, JOB / "bin/gopls", nss=True)
+            controlled = write.call_args.args[0]
+        self.assertEqual(controlled, nss.NATIVE_INIT_LUA + original)
+        init = nss.NATIVE_INIT_LUA
+        self.assertLess(init.index("ffi.C.nss_wrapper_enabled()"), init.index("vim.env[key] = nil"))
+        self.assertLess(init.index("vim.env[key] = nil"), init.index("local pw = ffi.C.getpwuid(0)"))
+        self.assertLess(controlled.index("local pw = ffi.C.getpwuid(0)"),
+                        controlled.index("vim.lsp.enable('gopls')"))
+        self.assertNotIn("vim.env[key] = value", init)
+        self.assertNotIn("saved", init)
+        self.assertNotIn("acceptance_producer", controlled)
+        for key in (*nss.LOADER_KEYS, "^NSS_WRAPPER_"):
+            self.assertIn(key, init)
+        # A normal child now inherits the permanently cleaned environ. No
+        # process-specific LSP callback or replacement command owns the cleanup.
+        self.assertNotIn("vim.lsp.rpc.start", init)
+        self.assertIn("os.exit(1)", init)  # Init errors must not continue into warm probes.
+
+    def test_non_lsp_git_child_binding_log_is_an_explicit_leak(self):
+        case = JOB / "c/claude"
+        path = case / "nss-bindings.70"
+        library = JOB / "nss" / nss.LIBRARY_RELATIVE
+        # Include a native getpwuid binding decoy. The loader's main program,
+        # not a coincidental symbol line or library init, identifies the leak.
+        raw = ("70:\tinitialize program: /usr/bin/git\n"
+               "70:\ttransferring control: /usr/bin/git\n"
+               "70:\tbinding file " + str(NATIVE) + " [0] to " + str(library)
+               + " [0]: normal symbol " + chr(96) + "getpwuid' [GLIBC_2.2.5]\n").encode()
+        with patch.object(nss, "verify"), patch.object(nss.Path, "glob", return_value=[path]), \
+             patch.object(nss, "bounded", return_value=raw), patch.object(nss, "write_json") as write:
+            with self.assertRaisesRegex(AssertionError,
+                                        r"nss-bindings\.70: NSS/loader environment leak.* /usr/bin/git"):
+                nss.finish_case(case, JOB, NATIVE)
+            write.assert_not_called()
+
+    def test_loader_program_identity_cannot_be_missing_mixed_or_other_pid(self):
+        raw = ("69:\tinitialize program: " + str(NATIVE) + "\n"
+               "69:\ttransferring control: " + str(NATIVE) + "\n")
+        self.assertEqual([m["program"] for m in nss.binding_program(raw.encode(), NATIVE, 69)],
+                         [str(NATIVE), str(NATIVE)])
+        for changed in ("", raw.splitlines()[0], raw.replace("69:", "70:"),
+                        raw + "69:\ttransferring control: /usr/bin/rg\n"):
+            with self.subTest(changed=changed), self.assertRaises(AssertionError):
+                nss.binding_program(changed.encode(), NATIVE, 69)
+
+    def test_native_init_proof_must_show_lookup_after_permanent_cleanup(self):
+        case = JOB / "c/claude"
+        path = case / "nss-bindings.69"
+        library = JOB / "nss" / nss.LIBRARY_RELATIVE
+        binding = ("69:\tinitialize program: " + str(NATIVE) + "\n"
+                   "69:\ttransferring control: " + str(NATIVE) + "\n"
+                   "69:\tbinding file " + str(NATIVE) + " [0] to " + str(library)
+                   + " [0]: normal symbol " + chr(96) + "getpwuid' [GLIBC_2.2.5]\n").encode()
+        proof = {"pid": 69, "HOME": "/home/job", "cached_wrapper_enabled": True,
+                 "loader_nss_keys": [], "passwd": ["job", "x", 0, 0, "", "/home/job", "/bin/sh"]}
+        for key, wrong in (("cached_wrapper_enabled", False), ("loader_nss_keys", ["LD_PRELOAD"]),
+                           ("HOME", "/changed"), ("passwd", ["job", "x", 0, 0, "", "/changed", "/bin/sh"])):
+            data = {path: binding, case / "nss-native-69.json": json.dumps({**proof, key: wrong}).encode()}
+            with self.subTest(key=key), patch.object(nss, "verify"), \
+                 patch.object(nss.Path, "glob", return_value=[path]), \
+                 patch.object(nss, "bounded", side_effect=lambda p, maximum: data[p]), \
+                 patch.object(nss, "write_json") as write:
+                with self.assertRaisesRegex(AssertionError, "native lookup proof after permanent"):
+                    nss.finish_case(case, JOB, NATIVE)
+                write.assert_not_called()
 
     def test_relay_refuses_overrides_before_any_maps_or_artifact_access(self):
         with patch.dict(nss.os.environ, {"NSS_WRAPPER_PASSWD": "/somewhere"}, clear=True), \
