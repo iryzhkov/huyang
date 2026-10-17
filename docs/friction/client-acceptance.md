@@ -163,11 +163,14 @@ strace records timestamped network, process, namespace and FD lifecycle syscalls
 for the actual client and service process trees (`-ff -ttt -T -y`, retained exit
 records). A bounded parser reconstructs unfinished/resumed calls and retains each
 exact original line. Any parser error or unsupported outbound socket shape fails.
-Parser-validated incomplete calls immediately terminated by a killed record retain
-raw records and any known destination; they cannot establish a model connection
-or receive an ACP exemption. A terminal unknown syscall has no inferred destination
-and is accepted only at the parser-validated terminal position. Such records are
-also retained in `terminal_incomplete_records`.
+Parser-validated incomplete named calls immediately followed by that same TID's
+validated final exit retain raw records and any known destination; they cannot
+establish a model connection or receive an ACP exemption. This includes a bare
+`close(fd) = ?` only with one structurally valid FD, retaining its annotation and
+the observed close-to-exit interval with `complete=False`. No syscall duration or
+successful close is inferred. A terminal unknown syscall has no inferred
+destination and requires a killed exit; `???(` followed by normal exit still
+fails. Such records are retained in `terminal_incomplete_records`.
 Only connect/sendto/sendmsg destination arguments are audited; payload text and
 bind/listen/getsockname metadata cannot masquerade as outbound destinations.
 Failed connects and EINPROGRESS remain audited, and a separate actual connect to
@@ -190,10 +193,14 @@ ambient sockets. Separately, only the exact sockaddr
 classification grants no ACP exemption, model-connect count or workflow progress.
 Nonzero netlink PIDs/groups, any other netlink shape and unknown address families
 remain violations, as do external/provider ports such as 1234/8000 and ambient Unix
-sockets. Every observed AF_UNIX
-destination must be an absolute path resolving inside J; external, abstract,
-unnamed and undecodable addresses fail. This includes failed ambient socket
-lookups. The complete destination report, including violations, is retained.
+sockets. AF_UNIX connects allow only the exact canonical case paths
+`J/c/<client>/control.sock` (client MCP and service LSP relay trace trees) and
+`J/c/<client>/h.sock` (client adapter trace tree only). The report records these
+paths and roles in `unix_allowed_sockets`. Symlink/noncanonical aliases, sibling
+cases, stale/temporary/other files anywhere in J, wrong trace roles, other outbound
+calls, external, abstract, unnamed and undecodable addresses fail. Failed ambient
+socket attempts, including nscd, remain violations. The complete destination
+report, including violations, is retained.
 Execve lines are recorded for inspection, not checked against an executable
 allowlist. These are observed destination gates, not a network firewall claim.
 Public downloads belong to bootstrap; client/LSP execution uses an offline Go
@@ -425,6 +432,24 @@ For the parent's disposable verification job, the focused command is
 No tests, runtime, builds, linters, generators, clients, Chaldea jobs, SSH,
 installations or services were run in this implementation session. No push or
 review was performed. IPC and destination-audit code and proof were not changed.
+
+## Bounded terminal-close and exact Unix-socket correction
+
+The implementation parent is `aa7d11044b6f658f79897600df4f14b0b256cdbc`.
+This owned-file delta is intended for cherry-pick onto M8 `c6425da`.
+Job `026f8582` supplied the actual Codex bare close fixtures for TIDs 9366/9367;
+they are retained as incomplete records only after the immediately following
+same-TID final exit. Ordinary duration requirements, unknown-normal-exit
+rejection, conservative listener-close checks, exact model-port credit and
+all-or-nothing original-record ACP grants remain required.
+
+The parent can run the focused synthetic regressions in its disposable agent-a
+job with `python3 -B -m unittest discover -s tests/client-acceptance -p 'test_*audit.py'`.
+No tests/builds/clients/linters/generators were executed in this implementation
+session. Huyang edit receipts are not runtime verification. The separately
+prepared scratch acquisition wrapper is for root review and one bounded dispatch;
+it does not change the full launcher, enable NSS controls in acceptance, establish
+a strace fix, or establish any native-client pass.
 
 ## Artifacts and remaining limitations
 

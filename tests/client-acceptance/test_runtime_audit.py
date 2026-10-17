@@ -142,6 +142,85 @@ class KernelDestinationTests(unittest.TestCase):
         self.assertIn("malformed terminal position", report["violations"])
 
 
+class ExactUnixDestinationTests(unittest.TestCase):
+    def unix(self, destination, role="client", call="connect"):
+        record = outbound('{sa_family=AF_UNIX, sun_path="'
+                          + destination + '"}', call)
+        record["path"] = "audit-" + role + ".17"
+        for original in record["original_records"]:
+            original["path"] = record["path"]
+        return record
+
+    def test_only_exact_case_sockets_with_expected_trace_roles_are_allowed(self):
+        for name, roles in (("control.sock", ("client", "service")), ("h.sock", ("client",))):
+            for role in roles:
+                with self.subTest(name=name, role=role):
+                    attempt = self.unix(str(CASE / name), role)
+                    report = audit([outbound(ipv4(MODEL_PORT)), attempt])
+                    self.assertEqual(report["violations"], [])
+                    entry, = report["unix_destinations"]
+                    self.assertEqual(entry["resolved_destination"], str(CASE / name))
+                    self.assertEqual(entry["trace_role"], role)
+                    self.assertEqual(entry["original_records"], attempt["original_records"])
+                    self.assertEqual(len(report["model_connects"]), 1)
+                    self.assertEqual(report["acp_ipc_records"], [])
+                    self.assertEqual(report["unix_allowed_sockets"], {
+                        str(CASE / "control.sock"): ("client", "service"),
+                        str(CASE / "h.sock"): ("client",),
+                    })
+
+    def test_job_siblings_stale_temporary_external_and_noncanonical_paths_fail(self):
+        for destination in (
+                "/synthetic/other/control.sock", "/synthetic/other/h.sock",
+                "/synthetic/control.sock", str(CASE / "stale.sock"),
+                str(CASE / "h.sock.old"), str(CASE / "tmp/control.sock"),
+                str(CASE / "unrelated"), "/var/run/nscd/socket", "control.sock",
+                str(CASE) + "/../case/h.sock", str(CASE) + "//control.sock",
+                str(CASE) + "/./h.sock"):
+            with self.subTest(destination=destination):
+                report = audit([outbound(ipv4(MODEL_PORT)), self.unix(destination)])
+                self.assertTrue(report["violations"])
+                self.assertEqual(len(report["unix_destinations"]), 1)
+                self.assertEqual(report["acp_ipc_records"], [])
+
+    def test_wrong_trace_roles_and_outbound_shapes_cannot_use_private_sockets(self):
+        for role, name, call in (
+                ("service", "h.sock", "connect"), ("unknown", "control.sock", "connect"),
+                ("client", "h.sock", "sendto"), ("service", "control.sock", "sendmsg")):
+            with self.subTest(role=role, name=name, call=call):
+                attempt = self.unix(str(CASE / name), role, call)
+                report = audit([outbound(ipv4(MODEL_PORT)), attempt])
+                self.assertTrue(report["violations"])
+        for address in (
+                "{sa_family=AF_UNIX}", '{sa_family=AF_UNIX, sun_path=@"control.sock"}',
+                '{sa_family=AF_UNIX, sun_path="/synthetic/case/control.sock", extra=1}',
+                '{sa_family=AF_UNIX, sun_path=0x1234}'):
+            with self.subTest(address=address):
+                self.assertTrue(audit([outbound(ipv4(MODEL_PORT)), outbound(address)])["violations"])
+
+    def test_symlink_alias_and_retargeted_exact_path_fail_without_disk_writes(self):
+        resolve = Path.resolve
+        endpoint = CASE / "control.sock"
+        alias = CASE / "alias.sock"
+        def resolve_alias(path, *args, **kwargs):
+            return endpoint if path == alias else resolve(path, *args, **kwargs)
+        def resolve_retargeted(path, *args, **kwargs):
+            return JOB / "other/control.sock" if path == endpoint else resolve(path, *args, **kwargs)
+        for destination, resolver in ((alias, resolve_alias), (endpoint, resolve_retargeted)):
+            with self.subTest(destination=destination), patch.object(Path, "resolve", resolver):
+                report = audit([outbound(ipv4(MODEL_PORT)), self.unix(str(destination))])
+                self.assertTrue(report["violations"])
+
+    def test_unix_connect_never_supplies_model_credit_or_consumes_acp_grants(self):
+        attempt = self.unix(str(CASE / "control.sock"))
+        report = audit([attempt], proof_for(attempt))
+        self.assertEqual(report["model_connects"], [])
+        self.assertEqual(report["acp_ipc_records"], [])
+        self.assertIn("no real model-port connect captured", report["violations"])
+        self.assertIn("ACP IPC proof records do not exactly match audited connect records",
+                      report["violations"])
+
+
 class CodexCatalogTests(unittest.TestCase):
     def test_actual_committed_entry_generates_only_the_two_authorized_overrides(self):
         raw = (acceptance.HERE / "codex-model-entry.json").read_bytes()

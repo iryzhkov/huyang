@@ -225,6 +225,67 @@ class TraceParserTests(unittest.TestCase):
             "audit-client.12": killed,
         })["violations"])
 
+    def test_bare_terminal_close_preserves_actual_fd_raw_record_and_exit_interval(self):
+        cases = [
+            ("audit-client.9366", "1792262863.916927 close(29<anon_inode:inotify>) = ?",
+             "1792262863.935287 +++ exited with 1 +++", "29<anon_inode:inotify>"),
+            ("audit-client.9367", "1792262863.916869 close(32<anon_inode:inotify>) = ?",
+             "1792262863.930113 +++ exited with 1 +++", "32<anon_inode:inotify>"),
+            ("audit-service.21", "1000.400000 close(5<socket:[900]>) = ?",
+             "1000.400001 +++ exited with 0 +++", FD),
+            ("audit-service.21", "1000.400000 close(5) = ?",
+             "1000.400001 +++ killed by SIGKILL +++", "5"),
+        ]
+        for path, first, last, fd in cases:
+            with self.subTest(path=path, first=first):
+                parsed = parse_memory({path: first + "\n" + last + "\n"})
+                self.assertEqual(parsed["violations"], [])
+                record, terminal = parsed["records"]
+                self.assertFalse(record["complete"])
+                self.assertEqual(record["call"], "close")
+                self.assertEqual(record["args"], [fd])
+                self.assertEqual(record["result"], "?")
+                self.assertEqual(record["text"], first.split(" ", 1)[1])
+                self.assertEqual(record["original_records"], [{"path": path, "line": first}])
+                self.assertEqual(record["start_ns"], ipc._ns(first.split()[0]))
+                self.assertEqual(record["end_ns"], ipc._ns(last.split()[0]))
+                self.assertIsNone(ipc.destination_text(record))
+                self.assertEqual(terminal["kind"], "exit")
+
+    def test_bare_close_requires_immediate_same_tid_validated_final_exit(self):
+        first = "1000.400000 close(29<anon_inode:inotify>) = ?\n"
+        last = "1000.400002 +++ exited with 1 +++\n"
+        for raw in (
+                first, first + "1000.400002 +++ exited with nope +++\n",
+                first + "1000.400001 --- SIGTERM {} ---\n" + last,
+                first + "1000.400001 close(9) = 0 <0.000001>\n" + last,
+                first + "1000.400001 <... close resumed>) = 0 <0.000001>\n" + last,
+                first + last + "1000.400003 exit(0) = ?\n",
+                first + "1000.399999 +++ exited with 1 +++\n"):
+            with self.subTest(raw=raw):
+                self.assertTrue(parse_memory({"audit-client.11": raw})["violations"])
+        self.assertTrue(parse_memory({
+            "audit-client.11": first, "audit-client.12": last,
+        })["violations"])
+        for arguments in ("", "-1", "fd", "7, 8", "7<socket:[9]", "7<socket:[9]>>",
+                          "7<socket:[9]>garbage", "7, " + sockaddr(PORT)):
+            with self.subTest(arguments=arguments):
+                raw = "1000.400000 close(" + arguments + ") = ?\n" + last
+                self.assertTrue(parse_memory({"audit-client.11": raw})["violations"])
+        with patch.object(ipc, "MAX_TRACE_RECORDS", 1):
+            self.assertTrue(parse_memory({"audit-client.11": first + last})["violations"])
+
+    def test_bare_connect_never_uses_terminal_close_exception(self):
+        first = "1000.400000 connect(7, " + sockaddr(PORT) + ", 16) = ?\n"
+        for files in (
+                {"audit-client.11": first},
+                {"audit-client.11": first + "1000.400001 +++ exited with 0 +++\n"},
+                {"audit-client.11": first + "1000.400001 +++ killed by SIGKILL +++\n"},
+                {"audit-client.11": first, "audit-client.12":
+                 "1000.400001 +++ exited with 0 +++\n"}):
+            with self.subTest(files=files):
+                self.assertTrue(parse_memory(files)["violations"])
+
     def test_terminal_unrecoverable_destination_fails_closed(self):
         prefixes = [
             "connect(7",
@@ -365,6 +426,7 @@ class OwnershipProofTests(unittest.TestCase):
     def test_close_replacement_and_exit_from_server_thread_refuse(self):
         operations = [
             "close(" + FD + ") = 0 <0.000001>",
+            "close(" + FD + ") = -1 EINTR (Interrupted system call) <0.000001>",
             "close_range(3, ~0U, 0) = 0 <0.000001>",
             "dup2(9<socket:[999]>, " + FD + ") = 5<socket:[999]> <0.000001>",
             "dup(" + FD + ") = 9<socket:[900]> <0.000001>",
@@ -383,6 +445,23 @@ class OwnershipProofTests(unittest.TestCase):
                 result = audit(initial, final, records)
                 self.assertTrue(result["violations"])
                 self.assertEqual(result["allowed_connect_records"], [])
+
+    def test_bare_terminal_close_cannot_prove_listener_lifecycle_or_hide_closure(self):
+        for stamp, expected_failure in (("1000.150000", True), ("1000.400000", False)):
+            with self.subTest(stamp=stamp):
+                initial, final, records = evidence()
+                parsed = parse_memory({"audit-client.21":
+                                       stamp + " close(" + FD + ") = ?\n"
+                                       + stamp + " +++ exited with 0 +++\n"})
+                self.assertEqual(parsed["violations"], [])
+                result = audit(initial, final, records + parsed["records"])
+                self.assertEqual(bool(result["violations"]), expected_failure)
+                if expected_failure:
+                    self.assertEqual(result["allowed_connect_records"], [])
+                else:
+                    self.assertEqual(result["allowed_connect_records"],
+                                     [r for item in records if item["call"] == "connect"
+                                      for r in item["original_records"]])
 
     def test_listener_reuseport_before_bind_refuses_even_if_snapshots_are_unique(self):
         for caller in (10, 21):

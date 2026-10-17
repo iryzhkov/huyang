@@ -380,8 +380,8 @@ def read_trace_records(case):
     Returns {records, violations}. A syscall record includes call, args, result,
     start_ns/end_ns, tid, path, and original_records=[{path,line}]. Split syscalls
     retain *both* original lines. Signals/exits have kind and no call. A terminal
-    unfinished call immediately followed by the same TID's final exit is retained
-    with complete=False; unknown ??? is accepted only when that exit is a kill.
+    unfinished call or bare close(fd) = ? immediately followed by the same TID's
+    final exit is retained with complete=False; unknown ??? requires a killed exit.
     Its recoverable explicit destination is still validated. Other missing timing,
     orphaned resumes, unfinished calls and truncation fail closed. Caller must
     preserve parser violations in its main audit too.
@@ -446,6 +446,20 @@ def read_trace_records(case):
                                                   "start_ns": stamp, "end_ns": stamp,
                                                   "original_records": [original]})
                         terminated = True
+                        continue
+                    # strace can lose close's return at thread-group exit without
+                    # printing <unfinished ...>. Admit only a validated single FD;
+                    # the pending path still requires the immediately next same-TID
+                    # record to be a final exit. No duration or successful close is
+                    # inferred, and this record can never supply ownership proof.
+                    bare_close = re.fullmatch(r"close\((.*)\)\s+=\s+\?", body)
+                    if bare_close:
+                        _need(pending is None, "overlapping unfinished syscalls")
+                        arguments = _split(bare_close[1])
+                        _need(len(arguments) == 1, "unparsed terminal close arguments")
+                        _fd(arguments[0])
+                        pending = (stamp, "close(" + bare_close[1], original, True)
+                        pending_separated = False
                         continue
                     terminal = re.fullmatch(r"(.*)<unfinished \.\.\.>\)\s+=\s+\?", body)
                     if body.endswith("<unfinished ...>") or terminal:

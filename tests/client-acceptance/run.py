@@ -114,7 +114,16 @@ def network_audit(case, port, job, ipc_proof=None):
               "model_connects": [], "acp_ipc_records": [], "local_kernel_queries": [],
               "terminal_incomplete_records": [],
               "execve_policy": "recorded only; no executable allowlist asserted",
-              "unix_allowed_root": str(job.resolve()), "violations": list(parsed["violations"])}
+              "violations": list(parsed["violations"])}
+    # Only these case-local stream sockets have supported outbound roles.
+    # control: client MCP relays and service LSP relays -> the controller.
+    # h: client adapters -> the private Huyang service.
+    canonical_case, canonical_job = case.resolve(), job.resolve()
+    unix_sockets = {
+        str(canonical_case / "control.sock"): ("client", "service"),
+        str(canonical_case / "h.sock"): ("client",),
+    } if canonical_case != canonical_job and canonical_case.is_relative_to(canonical_job) else {}
+    report["unix_allowed_sockets"] = unix_sockets
     allowed = set()
     if ipc_proof is not None:
         if ipc_proof["violations"]:
@@ -164,15 +173,21 @@ def network_audit(case, port, job, ipc_proof=None):
                 raise AssertionError("unexpected IP destination")
             if re.search(r"\bsa_family=AF_UNIX\b", address):
                 report["unix_destinations"].append(entry)
-                match = re.search(r'\bsun_path=("(?:[^"\\]|\\.)*")', address)
+                match = re.fullmatch(r'{sa_family=AF_UNIX, sun_path=("(?:[^"\\]|\\.)*")}', address)
                 require(match is not None, "unknown or abstract AF_UNIX address")
                 assert match is not None
                 destination = ast.literal_eval(match[1])
                 require(isinstance(destination, str) and Path(destination).is_absolute(),
-                        "AF_UNIX destination is not an absolute job path")
-                require(Path(destination).resolve().is_relative_to(job.resolve()),
-                        "AF_UNIX destination escaped the job allowlist")
-                entry["resolved_destination"] = str(Path(destination).resolve())
+                        "AF_UNIX destination is not an absolute case socket")
+                resolved = str(Path(destination).resolve())
+                require(destination == resolved and str(case) == str(canonical_case),
+                        "AF_UNIX destination or case is not canonical")
+                role = re.fullmatch(r"audit-(client|service)\.\d+", syscall["path"])
+                require(syscall["call"] == "connect" and role is not None
+                        and role[1] in unix_sockets.get(destination, ()),
+                        "AF_UNIX destination or trace role outside exact case socket allowlist")
+                entry["resolved_destination"] = resolved
+                entry["trace_role"] = role[1]
                 continue
             if address == "{sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}":
                 entry["classification"] = "local-kernel-query"
