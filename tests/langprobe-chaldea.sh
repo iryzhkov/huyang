@@ -169,7 +169,7 @@ export_env() {
 	# sockets and state; the probe's private defaults must always apply.
 	unset HUYANG_LANGPROBE HUYANG_LANGPROBE_STRICT HUYANG_LANGPROBE_LANGUAGES HUYANG_LANGPROBE_SOURCE
 	unset HUYANG_LANGPROBE_BINARY HUYANG_LANGPROBE_SOCKET HUYANG_LANGPROBE_STATE_DIR HUYANG_LANGPROBE_OUTPUT
-	unset HUYANG_SOCKET HUYANG_STATE_DIR AGENT99_HEADLESS_INIT HUYANG_LANGPROBE_NATIVE_TRACE
+	unset HUYANG_SOCKET HUYANG_STATE_DIR AGENT99_HEADLESS_INIT HUYANG_LANGPROBE_NATIVE_TRACE HUYANG_LANGPROBE_NATIVE_SCOPE
 	mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$CARGO_HOME" "$prefix/bin"
 }
 
@@ -457,11 +457,19 @@ check_versions() {
 	case $RUST_SRC_PATH in "$prefix"/*) [ -d "$RUST_SRC_PATH/core" ] || die "RUST_SRC_PATH has no core" ;; esac
 }
 
+start_native_observation() {
+	[ "${native_observation_started:-}" = 1 ] && return 0
+	native_observation_started=1
+	rm -rf "$prefix/native-trace"
+	mkdir -p "$prefix/native-trace"
+}
+
 # A headless Neovim with the generated init opens one broken file per
 # language and waits for the server to publish the expected error. This
 # proves the servers, runtimes and lspconfig wiring before any Huyang code
 # runs, so a failure here is a prerequisite problem, not a probe verdict.
 smoke() {
+	start_native_observation
 	local dir=$prefix/smoke
 	rm -rf "$dir"
 	mkdir -p "$dir/fixtures"
@@ -562,7 +570,8 @@ handle:write(vim.json.encode(results))
 handle:close()
 os.exit(failed == 0 and 0 or 1)
 LUA
-	LANGPROBE_SMOKE_LANGUAGES=${LANGPROBE_LANGUAGES:-} timeout 1800 nvim --clean --headless \
+	HUYANG_LANGPROBE_NATIVE_TRACE=$prefix/native-trace HUYANG_LANGPROBE_NATIVE_SCOPE=smoke \
+		LANGPROBE_SMOKE_LANGUAGES=${LANGPROBE_LANGUAGES:-} timeout 1800 nvim --clean --headless \
 		-l "$dir/smoke.lua" "$HUYANG_HEADLESS_INIT" "$dir/fixtures" "$out/lsp-smoke.json" 2>&1 |
 		tee "$out/lsp-smoke.txt" >&2
 	[ "${PIPESTATUS[0]}" = 0 ] || die "language-server smoke: $(grep -c FAIL "$out/lsp-smoke.txt") failing, see lsp-smoke.txt"
@@ -571,10 +580,7 @@ LUA
 probe() {
 	local languages=${LANGPROBE_LANGUAGES:-$languages_all} rc lang status verdict=PASS strict=1
 	local output=$out/langprobe
-	# Only the actual probe service inherits this hook; smoke uses native init.
-	native_observation_started=1
-	rm -rf "$prefix/native-trace"
-	mkdir -p "$prefix/native-trace"
+	start_native_observation
 	rm -rf "$output"
 	mkdir -p "$output"
 	# Strict mode asserts every intermediate reply and refuses a language
@@ -592,7 +598,7 @@ probe() {
 	# is weaker and must be labelled as such.
 	(cd "$repo/cmd/huyang" && { [ -z "$strict" ] || export HUYANG_LANGPROBE_STRICT=1; } &&
 		HUYANG_FRICTION=0 HUYANG_LANGPROBE=1 HUYANG_LANGPROBE_OUTPUT=$output \
-		HUYANG_LANGPROBE_NATIVE_TRACE=$prefix/native-trace \
+		HUYANG_LANGPROBE_NATIVE_TRACE=$prefix/native-trace HUYANG_LANGPROBE_NATIVE_SCOPE=probe \
 		go test -run '^TestLangprobeABCD$' -count=1 -v -timeout "${LANGPROBE_TIMEOUT:-45m}" .) 2>&1 |
 		tee "$out/go-test.txt" >&2
 	rc=${PIPESTATUS[0]}
@@ -693,8 +699,9 @@ for trace in traces[:16]:
     ready, rpc_ready, initialized = False, False, False
     pending = {}
     try:
-        pid = int(trace.stem.removeprefix("native-"))
-        log = live / ("lsp-" + str(pid) + ".log")
+        scope, pid = trace.stem.removeprefix("native-").rsplit("-", 1)
+        pid = int(pid)
+        log = live / ("lsp-" + scope + "-" + str(pid) + ".log")
         copy(log, log.name, 8 << 20)
         lines = body.splitlines(keepends=True)
         if len(lines) > 4096:
@@ -705,6 +712,8 @@ for trace in traces[:16]:
             event = json.loads(line)
             if event["trace_seq"] != seq or event["process_id"] != pid:
                 raise ValueError("sequence/PID mismatch")
+            if scope not in ("smoke", "probe") or event.get("scope") != scope:
+                raise ValueError("scope missing, invalid or mismatched")
             kind = event["kind"]
             ready |= kind == "observer_ready"
             rpc_ready |= kind == "rpc_observer_ready"
@@ -721,7 +730,7 @@ for trace in traces[:16]:
                 pending.pop(event["collection_sequence"], None)
                 if not event["ok"]:
                     fail(trace.name + ": late RPC send threw an error")
-        if not ready or not rpc_ready or not initialized:
+        if not ready or not initialized or (scope == "probe" and not rpc_ready):
             raise ValueError("observer/RPC/client initialization evidence missing")
         if pending:
             raise ValueError("late RPC collection has no observed send: " + str(pending))

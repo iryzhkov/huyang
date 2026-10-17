@@ -45,6 +45,12 @@ observer source, one native JSONL and one native debug LSP log per Neovim PID,
 and a manifest with file sizes, hashes, truncation/failure state and late RPC
 outcomes. The debug log path/level changes only local observation logging.
 Native logging adds overhead; no timing threshold has been changed.
+Smoke and probe share one freshly initialized capture directory and the same
+sixteen-PID bound. Events and JSONL/debug-log names identify their scope.
+DiagnosticChanged records include the event diagnostics and complete current
+editor cache. Both scopes require observer/client readiness; only probe requires
+RPC readiness. Job `377f1e51-585e-41f3-a77d-9ebcc9917873` failed Python smoke
+before probe. That failure stays a failure and is archived; no product cause is claimed.
 
 Bounds are sixteen processes, 8 MiB per JSONL and per LSP log, 4,096 events per
 JSONL, 256 KiB per encoded event, 64 KiB per local document snapshot, thirty-two

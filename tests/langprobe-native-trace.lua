@@ -1,8 +1,9 @@
 -- Observation only. Loaded before vim.lsp.enable by the private probe init.
 -- Local snapshots are correlation data, never producer version/clean proof.
 local dir = assert(vim.env.HUYANG_LANGPROBE_NATIVE_TRACE)
+local scope = assert(vim.env.HUYANG_LANGPROBE_NATIVE_SCOPE)
 local pid = vim.fn.getpid()
-local path = dir .. "/native-" .. pid .. ".jsonl"
+local path = dir .. "/native-" .. scope .. "-" .. pid .. ".jsonl"
 local MAX_BYTES, MAX_EVENTS, MAX_RECORD = 8 * 1024 * 1024, 4096, 256 * 1024
 local MAX_DOCUMENT, MAX_BUFFERS = 64 * 1024, 32
 local sequence, bytes, failed = 0, 0, false
@@ -24,7 +25,7 @@ if not fd then failure(open_error) end
 
 -- Separate the native Neovim log too. This changes only local logging,
 -- never LSP trace/capabilities/settings or any producer message.
-local lsp_log = dir .. "/lsp-" .. pid .. ".log"
+local lsp_log = dir .. "/lsp-" .. scope .. "-" .. pid .. ".log"
 local log_ok, log_error = pcall(function()
     assert(type(vim.lsp.log._set_filename) == "function", "native LSP log path hook unavailable")
     vim.lsp.log._set_filename(lsp_log)
@@ -41,7 +42,7 @@ end
 local function write(event)
     if failed then return end
     sequence = sequence + 1
-    event.trace_seq, event.process_id = sequence, pid
+    event.trace_seq, event.process_id, event.scope = sequence, pid, scope
     event.monotonic_ns = tostring(vim.uv.hrtime())
     local sec, usec = vim.uv.gettimeofday()
     if type(sec) == "table" then usec, sec = sec.usec, sec.sec end
@@ -258,6 +259,13 @@ for _, event in ipairs({ "LspAttach", "LspDetach", "LspProgress" }) do
         end)
     end })
 end
+
+vim.api.nvim_create_autocmd("DiagnosticChanged", { callback = function(ev)
+    observe(function() return { kind = "diagnostic_cache", bufnr = ev.buf,
+        changedtick = vim.api.nvim_buf_get_changedtick(ev.buf),
+        event_diagnostics = ev.data and ev.data.diagnostics,
+        diagnostics = vim.diagnostic.get(ev.buf) } end)
+end })
 
 -- Observe the existing RPC envelope at its actual send boundary, including
 -- structured failures/cancellation. Do not require production modules early.
