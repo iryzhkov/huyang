@@ -928,7 +928,7 @@ function M.late_evidence()
             batch.complete = publication_complete(batch.document_version, pending.expected,
                 batch.findings, observation.at, batch.producer, 0, batch.kind == "lsp_pull")
             if observation.delivered ~= batch.complete then
-                out[#out + 1] = vim.deepcopy(batch)
+                out[#out + 1] = require("huyang.python_environment").normalize_batch(vim.deepcopy(batch))
                 observation.delivered = batch.complete
             end
             if batch.complete then late_observations[key] = nil end
@@ -1398,6 +1398,7 @@ function M.diagnostic_evidence(args)
     end
     -- The completion carries the batches structurally as well, so the Go
     -- side can read evidence without parsing the value.
+    for _, batch in ipairs(batches) do require("huyang.python_environment").normalize_batch(batch) end
     require("huyang.rpc").report_evidence(batches)
     return { batches = batches }
 end

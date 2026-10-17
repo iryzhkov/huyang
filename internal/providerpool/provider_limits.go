@@ -135,14 +135,18 @@ func (p *Pool) closeSlotLocked(slot *providerSlot) error {
 	return nil
 }
 
-func (p *Pool) openOwned(root string, epoch uint64, pinned bool) (provider.Provider, error) {
+func (p *Pool) openOwned(root string, epoch uint64, pinned bool, pythonEnvironmentRoot ...string) (provider.Provider, error) {
+	environmentRoot := root
+	if len(pythonEnvironmentRoot) > 0 && pythonEnvironmentRoot[0] != "" {
+		environmentRoot = pythonEnvironmentRoot[0]
+	}
 	b, err := p.reserve()
 	if err != nil {
 		return nil, err
 	}
 	defer p.opening.Done()
 	backend, err := p.factory.Open(OpenConfig{
-		Root: root, InitFile: huyangHeadlessInit(), RuntimePath: ShippedRuntimePath(),
+		Root: root, InitFile: huyangHeadlessInit(), RuntimePath: ShippedRuntimePath(), PythonEnvironmentRoot: environmentRoot,
 		AfterEpoch: epoch, MaxLanguageServers: p.limits.MaxLanguageServers,
 		PinLanguageServers: pinned,
 	})

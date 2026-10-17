@@ -460,6 +460,8 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 	}
 	for _, reason := range report.ProvisionalReasons {
 		switch reason {
+		case "python_environment_unresolved":
+			return "Python environment not resolved for " + subject + "; import diagnostics remain provisional"
 		case "rust_diagnostics_pending":
 			return "Rust diagnostics pending for " + subject + "; findings arrive through diagnostic_updates on subsequent replies"
 		case "lsp_not_configured":

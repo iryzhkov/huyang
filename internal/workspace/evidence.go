@@ -417,6 +417,16 @@ func confidenceFor(batch DiagnosticBatch) (confidence DiagnosticConfidence, reas
 			reasons = append([]string{"rust_diagnostics_pending"}, reasons...)
 		}
 	}()
+	// Environment-noise collapsing weakens semantic coverage, never the
+	// publication's version/progress guards. Preserve both reasons.
+	if batch.Reason == "python_environment_unresolved" {
+		defer func() {
+			if confidence == ConfidenceAuthoritative || confidence == ConfidenceCorroborated {
+				confidence = ConfidenceProvisional
+			}
+			reasons = append(reasons, "python_environment_unresolved")
+		}()
+	}
 	if batch.TimedOut {
 		return ConfidenceProvisional, []string{"diagnostic_barrier_timed_out"}
 	}

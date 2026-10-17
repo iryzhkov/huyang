@@ -22,6 +22,68 @@ local function check(name, ok, detail)
     io.stdout:flush()
 end
 
+-- Missing-import grouping preserves canonical evidence and applies to late
+-- observations without changing the raw publication's completion guards.
+do
+    local python = require("huyang.python_environment")
+    local original_client = vim.lsp.get_client_by_id
+    vim.lsp.get_client_by_id = function() return nil end
+    python.configure({})
+    local function batch(producer)
+        return {
+            kind = "lsp_push", producer = producer or "pyright", provider_id = "pyright#42",
+            document = "/fixture/main.py", document_revision = "docrev_fixture",
+            document_version = 5, expected_version = 5, transaction_id = "edit_python",
+            complete = true, progress_pending = true,
+            findings = {
+                { code = "reportMissingImports", severity = 1, message = "Import a is missing" },
+                { code = "reportMissingImports", severity = 1, message = "Import b is missing" },
+                { code = "reportAssignmentType", severity = 1, message = "real type error" },
+            },
+        }
+    end
+    local grouped = python.normalize_batch(batch())
+    check("unknown interpreter groups missing imports into one warning",
+        #grouped.findings == 2 and grouped.findings[1].message == "real type error"
+            and grouped.findings[2].code == "python_environment_unresolved" and grouped.findings[2].severity == 2)
+    check("grouped imports never establish complete diagnostics",
+        grouped.complete == false and grouped.reason == "python_environment_unresolved"
+            and grouped.progress_pending == true)
+    check("grouping preserves revision and attribution guards",
+        grouped.document_revision == "docrev_fixture" and grouped.document_version == 5
+            and grouped.expected_version == 5 and grouped.transaction_id == "edit_python")
+    local repeated = python.normalize_batch(batch())
+    check("the explanatory note has stable identity despite different imports",
+        vim.deep_equal(grouped.findings[2], repeated.findings[2]))
+    check("normalization is idempotent",
+        #python.normalize_batch(grouped).findings == 2)
+    check("basedpyright gets the same policy", #python.normalize_batch(batch("basedpyright")).findings == 2)
+    check("other producers keep all findings", #python.normalize_batch(batch("other")).findings == 3)
+    local other = batch()
+    other.findings = { { code = "reportMissingModuleSource", severity = 2, message = "not a missing import" } }
+    check("other import codes remain intact", python.normalize_batch(other).complete)
+    vim.lsp.get_client_by_id = function()
+        return { config = { settings = { python = { pythonPath = "/user/python" } } } }
+    end
+    check("an attached user interpreter keeps all import diagnostics",
+        #python.normalize_batch(batch()).findings == 3)
+    vim.lsp.get_client_by_id = function() return nil end
+    python.configure({ configured = true })
+    check("explicit project environment configuration keeps imports", #python.normalize_batch(batch()).findings == 3)
+    python.configure({})
+    local path = "/fixture/python-late.py"
+    edit._note_pending_late(path, "edit_python_late", "wsrev_python", 5)
+    local raw = batch().findings
+    edit._capture_late("pyright", path, 5, raw, 42)
+    local late = edit.late_evidence().batches[1]
+    check("late imports are grouped without claiming completion",
+        late and #late.findings == 2 and late.complete == false
+            and late.reason == "python_environment_unresolved"
+            and late.document_version == 5 and late.expected_version == 5)
+    check("late normalization does not mutate raw evidence", #raw == 3 and raw[1].code == "reportMissingImports")
+    vim.lsp.get_client_by_id = original_client
+end
+
 local function buffer_with(lines, filetype)
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)

@@ -7,10 +7,10 @@ import (
 )
 
 func TestDiagnosticReasonCodesDoNotExportProviderText(t *testing.T) {
-	reasons := []string{"push_missing_current_document_proof", "push_missing_current_document_proof", "/home/private/token", "provider exposed secret", "code_shaped_secret", "", strings.Repeat("a", 100)}
+	reasons := []string{"python_environment_unresolved", "push_missing_current_document_proof", "push_missing_current_document_proof", "/home/private/token", "provider exposed secret", "code_shaped_secret", "", strings.Repeat("a", 100)}
 	reasons = append(reasons, make([]string, 64)...)
 	got := DiagnosticReasonCodes(reasons)
-	want := []string{"diagnostic_reason_unclassified", "push_missing_current_document_proof"}
+	want := []string{"diagnostic_reason_unclassified", "push_missing_current_document_proof", "python_environment_unresolved"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("reason codes: %v", got)
 	}

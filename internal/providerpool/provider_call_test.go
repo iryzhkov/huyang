@@ -86,6 +86,27 @@ func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
 	}
 }
 
+func TestPythonEnvironmentRootReachesSandboxFactory(t *testing.T) {
+	pool, factory := capPool(t, 2)
+	root, sandbox := t.TempDir(), t.TempDir()
+	backend, err := pool.Open(sandbox, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.Descriptor().Root != sandbox {
+		t.Fatal("changed source root")
+	}
+	if got := factory.configs[0]; got.PythonEnvironmentRoot != root || got.Root != sandbox {
+		t.Fatalf("sandbox environment root = %#v", got)
+	}
+	if _, err := pool.Open(root); err != nil {
+		t.Fatal(err)
+	}
+	if factory.configs[1].PythonEnvironmentRoot != root {
+		t.Fatal("canonical root was not retained")
+	}
+}
+
 // stubProvider answers every operation with an empty result.
 type stubProvider struct {
 	descriptor provider.Descriptor

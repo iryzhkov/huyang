@@ -44,6 +44,43 @@ Unversioned positives are provisional and unattributed; unversioned emptiness
 cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof
 is incomplete and delivers late findings via `diagnostic_updates` on later calls.
 
+## Python environments
+
+Pyright and basedpyright retain an explicit `settings.python.pythonPath`. Environment
+settings (`venv`, `venvPath`, `pythonPath`) in `pyrightconfig.json` or the
+`[tool.pyright]` / `[tool.basedpyright]` table also own interpreter selection.
+Their configuration is left to the language server; discovery does not validate that
+dependencies are installed. Otherwise discovery reuses the pipeline's filesystem selector:
+`.venv/bin/python`, `venv/bin/python`, `env/bin/python`, executable `VIRTUAL_ENV`,
+then the lockfile manager (uv before Poetry). A non-executable preferred venv is an
+explicit failure, not permission to substitute an unrelated interpreter.
+
+Provider bootstrap configures the interpreter before the first source buffer loads, including
+on generation restart. The canonical workspace root supplies environment metadata even when
+source bytes live in a preparation sandbox. The pipeline's command detection remains read-only and does not execute
+these queries. Language support discovery may issue `uv python find --no-python-downloads`
+or `poetry --no-plugins env info --executable`, with that root as cwd and a two-second
+deadline. It never uses `uv run`, `poetry run`, Python snippets, project scripts, a shell,
+dependency sync, or installation for discovery. A manager executable resolving inside the
+project is refused. Failed/missing managers, multiline output, relative paths, and absent or
+non-executable interpreters remain unresolved. Manager stderr is not published.
+
+When no interpreter is known to the attached client, only `reportMissingImports` findings
+from Pyright/basedpyright are collapsed into one stable warning per producer/document.
+The warning uses the existing finding shape, severity 2, source `huyang`, code
+`python_environment_unresolved`, and a stable range/message so ordinary ledger identity
+deduplicates it. Its severity keeps the explanation visible in edit deltas. Other findings
+and import-related codes are retained. Grouped evidence has `complete: false` and reason
+`python_environment_unresolved`; confidence stays provisional even if a producer incorrectly
+claims completion. The reason is a public diagnostic reason code and cannot be corroborated
+away by a project check. Omitted findings cannot be treated as resolved.
+
+Immediate evidence and late pushes/pulls use the same policy. Late normalization works on a
+copy after publication/version/progress checks; it never changes raw publication proof,
+guard tokens or transaction attribution. Existing baselines, retention and notification
+rules still apply. Interpreter configuration changes require a provider restart; a later
+global setting is not proof that an already-running client used it.
+
 ## Baselines
 
 Baselines only seed or refresh findings; they never resolve omitted findings.

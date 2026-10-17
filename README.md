@@ -99,6 +99,16 @@ runtimepath describes, each time it starts. After installing one, call
 service, so the running provider picks it up. `language_server_status` names a language
 that has no server, and lists the Mason packages that serve it under `install_options`.
 
+Pyright and basedpyright use the project's interpreter automatically. Explicit
+`python.pythonPath` and project environment settings take precedence; otherwise Huyang
+uses the pipeline's local `.venv`/`venv`/`env` selection, then an executable
+`VIRTUAL_ENV`, then uv or Poetry metadata when the corresponding lockfile exists.
+Discovery does not sync dependencies or run project scripts. Missing tools and failed
+queries leave the interpreter unresolved. In that case, repeated `reportMissingImports`
+findings become one explanatory warning per document and producer, with provisional
+coverage; other findings remain visible. Restart the provider after changing its
+environment. See [the diagnostic contract](docs/diagnostics-contract.md#python-environments).
+
 ## Build and test
 
 ```sh
