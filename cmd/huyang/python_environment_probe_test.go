@@ -704,8 +704,8 @@ func (p *m9Probe) collect() map[string]any {
 
 type m9PostFix struct {
 	Path, Hash, Revision, Transaction string
-	StartedUS                        float64
-	IDs                              []string
+	StartedUS                         float64
+	IDs                               []string
 }
 
 func (f *m9PostFix) uri() string { return (&url.URL{Scheme: "file", Path: f.Path}).String() }
@@ -715,15 +715,15 @@ type m9PullObservation struct {
 }
 
 type m9TraceState struct {
-	Candidate                          *m9PullObservation
-	Pushes                             []map[string]any
-	Provider                           string
-	ProducerProof, UnversionedPush      bool
-	Pending                            bool
-	ProgressBegins, Epoch               int
-	LastSeq                            float64
-	ProofBarrier                       float64
-	Reason                             string
+	Candidate                      *m9PullObservation
+	Pushes                         []map[string]any
+	Provider                       string
+	ProducerProof, UnversionedPush bool
+	Pending                        bool
+	ProgressBegins, Epoch          int
+	LastSeq                        float64
+	ProofBarrier                   float64
+	Reason                         string
 }
 
 // Local identity binds an observation to bytes we requested, never to the
@@ -1950,8 +1950,12 @@ func TestM9PostFixCorrelation(t *testing.T) {
 		{"missing-items", func(a, b map[string]any) { delete(m9Object(b["params"]), "items") }},
 		{"object-is-not-array", func(a, b map[string]any) { m9Object(b["params"])["items"] = map[string]any{} }},
 		{"null-is-not-array", func(a, b map[string]any) { m9Object(b["params"])["items"] = nil }},
-		{"nonempty", func(a, b map[string]any) { m9Object(b["params"])["items"] = []any{map[string]any{"message": "still analyzing"}} }},
-		{"sandbox-request", func(a, b map[string]any) { m9Object(m9Object(a["request_params"])["textDocument"])["uri"] = "file:///sandbox/main.py" }},
+		{"nonempty", func(a, b map[string]any) {
+			m9Object(b["params"])["items"] = []any{map[string]any{"message": "still analyzing"}}
+		}},
+		{"sandbox-request", func(a, b map[string]any) {
+			m9Object(m9Object(a["request_params"])["textDocument"])["uri"] = "file:///sandbox/main.py"
+		}},
 		{"pre-fix-bytes", func(a, b map[string]any) { m9Object(a["snapshot"])["sha256"] = "old" }},
 		{"unsynchronized-disk", func(a, b map[string]any) { m9Object(a["snapshot"])["disk_sha256"] = "old" }},
 		{"changed-during-request", func(a, b map[string]any) { m9Object(b["snapshot"])["changedtick"] = float64(9) }},
