@@ -595,23 +595,7 @@ func (s *diagnosticStore) recordLocked(batch DiagnosticBatch) (DiagnosticReport,
 		dimension = "edited_documents"
 	}
 	prior := s.state.ProviderDimensions[dimension+"\x00"+key+"\x00"+string(batch.Kind)]
-	baselineKnown := batch.Baseline
-	// Postimage reads invalidate current lane coverage, not immutable proof of
-	// the exact preimage. Recheck that payload's own authority below instead.
-	if !baselineKnown && batch.PreEditDocumentRevision != "" {
-		for _, id := range prior.EvidenceIDs {
-			var previous DiagnosticBatch
-			if evidence, ok := s.state.Evidence[id]; ok && json.Unmarshal(evidence.Payload, &previous) == nil &&
-				previous.DocumentRevision == batch.PreEditDocumentRevision && !previous.Staged &&
-				previous.Producer == batch.Producer && previous.ProducerVersion == batch.ProducerVersion {
-				if proof, _ := confidenceFor(previous); proof != ConfidenceAuthoritative {
-					continue
-				}
-				baselineKnown = true
-				break
-			}
-		}
-	}
+	baselineKnown := s.baselineKnownLocked(batch, prior.EvidenceIDs)
 	evID := s.recordEvidenceLocked(batch, confidence, reasons)
 	previous := append([]string(nil), s.state.Active[key]...)
 	previousStale := append([]string(nil), s.state.Stale[key]...)
@@ -701,32 +685,6 @@ func stagedItems(batch DiagnosticBatch, evID string) []DiagnosticItem {
 		})
 	}
 	return items
-}
-
-// baselineProofKey deduplicates only proven canonical baseline storage.
-// Observation time/state and mutation hints are not proof. All other publication
-// fields, exact native revision, finding placement and multiplicity are retained.
-func baselineProofKey(batch DiagnosticBatch, confidence DiagnosticConfidence) string {
-	if !batch.Baseline || batch.Staged || batch.DocumentRevision == "" || confidence != ConfidenceAuthoritative {
-		return ""
-	}
-	batch.ObservedAt, batch.StateSeq = time.Time{}, 0
-	batch.TransactionID, batch.Candidates, batch.PreEditDocumentRevision = "", nil, ""
-	if batch.Dimension == "" {
-		batch.Dimension = "edited_documents"
-	}
-	batch.Findings = append([]DiagnosticFinding(nil), batch.Findings...)
-	for i := range batch.Findings {
-		batch.Findings[i] = normalizeFinding(batch.Findings[i])
-	}
-	sort.Slice(batch.Findings, func(i, j int) bool {
-		left, _ := json.Marshal(batch.Findings[i])
-		right, _ := json.Marshal(batch.Findings[j])
-		return string(left) < string(right)
-	})
-	payload, _ := json.Marshal(batch)
-	hash := sha256.Sum256(payload)
-	return hex.EncodeToString(hash[:])
 }
 
 // recentEvidenceIDs moves observed IDs to the end and bounds each owner's
