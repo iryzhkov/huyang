@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -318,9 +320,7 @@ func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 12 {
-		t.Fatalf("default adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
-	}
+	requireProfileCatalog(t, "default adapter", listed.Tools, mcpapi.ProfileEdit)
 	_ = session.Close()
 	_ = toAdapterWriter.Close()
 	_ = fromAdapterReader.Close()
@@ -372,9 +372,7 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after service restart: %v", err)
 	}
-	if len(listed.Tools) != 12 {
-		t.Fatalf("reconnected adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
-	}
+	requireProfileCatalog(t, "reconnected adapter", listed.Tools, mcpapi.ProfileEdit)
 
 	stopSecond()
 	_, stopSecond = startTestHuyangService(t, stateDir, socketPath, "")
@@ -382,9 +380,7 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after second service restart: %v", err)
 	}
-	if len(listed.Tools) != 12 {
-		t.Fatalf("twice-reconnected adapter catalog = %d tools, want the 12 of the edit profile", len(listed.Tools))
-	}
+	requireProfileCatalog(t, "twice-reconnected adapter", listed.Tools, mcpapi.ProfileEdit)
 }
 
 func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
@@ -403,7 +399,7 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", response.StatusCode)
 	}
 
-	for route, expected := range map[string]int{"/mcp": 14, "/mcp/orient": 8, "/mcp/edit": 12} {
+	for route, profile := range map[string]mcpapi.Profile{"/mcp": mcpapi.ProfileFull, "/mcp/orient": mcpapi.ProfileOrient, "/mcp/edit": mcpapi.ProfileEdit} {
 		httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 		client := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
 		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
@@ -416,10 +412,29 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s list: %v", route, err)
 		}
-		if len(listed.Tools) != expected {
-			t.Errorf("%s tools = %d, want %d", route, len(listed.Tools), expected)
-		}
+		requireProfileCatalog(t, route, listed.Tools, profile)
 		_ = session.Close()
+	}
+}
+
+// requireProfileCatalog fails unless tools are exactly the catalog of
+// profile. The expectation comes from the registry rather than a hard-coded
+// count, so a deliberate catalog change cannot leave these route and adapter
+// checks behind; the frozen catalog fixtures pin the catalog itself.
+func requireProfileCatalog(t *testing.T, label string, tools []*mcp.Tool, profile mcpapi.Profile) {
+	t.Helper()
+	got := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		got = append(got, tool.Name)
+	}
+	want := append([]string(nil), mcpapi.CatalogNames(profile)...)
+	if len(want) == 0 {
+		t.Fatalf("profile %s has no catalog", profile)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("%s catalog = %v, want the %d tools of the %s profile: %v", label, got, len(want), profile, want)
 	}
 }
 
