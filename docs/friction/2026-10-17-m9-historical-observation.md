@@ -49,7 +49,13 @@ that exact transported table to the construction/emission sidecar and actual
 provider RPC ID. It follows the production decoder's preference for nonempty
 `completion.evidence`, otherwise `completion.result.batches`. Callback snapshots
 are deep copies. Observer exceptions leave production delivery intact and cause
-qualification to fail through recorded errors or missing causal events.
+qualification to fail through recorded errors or missing causal events. After
+`observer.transport` returns, the probe records `transport_end` with the actual
+provider RPC ID and a fresh observer.status snapshot, then delegates the unchanged
+notification arguments and return/error behavior. Every such marker must be
+installed/error-free. Every observed transport needs a later same-RPC marker,
+including the final transport whose failure has no subsequent observation to expose
+it. A prior collection_end status cannot substitute for this post-transport state.
 
 No observer is installed in ordinary sessions. Absent-observer functions return
 without snapshots, logging, fetching or I/O. The optional observer is not authority
@@ -60,7 +66,8 @@ or a supported producer proof capability.
 An observed Lua emission alone is insufficient. The probe records raw-trace byte
 boundaries immediately before/after each real MCP call, outside the immutable MCP
 reply body. The first report/receipt citing a selected evidence ID must contain its
-unique successful actual provider transport entirely inside that call's boundary.
+unique successful actual provider transport and its same-RPC transport_end marker
+entirely inside that call's boundary.
 
 The selected batch must match the entire typed emitted diagnostic payload:
 provider/producer, kind, canonical document, DocRev/transaction, expected and
@@ -74,14 +81,19 @@ parent `89cbead1f2f5e990b140e65e8aea7f4f2b860edf`:
 
 | Field | Actual ingestion source |
 | --- | --- |
-| `pre_edit_document_revision` | `providerpool.bindDiagnosticBatchDocument`, `internal/providerpool/evidence.go:125–126`, called by `recordDiagnostics` after receipt binding. |
+| `pre_edit_document_revision` | `providerpool.bindDiagnosticBatchDocument`, `internal/providerpool/evidence.go:136`, called by `recordDiagnostics` at :118 after receipt binding. |
 | `state_seq` | `Workspace.RecordDiagnosticEvidenceBatches`, `internal/workspace/evidence.go:1410–1421`, fills zero from workspace identity on its copied input. |
 | `observed_at` | `diagnosticStore.recordBatches`, `internal/workspace/evidence.go:519–520`, assigns the recording time only when absent. |
 
 These fields never supply clean/version/completion proof. The original selected
 evidence ID and full original observed_at remain in the result unchanged.
 The ordering check that recording follows actual transport is an additional
-consistency rejection, never an origin guess.
+consistency rejection, never an origin guess. Other Go ingestion rewrites stay
+inside the comparison: immediate Selected/Staged/TransactionID/DocumentRevision
+assignments (`providerpool/evidence.go:114–117`), receipt/path rebinding (:131–135),
+Document cleaning (`workspace/evidence.go:522`), and baseline TransactionID/Candidates
+clearing (:523–525). They are compared, not excluded; mismatches conservatively
+reject rather than authorize additional matches.
 
 `providerpool.diagnosticPayload` (`evidence.go:342–370`) reads those actual typed
 batches; `CollectLateEvidence` (`318–338`) coalesces within streams, canonicalizes
@@ -114,7 +126,12 @@ its own contiguous sequence from observer installation; processes are not merged
 by trace_seq. The canonical attachment is selected explicitly, and all other raw
 process records remain in the cut. Unknown events, gaps, unfinished collections,
 telemetry errors or ambiguous identities reject qualification. The cut includes
-work triggered by final diagnostics/evidence recovery.
+work triggered by final diagnostics/evidence recovery. The final full report citing
+the historical evidence must contain a canonical transport_end marker inside its
+actual MCP byte interval, even when that completion has no new batches. The result
+retains this in-stream final_cut_marker with its RPC identity and post-transport
+status. A missing marker, wrong process/RPC relation, marker outside the citing
+call or observer error in the last marker leaves the cut unqualified.
 
 All later relevant callbacks, progress, cancellations and pushes are replayed.
 Later progress records every superseding sequence and invalidates terminal-current
@@ -124,7 +141,13 @@ be empty; no invented activity is reported. The latest raw payload remains visib
 Every successful later full positive callback must have a genuine accepted origin,
 construction, enqueue/emission, transport, selected evidence and actual current/stale
 finding bodies carrying that evidence ID. Raw presence, an emission alone, or an
-eventual empty cannot hide an undelivered positive. Such a gap fails the result.
+eventual empty cannot hide an undelivered positive. The first full current/stale
+report delivering each selected evidence ID/content establishes its actual nonempty
+finding IDs. Every subsequent full report through the cut must retain all those IDs
+in current/stale bodies, independently of original pre-fix ID retention. Silent
+omission fails even if a later report restores the body. The result records the
+first delivery index and actual IDs; repeated old evidence references need not stay
+on later retained bodies. Such a delivery or retention gap fails the result.
 A delivered later positive gets the conspicuous final classification
 `historical_empty_later_positive_delivered`, even if more progress follows.
 Unattributed native/cancelled later positives conservatively remain unqualified.
@@ -146,11 +169,16 @@ The source writes exactly these additional case artifacts:
   coverage; the complete raw lsp.jsonl remains independently retained and hashed.
 - `historical-observation.json`: separate historical/attribution/non-resolution
   claims, original evidence and sidecars, duplicate/superseding sequences, latest
-  payload, actual tokens/inflight, final ledger and every report artifact hash.
+  payload, actual tokens/inflight, retained later-positive IDs/delivery indices,
+  in-stream final marker, final ledger and every report artifact hash.
 
 Cleanup verifies the final raw trace still contains the declared cut. The collector
-allowlist adds only these exact three basenames; its fullmatch, file safety,
-inventory, recursion and size/file-count caps are unchanged. Root must refresh
+allowlist retains these exact three historical basenames plus the existing required
+`manager-failure-preflight.json`. The latter contains case12's actual command/input
+hashes, bounded stdout/stderr and normal nonzero exit proof; retaining it repairs
+an evidence omission without changing the manager policy or assertions. These four
+exact names are the only additions; fullmatch, file safety, inventory, recursion
+and size/file-count caps are unchanged. Root must refresh
 source/collector entry pins, then verify the complete collected inventory, exact
 cut prefix/hash, every report hash, plan presence and all required case artifacts.
 Missing/truncated/interrupted collection remains unqualified. Collector
@@ -158,13 +186,20 @@ Missing/truncated/interrupted collection remains unqualified. Collector
 
 No test, build, syntax/import check, linter, formatter, client, provisioning,
 Chaldea job, SSH, install, push or review ran in this implementation child.
-All source edits use Huyang with format=false. Root owns fresh other-provider main
+All source edits use Huyang with format=false. The first correction round imports
+the root's agent-a5a998 formatted baseline before making changes; no local formatter
+runs. That original job remains format FAIL despite its thirteen pure checks and
+focused Lua/Go/collector checks passing. Final corrections still need root-owned
+format/artifact import and new checks. Root owns fresh other-provider main
 review of the exact final clean commit and Git-independent agent-a checks:
 
 - Existing six Go pure regressions plus `TestM9Historical.*`.
 - `nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_edit.lua`,
-  including dormant/error/snapshot/cancellation/dedup/real enqueue-emission checks.
-- Collector exact-name acceptance and prefixed/suffixed/near-miss rejection, with
+  including dormant/error/snapshot/cancellation/dedup/real enqueue-emission checks
+  and a real two-batch final-transport failure whose post-status preserves notify
+  arguments, nil return slots and thrown error objects.
+- Collector acceptance for all four exact additions and prefixed/suffixed/near-miss
+  rejection, with
   existing inventory/hash/safety checks. No generic allowlist widening.
 - Appropriate production Lua/Go regression checks and fresh full fifteen-case
   Python matrix from sealed updated source. Strict-nine and other milestones are

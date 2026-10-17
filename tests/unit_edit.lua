@@ -77,6 +77,53 @@ do
         calls==1 and returned==result and #observer.status().errors>0)
     ok,detail=pcall(observer.with_raw,{},function() error(thrown) end)
     check("enabled observer preserves thrown production error object",not ok and detail==thrown)
+
+    -- Fail only the second snapshot of the final transport. No later observer
+    -- event or collection status can reveal this error; transport_end must.
+    local transported = {}
+    observer.install(function(event)
+        if event.stage=="transport_emission" and event.transport_index==2 then
+            error("intentional final transport tail failure")
+        end
+        transported[#transported+1]=event
+    end)
+    local normalized = {}
+    for i=1,2 do
+        local source={kind="lsp_pull",findings={{message="body " .. i}},complete=false}
+        observer.construct(source)
+        normalized[i]=vim.deepcopy(source)
+        observer.emission("immediate_emission",source,normalized[i],nil,{request_id="final"})
+    end
+    check("transport tail fixture has no earlier observer errors",#observer.status().errors==0)
+    local completion={ok=true,result={batches=normalized}}
+    local marker,args_seen
+    local notify=function(...)
+        args_seen={n=select("#",...),...}
+        return "same",nil,17
+    end
+    local function notify_with_marker(channel,method,...)
+        if method=="huyang/result" then
+            local args={...}
+            if type(args[2])=="table" then
+                observer.transport(args[1],args[2])
+                marker={kind="transport_end",provider_rpc_id=args[1],observer_status=observer.status()}
+            end
+        end
+        return notify(channel,method,...)
+    end
+    a,b,c=notify_with_marker(8,"huyang/result",91,completion,nil)
+    check("final transport marker exposes an otherwise silent observer error",
+        marker and marker.provider_rpc_id==91 and #marker.observer_status.errors==1
+            and transported[#transported].stage=="transport_emission"
+            and transported[#transported].transport_index==1)
+    check("tail failure preserves notify arguments return slots and source bodies",
+        args_seen.n==5 and args_seen[1]==8 and args_seen[2]=="huyang/result"
+            and args_seen[3]==91 and args_seen[4]==completion and args_seen[5]==nil
+            and a=="same" and b==nil and c==17
+            and normalized[2].findings[1].message=="body 2")
+    notify=function() error(thrown) end
+    ok,detail=pcall(notify_with_marker,8,"huyang/result",92,completion)
+    check("transport marker preserves thrown notify error object",not ok and detail==thrown)
     observer.install(nil)
 end
 

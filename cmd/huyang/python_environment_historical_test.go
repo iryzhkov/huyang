@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,12 +27,12 @@ type m9HistoricalCall struct {
 
 type m9HistoricalBatch struct {
 	Constructed, Enqueued, Emission map[string]any
-	Transport                      map[string]any
-	CitingCall                     map[string]any
-	Origin                         map[string]any
-	Request, Response              map[string]any
-	EvidenceID                     string
-	Attributed                     bool
+	Transport                       map[string]any
+	CitingCall                      map[string]any
+	Origin                          map[string]any
+	Request, Response               map[string]any
+	EvidenceID                      string
+	Attributed                      bool
 }
 
 type m9History struct {
@@ -44,6 +45,7 @@ type m9History struct {
 	Batches         map[string]*m9HistoricalBatch
 	Origins         map[string]map[string]any
 	Sequences       map[string]float64
+	TransportEnds   map[string]map[string]any
 	OpenTokens      map[string]any
 	Inflight        map[string]bool
 	Latest          map[string]any
@@ -51,6 +53,20 @@ type m9History struct {
 }
 
 func m9Identity(process, id any) string { return fmt.Sprintf("%v:%v", process, id) }
+
+func m9ObserverStatusOK(status map[string]any) bool {
+	if status["installed"] != true {
+		return false
+	}
+	switch errors := status["errors"].(type) {
+	case []any:
+		return len(errors) == 0
+	case map[string]any:
+		return len(errors) == 0 // Lua may encode an empty table as an object.
+	default:
+		return false
+	}
+}
 
 func m9DecodeCut(body []byte) ([]map[string]any, error) {
 	if len(body) == 0 || body[len(body)-1] != '\n' {
@@ -76,9 +92,10 @@ func m9DecodeCut(body []byte) ([]map[string]any, error) {
 func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, error) {
 	h := &m9History{Requests: map[string]map[string]any{}, Dispatched: map[string]bool{}, Callbacks: map[string]map[string]any{},
 		Cancelled: map[string]bool{}, Sent: map[string]bool{}, Batches: map[string]*m9HistoricalBatch{},
-		Origins: map[string]map[string]any{}, Sequences: map[string]float64{},
+		Origins: map[string]map[string]any{}, Sequences: map[string]float64{}, TransportEnds: map[string]map[string]any{},
 		OpenTokens: map[string]any{}, Inflight: map[string]bool{}}
 	ready, collections := map[string]bool{}, map[string]bool{}
+	transportSequences := map[string]float64{}
 	for _, event := range events {
 		process, pok := event["process_id"].(float64)
 		seq, sok := event["trace_seq"].(float64)
@@ -106,7 +123,20 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 				return nil, fmt.Errorf("missing collection or observer telemetry failed")
 			}
 			delete(collections, key)
+		case "transport_end":
+			status := m9Object(event["observer_status"])
+			key := m9Identity(process, event["provider_rpc_id"])
+			if event["provider_rpc_id"] == nil || h.TransportEnds[key] != nil || !m9ObserverStatusOK(status) {
+				return nil, fmt.Errorf("missing/duplicate transport-end identity or observer error")
+			}
+			h.TransportEnds[key] = event
 		case "diagnostic_observation":
+			if event["stage"] == "transport_emission" {
+				if event["provider_rpc_id"] == nil {
+					return nil, fmt.Errorf("transport emission lacks actual RPC identity")
+				}
+				transportSequences[m9Identity(process, event["provider_rpc_id"])] = seq
+			}
 			switch event["stage"] {
 			case "accepted_receive", "constructed", "enqueued", "immediate_emission", "transport_emission":
 			case "late_emission":
@@ -132,6 +162,12 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 				return nil, fmt.Errorf("ambiguous canonical process/client")
 			}
 			h.Process, h.Client = process, event["client_id"]
+		}
+	}
+	for key, seq := range transportSequences {
+		marker := h.TransportEnds[key]
+		if marker == nil || marker["trace_seq"].(float64) <= seq {
+			return nil, fmt.Errorf("transport emission lacks later same-RPC transport-end marker")
 		}
 	}
 	if h.Process == nil || len(collections) != 0 {
@@ -413,28 +449,71 @@ func m9SameEmittedBatch(emitted, selected map[string]any) bool {
 	return true
 }
 
-func m9EvidenceBodyDelivered(reply map[string]any, id string, finding any) bool {
-	found := false
-	var walk func(any)
-	walk = func(value any) {
-		switch v := value.(type) {
-		case []any:
-			for _, x := range v {
-				walk(x)
-			}
-		case map[string]any:
-			if reflect.DeepEqual(v["finding"], finding) && (v["status"] == "current" || v["status"] == "stale") {
-				for _, raw := range probeSlice(v["evidence_ids"]) {
-					found = found || raw == id
+// First full delivery establishes actual ledger IDs. Later empty observations
+// cannot silently erase those IDs from any subsequent full current/stale report.
+func m9RetainedPositiveIDs(replies []map[string]any, evidenceID string, finding any) ([]string, int, error) {
+	var ids []string
+	first := -1
+	for n, reply := range replies {
+		report := m9Report(reply)
+		if report == nil {
+			continue
+		}
+		retained := map[string]bool{}
+		delivered := map[string]bool{}
+		for _, group := range []string{"current", "stale"} {
+			for _, raw := range probeSlice(report[group]) {
+				item := m9Object(raw)
+				id := m9Text(item["id"])
+				if id == "" || item["status"] != group {
+					continue
+				}
+				retained[id] = true
+				if !reflect.DeepEqual(item["finding"], finding) {
+					continue
+				}
+				for _, ev := range probeSlice(item["evidence_ids"]) {
+					if ev == evidenceID {
+						delivered[id] = true
+					}
 				}
 			}
-			for _, child := range v {
-				walk(child)
+		}
+		if first == -1 && len(delivered) > 0 {
+			first = n
+			for id := range delivered {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+		}
+		if first != -1 {
+			for _, id := range ids {
+				if !retained[id] {
+					return nil, first, fmt.Errorf("later positive finding %s disappeared from full report %d", id, n)
+				}
 			}
 		}
 	}
-	walk(reply)
-	return found
+	if first == -1 {
+		return nil, first, fmt.Errorf("later positive lacks full selected evidence/body delivery")
+	}
+	return ids, first, nil
+}
+
+// A completion marker is written after observer.transport, including completions
+// with no batches. Byte bounds bind it to the actual citing MCP call.
+func m9CallTransportEnd(h *m9History, call m9HistoricalCall) map[string]any {
+	var last map[string]any
+	for _, marker := range h.TransportEnds {
+		start, _ := marker["cut_byte_start"].(float64)
+		end, _ := marker["cut_byte_end"].(float64)
+		if marker["process_id"] == h.Process && end > start &&
+			start >= float64(call.Before) && end <= float64(call.After) &&
+			(last == nil || marker["trace_seq"].(float64) > last["trace_seq"].(float64)) {
+			last = marker
+		}
+	}
+	return last
 }
 
 func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[string]map[string]any, replies []map[string]any, calls []m9HistoricalCall) (map[string]any, error) {
@@ -493,8 +572,14 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 		if b.Transport == nil || first == nil || end <= start || start < float64(first.Before) || end > float64(first.After) {
 			return nil, fmt.Errorf("selected evidence lacks unique actual transport inside its first citing call")
 		}
+		marker := h.TransportEnds[m9Identity(h.Process, b.Transport["provider_rpc_id"])]
+		markerStart, _ := marker["cut_byte_start"].(float64)
+		markerEnd, _ := marker["cut_byte_end"].(float64)
+		if marker == nil || markerEnd <= markerStart || markerStart < float64(first.Before) || markerEnd > float64(first.After) {
+			return nil, fmt.Errorf("same-RPC transport-end marker lies outside first citing call")
+		}
 		b.CitingCall = map[string]any{"name": first.Name, "request_id": first.Reply["request_id"],
-			"trace_bytes_before": first.Before, "trace_bytes_after": first.After}
+			"trace_bytes_before": first.Before, "trace_bytes_after": first.After, "transport_end": marker}
 		observed, e := time.Parse(time.RFC3339Nano, m9Text(selected["observed_at"]))
 		at, _ := b.Transport["unix_us"].(float64)
 		if e != nil || float64(observed.UnixMicro()) < at {
@@ -530,10 +615,24 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 		return nil, fmt.Errorf("no exact-origin selected historical post-fix empty observation")
 	}
 	candidate := candidates[0]
+	var finalMarker map[string]any
+	for n := len(calls) - 1; n >= 0; n-- {
+		call := calls[n]
+		if call.Name == "diagnostics" && m9Report(call.Reply) != nil {
+			if m9CitedBatches(call.Reply)[candidate.EvidenceID] {
+				finalMarker = m9CallTransportEnd(h, call)
+			}
+			break
+		}
+	}
+	if finalMarker == nil {
+		return nil, fmt.Errorf("final citing full report lacks in-stream transport-end cut marker")
+	}
 	seq := candidate.Response["trace_seq"].(float64)
 	var superseding, duplicates []any
 	classification := "historical_empty_latest_payload_reported"
 	laterPositive := false
+	var laterDeliveries []any
 	for _, event := range h.Relevant {
 		s := event["trace_seq"].(float64)
 		if s <= seq {
@@ -561,15 +660,15 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 			if b.Response == nil || b.Response["request_id"] != event["request_id"] || b.Response["trace_seq"] != event["trace_seq"] || !b.Attributed || b.EvidenceID == "" || b.Emission == nil || m9Object(b.Origin["raw"]) == nil {
 				continue
 			}
-			all := true
 			for _, finding := range probeSlice(evidence[b.EvidenceID]["findings"]) {
-				seen := false
-				for _, reply := range replies {
-					seen = seen || m9EvidenceBodyDelivered(reply, b.EvidenceID, finding)
+				ids, first, err := m9RetainedPositiveIDs(replies, b.EvidenceID, finding)
+				if err != nil {
+					return nil, err
 				}
-				all = all && seen
+				laterDeliveries = append(laterDeliveries, map[string]any{"evidence_id": b.EvidenceID,
+					"finding_ids": ids, "first_full_report_index": first})
 			}
-			delivered = delivered || (all && len(probeSlice(evidence[b.EvidenceID]["findings"])) > 0)
+			delivered = delivered || len(probeSlice(evidence[b.EvidenceID]["findings"])) > 0
 		}
 		if !delivered {
 			return nil, fmt.Errorf("later positive callback %v lacks attributed selected ledger-body delivery", event["trace_seq"])
@@ -587,7 +686,9 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 	}
 	return map[string]any{
 		"call_boundaries": callBoundaries,
-		"outcome": "historical_post_fix_observation_pending", "historical_observation": true,
+		"later_positive_deliveries": laterDeliveries,
+		"final_cut_marker": finalMarker,
+		"outcome":         "historical_post_fix_observation_pending", "historical_observation": true,
 		"exact_attribution": true, "no_resolution": true, "analysis_completion_proven": false,
 		"clean_resolution_proven": false, "old_terminal_gate_qualified": false,
 		"classification": classification, "original_observation": candidate,
@@ -595,7 +696,7 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 		"identical_later_callbacks": duplicates, "superseding_trace_sequences": superseding,
 		"latest_observed_payload": h.Latest, "open_progress_tokens": h.OpenTokens, "inflight_requests": h.Inflight,
 		"known_work_pending": len(h.OpenTokens) != 0 || len(h.Inflight) != 0,
-		"canonical_process": h.Process, "selected_provider": fmt.Sprintf("pyright#%v", h.Client),
+		"canonical_process":  h.Process, "selected_provider": fmt.Sprintf("pyright#%v", h.Client),
 		"final_process_sequences": h.Sequences, "final_ledger": m9Report(final),
 		"retained_finding_ids": fixed.IDs, "fixed_transaction": fixed.Transaction,
 		"producer_proof_observed": false,
@@ -698,7 +799,7 @@ func m9HistoricalFixture(t *testing.T) (*m9PostFix, []map[string]any, map[string
 		"expected_version": float64(4), "result_id": "opaque-5", "complete": false,
 		"selected": true, "dimension": "edited_documents", "findings": []any{}}
 	origin := map[string]any{"origin_id": float64(1),
-		"raw": map[string]any{"process_id": float64(91), "client_id": float64(7), "request_id": "91:7:1", "callback_seq": float64(5)},
+		"raw":   map[string]any{"process_id": float64(91), "client_id": float64(7), "request_id": "91:7:1", "callback_seq": float64(5)},
 		"watch": map[string]any{"client_id": float64(7), "document": fixed.Path, "generation": float64(1)}}
 	identity := map[string]any{"batch_id": float64(2), "origin": origin}
 	for _, e := range []map[string]any{
@@ -713,6 +814,9 @@ func m9HistoricalFixture(t *testing.T) (*m9PostFix, []map[string]any, map[string
 			float64(len(events)+1), float64(91), float64(len(events)+31), float64(0)
 		events = append(events, e)
 	}
+	events = m9HistoryAppend(events, map[string]any{"kind": "transport_end", "provider_rpc_id": float64(41),
+		"observer_status": map[string]any{"installed": true, "errors": []any{}}})
+	events[len(events)-1]["unix_us"] = float64(40)
 	selected := maps.Clone(batch)
 	selected["observed_at"] = "1970-01-01T00:00:00.000100Z"
 	reply := map[string]any{"data": map[string]any{"diagnostics": map[string]any{
@@ -746,7 +850,7 @@ func m9AppendHistoricalPull(t *testing.T, fixed *m9PostFix, events []map[string]
 		events = m9HistoryAppend(events, e)
 	}
 	origin := map[string]any{"origin_id": float64(10),
-		"raw": map[string]any{"process_id": float64(91), "client_id": float64(7), "request_id": id, "callback_seq": response["trace_seq"]},
+		"raw":   map[string]any{"process_id": float64(91), "client_id": float64(7), "request_id": id, "callback_seq": response["trace_seq"]},
 		"watch": map[string]any{"client_id": float64(7), "document": fixed.Path, "generation": float64(2)}}
 	batch := map[string]any{"kind": "lsp_pull", "provider_id": "pyright#7", "producer": "pyright",
 		"document": fixed.Path, "document_revision": fixed.Revision, "transaction_id": fixed.Transaction,
@@ -775,6 +879,8 @@ func m9AppendHistoricalPull(t *testing.T, fixed *m9PostFix, events []map[string]
 	}
 	events = m9HistoryAppend(events, map[string]any{"kind": "diagnostic_observation", "stage": "transport_emission",
 		"identity": identity, "batch": batch, "provider_rpc_id": float64(42), "transport_ok": true})
+	events = m9HistoryAppend(events, map[string]any{"kind": "transport_end", "provider_rpc_id": float64(42),
+		"observer_status": map[string]any{"installed": true, "errors": []any{}}})
 	selected := maps.Clone(batch)
 	selected["observed_at"] = "1970-01-01T00:00:00.001000Z"
 	return events, selected
@@ -810,10 +916,14 @@ func TestM9HistoricalPendingDoesNotRestoreTerminal(t *testing.T) {
 }
 
 func TestM9HistoricalOriginAndCompleteCut(t *testing.T) {
-	for _, name := range []string{"missing-accepted-origin", "cancelled-origin", "wrong-process", "wrong-docrev",
+	for _, name := range []string{"missing-accepted-origin", "cancelled-origin", "wrong-process", "raw-origin-process", "wrong-docrev",
 		"wrong-version", "wrong-hash", "missing-sequence", "missing-queue", "observer-error", "unknown-event", "ambiguous-emission", "native-identical-not-origin"} {
 		t.Run(name, func(t *testing.T) {
 			fixed, events, evidence, replies := m9HistoricalFixture(t)
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, m9TestHistoryCalls(events, replies)); err != nil {
+				t.Fatalf("negative fixture baseline is not qualified: %v", err)
+			}
+			want := ""
 			switch name {
 			case "missing-accepted-origin":
 				events = append(events[:5], events[6:]...)
@@ -823,11 +933,28 @@ func TestM9HistoricalOriginAndCompleteCut(t *testing.T) {
 			case "cancelled-origin":
 				events = m9HistoryAppend(events, map[string]any{"kind": "pull_cancel", "request_id": "91:7:1", "client_id": float64(7)})
 			case "wrong-process":
-				events[4]["process_id"] = float64(92)
+				// A complete second stream gets through per-process validation.
+				events = append(events,
+					map[string]any{"kind": "observer_ready", "process_id": float64(92), "trace_seq": float64(1), "unix_us": float64(200)},
+					map[string]any{"kind": "publish", "process_id": float64(92), "trace_seq": float64(2), "unix_us": float64(201),
+						"client_id": float64(7), "params": map[string]any{"uri": fixed.uri(), "diagnostics": []any{}}})
+				want = "wrong-process/client canonical event"
+			case "raw-origin-process":
+				m9Object(m9Object(events[5]["origin"])["raw"])["process_id"] = float64(92)
+				want = "accepted origin conflicts with request/callback/cancellation"
 			case "wrong-docrev":
 				evidence["ev_origin"]["document_revision"] = "docrev_other"
 			case "wrong-version":
-				evidence["ev_origin"]["expected_version"] = float64(3)
+				m9Object(events[2]["snapshot"])["local_version"] = float64(5)
+				m9Object(events[4]["snapshot"])["local_version"] = float64(5)
+				if _, err := m9HistoricalTrace(events, fixed); err != nil {
+					t.Fatalf("version negative missed the candidate guard: %v", err)
+				}
+				if err := m9CorrelatedEmpty(events[2], events[4], fixed); err != nil ||
+					!m9SameEmittedBatch(m9Object(events[7]["batch"]), evidence["ev_origin"]) {
+					t.Fatalf("version negative failed an earlier local/payload guard: %v", err)
+				}
+				want = "no exact-origin selected historical post-fix empty observation"
 			case "wrong-hash":
 				m9Object(events[4]["snapshot"])["sha256"] = "old"
 			case "missing-sequence":
@@ -836,11 +963,17 @@ func TestM9HistoricalOriginAndCompleteCut(t *testing.T) {
 				var selected map[string]any
 				events, selected = m9AppendHistoricalPull(t, fixed, events, []any{}, false)
 				evidence["ev_later"] = selected
+				var withoutQueue []map[string]any
 				for _, e := range events {
-					if e["stage"] == "enqueued" {
-						e["stage"] = "constructed"
+					if e["stage"] != "enqueued" {
+						withoutQueue = append(withoutQueue, e)
 					}
 				}
+				events = withoutQueue
+				for n, e := range events {
+					e["trace_seq"] = float64(n + 1)
+				}
+				want = "emission lacks actual enqueue/collection relation"
 			case "observer-error":
 				events[7]["telemetry_errors"] = float64(1)
 			case "unknown-event":
@@ -852,8 +985,12 @@ func TestM9HistoricalOriginAndCompleteCut(t *testing.T) {
 				// old sidecar at that duplicate must not invent the missing edge.
 				m9Object(m9Object(events[5]["origin"])["raw"])["callback_seq"] = float64(99)
 			}
-			if result, err := m9HistoricalResult(events, fixed, evidence, replies, m9TestHistoryCalls(events, replies)); err == nil {
+			result, err := m9HistoricalResult(events, fixed, evidence, replies, m9TestHistoryCalls(events, replies))
+			if err == nil {
 				t.Fatalf("unqualified history passed: %+v", result)
+			}
+			if want != "" && !strings.Contains(err.Error(), want) {
+				t.Fatalf("negative hit an unrelated guard: want %q, got %v", want, err)
 			}
 		})
 	}
@@ -862,6 +999,63 @@ func TestM9HistoricalOriginAndCompleteCut(t *testing.T) {
 			t.Fatal("incomplete/truncated cut accepted")
 		}
 	}
+}
+
+func m9CloneHistoricalReply(t *testing.T, reply map[string]any) map[string]any {
+	t.Helper()
+	body, err := json.Marshal(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(body, &clone); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
+// Distinct call intervals deliver a later positive, then observe an empty
+// native callback and two more full reports with real completion markers.
+func m9PositiveRetentionFixture(t *testing.T) (*m9PostFix, []map[string]any, map[string]map[string]any, []map[string]any, []m9HistoricalCall) {
+	t.Helper()
+	fixed, events, evidence, replies := m9HistoricalFixture(t)
+	firstEnd := len(events)
+	items := []any{map[string]any{"range": map[string]any{
+		"start": map[string]any{"line": float64(1), "character": float64(0)},
+		"end": map[string]any{"line": float64(1), "character": float64(1)}},
+		"severity": float64(1), "code": "reportAssignmentType", "source": "Pyright", "message": "later real positive"}}
+	var selected map[string]any
+	events, selected = m9AppendHistoricalPull(t, fixed, events, items, false)
+	evidence["ev_positive"] = selected
+	secondEnd := len(events)
+	positive := m9CloneHistoricalReply(t, replies[0])
+	m9Report(positive)["current"] = []any{map[string]any{"id": "later-real", "status": "current",
+		"finding": probeSlice(selected["findings"])[0], "evidence_ids": []any{"ev_positive"}}}
+	m9Object(m9Object(m9Report(positive)["coverage"])["edited_documents"])["evidence_ids"] = []any{"ev_origin", "ev_positive"}
+	replies = append(replies, positive)
+	calls := []m9HistoricalCall{
+		{Name: "diagnostics", Reply: replies[0], Before: 0, After: firstEnd},
+		{Name: "diagnostics", Reply: positive, Before: firstEnd, After: secondEnd},
+	}
+	_, raw := m9PolicyFixture(t)
+	for _, event := range raw[1:] {
+		event["request_id"] = "91:7:after-positive"
+		events = m9HistoryAppend(events, event)
+	}
+	m9Object(raw[1]["request_params"])["previousResultId"] = "later"
+	m9Object(raw[3]["request_params"])["previousResultId"] = "later"
+	m9Object(raw[3]["params"])["resultId"] = "empty-after-positive"
+	before := secondEnd
+	for _, rpc := range []float64{43, 44} {
+		events = m9HistoryAppend(events, map[string]any{"kind": "transport_end", "provider_rpc_id": rpc,
+			"observer_status": map[string]any{"installed": true, "errors": []any{}}})
+		reply := m9CloneHistoricalReply(t, positive)
+		replies = append(replies, reply)
+		calls = append(calls, m9HistoricalCall{Name: "diagnostics", Reply: reply, Before: before, After: len(events)})
+		before = len(events)
+	}
+	m9TestHistoryCalls(events, nil) // Populate byte offsets without overlapping the calls above.
+	return fixed, events, evidence, replies, calls
 }
 
 func TestM9HistoricalLaterPositiveRequiresActualDelivery(t *testing.T) {
@@ -882,6 +1076,39 @@ func TestM9HistoricalLaterPositiveRequiresActualDelivery(t *testing.T) {
 	if err != nil || result["classification"] != "historical_empty_later_positive_delivered" ||
 		result["clean_resolution_proven"] != false {
 		t.Fatalf("honest later positive not conspicuous: %+v %v", result, err)
+	}
+
+	for _, name := range []string{"final-omission-after-empty", "intermediate-omission-then-restoration", "retained-current-to-stale"} {
+		t.Run(name, func(t *testing.T) {
+			fixed, events, evidence, replies, calls := m9PositiveRetentionFixture(t)
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err != nil {
+				t.Fatalf("retention fixture baseline is not qualified: %v", err)
+			}
+			switch name {
+			case "final-omission-after-empty":
+				m9Report(replies[3])["current"] = []any{}
+			case "intermediate-omission-then-restoration":
+				m9Report(replies[2])["current"] = []any{}
+			case "retained-current-to-stale":
+				for _, reply := range replies[2:] {
+					report := m9Report(reply)
+					item := maps.Clone(m9Object(probeSlice(report["current"])[0]))
+					item["status"] = "stale"
+					delete(item, "evidence_ids") // The delivered ID must survive, not every old evidence reference.
+					report["current"] = []any{}
+					report["stale"] = append(probeSlice(report["stale"]), item)
+				}
+			}
+			result, err := m9HistoricalResult(events, fixed, evidence, replies, calls)
+			if name != "retained-current-to-stale" {
+				if err == nil || !strings.Contains(err.Error(), "later positive finding later-real disappeared from full report") {
+					t.Fatalf("silent later-positive loss missed its retention guard: %+v %v", result, err)
+				}
+			} else if err != nil || result["classification"] != "historical_empty_later_positive_delivered" ||
+				result["clean_resolution_proven"] != false || len(probeSlice(result["later_positive_deliveries"])) != 1 {
+				t.Fatalf("retained current/stale positive misclassified: %+v %v", result, err)
+			}
+		})
 	}
 }
 
@@ -920,9 +1147,12 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 			calls := m9TestHistoryCalls(events, replies)
 			switch name {
 			case "missing-transport":
-				events = events[:len(events)-1]
+				events = append(events[:len(events)-2], events[len(events)-1])
+				for n, event := range events {
+					event["trace_seq"] = float64(n + 1)
+				}
 			case "failed-transport":
-				events[len(events)-1]["transport_ok"] = false
+				events[len(events)-2]["transport_ok"] = false
 			case "outside-first-call":
 				calls[0].After = 1
 			case "missing-call":
@@ -930,7 +1160,13 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 			case "unknown-payload-field":
 				evidence["ev_origin"]["invented"] = true
 			case "repeated-transport":
-				events = m9HistoryAppend(events, maps.Clone(events[len(events)-1]))
+				marker := events[len(events)-1]
+				events[len(events)-1] = maps.Clone(events[len(events)-2])
+				events = append(events, marker)
+				for n, event := range events {
+					event["trace_seq"] = float64(n + 1)
+				}
+				calls = m9TestHistoryCalls(events, replies)
 			}
 			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err == nil {
 				t.Fatal("missing/ambiguous causal transport-to-selected edge qualified")
@@ -951,6 +1187,54 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 		original["state_seq"] != float64(8) || original["pre_edit_document_revision"] != "docrev_before" ||
 		result["analysis_completion_proven"] != false || result["clean_resolution_proven"] != false {
 		t.Fatal("Go-owned additions changed original ID/time or acquired authority")
+	}
+
+	for _, name := range []string{"only-last-transport-error", "missing-same-rpc-marker", "wrong-marker-rpc",
+		"marker-outside-first-call", "missing-final-call-marker", "other-process-final-marker"} {
+		t.Run(name, func(t *testing.T) {
+			fixed, events, evidence, replies := m9HistoricalFixture(t)
+			calls := m9TestHistoryCalls(events, replies)
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err != nil {
+				t.Fatalf("transport-end fixture baseline is not qualified: %v", err)
+			}
+			want := ""
+			marker := events[len(events)-1]
+			switch name {
+			case "only-last-transport-error":
+				// Every emission succeeded and has telemetry_errors=0. Only
+				// the status captured after the final transport reports failure.
+				m9Object(marker["observer_status"])["errors"] = []any{"second batch transport snapshot failed"}
+				want = "transport-end identity or observer error"
+			case "missing-same-rpc-marker":
+				events = events[:len(events)-1]
+				want = "transport emission lacks later same-RPC transport-end marker"
+			case "wrong-marker-rpc":
+				marker["provider_rpc_id"] = float64(99)
+				want = "transport emission lacks later same-RPC transport-end marker"
+			case "marker-outside-first-call":
+				calls[0].After = len(events) - 1 // Includes transport, excludes only its end marker.
+				want = "same-RPC transport-end marker lies outside first citing call"
+			case "missing-final-call-marker":
+				final := m9CloneHistoricalReply(t, replies[0])
+				replies = append(replies, final)
+				calls = append(calls, m9HistoricalCall{Name: "diagnostics", Reply: final, Before: len(events), After: len(events)})
+				want = "final citing full report lacks in-stream transport-end cut marker"
+			case "other-process-final-marker":
+				before := len(events)
+				events = append(events,
+					map[string]any{"kind": "observer_ready", "process_id": float64(92), "trace_seq": float64(1), "unix_us": float64(200)},
+					map[string]any{"kind": "transport_end", "process_id": float64(92), "trace_seq": float64(2), "unix_us": float64(201),
+						"provider_rpc_id": float64(41), "observer_status": map[string]any{"installed": true, "errors": []any{}}})
+				final := m9CloneHistoricalReply(t, replies[0])
+				replies = append(replies, final)
+				m9TestHistoryCalls(events, nil)
+				calls = append(calls, m9HistoricalCall{Name: "diagnostics", Reply: final, Before: before, After: len(events)})
+				want = "final citing full report lacks in-stream transport-end cut marker"
+			}
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("tail/cut negative missed its intended guard %q: %v", want, err)
+			}
+		})
 	}
 }
 

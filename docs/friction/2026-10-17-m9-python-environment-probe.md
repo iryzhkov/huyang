@@ -151,7 +151,9 @@ record can remain parked. No historical failure is reclassified.
   identity, uniquely linked selected incomplete Go evidence, and verified
   non-resolution across the complete declared history. Every intermediate/final
   report stays provisional and retains original current/stale IDs. Later positives
-  must reach selected evidence and actual finding bodies or the case fails.
+  must reach selected evidence and actual finding bodies. Their actual IDs from
+  the first full delivery must remain current/stale in every later full report;
+  silent disappearance, including temporary loss followed by restoration, fails.
 
 The latter deliberately loses the old settled-terminal observation coverage.
 It always records `analysis_completion_proven=false`,
@@ -167,7 +169,10 @@ schema, result IDs, observed_at, versions, authority and scheduling do not chang
 Errors in telemetry preserve production delivery and make probe qualification fail.
 Raw client/process/request identity, synchronized local hashes/version/changedtick,
 receipt DocRev/transaction, actual accepted receive, actual queue sequence,
-normalization and real provider notification are checked separately.
+normalization and real provider notification are checked separately. A transport_end
+marker after observer.transport captures fresh error status for the same provider
+RPC; all markers must be error-free. Selected transport and marker must fit the
+first citing call, and the final full citing call must have its in-stream marker.
 
 The complete emitted payload must have exactly one possible original origin and
 transport inside the first MCP call citing the immutable selected evidence ID.
@@ -363,7 +368,9 @@ run top level and two-digit case directories, and accepts these regular owned fi
   `coverage.json`, `*hashes*.json`, `fixture-commands.log`, `service.log`,
   `plain-*.txt`, `raw-publication-summary.json`, and exactly
   `historical-observation-plan.json`, `historical-trace-cut.jsonl`,
-  `historical-observation.json`.
+  `historical-observation.json`, and the existing required
+  `manager-failure-preflight.json`. The last file retains case12's preflight
+  command/input hashes and normal nonzero exit evidence; manager policy is unchanged.
 - The explicitly named Go-test log and a generated `collection.json` with every
   collected file's size/SHA-256, missing top evidence, coverage presence and test exit.
 

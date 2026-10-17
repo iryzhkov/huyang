@@ -542,7 +542,10 @@ local notify = vim.rpcnotify
 vim.rpcnotify = function(channel, method, ...)
     if method == "huyang/result" then
         local args = {...}
-        if type(args[2]) == "table" then observer.transport(args[1], args[2]) end
+        if type(args[2]) == "table" then
+            observer.transport(args[1], args[2])
+            trace({kind="transport_end", provider_rpc_id=args[1], observer_status=observer.status()})
+        end
     end
     return notify(channel, method, ...)
 end
@@ -1547,7 +1550,7 @@ func (p *m9Probe) run() {
 		p.historicalFirstCall = p.sequence + 1
 		p.historicalEnd = time.Now().Add(5 * time.Second)
 		p.postFixCoverage["observation_plan"] = map[string]any{"sampling_ms": 5000, "declared_before_fix": true,
-			"sampling_end": p.historicalEnd.UTC().Format(time.RFC3339Nano), "boundary": "final full report and evidence recovery, followed by complete newline-terminated trace byte cut",
+			"sampling_end": p.historicalEnd.UTC().Format(time.RFC3339Nano), "boundary": "final full report and evidence recovery with in-stream transport-end marker, followed by complete newline-terminated trace byte cut",
 			"limit": "Sampling is a measurement allocation; time, quiet and deadlines never prove analysis or resolution."}
 		m9JSON(p.t, filepath.Join(p.dir, "historical-observation-plan.json"), p.postFixCoverage["observation_plan"])
 		p.postFixCoverage["reached_gate"] = "fix_dispatch"

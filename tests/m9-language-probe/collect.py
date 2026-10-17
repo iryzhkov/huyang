@@ -25,7 +25,8 @@ CASE = re.compile(
     r"(?:lsp\.jsonl|wire-[a-z]+\.jsonl|[0-9]{3,}-[a-z_]+\.json|exec\.[0-9]+|"
     r"coverage\.json|[a-z-]*hashes[a-z-]*\.json|fixture-commands\.log|service\.log|"
     r"plain-[a-z-]+\.txt|raw-publication-summary\.json|"
-    r"historical-observation-plan\.json|historical-trace-cut\.jsonl|historical-observation\.json)"
+    r"historical-observation-plan\.json|historical-trace-cut\.jsonl|historical-observation\.json|"
+    r"manager-failure-preflight\.json)"
 )
 
 
