@@ -28,7 +28,9 @@ func TestAppliedDiagnosticRevisionIsNotReplacedByLaterSnapshot(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package changed\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	current, err := w.Snapshot(path, workspacecore.ProviderLayer{})
+	// Observe the external write through the workspace's refresh API; Snapshot
+	// deliberately reuses the cached document until an explicit refresh.
+	current, err := w.Refresh(path, workspacecore.ProviderLayer{})
 	if err != nil || current.Revision == applied.Revision {
 		t.Fatalf("fixture did not advance document: %+v, %v", current, err)
 	}

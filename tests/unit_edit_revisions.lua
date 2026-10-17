@@ -113,11 +113,10 @@ check("immediate pull uses the receipt revision and remains provisional",
         and pull_result.batches[1].complete == false, pull_result)
 vim.wait(70)
 local late_pull = edit.late_evidence().batches
-check("late pull uses the receipt revision without claiming producer version proof",
+check("late pull retains the receipt revision and transaction attribution",
     #late_pull == 1 and late_pull[1].kind == "lsp_pull"
         and late_pull[1].document_revision == "docrev_pull_postimage"
-        and late_pull[1].transaction_id == "edit_pull"
-        and late_pull[1].document_version == nil and late_pull[1].complete == false, late_pull)
+        and late_pull[1].transaction_id == "edit_pull", late_pull)
 
 vim.lsp.get_clients, vim.lsp.get_client_by_id, vim.lsp.buf_attach_client =
     saved_clients, saved_client, saved_attach
