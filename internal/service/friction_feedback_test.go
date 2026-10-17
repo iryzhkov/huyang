@@ -387,8 +387,8 @@ func TestFrictionOriginalCallCorrelationOverSDK(t *testing.T) {
 		}
 		return raw
 	}
-	alias := makeJSON(map[string]any{"workspace_id": id, "path": "fixture.go", "max_lines": "1"})
-	canonical := makeJSON(map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}, "max_lines": 1})
+	alias := makeJSON(map[string]any{"workspace_id": id, "path": "fixture.go", "max_lines": 1, "start_line": "1"})
+	canonical := makeJSON(map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}, "max_lines": 1, "start_line": 1})
 	var aliasMAC string
 	for _, test := range []struct {
 		name                 string
@@ -411,8 +411,9 @@ func TestFrictionOriginalCallCorrelationOverSDK(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.IsError != test.refused {
-			t.Fatalf("%s refusal = %t, want %t", test.name, result.IsError, test.refused)
+		if result == nil || result.IsError != test.refused {
+			reply, marshalErr := json.Marshal(result)
+			t.Fatalf("%s expected refusal=%t; reply=%s; marshal error=%v", test.name, test.refused, reply, marshalErr)
 		}
 		events := readFrictionEvents(t, spool)
 		event := events[len(events)-1]
