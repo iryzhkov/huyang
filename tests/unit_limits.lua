@@ -237,7 +237,15 @@ assert(debug_runtime.active(), "live child session was not retained")
 state.exit = { reason = "exited" }
 user_session = child
 assert(not debug_runtime.active(), "exited child retained ownership")
-state.exit, user_session = nil, nil
+user_session = { closed = false }
+assert(debug_runtime.active(), "unrelated live session lost protection after child exit")
+user_session = child
+state.session = { closed = true }
+state.exit = nil
+assert(debug_runtime.active(), "live child of a closed root was not retained")
+state.exit = { reason = "exited" }
+assert(not debug_runtime.active(), "exited child of a closed root retained ownership")
+state.session, state.exit, user_session = nil, nil, nil
 child.closed = true
 assert(not debug_runtime.active(), "closed child retained ownership")
 state.children = {}

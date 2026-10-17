@@ -455,8 +455,11 @@ end
 -- Ours: the session we started or adopted, or a child of it (js-debug
 -- runs the program in a child session opened by a startDebugging request).
 local function our_session(session)
-    if state.session == nil or session == nil then return false end
+    if session == nil then return false end
+    -- Recorded identity survives the root being cleared or detached. Check it
+    -- before requiring a root for the parent-chain fallback below.
     if session == state.session or state.children[session] then return true end
+    if state.session == nil then return false end
     -- Fall back to the parent chain for a child seen before it was
     -- recorded; nvim-dap clears `parent` when the child closes, so the
     -- children table above is what a termination listener relies on.

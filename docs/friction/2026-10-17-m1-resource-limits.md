@@ -75,6 +75,22 @@ Nonblocking review follow-ups remain outside this correction: an absent shipped
 runtime path silently disables Lua LSP admission, and verify-stage provider
 capacity failures lack a diagnostic reason. No fleet host was changed.
 
+## Runtime correction: tracked child identity
+
+Integrated validation at `869f0bf` reported
+`tests/unit_limits.lua:239: exited child retained ownership`. The activity query
+misclassified a recorded child as an unadopted session when the root was nil:
+`our_session` rejected a missing root before consulting `state.children`.
+
+The correction checks recorded session/child identity before the root-dependent
+parent-chain fallback. The existing failing assertion is preserved. Additional
+assertions retain an unrelated live session after the tracked child's exit and
+retain a live child with a closed root until the owning lifecycle exits.
+
+Runtime validation of this correction remains **deferred** to the parent's
+central agent-a dispatch; parent job `63038d7d` is still running. No jobs were
+launched for this round.
+
 ## Prior resource-cap validation
 
 All builds/tests/vet ran through `chaldea exec --host agent-a`; every Go test had
