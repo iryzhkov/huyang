@@ -18,6 +18,18 @@ printed in full as JSON data in a plain reply; with `--reply-style json` the env
 sent as before. Nothing is removed from the ledger, the receipts or the evidence store to
 render a reply.
 
+For canonical edits, `document_revision` is the exact per-file postimage
+`docrev_...` returned in the mutation receipt, including the final formatter
+output and the last edit to each file in a batch. The coordinator passes those
+revisions to the provider by document path before diagnostic collection. Pending
+late pushes and pulls retain that document revision with the transaction and
+expected buffer version; collection never substitutes the current workspace or
+document revision. A supplied map with no entry for a document leaves its
+revision unknown. The scalar provider argument remains available to older
+callers and preparation-scoped evidence. Preparation providers are private and
+closed on apply or rollback; their pending observations are never transferred
+to the canonical provider or collected into the canonical ledger.
+
 ## Completeness and late evidence
 
 Immediate and late push evidence follow the same completeness rule: the

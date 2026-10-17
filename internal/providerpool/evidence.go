@@ -23,7 +23,22 @@ func diagnosticSourcePath(path string) bool {
 }
 
 func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
-	return recordDiagnostics(ctx, workspace, backend, files, revision, transactionID, false, settleWait...)
+	return recordDiagnostics(ctx, workspace, backend, files, nil, revision, transactionID, false, settleWait...)
+}
+
+// RecordAppliedDiagnostics binds immediate and pending late evidence to the
+// exact per-document postimages in the edit receipt. Workspace revisions remain
+// aggregate scope identifiers, never substitutes for a missing document revision.
+func RecordAppliedDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revisions map[string]workspacecore.RevisionID, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
+	if backend == nil {
+		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
+	}
+	documentRevisions := make(map[string]string, len(revisions))
+	providerRoot := backend.Descriptor().Root
+	for path, revision := range revisions {
+		documentRevisions[filepath.Clean(filepath.Join(providerRoot, filepath.FromSlash(path)))] = string(revision)
+	}
+	return recordDiagnostics(ctx, workspace, backend, files, documentRevisions, revision, transactionID, false, settleWait...)
 }
 
 // RecordStagedDiagnostics records what a language server made of bytes that
@@ -31,10 +46,10 @@ func RecordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 // workspace's ledger is left describing the workspace: a proposal nobody
 // applied is not evidence about the files on disk.
 func RecordStagedDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
-	return recordDiagnostics(ctx, workspace, backend, files, revision, transactionID, true, settleWait...)
+	return recordDiagnostics(ctx, workspace, backend, files, nil, revision, transactionID, true, settleWait...)
 }
 
-func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, revision, transactionID string, staged bool, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
+func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider, files []workspacecore.PlanStageFile, documentRevisions map[string]string, revision, transactionID string, staged bool, settleWait ...time.Duration) (workspacecore.DiagnosticReport, error) {
 	if backend == nil {
 		return workspacecore.DiagnosticReport{}, fmt.Errorf("diagnostic provider unavailable")
 	}
@@ -59,9 +74,13 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 	deadline := time.Now().Add(diagnosticEvidenceTimeout(waitMS))
 	callCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	args := map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS}
+	if documentRevisions != nil {
+		args["document_revisions"] = documentRevisions
+	}
 	result, err := Call(callCtx, workspace, backend, CallSpec{
 		RequestID: fmt.Sprintf("diagnostics_%s", transactionID), TransactionID: transactionID,
-	}, "huyang_diagnostic_evidence", map[string]any{"files": paths, "revision": revision, "transaction_id": transactionID, "wait_ms": waitMS})
+	}, "huyang_diagnostic_evidence", args)
 	if err != nil {
 		return workspace.RecordDiagnosticEvidence(workspacecore.DiagnosticBatch{
 			Kind: workspacecore.EvidencePush, ProviderID: string(descriptor.ID), Producer: descriptor.Backend, ProducerVersion: err.Error(),
@@ -97,11 +116,14 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		batch.Staged = staged
 		batch.TransactionID = transactionID
 		batch.DocumentRevision = revision
+		if documentRevisions != nil {
+			batch.DocumentRevision = documentRevisions[filepath.Clean(batch.Document)]
+		}
 		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
 			batch.Document = filepath.Join(workspace.Identity().Root, relative)
 		}
 		batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
-		if !staged {
+		if !staged && documentRevisions == nil {
 			if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
 				batch.DocumentRevision = string(snapshot.Revision)
 			}

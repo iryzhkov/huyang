@@ -111,14 +111,14 @@ check("format_damage leaves a same-width format alone",
 -- batches empties them.
 do
     local path = "/tmp/huyang-late-test/main.py"
-    edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
+    edit._note_pending_late(path, "edit_t1", "docrev_late_postimage", 5)
     check("late publish for a newer version is not attributed",
         edit._capture_late("pyright", path, 6, {}) == false)
     check("an older publish cannot consume the pending verdict",
         edit._capture_late("pyright", path, 4, {}) == false)
     check("an unversioned publish cannot consume the pending verdict",
         edit._capture_late("pyright", path, nil, {}) == false)
-    edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
+    edit._note_pending_late(path, "edit_t1", "docrev_late_postimage", 5)
     local finding = { range = { start_line = 1, start_character = 1, end_line = 1, end_character = 2 }, severity = 1, message = "late" }
     check("late publish for the matching version is captured",
         edit._capture_late("pyright", path, 5, { finding }, 42) == true)
@@ -126,7 +126,7 @@ do
     local batch = collected.batches[1]
     check("late evidence names the transaction and the reason",
         #collected.batches == 1 and batch.transaction_id == "edit_t1" and batch.reason == "late_attach"
-            and batch.document_revision == "wsrev_9" and batch.expected_version == 5 and batch.document_version == 5
+            and batch.document_revision == "docrev_late_postimage" and batch.expected_version == 5 and batch.document_version == 5
             and batch.candidates[1].postimage_version_match == true and batch.findings[1].message == "late"
             and batch.provider_id == "pyright#42",
         batch)
