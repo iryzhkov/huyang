@@ -78,6 +78,32 @@ func TestDirectoryListingIsBoundedAndSaysSo(t *testing.T) {
 	}
 }
 
+// A directory whose name is a suffix of a crowded one is still listed: the
+// directory scope is an exact prefix applied before the file cap, so the
+// cap's worth of files under a/pkg/ cannot crowd out pkg/.
+func TestDirectoryListingIsNotStarvedByASubstringCollision(t *testing.T) {
+	files := map[string]string{"pkg/only.go": "package pkg\n"}
+	for index := 0; index < 2000; index++ {
+		files[fmt.Sprintf("a/pkg/f%04d.go", index)] = "package pkg\n"
+	}
+	handlers, workspaceID, _ := literalFixture(t, files)
+	result := handlers.Execute(context.Background(), "req_collision", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "pkg"},
+	})
+	data, _ := result["data"].(map[string]any)
+	if result["outcome"] != "ok" || listingPaths(t, result) != "pkg/only.go file" || data["entry_count"] != 1 || data["coverage"] != nil {
+		t.Fatalf("listing of pkg beside 2000 files under a/pkg = %#v", data)
+	}
+	// The crowded directory still counts all 2000 of its files and is cut
+	// only at the listing's own entry bound.
+	crowded := handlers.Execute(context.Background(), "req_crowded", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "a/pkg"},
+	})
+	if data := crowded["data"].(map[string]any); data["entry_count"] != 2000 || data["listed_count"] != maxDirectoryEntries || data["truncated"] != true {
+		t.Fatalf("listing of a/pkg = %#v", data)
+	}
+}
+
 // A symlink that leaves the root is not followed into a listing, so the
 // listing shows no more than search would read.
 func TestDirectoryListingDoesNotFollowASymlinkOutOfTheRoot(t *testing.T) {
@@ -197,7 +223,16 @@ func TestSymlinkEscapeRefusalNamesTheResolvedDocument(t *testing.T) {
 	aliased := handlers.Execute(context.Background(), "req_alias", "read", map[string]any{
 		"workspace_id": workspaceID, "target": map[string]any{"path": "alias.md"},
 	})
-	if step := mcpapi.AnySlice(aliased["next"]); aliased["outcome"] != "failed" || len(step) != 1 || step[0].(map[string]any)["path"] != "real.md" {
+	// Its next may also carry the generic hint a second single-target read
+	// gets; the link's own step must be among them.
+	namedTarget := false
+	for _, raw := range mcpapi.AnySlice(aliased["next"]) {
+		step, _ := raw.(map[string]any)
+		if step["tool"] == "read" && step["action"] == "read_the_link_target_by_its_own_path" && step["path"] == "real.md" {
+			namedTarget = true
+		}
+	}
+	if aliased["outcome"] != "failed" || !namedTarget {
 		t.Fatalf("in-root link refusal = %#v", aliased)
 	}
 }

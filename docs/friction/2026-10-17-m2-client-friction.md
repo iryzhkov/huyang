@@ -38,8 +38,10 @@ From the prototype (`75dff44`, unchanged in substance):
 Added here:
 
 - **Shared bounded listing** (`internal/handlers/listing.go`). `listWorkspacePaths` lists
-  what search would read, through the new `Workspace.ScopedPaths`: the Git inventory or the
-  bounded walk, scope applied before the file cap, `.gitignore`, depth and cap rules
+  what search would read, through the new `Workspace.DirectoryPaths` (a directory, as an
+  exact path prefix) and `Workspace.ScopedPaths` (search patterns): the Git inventory or the
+  bounded walk, scope applied before the file cap, so 2,000 files under `a/pkg/` cannot
+  crowd `pkg/` out of its own listing, `.gitignore`, depth and cap rules
   honoured, nothing followed past a symlink. A directory read lists immediate children
   (directories with their file counts) bounded at 200 entries; an empty-query search lists
   the files under `paths` bounded by `limit`. Both report `coverage` when incomplete and say
@@ -67,8 +69,11 @@ Added here:
   the working tree of an absolute directory with the same rule the client-path resolver
   uses. `adapterWorkingDirectory` makes the adapter's directory injectable for tests.
 
-The `workspace` package changes are additive: two error types, `ScopedPaths` and
-`GitTopLevel`. Error text, confinement and write paths are unchanged.
+The `workspace` package changes are additive: two error types, `ScopedPaths`,
+`DirectoryPaths` and `GitTopLevel`, with the listing scope carried as one unexported
+`pathScope` (patterns, plus an optional exact directory) through the existing inventory,
+walk and allowlist collectors. Pattern-only scopes match exactly as before. Error text,
+confinement and write paths are unchanged.
 
 ## Safety
 
@@ -92,7 +97,8 @@ The `workspace` package changes are additive: two error types, `ScopedPaths` and
   and its subdirectory gets no default; the default survives a service restart under a
   running adapter; an HTTP client gets no default.
 - `internal/handlers/read_listing_test.go`: directory and root listings, the substring trap
-  (`other/pkg/` is not `pkg/`), the 200-entry bound, no listing through an escaping
+  (`other/pkg/` is not `pkg/`), the same collision with 2,000 files under `a/pkg/` beyond the
+  file cap, the 200-entry bound, no listing through an escaping
   symlink, a directory target in `targets`, the past-the-end window (single and batch) with
   `line_count` and `past_end` (single and batch), the last line still an ordinary window,
   an empty document, a reversed window still refused, the symlink-escape `next` followed to a documents read,

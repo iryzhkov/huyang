@@ -42,11 +42,17 @@ func (l pathListing) truncated() bool { return l.Total > len(l.Entries) }
 func listWorkspacePaths(workspace *workspacecore.Workspace, directory string, patterns []string, limit int) (pathListing, error) {
 	grouped := directory != "" || len(patterns) == 0
 	prefix := ""
+	var paths []string
+	var coverage workspacecore.Coverage
+	var err error
 	if directory != "" {
+		// The directory is an exact prefix applied before the file cap, so
+		// files under a/pkg/ cannot spend the cap a listing of pkg needs.
 		prefix = strings.TrimSuffix(directory, "/") + "/"
-		patterns = []string{prefix}
+		paths, coverage, err = workspace.DirectoryPaths(directory)
+	} else {
+		paths, coverage, err = workspace.ScopedPaths(patterns)
 	}
-	paths, coverage, err := workspace.ScopedPaths(patterns)
 	if err != nil {
 		return pathListing{}, err
 	}
@@ -55,8 +61,6 @@ func listWorkspacePaths(workspace *workspacecore.Workspace, directory string, pa
 	for _, path := range paths {
 		entry := listedEntry{Path: path}
 		if grouped {
-			// The scope is a substring match, so a/b/ also matches x/a/b/;
-			// only the directory itself is listed.
 			rest, inside := strings.CutPrefix(path, prefix)
 			if !inside || rest == "" {
 				continue
