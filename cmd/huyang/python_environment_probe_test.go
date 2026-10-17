@@ -178,6 +178,7 @@ type m9Probe struct {
 	evidenceBatches                          map[string]map[string]any
 	before                                   map[string]string
 	beforeEnvironment                        map[string]string
+	intentionalSource                        map[string]bool
 }
 
 func m9RequiredDir(t *testing.T, name string) string {
@@ -256,14 +257,54 @@ func m9Exec(t *testing.T, parent context.Context, cwd string, env []string, comm
 
 func (p *m9Probe) venv(path string, dependency bool) string {
 	p.t.Helper()
-	m9Exec(p.t, p.ctx, p.root, p.env, filepath.Join(p.tools, "bin", "python"), "-I", "-m", "venv", "--without-pip", path)
+	// CPython records the creator's directory in pyvenv.cfg. The tools/bin
+	// alias is not a Python installation prefix; use the resolved base binary.
+	m9Exec(p.t, p.ctx, p.root, p.env, p.basePython(), "-I", "-m", "venv", "--without-pip", path)
 	if dependency {
 		site := filepath.Join(path, "lib", "python3.12", "site-packages")
 		m9Write(p.t, filepath.Join(site, "m9_fixture_dep", "__init__.py"), "VALUE: int = 42\n")
 		m9Write(p.t, filepath.Join(site, "m9_fixture_dep", "py.typed"), "")
 		m9Write(p.t, filepath.Join(site, "m9_fixture_dep-1.0.dist-info", "METADATA"), "Metadata-Version: 2.1\nName: m9-fixture-dep\nVersion: 1.0\n")
 	}
-	return filepath.Join(path, "bin", "python")
+	python := filepath.Join(path, "bin", "python")
+	p.verifyEnvironment(python, dependency)
+	return python
+}
+
+func (p *m9Probe) basePython() string {
+	p.t.Helper()
+	python, err := filepath.EvalSymlinks(filepath.Join(p.tools, "bin", "python"))
+	if err != nil || !m9Within(filepath.Join(p.tools, "python"), python) {
+		p.t.Fatal("base Python must resolve into the private managed installation")
+	}
+	return python
+}
+
+// Exercise the same non-isolated interpreter path query Pyright uses, as well
+// as isolated mode. Executability and --version alone do not prove stdlib or
+// venv site-packages are usable. Keep stdout/stderr in fixture-commands.log.
+func (p *m9Probe) verifyEnvironment(python string, dependency bool) {
+	p.t.Helper()
+	root := filepath.Dir(filepath.Dir(python))
+	script := `import json, os, sys
+assert sys.prefix == sys.argv[1], (sys.prefix, sys.argv[1])
+assert sys.prefix != sys.base_prefix, (sys.prefix, sys.base_prefix)
+site = os.path.join(sys.prefix, "lib", "python3.12", "site-packages")
+assert site in sys.path, sys.path
+result = dict(prefix=sys.prefix, base_prefix=sys.base_prefix, path=sys.path, json=json.__file__)
+if sys.argv[2] == "true":
+    import m9_fixture_dep
+    assert m9_fixture_dep.__file__.startswith(site + os.sep), m9_fixture_dep.__file__
+    result["dependency"] = m9_fixture_dep.__file__
+print(json.dumps(result))
+`
+	for _, isolated := range []bool{false, true} {
+		args := []string{"-c", script, root, strconv.FormatBool(dependency)}
+		if isolated {
+			args = append([]string{"-I"}, args...)
+		}
+		m9Exec(p.t, p.ctx, p.root, p.env, python, args...)
+	}
 }
 
 func (p *m9Probe) fixture() {
@@ -336,7 +377,7 @@ func (p *m9Probe) fixture() {
 	if p.spec.name == "poetry_external" {
 		m9Write(p.t, filepath.Join(p.root, "poetry.toml"), fmt.Sprintf("[virtualenvs]\nin-project = false\npath = %q\n[virtualenvs.options]\nno-pip = true\nalways-copy = false\n", filepath.Join(p.dir, "poetry-envs")))
 		poetry := filepath.Join(p.tools, "bin", "poetry")
-		m9Exec(p.t, p.ctx, p.root, p.env, poetry, "--no-plugins", "env", "use", filepath.Join(p.tools, "bin", "python"))
+		m9Exec(p.t, p.ctx, p.root, p.env, poetry, "--no-plugins", "env", "use", p.basePython())
 		envRoot := m9Exec(p.t, p.ctx, p.root, p.env, poetry, "--no-plugins", "env", "info", "--path")
 		if !strings.HasPrefix(envRoot, filepath.Join(p.dir, "poetry-envs")+string(filepath.Separator)) {
 			p.t.Fatal("Poetry escaped its job-local env directory")
@@ -347,6 +388,7 @@ func (p *m9Probe) fixture() {
 		}
 		m9Write(p.t, filepath.Join(envRoot, "lib", "python3.12", "site-packages", "m9_fixture_dep", "__init__.py"), "VALUE: int = 42\n")
 		m9Write(p.t, filepath.Join(envRoot, "lib", "python3.12", "site-packages", "m9_fixture_dep", "py.typed"), "")
+		p.verifyEnvironment(p.selected, true)
 	}
 	imports := "import m9_fixture_dep\n"
 	if p.spec.unknown {
@@ -381,10 +423,33 @@ local function trace(event)
     f:write(vim.json.encode(event), "\n")
     f:close()
 end
+local publish = vim.lsp.handlers["textDocument/publishDiagnostics"] or vim.lsp.diagnostic.on_publish_diagnostics
+local function observe_publish(err, params, ctx, config)
+    trace({kind="publish", params=params, client_id=ctx.client_id, err=err})
+    return publish(err, params, ctx, config)
+end
+local function observe_client(client)
+    -- Observe actual pull responses too. Keep capabilities, requests, errors,
+    -- response bodies and callback results unchanged.
+    local request = client.request
+    client.request = function(self, method, params, handler, bufnr)
+        if method == "textDocument/diagnostic" then
+            local inner = handler or self.handlers[method] or vim.lsp.handlers[method]
+            if inner then
+                handler = function(err, result, ctx, config)
+                    trace({kind="pull", params=result, request_params=params, client_id=self.id, err=err})
+                    return inner(err, result, ctx, config)
+                end
+            end
+        end
+        return request(self, method, params, handler, bufnr)
+    end
+end
 local settings = { python = { analysis = { typeCheckingMode = "basic", diagnosticMode = "openFilesOnly" } } }
 if vim.env.M9_EXPLICIT_PYTHON then settings.python.pythonPath = vim.env.M9_EXPLICIT_PYTHON end
 vim.lsp.config("pyright", { cmd = {vim.env.M9_PYRIGHT, "--stdio"}, filetypes = {"python"},
-    root_markers = {"pyproject.toml", ".git"}, settings = settings })
+    root_markers = {"pyproject.toml", ".git"}, settings = settings, on_init = observe_client,
+    handlers = { ["textDocument/publishDiagnostics"] = observe_publish } })
 vim.lsp.enable("pyright")
 vim.api.nvim_create_autocmd("LspAttach", {callback = function(ev)
     local client = vim.lsp.get_client_by_id(ev.data.client_id)
@@ -395,13 +460,6 @@ end})
 vim.api.nvim_create_autocmd("LspProgress", {callback = function(ev)
     trace({kind="progress", data=ev.data})
 end})
--- Huyang's per-client wrapper records the publication before calling this
--- inner observer. No diagnostic, version, timing or handler result is changed.
-local publish = vim.lsp.handlers["textDocument/publishDiagnostics"]
-vim.lsp.handlers["textDocument/publishDiagnostics"] = function(err, params, ctx, config)
-    trace({kind="publish", params=params, client_id=ctx.client_id})
-    return publish(err, params, ctx, config)
-end
 `
 
 func (p *m9Probe) start() {
@@ -413,7 +471,7 @@ func (p *m9Probe) start() {
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	command := exec.CommandContext(p.ctx, filepath.Join(p.tools, "bin", "strace"), "--kill-on-exit", "-ff", "-e", "trace=execve,execveat", "-s", "2048", "-o", filepath.Join(p.dir, "exec"), p.binary, "serve", "--socket", socket, "--state-dir", filepath.Join(p.dir, "state"))
+	command := exec.CommandContext(p.ctx, filepath.Join(p.tools, "bin", "strace"), "--kill-on-exit", "--seccomp-bpf", "-ff", "-e", "trace=execve,execveat", "-s", "2048", "-o", filepath.Join(p.dir, "exec"), p.binary, "serve", "--socket", socket, "--state-dir", filepath.Join(p.dir, "state"))
 	command.Env, command.Stdout, command.Stderr, command.WaitDelay = p.env, log, log, time.Second
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error {
@@ -615,6 +673,12 @@ func (p *m9Probe) collectClean() map[string]any {
 }
 
 func (p *m9Probe) edit(old, new string) map[string]any {
+	body, err := os.ReadFile(filepath.Join(p.root, "main.py"))
+	if err != nil || !p.intentionalSource[string(body)] || strings.Count(string(body), old) != 1 {
+		p.t.Fatal("intentional edit does not match the expected fixture source")
+	}
+	// Register before dispatch: a deadline may close MCP after canonical commit.
+	p.intentionalSource[strings.Replace(string(body), old, new, 1)] = true
 	reply := p.call("edit_apply", map[string]any{"format": false, "operation": map[string]any{"kind": "replace_literal", "path": "main.py", "old": old, "new": new}})
 	p.lastEditAt = time.Now()
 	data := m9Object(reply["data"])
@@ -674,6 +738,19 @@ func (p *m9Probe) run() {
 		p.t.Fatal(err)
 	}
 
+	p.intentionalSource = map[string]bool{string(original): true}
+	// Registered before start: LIFO cleanup stops adapters/service descendants
+	// before restoration, and restores even after Fatal or a context deadline.
+	p.t.Cleanup(func() {
+		path := filepath.Join(p.root, "main.py")
+		body, err := os.ReadFile(path)
+		m9JSON(p.t, filepath.Join(p.dir, "before-restore-hashes.json"), m9Hashes(p.t, p.root))
+		if err != nil || !p.intentionalSource[string(body)] {
+			p.t.Error("unexpected fixture source after process-tree termination; leaving it for diagnosis")
+			return
+		}
+		m9Write(p.t, path, string(original))
+	})
 	p.start()
 	p.call("workspace_open", nil)
 	if !p.spec.cold {
@@ -735,12 +812,6 @@ func (p *m9Probe) run() {
 		p.inspectEvidence(p.collectClean())
 	}
 	p.interpreterSelection()
-	// Restore only intentional source edits. Cleanup runs after process-tree
-	// termination and enforces the final fixture/environment hash comparisons.
-	m9Write(p.t, filepath.Join(p.root, "main.py"), string(original))
-	if !maps.Equal(p.before, m9Hashes(p.t, p.root)) {
-		p.t.Error("canonical fixture changed beyond intentional main.py edits")
-	}
 }
 
 func (p *m9Probe) plain() {
@@ -767,7 +838,11 @@ func (p *m9Probe) plain() {
 	if err != nil {
 		p.t.Fatal(err)
 	}
+	if !p.intentionalSource[string(body)] || strings.Count(string(body), "marker two") != 1 {
+		p.t.Fatal("plain edit does not match the expected fixture source")
+	}
 	body = []byte(strings.Replace(string(body), "marker two", "marker three", 1))
+	p.intentionalSource[string(body)] = true
 	text = call("edit_apply", map[string]any{"format": false, "operation": map[string]any{"kind": "create_file", "path": "main.py", "replace": true, "revision_id": revision, "content": string(body)}})
 	m9Write(p.t, filepath.Join(p.dir, "plain-edit.txt"), text)
 	if !strings.Contains(text, "revision_id=docrev_") || !strings.Contains(text, "wsrev_") {
@@ -819,11 +894,17 @@ func (p *m9Probe) interpreterSelection() {
 		if json.Unmarshal([]byte(line), &event) != nil {
 			continue
 		}
-		if event["kind"] == "publish" {
+		if event["kind"] == "publish" || event["kind"] == "pull" {
 			params := m9Object(event["params"])
-			if strings.HasSuffix(m9Text(params["uri"]), "/main.py") {
+			uri := m9Text(params["uri"])
+			diagnostics := probeSlice(params["diagnostics"])
+			if event["kind"] == "pull" {
+				uri = m9Text(m9Object(m9Object(event["request_params"])["textDocument"])["uri"])
+				diagnostics = probeSlice(params["items"])
+			}
+			if strings.HasSuffix(uri, "/main.py") {
 				count := 0
-				for _, raw := range probeSlice(params["diagnostics"]) {
+				for _, raw := range diagnostics {
 					if m9Object(raw)["code"] == "reportMissingImports" {
 						count++
 					}
@@ -850,7 +931,7 @@ func (p *m9Probe) interpreterSelection() {
 		}
 	}
 	if p.spec.unknown && rawMissingPeak < 2 {
-		p.t.Fatal("real Pyright did not publish multiple raw missing imports")
+		p.t.Fatal("real Pyright did not report multiple raw missing imports through push or pull")
 	}
 	m9JSON(p.t, filepath.Join(p.dir, "raw-publication-summary.json"), map[string]any{"raw_missing_import_peak": rawMissingPeak, "sandbox_attached": sandboxAttached})
 	if !attached || (p.spec.sandbox && !sandboxAttached) {

@@ -40,9 +40,14 @@ local-venv and missing-manager cases assert manager nonexecution from that trace
 not from an empty manager result. Negative matching decodes quoted path/argv strings
 and recognizes uv/Poetry basenames through any path and Python `-m poetry`
 (including module subpaths). Positive fallback matching still requires the exact
-resolved manager executable. Tracing is required and includes `--kill-on-exit`;
-an unsupported strace or denied ptrace is a failure. Real Pyright publications and progress events are
-observed without modifying findings, versions, timing, handlers' results or progress.
+resolved manager executable. Tracing is required and includes `--kill-on-exit` and `--seccomp-bpf`;
+an unsupported strace or denied ptrace is a failure. Seccomp filtering reduces syscall
+tracing overhead without omitting the requested exec events. If the kernel refuses
+seccomp assistance, strace may fall back and report that in `service.log`; a timeout
+still fails the matrix. Real Pyright push publications, pull responses and progress
+events are observed without modifying capabilities, findings, versions, handler results
+or progress. Push telemetry is installed on the configured client handler, so a
+per-client handler cannot bypass a global-only observer.
 The attached client's effective settings are recorded; supplied explicit selection is
 not claimed to prove dependencies are installed.
 
@@ -88,6 +93,13 @@ body recovery, stable note identity across edits and later calls, and guarded pl
 read/overwrite/diagnostics. Both styles must preserve the environment note and real
 type error; plain replies must retain exact document/workspace guard tokens.
 
+Fixture venvs are created with the resolved private base executable, rather than the
+`tools/bin/python` alias directory. Each created venv must load stdlib JSON, expose its
+own site-packages and (when installed) import the synthetic dependency from that venv,
+in both ordinary and isolated Python mode. These preflight results and failures are
+recorded in `fixture-commands.log`. Poetry also receives the resolved base executable;
+the selected venv path itself stays unresolved for the symlinked-interpreter case.
+
 Known-environment cases fix the type error and require current authoritative clean
 evidence with no stale bodies. Raw-complete push evidence must prove the document
 version and absence of pending progress. A raw-complete pull is allowed to lack that
@@ -114,7 +126,12 @@ exit closes a stalled read. Fixture commands and adapters also own process group
 Cleanup tracks descendant identities (PID plus kernel start time), including separate
 provider groups, sends TERM and polls for disappearance, escalates to KILL at three
 seconds and fails if any tracked identity or the original group persists at six.
-It does not equate strace leader exit with daemon-tree exit. Strace kill-on-exit also
+It does not equate strace leader exit with daemon-tree exit. After tree termination,
+cleanup saves `before-restore-hashes.json`, restores `main.py` only if its body is one
+of the exact intentional source states registered before dispatch, then compares all
+canonical/environment hashes. This cleanup also runs after a failed assertion or MCP
+deadline; an unexpected source body is left intact and fails the hash gate.
+Strace kill-on-exit also
 prevents its tracees surviving a tracer exit between process observations. The
 fixture commands are the fixed, trusted tool invocations in this test, not arbitrary
 project scripts. Kernel/process-tree enforcement still needs runtime verification.
@@ -122,9 +139,11 @@ project scripts. Kernel/process-tree enforcement still needs runtime verificatio
 Natural late publications and later-call notifications are separately recorded.
 `natural_late_publication_observed` means a non-empty same-version raw publish
 arrived after the edit reply returned; it does not prove Huyang's late-capture path,
-a provisional reply, or late finding delivery. The telemetry handler runs inside
-Huyang's per-client wrapper, after Huyang records the publication. Its microsecond
-timestamp skew makes the empty-push quiet check stricter.
+a provisional reply, or late finding delivery. The configured push telemetry handler
+runs inside Huyang's per-client wrapper, after Huyang records the publication. Its
+microsecond timestamp skew makes the empty-push quiet check stricter. Pull telemetry
+records the request URI, untouched response and error before delegating to the
+original callback; it does not assert a push occurred.
 No real publication is deliberately delayed and no work-done progress is synthesized.
 A successful matrix therefore does **not** imply that every producer timing permutation
 occurred. Review `natural_late_publication_observed`,
@@ -141,9 +160,10 @@ Other limits remain explicit:
   preserves that conservative ledger behavior rather than asserting artificial cleanup.
 - Pyright can execute a selected local interpreter, as before M9.
 - Bootstrap's bounded manager query still uses its existing non-Close-cancelable context.
-- Full descendant strace adds overhead near the manager's existing two-second deadline.
-  Seccomp-assisted tracing is not enabled or assumed; root must assess tracing cost and
-  ptrace permissions in the actual private job. Tool absence/timeout fails honestly.
+- Descendant tracing can add overhead near the manager's existing two-second deadline.
+  Seccomp-assisted tracing is requested; root must inspect fallback warnings and assess
+  tracing cost and ptrace permissions in the private job. Tool absence/timeout fails
+  honestly. The production manager deadline is unchanged.
 - No source pass establishes runtime acceptance or historical Go host attribution.
 - The Linux-only probe and setup refuse unsupported prerequisites; this adds no portable
   non-Linux acceptance runner.
