@@ -2735,62 +2735,6 @@ local function forget_actions(token)
     client_slot(action_cache)[tostring(token)] = nil
 end
 
-local function code_actions(args)
-    local bufnr = load_buf(args.file)
-    local client = get_client(bufnr, "textDocument/codeAction")
-    -- Every other position tool needs a column because it has to land on one
-    -- particular name. Code actions do not: they are asked for over a range,
-    -- and the range that matters is the line a diagnostic was reported on.
-    -- So when neither symbol nor col is given, take the whole line - that is
-    -- what "code actions at that line" is supposed to mean.
-    local col, symbol = args.col, args.symbol
-    local range
-    if col == nil and (symbol == nil or symbol == "") then
-        local lnum = tonumber(args.line) or 1
-        local text = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1] or ""
-        -- From the first non-blank to the end of the line, not a point at
-        -- the first non-blank: a quick fix for a diagnostic further along
-        -- the line is offered only when the range reaches it.
-        local start = make_position(bufnr, client, lnum, nil, text:find("%S") or 1)
-        local stop = make_position(bufnr, client, lnum, nil, #text + 1)
-        range = { start = start, ["end"] = stop }
-    else
-        local pos = make_position(bufnr, client, args.line, symbol, col)
-        range = { start = pos, ["end"] = pos }
-    end
-    local lsp_diags = {}
-    pcall(function()
-        lsp_diags = vim.lsp.diagnostic.from(
-            vim.diagnostic.get(bufnr, { lnum = range.start.line }))
-    end)
-    local result = request(client, bufnr, "textDocument/codeAction", {
-        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-        range = range,
-        context = { diagnostics = lsp_diags, triggerKind = 1 },
-    }) or {}
-    local token = cache_actions({ client_id = client.id, bufnr = bufnr, actions = result })
-    -- Servers repeat themselves: gopls offered "Remove variable trimmed"
-    -- twice for one diagnostic, at indices 1 and 2, which reads as two
-    -- different fixes. The first of each title keeps its index.
-    local out, seen = {}, {}
-    for i, a in ipairs(result) do
-        local key = (a.title or "") .. "\0" .. (a.kind or "")
-        if not seen[key] then
-            seen[key] = true
-            out[#out + 1] = {
-                index = i,
-                title = a.title,
-                kind = a.kind,
-                preferred = a.isPreferred or nil,
-            }
-        end
-    end
-    return {
-        token = token,
-        actions = out,
-        note = #out == 0 and "no code actions available at this position" or nil,
-    }
-end
 
 local function apply_code_action(args)
     local entry = cached_actions(args.token)
@@ -4574,7 +4518,7 @@ local function code_action_workspace_edit(bufnr, args)
         -- A command runs inside the server and sends its edit back later,
         -- which cannot be previewed or staged; the caller is told plainly.
         err("the action %q is a server command rather than an edit, so it cannot be "
-            .. "staged; apply it through code_actions in an editing session instead",
+            .. "staged; make the change with an edit instead",
             action.title or "?")
     end
     return action.edit, client, { applied_title = action.title, applied_kind = action.kind }
@@ -4919,8 +4863,8 @@ local function replace_pattern(args)
     end
     if #no_parser > 0 and #no_parser == #files - #unreadable then
         err("kind=%s needs a treesitter parser to tell comments and strings from code, "
-            .. "and none of the files has one (%s); install_language adds it, or call "
-            .. "without kind=", kind, table.concat(no_parser, ", "))
+            .. "and none of the files has one (%s); install the parser outside Huyang "
+            .. "(nvim-treesitter in your Neovim setup), or call without kind=", kind, table.concat(no_parser, ", "))
     end
 
     local FILES_SHOWN = 40
@@ -5055,7 +4999,6 @@ M.silent_server = silent_server
 -- published. A count that says "0 elsewhere" is theirs, and it stops being an
 -- answer the moment they stop running.
 M.stopped_servers = stopped_servers
-M.code_actions = code_actions
 M.apply_code_action = apply_code_action
 -- Exported for tests/unit_edit.lua: the bound on the code-action cache.
 M.cache_actions = cache_actions

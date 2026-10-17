@@ -149,9 +149,8 @@ func TestEveryRegisteredToolDeclaresASchedulerClass(t *testing.T) {
 	}
 	want := map[string]SchedulerClass{
 		"workspace_open": ClassProviderRead, "workspace_inspect": ClassProviderRead,
-		"execution_graph": ClassProviderRead, "path_explain": ClassProviderRead,
 		"search": ClassPureRead, "symbol_find": ClassProviderRead, "navigate": ClassProviderRead,
-		"read": ClassPureRead, "diagnostics": ClassPureRead, "code_actions": ClassProviderRead,
+		"read": ClassPureRead, "diagnostics": ClassPureRead,
 		"edit_apply": ClassCanonicalWrite, "change_plan": ClassSandboxWrite,
 		"revision_diff": ClassCanonicalWrite, "evidence_get": ClassPureRead,
 		"language_server_status": ClassProviderRead, "language_server_setup": ClassCanonicalWrite,

@@ -1,45 +1,26 @@
 package handlers
 
 import (
+	"strings"
 	"testing"
 )
 
-// Attachment is confirmed by a server name or an explicit true, never by
-// an empty, "none" or "false" value.
-func TestLanguageServerAttachmentConfirmedAcceptsServerNameOrTrue(t *testing.T) {
-	if !languageServerAttachmentConfirmed("rust_analyzer") || !languageServerAttachmentConfirmed(true) {
-		t.Fatal("positive provider attachment was not recognized")
-	}
-	for _, value := range []any{nil, false, "", "none", "false"} {
-		if languageServerAttachmentConfirmed(value) {
-			t.Fatalf("false attachment %#v was recognized", value)
-		}
-	}
-}
-
-// A terminal install status (unknown, unsupported) offers inspection only;
-// retrying an impossible server is not a recovery.
-func TestLanguageServerInstallTerminalFailureOffersInspectionOnly(t *testing.T) {
-	next := failedLanguageServerInstallNext("unknown", "markdown", "definitely_missing_server")
+// A missing language is answered with how to install its server outside
+// Huyang and the restart that picks it up, never with an install action.
+func TestMissingLanguageServerPointsOutOfBand(t *testing.T) {
+	next := outOfBandInstallNext(languageSupport{
+		missing:        []string{"json", "markdown"},
+		installOptions: map[string][]string{"json": {"jsonls"}},
+	})
 	if len(next) != 1 {
-		t.Fatalf("terminal installation failure offered an impossible retry: %#v", next)
+		t.Fatalf("out-of-band recovery = %#v", next)
 	}
 	action, _ := next[0].(map[string]any)
-	if action["tool"] != "language_server_status" {
-		t.Fatalf("terminal installation recovery is not an inspection: %#v", next)
-	}
-}
-
-// A transient install failure keeps the retry with the requested server.
-func TestLanguageServerInstallTransientFailureKeepsRetry(t *testing.T) {
-	next := failedLanguageServerInstallNext("failed", "cmake", "cmake-language-server")
-	if len(next) != 2 {
-		t.Fatalf("transient installation failure omitted retry: %#v", next)
-	}
-	retry, _ := next[0].(map[string]any)
-	if retry["tool"] != "language_server_setup" || retry["action"] != "install" ||
-		retry["server"] != "cmake-language-server" {
-		t.Fatalf("transient installation recovery is not actionable: %#v", next)
+	prerequisite, _ := action["prerequisite"].(string)
+	if action["tool"] != "language_server_setup" || action["action"] != "restart" ||
+		!strings.Contains(prerequisite, "json, markdown") || !strings.Contains(prerequisite, "Mason") ||
+		!strings.Contains(prerequisite, "install_options") {
+		t.Fatalf("out-of-band recovery does not say how to install: %#v", next)
 	}
 }
 

@@ -53,11 +53,6 @@ const (
 	// with the adapter for its language, and unknown for a file no adapter
 	// covers.
 	InvariantAPICompatible InvariantKind = "api_compatible"
-	// InvariantPathUnreachable: nothing can still reach the named declaration
-	// after the change. A static call candidate can refute it. Proof needs
-	// complete uncapped execution coverage; the closed Go adapter supports
-	// only unexported non-entry declarations in its narrow main-package model.
-	InvariantPathUnreachable InvariantKind = "path_unreachable"
 )
 
 // InvariantEnforcement decides what an unproven invariant costs. Required is
@@ -165,7 +160,7 @@ func validateInvariantScope(invariant PlanInvariant) error {
 	switch invariant.Kind {
 	case InvariantNoNewDiagnostics, InvariantTestsPass, InvariantAPICompatible:
 		return nil
-	case InvariantNoReferences, InvariantSymbolExists, InvariantSymbolAbsent, InvariantPathUnreachable:
+	case InvariantNoReferences, InvariantSymbolExists, InvariantSymbolAbsent:
 		symbol := invariant.Scope.Symbol
 		if symbol == nil || strings.TrimSpace(symbol.Path) == "" || strings.TrimSpace(symbol.NamePath) == "" {
 			return Codedf(CodePlanValidationConflicts,

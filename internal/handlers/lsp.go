@@ -31,18 +31,6 @@ func reconcileParserSupport(entry map[string]any) {
 	}
 }
 
-func languageServerAttachmentConfirmed(value any) bool {
-	switch attached := value.(type) {
-	case bool:
-		return attached
-	case string:
-		attached = strings.TrimSpace(attached)
-		return attached != "" && attached != "false" && attached != "none"
-	default:
-		return false
-	}
-}
-
 // languageSupport is what the provider's workspace_support report says
 // once the languages are tallied: which servers attached, which languages
 // have none, which configured servers failed, and the install options per
@@ -162,54 +150,35 @@ func (h *Handlers) languageServerStatus(ctx context.Context, requestID string, w
 	})
 	if len(tally.missing) > 0 {
 		result["warnings"] = []string{"Some workspace languages have no attached language server."}
-		result["next"] = installMissingLanguagesNext(tally)
+		result["next"] = outOfBandInstallNext(tally)
 	}
 	return result
 }
 
-// installMissingLanguagesNext offers an install for the first two missing
-// languages, pointing at their install options when the provider listed any.
-func installMissingLanguagesNext(tally languageSupport) []any {
-	next := make([]any, 0, 2)
-	for _, language := range tally.missing {
-		if len(next) == 2 {
-			break
-		}
-		action := map[string]any{"tool": "language_server_setup", "action": "install", "language": language, "use_new_idempotency_key": true}
-		if options := tally.installOptions[language]; len(options) > 0 {
-			action["install_options_key"] = language
-			action["selection"] = "automatic_preferred"
-		}
-		next = append(next, action)
+// outOfBandInstallNext says how a missing language gets a server. Huyang
+// installs nothing itself, so the server is installed outside it and a
+// restart is what makes the provider pick it up.
+func outOfBandInstallNext(tally languageSupport) []any {
+	prerequisite := fmt.Sprintf("Install a language server for %s outside Huyang: with Mason in your Neovim setup or with the system package manager.", strings.Join(tally.missing, ", "))
+	if len(tally.installOptions) > 0 {
+		prerequisite += " data.install_options lists the Mason packages that serve each language."
 	}
-	return next
+	return []any{map[string]any{
+		"tool": "language_server_setup", "action": "restart", "prerequisite": prerequisite, "use_new_idempotency_key": true,
+	}}
 }
 
-func failedLanguageServerInstallNext(status, language, requestedServer string) []any {
-	statusAction := map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}
-	if status != "failed" {
-		return []any{statusAction}
-	}
-	retry := map[string]any{
-		"tool": "language_server_setup", "action": "install", "language": language,
-		"use_new_idempotency_key": true,
-	}
-	if requestedServer != "" {
-		retry["server"] = requestedServer
-	}
-	return []any{retry, statusAction}
-}
+// outOfBandInstallMessage is the refusal for any setup action but restart:
+// installing language servers is the user's Neovim setup's job, not this
+// service's.
+const outOfBandInstallMessage = "action must be restart. Huyang does not install language servers or parsers: install them outside it (Mason in your Neovim setup, or the system package manager), then restart"
 
 func (h *Handlers) languageServerSetup(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	action, _ := arguments["action"].(string)
-	switch action {
-	case "restart":
-		return h.restartLanguageServers(ctx, requestID, workspace)
-	case "install":
-		return h.installLanguageServer(ctx, requestID, workspace, arguments)
-	default:
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_language_server_action", "action must be install or restart", map[string]any{})
+	if action != "restart" {
+		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_language_server_action", outOfBandInstallMessage, map[string]any{})
 	}
+	return h.restartLanguageServers(ctx, requestID, workspace)
 }
 
 // restartLanguageServers replaces the canonical provider and verifies that
@@ -265,89 +234,6 @@ func stringList(value any) []string {
 		}
 	}
 	return names
-}
-
-// installLanguageServer asks the provider to install support for one
-// language and classifies what the provider reports about the server.
-func (h *Handlers) installLanguageServer(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
-	language, _ := arguments["language"].(string)
-	if strings.TrimSpace(language) == "" {
-		return mcpapi.Envelope(requestID, workspace, "failed", "language_required", "language is required for install", map[string]any{})
-	}
-	backend, release, err := h.pool.Canonical(ctx, workspace)
-	defer release()
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
-	}
-	providerArguments := map[string]any{"root": workspace.Identity().Root, "language": language}
-	if server, ok := arguments["server"].(string); ok && server != "" {
-		providerArguments["server"] = server
-	}
-	if parser, ok := arguments["parser"].(bool); ok {
-		providerArguments["parser"] = parser
-	}
-	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, "install_language", providerArguments)
-	if err != nil {
-		return modernProviderFailure(requestID, workspace, "language_server_install_failed", err)
-	}
-	data := map[string]any{"installation": value, "provider": providerpool.Status(ctx, backend)}
-	installation, _ := value.(map[string]any)
-	serverResult, _ := installation["server"].(map[string]any)
-	requestedServer := strings.TrimSpace(fmt.Sprint(arguments["server"]))
-	return installOutcome(requestID, workspace, language, requestedServer, serverResult, data)
-}
-
-// installOutcome turns the provider's server report into the tool result:
-// parser-only success, an installed server that did not attach, a failed
-// install, an unconfirmed attachment, or a confirmed one.
-func installOutcome(requestID string, workspace *workspacecore.Workspace, language, requestedServer string, serverResult, data map[string]any) map[string]any {
-	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(serverResult["status"])))
-	note := strings.TrimSpace(fmt.Sprint(serverResult["note"]))
-	if requestedServer == "" && (len(serverResult) == 0 || status == "skipped" || status == "none") {
-		result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Parser support installation completed for %s; no language server was requested", language), data)
-		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_parser"}}
-		return result
-	}
-	if attached, present := serverResult["attached"]; present && attached == false {
-		if note == "" {
-			note = "the language server did not attach after installation"
-		}
-		requirement := note
-		if strings.Contains(strings.ToLower(note), "cargo not found") {
-			requirement = "Install the Rust toolchain so cargo is executable in the Huyang user service PATH, then restart the provider."
-		}
-		result := mcpapi.Envelope(requestID, workspace, "provisional", "language_server_not_attached",
-			fmt.Sprintf("Language support was installed for %s, but its server did not attach: %s", language, note), data)
-		result["warnings"] = []string{requirement}
-		result["next"] = []any{
-			map[string]any{"tool": "language_server_setup", "action": "restart", "prerequisite": requirement, "use_new_idempotency_key": true},
-			map[string]any{"tool": "language_server_status", "action": "verify_attachment"},
-		}
-		return result
-	}
-	if status == "failed" || status == "unknown" || status == "unsupported" || status == "skipped" {
-		if note == "" {
-			note = "the provider did not supply installation diagnostics"
-		}
-		result := mcpapi.Envelope(requestID, workspace, "failed", "language_server_install_failed",
-			fmt.Sprintf("Language support installation failed for %s: %s", language, note), data)
-		result["warnings"] = []string{note}
-		result["next"] = failedLanguageServerInstallNext(status, language, requestedServer)
-		return result
-	}
-	if attached, present := serverResult["attached"]; !present || !languageServerAttachmentConfirmed(attached) {
-		if note == "" || note == "<nil>" {
-			note = "the provider did not positively confirm attachment"
-		}
-		result := mcpapi.Envelope(requestID, workspace, "provisional", "language_server_attachment_unconfirmed",
-			fmt.Sprintf("Language support was installed for %s, but server attachment is unconfirmed: %s", language, note), data)
-		result["warnings"] = []string{note}
-		result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
-		return result
-	}
-	result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Language support installation completed and attached for %s", language), data)
-	result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "verify_attachment"}}
-	return result
 }
 
 func (h *Handlers) navigateProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
@@ -470,26 +356,4 @@ func (h *Handlers) locatorForSymbol(ctx context.Context, requestID string, works
 	}
 	result["next"] = next
 	return nil, result
-}
-
-func (h *Handlers) codeActionsProvider(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
-	target, _ := arguments["target"].(map[string]any)
-	providerArguments, err := modernProviderTarget(workspace, target)
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
-	}
-	backend, release, err := h.pool.Canonical(ctx, workspace)
-	defer release()
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "semantic_provider_start_failed", err)
-	}
-	value, err := providerpool.CallCanonical(ctx, requestID, workspace, backend, "code_actions", providerArguments)
-	if err != nil {
-		result := modernProviderFailure(requestID, workspace, "language_server_unavailable", err)
-		if result["retryable"] != true {
-			result["next"] = []any{map[string]any{"tool": "language_server_status", "action": "inspect_attachment"}}
-		}
-		return result
-	}
-	return mcpapi.Envelope(requestID, workspace, "ok", "", "Code actions retrieved through the workspace language server", map[string]any{"code_actions": value, "provider": providerpool.Status(ctx, backend)})
 }

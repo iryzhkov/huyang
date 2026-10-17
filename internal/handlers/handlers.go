@@ -169,14 +169,10 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 	// same plan is already preparing.
 	// A call that names a prepared revision is answered from the sandbox
 	// that holds it, never from canonical source.
-	if selector := decodePreparedSelector(arguments); selector.wantsPrepared(workspace) && preparedCapableTool(name) && !executionContentSelector(name, selector) {
+	if selector := decodePreparedSelector(arguments); selector.wantsPrepared(workspace) && preparedCapableTool(name) {
 		return h.routePrepared(ctx, requestID, name, workspace, selector, arguments)
 	}
 	switch name {
-	case "execution_graph":
-		return h.executionGraph(ctx, requestID, workspace, arguments)
-	case "path_explain":
-		return h.pathExplain(ctx, requestID, workspace, arguments, nil)
 	case "workspace_inspect":
 		return h.inspect(ctx, requestID, workspace, arguments)
 	case "search":
@@ -208,8 +204,6 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 		return h.languageServerSetup(ctx, requestID, workspace, arguments)
 	case "navigate":
 		return h.navigateProvider(ctx, requestID, workspace, arguments)
-	case "code_actions":
-		return h.codeActionsProvider(ctx, requestID, workspace, arguments)
 	default:
 		result := mcpapi.Envelope(requestID, workspace, "unavailable", "semantic_provider_unavailable",
 			fmt.Sprintf("%s requires a semantic provider that is not available for this workspace", name),

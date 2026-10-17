@@ -103,11 +103,6 @@ func TestTheWholeWorkflowFromOpenToApplied(t *testing.T) {
 		t.Fatalf("prepared diagnostics = %s: %s", outcome(diagnosed), summary(diagnosed))
 	}
 	t.Logf("prepared diagnostics: %s", summary(diagnosed))
-	actions := call(t, session, "code_actions", map[string]any{
-		"workspace_id": workspaceID, "revision": revision,
-		"target": map[string]any{"symbol_locator": map[string]any{"path": "ledger.go", "name_path": "Total"}},
-	})
-	t.Logf("code actions: %s/%v", outcome(actions), actions["code"])
 
 	// Revise: editing a prepared plan releases its preparation and returns it
 	// to an intent, then it is prepared again.

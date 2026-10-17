@@ -1,5 +1,5 @@
 {
-  "fixture_version": "huyang.tools/v1alpha1-m5",
+  "fixture_version": "huyang.tools/v1alpha1-m6",
   "catalogs": {
     "full": [
       "workspace_open",
@@ -9,7 +9,6 @@
       "navigate",
       "read",
       "diagnostics",
-      "code_actions",
       "edit_apply",
       "change_plan",
       "revision_diff",
@@ -36,7 +35,6 @@
       "read",
       "diagnostics",
       "evidence_get",
-      "code_actions",
       "edit_apply",
       "change_plan",
       "revision_diff"
@@ -230,18 +228,6 @@
         "cursor"
       ]
     },
-    "code_actions": {
-      "read_only": true,
-      "required": [
-        "workspace_id",
-        "target"
-      ],
-      "applies": false,
-      "returns": [
-        "revision_bound_action_handles",
-        "known_write_sets"
-      ]
-    },
     "edit_apply": {
       "read_only": false,
       "required": [
@@ -338,7 +324,6 @@
         "full"
       ],
       "action": [
-        "install",
         "restart"
       ]
     }

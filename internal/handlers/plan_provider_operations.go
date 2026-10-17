@@ -134,7 +134,7 @@ func (h *Handlers) workspaceEditArguments(workspace *workspacecore.Workspace, op
 		arguments["kind"], arguments["new_name"] = "rename", operation.Content
 	case kindApplyCodeAction:
 		if strings.TrimSpace(operation.Content) == "" {
-			return nil, fmt.Errorf("apply_code_action requires the action title in content; code_actions lists them")
+			return nil, fmt.Errorf("apply_code_action requires the action title in content; a title the server does not offer is refused with the titles it does")
 		}
 		arguments["kind"], arguments["title"] = "code_action", operation.Content
 	case kindInlineSymbol:

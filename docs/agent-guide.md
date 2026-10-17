@@ -9,7 +9,7 @@ full tables, the Python fixture and the pre-change numbers are in
 [bench/agent-efficiency/RESULTS.md](../bench/agent-efficiency/RESULTS.md).
 
 Every tool that names a workspace accepts `root` (the repository root) in place of
-`workspace_id`, including `change_plan`, `revision_diff`, `diagnostics`, `code_actions`
+`workspace_id`, including `change_plan`, `revision_diff`, `diagnostics`
 and, on the `full` profile, `language_server_*`: the workspace is opened on the first call
 and reused afterwards, so a task in a known repository needs no `workspace_open` at all. Call `workspace_open {kind: project, root}`
 only when you want its answer: the top-level overview, the verification commands and
@@ -238,7 +238,7 @@ Keep both transport representations for compatible consumers and deduplicate for
   resource cap, then retry verification. A quota refusal is not a failed compilation
   or permission to verify different bytes without declaring that change.
 - After preparing a plan, the staged code is somewhere you can look: pass `revision:
-  "prep_..."` (or `plan_id`) to `read`, `navigate`, `diagnostics` or `code_actions` on the
+  "prep_..."` (or `plan_id`) to `read`, `navigate` or `diagnostics` on the
   experimental profile, and the answer comes from the sandbox and the language server that
   read it, in the paths you know. Once the plan is discarded, applied or edited, the same
   call is refused rather than answered about the canonical bytes.
@@ -257,13 +257,12 @@ Keep both transport representations for compatible consumers and deduplicate for
   `change_plan {action: prepare, operations, invariants: [{id: "clean", kind:
   "no_new_diagnostics"}]}` on the experimental profile. The kinds are
   `no_new_diagnostics`, `tests_pass`, `api_compatible`, `no_references`,
-  `symbol_exists`, `symbol_absent` and `path_unreachable`; the ones about a
+  `symbol_exists` and `symbol_absent`; the ones about a
   declaration name it in `scope.symbol`. `api_compatible` reads each affected
   file's exported surface before and after (Go through the compiler's parser,
   TypeScript through its export forms) and calls a removal, a rename, a changed
   signature, a changed member set or a moved barrel export breaking.
-  `path_unreachable` can refute reachability from one remaining reference but
-  cannot yet prove it, so it answers violated or unknown. Each one is answered against the prepared revision and is
+  Each one is answered against the prepared revision and is
   `proven`, `violated` or `unknown`, and unknown is not a pass: a required
   invariant that nobody could evaluate keeps the plan out of READY exactly as a
   violated one does. A required invariant has no accept flag, so a plan that
@@ -294,8 +293,9 @@ Keep both transport representations for compatible consumers and deduplicate for
   (`huyang mcp --profile experimental`), because the frozen schemas do not advertise
   `view`. It writes nothing.
 - Refactors the language server owns are `change_plan` operations: `rename_symbol`
-  (`content` is the new name), `apply_code_action` (`content` is the title `code_actions`
-  listed), `inline_symbol`, and `safe_delete_symbol`, which refuses and names the call
+  (`content` is the new name), `apply_code_action` (`content` is the action's title;
+  `diagnostics` on a prepared revision lists the titles on offer under `quick_fixes`),
+  `inline_symbol`, and `safe_delete_symbol`, which refuses and names the call
   sites when anything outside the declaration still refers to it. Each one asks the server
   what it would change and stages that answer as exact ranges, so the plan previews,
   verifies and rolls back like any other; the operations it produced carry `derived_from`.
@@ -355,6 +355,13 @@ Keep both transport representations for compatible consumers and deduplicate for
   `language_server_status` (a `full`-profile tool; the default `edit` profile does not
   carry it): its server starts on the first call that touches one of its files, which may
   then answer `lsp_starting` once, or at once when the status call names it in `languages`.
+- Huyang installs no language servers or parsers. A language with none answers
+  `lsp_not_configured` (or `lsp_not_startable` when the configured command is missing);
+  ask the user to install one outside Huyang, with Mason or nvim-treesitter in their
+  Neovim setup or with the system package manager, then call `language_server_setup
+  {action: restart}` on the `full` profile so the provider picks it up.
+  `language_server_status` lists the Mason packages that serve a missing language under
+  `install_options`.
 - `verbose: true` on `edit_apply` restores the full change record and handle resolution;
   nothing else needs it.
 - A whole-file rewrite through `edit_apply` is bounded (the patch in the response is cut at

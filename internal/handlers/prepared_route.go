@@ -19,7 +19,7 @@ const preparedDiagnosticBudget = 10
 // so rather than quietly answering about the wrong bytes.
 func preparedCapableTool(name string) bool {
 	switch name {
-	case "read", "navigate", "diagnostics", "code_actions", "path_explain", "execution_graph":
+	case "read", "navigate", "diagnostics":
 		return true
 	}
 	return false
@@ -32,8 +32,6 @@ func (h *Handlers) routePrepared(ctx context.Context, requestID, name string, wo
 		return failure
 	}
 	switch name {
-	case "path_explain", "execution_graph":
-		return h.executionPrepared(ctx, requestID, name, workspace, view, arguments)
 	case "read":
 		request, ok := decodeReadRequest(arguments)
 		if !ok {
@@ -46,8 +44,6 @@ func (h *Handlers) routePrepared(ctx context.Context, requestID, name string, wo
 		return h.navigatePrepared(ctx, requestID, workspace, view, arguments)
 	case "diagnostics":
 		return h.diagnosticsPrepared(ctx, requestID, workspace, view, arguments)
-	case "code_actions":
-		return h.codeActionsPrepared(ctx, requestID, workspace, view, arguments)
 	}
 	return mcpapi.Envelope(requestID, workspace, "unavailable", "prepared_tool_unsupported",
 		fmt.Sprintf("%s answers about the canonical workspace only", name), map[string]any{})
@@ -138,31 +134,4 @@ func (h *Handlers) diagnosticsPrepared(ctx context.Context, requestID string, wo
 		}
 	}
 	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
-}
-
-// codeActionsPrepared lists what the server would offer for the staged bytes.
-// Listing is read-only: selecting one is an operation added to the plan,
-// which replaces the preparation rather than editing it in place.
-func (h *Handlers) codeActionsPrepared(ctx context.Context, requestID string, workspace *workspacecore.Workspace, view providerpool.PreparedView, arguments map[string]any) map[string]any {
-	target, _ := arguments["target"].(map[string]any)
-	if target == nil {
-		return mcpapi.Envelope(requestID, workspace, "failed", "invalid_target", "code_actions requires target", map[string]any{})
-	}
-	providerArguments, err := preparedProviderTarget(view, workspace, target)
-	if err != nil {
-		return mcpapi.Failure(requestID, workspace, "semantic_target_invalid", err)
-	}
-	value, failure := h.callPrepared(ctx, requestID, workspace, view, "code_actions", providerArguments)
-	if failure != nil {
-		return failure
-	}
-	result := mcpapi.Envelope(requestID, workspace, "ok", "",
-		fmt.Sprintf("Code actions for %s", view.PreparedRevision), map[string]any{
-			"code_actions": value, "revision": view.PreparedRevision, "plan_id": view.PlanID,
-		})
-	result["next"] = []any{map[string]any{
-		"tool": "change_plan", "action": "edit", "plan_id": view.PlanID, "plan_revision": view.PlanRevision,
-		"note": "Applying one of these adds an operation to the plan and needs a fresh prepare; a reviewed preparation is never edited in place.",
-	}}
-	return result
 }

@@ -9,8 +9,7 @@ package workspace
 // snapshot keeps each contributor's claim with its producer, confidence and
 // coverage, merges duplicates without losing either provenance, and retains
 // disagreements rather than picking a winner. Anything built on top - impact
-// analysis, invariants, execution graphs - reads facts that name their own
-// evidence.
+// analysis and invariants - reads facts that name their own evidence.
 //
 // Identity is the whole input: a snapshot is keyed by workspace, epoch,
 // revision, analysis profile, project configuration and the version of every
@@ -25,11 +24,6 @@ import (
 	"sort"
 	"time"
 )
-
-// maxAnalysisSnapshots bounds the cache. Snapshots are keyed by revision, so
-// an editing session produces a new one every few edits and the old ones are
-// never asked for again.
-const maxAnalysisSnapshots = 16
 
 // AnalysisNodeKind is what a node stands for.
 type AnalysisNodeKind string
@@ -68,14 +62,12 @@ type ProducerVersion struct {
 
 // AnalysisKey is everything a snapshot's identity depends on.
 type AnalysisKey struct {
-	ExecutionBudget *GraphBudget      `json:"execution_budget,omitempty"`
-	ExecutionDomain string            `json:"execution_domain,omitempty"`
-	WorkspaceID     ID                `json:"workspace_id"`
-	Epoch           uint64            `json:"epoch"`
-	Revision        string            `json:"revision"`
-	Profile         string            `json:"profile"`
-	ConfigHash      string            `json:"config_hash"`
-	Producers       []ProducerVersion `json:"producers"`
+	WorkspaceID ID                `json:"workspace_id"`
+	Epoch       uint64            `json:"epoch"`
+	Revision    string            `json:"revision"`
+	Profile     string            `json:"profile"`
+	ConfigHash  string            `json:"config_hash"`
+	Producers   []ProducerVersion `json:"producers"`
 }
 
 // ID is the deterministic identity of the key: the same inputs in any order
@@ -147,7 +139,6 @@ type AnalysisConflict struct {
 
 // AnalysisSnapshot is the immutable result.
 type AnalysisSnapshot struct {
-	Execution *ExecutionGraph    `json:"execution,omitempty"`
 	ID        string             `json:"id"`
 	Key       AnalysisKey        `json:"key"`
 	Nodes     []AnalysisNode     `json:"nodes"`

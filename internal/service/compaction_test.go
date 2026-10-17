@@ -365,13 +365,17 @@ func TestLanguageServerStatusListsInstallOptionsOnce(t *testing.T) {
 			t.Fatalf("language entry lacks the options key: %#v", entry)
 		}
 	}
+	// Huyang installs nothing, so the recovery is the restart that picks up a
+	// server installed outside it, pointing at the options listed once above.
 	for _, raw := range status["next"].([]any) {
 		action := raw.(map[string]any)
 		if _, present := action["server_options"]; present {
 			t.Fatalf("next repeats install options: %#v", action)
 		}
-		if action["install_options_key"] != action["language"] {
-			t.Fatalf("next lacks the options key: %#v", action)
+		prerequisite, _ := action["prerequisite"].(string)
+		if action["tool"] != "language_server_setup" || action["action"] != "restart" ||
+			!strings.Contains(prerequisite, "install_options") {
+			t.Fatalf("next is not an out-of-band install and restart: %#v", action)
 		}
 	}
 }

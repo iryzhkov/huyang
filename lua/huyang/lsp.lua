@@ -36,11 +36,10 @@ local workspace_tree = index.workspace_tree
 local workspace_symbols, find_symbol = index.workspace_symbols, index.find_symbol
 
 local edit = require("huyang.edit")
-local code_actions = edit.code_actions
 local huyang_workspace_edit = edit.huyang_workspace_edit
 
 local install = require("huyang.install")
-local workspace_support, install_language = install.workspace_support, install.install_language
+local workspace_support = install.workspace_support
 -- Normalize Location | Location[] | LocationLink[] into a compact list.
 local function format_locations(result)
     if result == nil then
@@ -255,8 +254,9 @@ local function diagnostics(args)
                 count = #diags,
                 diagnostics = out,
                 note = ("no language server is enabled for filetype %s, so nothing checks this "
-                    .. "file; install_language(%q) adds one"):format(ft ~= "" and ft or "(none)",
-                    ft ~= "" and ft or vim.fn.fnamemodify(args.file, ":e")),
+                    .. "file; install one outside Huyang (Mason in your Neovim setup, or the system "
+                    .. "package manager), then call language_server_setup action=restart")
+                    :format(ft ~= "" and ft or "(none)"),
             }
         end
     end
@@ -329,8 +329,7 @@ local function diagnostics(args)
         diagnostics = out,
         note = total > 0
             and "quick_fixes lists code actions the language server can apply for you: "
-            .. "call code_actions with this file and line (the col above is optional), "
-            .. "then apply one through a change_plan apply_code_action operation, "
+            .. "stage one by its title through a change_plan apply_code_action operation "
             .. "instead of editing by hand"
             or silent and ("nothing is reported for this file, but %s has published no "
                 .. "diagnostics %s, so this is not evidence that the file "
@@ -533,15 +532,11 @@ local dispatch_table = {
     end,
     incoming_calls = call_hierarchy("in"),
     outgoing_calls = call_hierarchy("out"),
-    huyang_execution_batch = function(args) return require("huyang.execution").batch(args) end,
-    huyang_execution_flow = function(args) return require("huyang.execution_flow").batch(args) end,
-    code_actions = code_actions,
     -- The bytes a server-owned refactor would change, for the coordinator to
     -- stage as ordinary guarded edits; it never applies anything itself.
     huyang_workspace_edit = huyang_workspace_edit,
     workspace_tree = workspace_tree,
     workspace_support = workspace_support,
-    install_language = install_language,
     find_symbol = find_symbol,
     -- Internal Huyang transaction calls stage exact bytes without saving or emitting
     -- intermediate edit verdicts. The Go coordinator owns the lease and durable state.

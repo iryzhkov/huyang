@@ -4,8 +4,8 @@ Huyang is a local transactional semantic workspace for coding agents. It combine
 long-lived Go service with isolated Neovim providers so MCP clients can navigate, edit,
 verify, and recover changes against an explicit workspace revision.
 
-The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (14
-tools), `edit` (12 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
+The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (13
+tools), `edit` (11 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
 `experimental`, is `full` plus the input shapes still being designed; a caller asks for it
 by name. There is no legacy or compatibility surface: the embedded Neovim provider is the
 only backend and the tools below are the only tools.
@@ -34,7 +34,7 @@ an agent's instructions.
 
 ## Tools
 
-The `full` profile lists all 14 tools in this order. `edit` and `orient` are fixed subsets
+The `full` profile lists all 13 tools in this order. `edit` and `orient` are fixed subsets
 of it.
 
 Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
@@ -44,17 +44,20 @@ Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
 
 Editing and verification, in `full` and `edit`:
 
-- `code_actions`, `edit_apply`, `change_plan`, `revision_diff`.
+- `edit_apply`, `change_plan`, `revision_diff`.
 
 Language-server administration, in `full` (and `experimental`) only. A session on the
 default `edit` profile does not see these two tools:
 
 - `language_server_status`, `language_server_setup`.
 
-That gives 14 tools in `full`, 8 in `orient`, and 12 in `edit`. The service refuses to start
+`language_server_setup` only restarts the provider (`action=restart`); Huyang does not
+install language servers or parsers (see [Requirements](#requirements)).
+
+That gives 13 tools in `full`, 8 in `orient`, and 11 in `edit`. The service refuses to start
 if the registered catalog differs from those counts, and every tool declares the scheduler
-class it runs under. The `experimental` profile adds `execution_graph` and `path_explain`
-and a few experimental arguments to `full`; it is not a contract. The contract is described
+class it runs under. The `experimental` profile adds a few experimental arguments to `full`
+and no tools of its own; it is not a contract. The contract is described
 in [docs/plans/huyang-tools-v1alpha1.md](docs/plans/huyang-tools-v1alpha1.md).
 
 The debugger tools (`debug_session`, `debug_breakpoints`, `debug_control`, `debug_inspect`),
@@ -62,7 +65,11 @@ the `debug` and `debugger` profiles, the `/mcp/debug` route and the nvim-dap dep
 removed on 2026-10-17, together with `file_range` targets and the `include_ranges` search
 option. `verify_run`, its affected-test selection and the `--external-job-quota` flag were
 removed the same day: run builds and tests in the shell, and `change_plan` prepare still
-runs a trusted root's commands against its sandbox. These are breaking changes inside
+runs a trusted root's commands against its sandbox. Later the same day `code_actions`, the
+`install` action of `language_server_setup`, the experimental `execution_graph` and
+`path_explain` tools and the `path_unreachable` invariant were removed as well: a
+`change_plan` `apply_code_action` operation names the action by title, and a title the
+server does not offer is refused with the titles it does. These are breaking changes inside
 `v1alpha1`; see [the contract's change log](docs/plans/huyang-tools-v1alpha1.md#change-log).
 
 ## Requirements
@@ -76,6 +83,16 @@ runs a trusted root's commands against its sandbox. These are breaking changes i
 - The language servers, parsers, and formatters required by your projects.
 
 The native text core does not require Neovim or an LSP.
+
+Huyang installs no language servers or Tree-sitter parsers. Install them outside it, the
+same way an interactive Neovim gets them: with Mason (`:MasonInstall gopls`, or
+`ensure_installed` in your mason-lspconfig setup) and nvim-treesitter (`:TSInstall go`), or
+with the system package manager (`pacman -S gopls`, `brew install pyright`). The provider
+enables a server Mason has installed, and one on `PATH` that an lspconfig config on the
+runtimepath describes, each time it starts. After installing one, call
+`language_server_setup` with `action=restart` (in the `full` profile), or restart the
+service, so the running provider picks it up. `language_server_status` names a language
+that has no server, and lists the Mason packages that serve it under `install_options`.
 
 ## Build and test
 
@@ -185,7 +202,7 @@ is unambiguous:
   working directory to /abs; send absolute roots`.
 - **A default workspace, for read-only tools only.** A call to `workspace_open`,
   `workspace_inspect`, `search`, `symbol_find`, `navigate`, `read`, `diagnostics`,
-  `evidence_get`, `code_actions`, `revision_diff` or `language_server_status` that names
+  `evidence_get`, `revision_diff` or `language_server_status` that names
   neither `workspace_id` nor `root` reads the repository the client was started in, but
   only when the client was started at the top of that working tree and the call names no
   absolute path (an absolute path keeps its exact-document meaning). The reply warns

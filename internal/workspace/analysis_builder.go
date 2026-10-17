@@ -235,38 +235,3 @@ func BuildAnalysisSnapshot(ctx context.Context, request AnalysisRequest, contrib
 	}
 	return builder.finish(key), nil
 }
-
-// analysisStore caches snapshots by identity. There is no invalidation,
-// because there is nothing to invalidate: every input that could change an
-// answer is already in the key, so a stale snapshot is unreachable rather
-// than wrong. The store is bounded and evicts the oldest.
-type analysisStore struct {
-	mu      sync.Mutex
-	entries map[string]AnalysisSnapshot
-	order   []string
-}
-
-func newAnalysisStore() *analysisStore {
-	return &analysisStore{entries: map[string]AnalysisSnapshot{}}
-}
-
-func (s *analysisStore) get(id string) (AnalysisSnapshot, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	snapshot, ok := s.entries[id]
-	return cloneExecution(snapshot), ok
-}
-
-func (s *analysisStore) put(snapshot AnalysisSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, known := s.entries[snapshot.ID]; known {
-		return
-	}
-	s.entries[snapshot.ID] = cloneExecution(snapshot)
-	s.order = append(s.order, snapshot.ID)
-	for len(s.order) > maxAnalysisSnapshots {
-		delete(s.entries, s.order[0])
-		s.order = s.order[1:]
-	}
-}
