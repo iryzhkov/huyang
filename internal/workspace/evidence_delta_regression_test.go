@@ -13,7 +13,7 @@ func TestDiagnosticStaleRefreshPersistsButResolvedFindingRegresses(t *testing.T)
 			if _, err := w.Snapshot(path, ProviderLayer{}); err != nil {
 				t.Fatal(err)
 			}
-			batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: producer + "#1", Producer: producer,
+			batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: producer + "#1", Producer: producer,
 				Document: path, DocumentRevision: "before", ResultID: "r1", Complete: true, Selected: true,
 				Findings: []DiagnosticFinding{finding("existing")}}
 			record := func() DiagnosticReport {
@@ -72,7 +72,7 @@ func TestDiagnosticPersistingNoticeSurvivesReopenAndAcknowledgement(t *testing.T
 	if _, err := w.Snapshot(path, ProviderLayer{}); err != nil {
 		t.Fatal(err)
 	}
-	batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: "pyright#1", Producer: "pyright",
+	batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: "pyright#1", Producer: "pyright",
 		Document: path, ResultID: "before", Complete: true, Selected: true,
 		Findings: []DiagnosticFinding{finding("existing")}}
 	first, err := w.RecordDiagnosticEvidence(batch)

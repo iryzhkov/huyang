@@ -226,4 +226,6 @@ function M.status(args)
     return { active = true, plan_id = active.plan_id, plan_revision = active.plan_revision }
 end
 
+M.set_buffer_bytes = set_buffer_bytes
+
 return M

@@ -24,13 +24,14 @@ const (
 // since the client's previous reply, as a workspace-relative path, without
 // the cursor or an empty attribution.
 type DiagnosticUpdate struct {
-	ID          string                            `json:"id"`
-	Kind        string                            `json:"kind"`
-	Severity    int                               `json:"severity,omitempty"`
-	Path        string                            `json:"path,omitempty"`
-	Line        int                               `json:"line,omitempty"`
-	Message     string                            `json:"message,omitempty"`
-	Attribution *workspacecore.CulpritAttribution `json:"attribution,omitempty"`
+	BaselineMissing bool                              `json:"baseline_missing,omitempty"`
+	ID              string                            `json:"id"`
+	Kind            string                            `json:"kind"`
+	Severity        int                               `json:"severity,omitempty"`
+	Path            string                            `json:"path,omitempty"`
+	Line            int                               `json:"line,omitempty"`
+	Message         string                            `json:"message,omitempty"`
+	Attribution     *workspacecore.CulpritAttribution `json:"attribution,omitempty"`
 }
 
 // maxNoticeMessage bounds the message a notice carries. A compiler says what
@@ -351,7 +352,7 @@ func describeNotices(workspace *workspacecore.Workspace, updates []DiagnosticUpd
 		if !known {
 			continue
 		}
-		updates[index].Line = finding.Range.StartLine
+		updates[index].Line = diagnosticLine(finding)
 		message := finding.Message
 		if len(message) > maxNoticeMessage {
 			message = message[:maxNoticeMessage] + "..."
@@ -392,7 +393,7 @@ func collapseNotices(root string, notices []workspacecore.DiagnosticNotice) ([]D
 		if len(updates) == MaxDiagnosticUpdates {
 			return updates, true
 		}
-		update := DiagnosticUpdate{ID: notice.ID, Kind: notice.Kind, Severity: notice.Severity, Path: strings.TrimPrefix(notice.Document, root+"/")}
+		update := DiagnosticUpdate{ID: notice.ID, Kind: notice.Kind, BaselineMissing: notice.BaselineMissing, Severity: notice.Severity, Path: strings.TrimPrefix(notice.Document, root+"/")}
 		if notice.Attribution.Rank != "" && notice.Attribution.Rank != "unattributed" {
 			attribution := notice.Attribution
 			update.Attribution = &attribution

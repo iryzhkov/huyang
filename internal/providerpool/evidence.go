@@ -80,8 +80,22 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 			TimedOut: true, Selected: true, Staged: staged, Dimension: "edited_documents",
 		})
 	}
-	var report workspacecore.DiagnosticReport
-	for _, batch := range payload.Batches {
+	// A pull may supersede a push for the same producer/document. Select
+	// the strongest observation before recording, so an intermediate empty
+	// batch cannot resolve findings that a current pull still reports.
+	batches := selectDiagnosticBatches(payload.Batches)
+	covered := map[string]bool{}
+	for _, batch := range batches {
+		covered[filepath.Clean(batch.Document)] = true
+	}
+	for _, path := range paths {
+		if !covered[filepath.Clean(path)] {
+			batches = append(batches, workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePush,
+				ProviderID: string(descriptor.ID), Producer: descriptor.Backend, Document: path, Selected: true, Dimension: "edited_documents"})
+		}
+	}
+	report := workspacecore.DiagnosticReport{Confidence: workspacecore.ConfidenceAuthoritative}
+	for _, batch := range batches {
 		batch.Selected = true
 		batch.Staged = staged
 		batch.TransactionID = transactionID
@@ -89,12 +103,105 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
 			batch.Document = filepath.Join(workspace.Identity().Root, relative)
 		}
-		report, err = workspace.RecordDiagnosticEvidence(batch)
-		if err != nil {
-			return workspacecore.DiagnosticReport{}, err
+		observed, recordErr := workspace.RecordDiagnosticEvidence(batch)
+		if recordErr != nil {
+			return workspacecore.DiagnosticReport{}, recordErr
 		}
+		mergeDiagnosticReport(&report, observed)
 	}
 	return report, nil
+}
+
+func publicationProven(batch workspacecore.DiagnosticBatch) bool {
+	return batch.Complete && batch.DocumentVersion != nil && batch.ExpectedVersion != nil &&
+		*batch.DocumentVersion >= *batch.ExpectedVersion && !batch.ProgressPending && !batch.TimedOut
+}
+
+func selectDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspacecore.DiagnosticBatch {
+	var selected []workspacecore.DiagnosticBatch
+	index := map[string]int{}
+	for _, batch := range batches {
+		key := batch.ProviderID + "\x00" + batch.Document
+		if i, ok := index[key]; ok {
+			if publicationProven(batch) || !publicationProven(selected[i]) {
+				selected[i] = batch
+			}
+		} else {
+			index[key] = len(selected)
+			selected = append(selected, batch)
+		}
+	}
+	return selected
+}
+
+func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed workspacecore.DiagnosticReport) {
+	rank := func(c workspacecore.DiagnosticConfidence) int {
+		switch c {
+		case workspacecore.ConfidenceAuthoritative:
+			return 3
+		case workspacecore.ConfidenceCorroborated:
+			return 2
+		case workspacecore.ConfidenceProvisional:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(observed.Confidence) < rank(report.Confidence) {
+		report.Confidence = observed.Confidence
+	}
+	report.New = append(report.New, observed.New...)
+	report.Current = append(report.Current, observed.Current...)
+	report.Resolved = append(report.Resolved, observed.Resolved...)
+	report.EvidenceIDs = append(report.EvidenceIDs, observed.EvidenceIDs...)
+	for _, reason := range observed.ProvisionalReasons {
+		found := false
+		for _, prior := range report.ProvisionalReasons {
+			if prior == reason {
+				found = true
+				break
+			}
+		}
+		if !found {
+			report.ProvisionalReasons = append(report.ProvisionalReasons, reason)
+		}
+	}
+	report.Coverage, report.Cursor = observed.Coverage, observed.Cursor
+	report.CurrentCount, report.StaleCount = observed.CurrentCount, observed.StaleCount
+	report.Stale = observed.Stale
+	report.PreexistingCount = report.CurrentCount - len(report.New)
+}
+
+// RecordDiagnosticBaseline reads only already-loaded provider buffers. It neither
+// attaches a server nor sends an LSP request, so the pre-edit path adds one local
+// RPC and no analysis wait.
+func RecordDiagnosticBaseline(ctx context.Context, workspace *workspacecore.Workspace, backend provider.Provider) error {
+	callCtx, cancel := context.WithTimeout(ctx, lateEvidenceTimeout)
+	defer cancel()
+	result, err := Call(callCtx, workspace, backend, CallSpec{RequestID: "diagnostic_baseline"}, "huyang_diagnostic_evidence", map[string]any{"baseline": true, "wait_ms": 0})
+	if err != nil {
+		return err
+	}
+	payload, err := diagnosticPayload(result)
+	if err != nil {
+		return err
+	}
+	for _, batch := range payload.Batches {
+		if !publicationProven(batch) {
+			continue
+		}
+		batch.Selected, batch.Baseline = true, true
+		if relative, relErr := filepath.Rel(backend.Descriptor().Root, batch.Document); relErr == nil {
+			batch.Document = filepath.Join(workspace.Identity().Root, relative)
+		}
+		if snapshot, snapErr := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); snapErr == nil {
+			batch.DocumentRevision = string(snapshot.Revision)
+		}
+		if _, err := workspace.RecordDiagnosticEvidence(batch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // lateEvidenceTimeout bounds the collection of late batches: the kernel

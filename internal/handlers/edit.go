@@ -117,6 +117,13 @@ type appliedEdit struct {
 }
 
 func (h *Handlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if preview, _ := arguments["preview_only"].(bool); !preview {
+		backend, release := h.pool.Existing(workspace)
+		if backend != nil {
+			_ = providerpool.RecordDiagnosticBaseline(ctx, workspace, backend)
+		}
+		release()
+	}
 	if _, listed := arguments["operations"]; listed {
 		return h.editOperations(ctx, requestID, workspace, arguments)
 	}
@@ -462,13 +469,18 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 // diagnosticSummary words the post-edit diagnostic outcome so the agent
 // can read the verdict without opening the delta.
 func diagnosticSummary(report workspacecore.DiagnosticReport) string {
-	current := 0
+	current, unknown := 0, 0
 	for _, item := range report.New {
 		if includeEditDiagnostic(item) {
+			if item.BaselineMissing {
+				unknown++
+			}
 			current++
 		}
 	}
 	switch {
+	case unknown > 0:
+		return fmt.Sprintf("%d new or pre-existing diagnostic(s) (no baseline), %d new, %d resolved", unknown, current-unknown, len(report.Resolved))
 	case current == 0 && len(report.Resolved) == 0:
 		return "no new diagnostics"
 	case current == 0:
@@ -498,7 +510,10 @@ func compactDiagnosticDelta(workspace *workspacecore.Workspace, report workspace
 		}
 		compact := map[string]any{
 			"id": item.ID, "severity": item.Finding.Severity, "message": item.Finding.Message,
-			"path": strings.TrimPrefix(item.Document, root), "line": item.Finding.Range.StartLine + 1,
+			"path": strings.TrimPrefix(item.Document, root), "line": diagnosticLine(item.Finding),
+		}
+		if item.BaselineMissing {
+			compact["baseline_missing"] = true
 		}
 		if item.Finding.Code != "" {
 			compact["code"] = item.Finding.Code

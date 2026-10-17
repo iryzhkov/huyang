@@ -114,21 +114,121 @@ do
     edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
     check("late publish for a newer version is not attributed",
         edit._capture_late("pyright", path, 6, {}) == false)
-    check("a mismatched publish clears the pending verdict",
-        edit._capture_late("pyright", path, 5, {}) == false)
+    check("an older publish cannot consume the pending verdict",
+        edit._capture_late("pyright", path, 4, {}) == false)
+    check("an unversioned publish cannot consume the pending verdict",
+        edit._capture_late("pyright", path, nil, {}) == false)
     edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
     local finding = { range = { start_line = 1, start_character = 1, end_line = 1, end_character = 2 }, severity = 1, message = "late" }
     check("late publish for the matching version is captured",
-        edit._capture_late("pyright", path, 5, { finding }) == true)
+        edit._capture_late("pyright", path, 5, { finding }, 42) == true)
     local collected = edit.late_evidence()
     local batch = collected.batches[1]
     check("late evidence names the transaction and the reason",
         #collected.batches == 1 and batch.transaction_id == "edit_t1" and batch.reason == "late_attach"
             and batch.document_revision == "wsrev_9" and batch.expected_version == 5 and batch.document_version == 5
-            and batch.candidates[1].postimage_version_match == true and batch.findings[1].message == "late",
+            and batch.candidates[1].postimage_version_match == true and batch.findings[1].message == "late"
+            and batch.provider_id == "pyright#42",
         batch)
     check("collecting late evidence clears it", #edit.late_evidence().batches == 0)
-    check("an unpended path is ignored", edit._capture_late("pyright", path, 5, {}) == false)
+    check("a later clean publication for the same edit remains observable",
+        edit._capture_late("pyright", path, 5, {}, 42) == true)
+    local clean = edit.late_evidence().batches[1]
+    check("late clean publication preserves producer identity",
+        clean.provider_id == "pyright#42" and #clean.findings == 0)
+    check("an unpended path is ignored", edit._capture_late("pyright", path .. ".other", 5, {}) == false)
+    check("a late unversioned positive finding is delivered provisionally",
+        edit._capture_late("pyright",path,nil,{finding},42)==true)
+    local unversioned=edit.late_evidence().batches[1]
+    check("unstamped late findings cannot resolve or claim transaction attribution",
+        unversioned.complete==false and unversioned.transaction_id==nil and unversioned.candidates==nil)
+end
+
+-- Publication payloads, their versions, and the nonblocking baseline travel
+-- together even when the editor cache or an older publication disagrees.
+do
+    local saved_clients = vim.lsp.get_clients
+    local path = vim.fn.getcwd() .. "/huyang-publication-unit.py"
+    local buf = buffer_with({ "value = 1" }, "python")
+    vim.api.nvim_buf_set_name(buf, path)
+    vim.bo[buf].modified = false
+    vim.lsp.util.buf_versions[buf] = 4
+    local fake = { id = 9001, name = "proof_test", config = { filetypes = { "python" } },
+        handlers = { ["textDocument/publishDiagnostics"] = function() end },
+        supports_method = function() return false end,
+        request_sync = function() error("baseline must not request LSP analysis") end }
+    vim.lsp.get_clients = function(filter)
+        if filter and filter.bufnr == buf then return { fake } end
+        return {}
+    end
+    edit._wrap_publish_handler(fake)
+    local publish = fake.handlers["textDocument/publishDiagnostics"]
+    local diagnostic = { range = { start = {line=0,character=0}, ["end"]={line=0,character=1} },
+        severity=1,message="bound payload" }
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=4,diagnostics={diagnostic}}, {})
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=3,diagnostics={}}, {})
+    local began = vim.uv.hrtime()
+    local baseline = edit.diagnostic_evidence({baseline=true,wait_ms=0})
+    local elapsed_ms = (vim.uv.hrtime()-began)/1e6
+    check("baseline keeps the finding bound to the newest publication",
+        #baseline.batches==1 and baseline.batches[1].document_version==4
+        and baseline.batches[1].expected_version==4
+        and baseline.batches[1].findings[1].message=="bound payload",baseline)
+    check("baseline adds no attach or analysis wait",elapsed_ms<25,elapsed_ms)
+    publish(nil,{uri=vim.uri_from_bufnr(buf),diagnostics={}}, {})
+    check("an unstamped empty publication cannot become a clean baseline",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==0)
+    vim.lsp.get_clients = saved_clients
+    vim.api.nvim_buf_delete(buf,{force=true})
+end
+
+-- A pull that outlives the edit budget must still reach late evidence. A
+-- response after another buffer change must not be charged to the old edit.
+do
+    local path = vim.fn.tempname() .. ".py"
+    vim.fn.writefile({ "value = 1" }, path)
+    local buf = core.load_buf(path)
+    local saved_clients = vim.lsp.get_clients
+    vim.lsp.util.buf_versions[buf] = 4
+    local fake = {id=9002,name="pull_test",config={filetypes={"python"}},
+        handlers={["textDocument/publishDiagnostics"]=function() end},
+        supports_method=function(_,method) return method=="textDocument/diagnostic" end,
+        request=function(_,_,_,callback)
+            vim.defer_fn(function() callback(nil,{kind="full",items={}}) end,40)
+            return true,1
+        end}
+    vim.lsp.get_clients=function(filter)
+        if not filter or filter.bufnr==buf then return {fake} end
+        return {}
+    end
+    local function timed_pull()
+        local result
+        local co=coroutine.create(function()
+            result=edit.diagnostic_evidence({files={path},wait_ms=5,
+                transaction_id="edit_pull",revision="wsrev_pull"})
+        end)
+        local ok,detail=coroutine.resume(co)
+        check("late pull starts without blocking",ok,detail)
+        vim.wait(500,function() return coroutine.status(co)=="dead" end,1)
+        return result
+    end
+    local result=timed_pull()
+    check("a timed-out pull stays incomplete",
+        result and #result.batches==1 and result.batches[1].complete==false,result)
+    vim.wait(70)
+    local late=edit.late_evidence().batches
+    check("a late clean pull carries current version proof and transaction",
+        #late==1 and late[1].kind=="lsp_pull" and late[1].reason=="late_pull"
+        and late[1].document_version==4 and late[1].expected_version==4
+        and late[1].transaction_id=="edit_pull" and late[1].complete==true,late)
+    timed_pull()
+    vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 2"})
+    vim.wait(70)
+    check("a pull response for superseded bytes is not late current evidence",
+        #edit.late_evidence().batches==0)
+    vim.lsp.get_clients=saved_clients
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(path)
 end
 
 -- map_region: where an edited region ends up once polishing has moved it,

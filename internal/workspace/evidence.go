@@ -83,6 +83,9 @@ type DiagnosticBatch struct {
 	ProgressPending  bool                   `json:"progress_pending,omitempty"`
 	ChangeBarrier    bool                   `json:"change_barrier,omitempty"`
 	Selected         bool                   `json:"selected"`
+	// Baseline records existing, proven-current pre-edit findings without
+	// announcing them as introduced by a mutation.
+	Baseline bool `json:"baseline,omitempty"`
 	// Staged marks evidence about bytes that only exist inside a preparation.
 	// It is recorded as evidence and kept out of the ledger's current set: a
 	// proposal nobody applied must not change what the workspace believes
@@ -95,6 +98,7 @@ type DiagnosticBatch struct {
 }
 
 type DiagnosticItem struct {
+	BaselineMissing  bool                     `json:"baseline_missing,omitempty"`
 	ID               string                   `json:"id"`
 	ProviderID       string                   `json:"provider_id"`
 	Producer         string                   `json:"producer"`
@@ -158,12 +162,13 @@ type DiagnosticDimension struct {
 // DiagnosticNotice records new, stale, persisting (stale refreshed as current),
 // and resolved transitions. Persistence does not imply a new finding.
 type DiagnosticNotice struct {
-	Cursor      string             `json:"cursor"`
-	Kind        string             `json:"kind"`
-	ID          string             `json:"id"`
-	Severity    int                `json:"severity,omitempty"`
-	Document    string             `json:"document,omitempty"`
-	Attribution CulpritAttribution `json:"attribution,omitempty"`
+	BaselineMissing bool               `json:"baseline_missing,omitempty"`
+	Cursor          string             `json:"cursor"`
+	Kind            string             `json:"kind"`
+	ID              string             `json:"id"`
+	Severity        int                `json:"severity,omitempty"`
+	Document        string             `json:"document,omitempty"`
+	Attribution     CulpritAttribution `json:"attribution,omitempty"`
 }
 
 type DiagnosticReport struct {
@@ -265,7 +270,62 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 	if store.state.ProviderDimensions == nil {
 		store.state.ProviderDimensions = map[string]DiagnosticDimension{}
 	}
+	store.migrateDocumentDimensions()
 	return store, nil
+}
+
+// Older ledgers grouped every document under one producer key. Split those
+// dimensions using their retained evidence and re-evaluate the stronger proof
+// rule so an old attachment failure cannot poison that producer forever.
+func (s *diagnosticStore) migrateDocumentDimensions() {
+	dimensions := map[string]bool{}
+	for key, dimension := range s.state.ProviderDimensions {
+		if strings.Count(key, "\x00") != 1 {
+			continue
+		}
+		name, _, _ := strings.Cut(key, "\x00")
+		latest := map[string]time.Time{}
+		for _, id := range dimension.EvidenceIDs {
+			evidence, ok := s.state.Evidence[id]
+			if !ok {
+				continue
+			}
+			var batch DiagnosticBatch
+			if json.Unmarshal(evidence.Payload, &batch) != nil || batch.Document == "" {
+				continue
+			}
+			documentKey := key + "\x00" + batch.Document
+			if previous, ok := s.state.ProviderDimensions[documentKey]; ok && len(previous.EvidenceIDs) > 0 {
+				newer := false
+				for _, previousID := range previous.EvidenceIDs {
+					if prior, ok := s.state.Evidence[previousID]; ok && prior.RecordedAt.After(evidence.RecordedAt) {
+						newer = true
+						break
+					}
+				}
+				if newer {
+					continue
+				}
+			}
+			if latest[documentKey].After(evidence.RecordedAt) {
+				continue
+			}
+			confidence, reasons := confidenceFor(batch)
+			state := "complete"
+			if confidence == ConfidenceProvisional || confidence == ConfidenceUnavailable {
+				state = "incomplete"
+			}
+			s.state.ProviderDimensions[documentKey] = DiagnosticDimension{State: state, Confidence: confidence, Reasons: reasons, EvidenceIDs: []string{id}}
+			latest[documentKey] = evidence.RecordedAt
+		}
+		if len(latest) > 0 {
+			delete(s.state.ProviderDimensions, key)
+			dimensions[name] = true
+		}
+	}
+	for name := range dimensions {
+		s.state.Dimensions[name] = s.aggregateDimensionLocked(name)
+	}
 }
 
 func (s *diagnosticStore) save() error {
@@ -316,6 +376,13 @@ func evidenceID(batch DiagnosticBatch, sequence uint64) string {
 	return "ev_" + hex.EncodeToString(sum[:16])
 }
 
+// currentPublication requires the producer's document version, never a syntax
+// request acknowledgement or the version of the editor's diagnostic cache.
+func currentPublication(batch DiagnosticBatch) bool {
+	return batch.DocumentVersion != nil && batch.ExpectedVersion != nil &&
+		*batch.DocumentVersion >= *batch.ExpectedVersion
+}
+
 func confidenceFor(batch DiagnosticBatch) (DiagnosticConfidence, []string) {
 	if batch.TimedOut {
 		return ConfidenceProvisional, []string{"diagnostic_barrier_timed_out"}
@@ -328,18 +395,17 @@ func confidenceFor(batch DiagnosticBatch) (DiagnosticConfidence, []string) {
 	}
 	switch batch.Kind {
 	case EvidencePush:
-		if batch.Complete && (batch.ChangeBarrier ||
-			(batch.DocumentVersion != nil && batch.ExpectedVersion != nil && *batch.DocumentVersion == *batch.ExpectedVersion)) {
+		if batch.Complete && currentPublication(batch) {
 			return ConfidenceAuthoritative, nil
 		}
 		return ConfidenceProvisional, []string{"push_missing_current_document_proof"}
 	case EvidencePull:
-		if batch.Complete && batch.ResultID != "" {
+		if batch.Complete && currentPublication(batch) {
 			return ConfidenceAuthoritative, nil
 		}
 		return ConfidenceProvisional, []string{"pull_incomplete_or_missing_result_id"}
 	case EvidenceWorkspace:
-		if batch.Complete && batch.ResultID != "" {
+		if batch.Complete && batch.ResultID != "" && currentPublication(batch) {
 			return ConfidenceAuthoritative, nil
 		}
 		return ConfidenceProvisional, []string{"workspace_diagnostics_incomplete"}
@@ -419,11 +485,23 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 	if batch.Staged {
 		return s.recordStagedLocked(batch, confidence, reasons)
 	}
-	evID := s.recordEvidenceLocked(batch, confidence, reasons)
 	key := batch.ProviderID + "\x00" + batch.Document
+	dimension := batch.Dimension
+	if dimension == "" {
+		dimension = "edited_documents"
+	}
+	prior := s.state.ProviderDimensions[dimension+"\x00"+key]
+	baselineKnown := batch.Baseline || prior.Confidence == ConfidenceAuthoritative
+	evID := s.recordEvidenceLocked(batch, confidence, reasons)
 	previous := append([]string(nil), s.state.Active[key]...)
 	previousStale := append([]string(nil), s.state.Stale[key]...)
-	current, added, seen := s.recordFindingsLocked(batch, evID)
+	var current, added []DiagnosticItem
+	seen := map[string]bool{}
+	// An explicitly old publication cannot refresh stale findings or resurrect
+	// resolved ones. Keep its evidence, but leave the ledger's items alone.
+	if batch.ExpectedVersion == nil || batch.DocumentVersion == nil || currentPublication(batch) {
+		current, added, seen = s.recordFindingsLocked(batch, evID, baselineKnown)
+	}
 	var resolved []DiagnosticItem
 	if batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
 		// A complete observation of this document verifies the absence of
@@ -523,11 +601,16 @@ func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence
 		s.state.Dimensions[dimension] = updated
 		return evID
 	}
-	providerDimension := dimension + "\x00" + batch.ProviderID
+	providerDimension := dimension + "\x00" + batch.ProviderID + "\x00" + batch.Document
 	if prior, ok := s.state.ProviderDimensions[providerDimension]; ok {
 		updated.EvidenceIDs = appendUnique(prior.EvidenceIDs, evID)
 	}
 	s.state.ProviderDimensions[providerDimension] = updated
+	if confidence == ConfidenceAuthoritative && batch.Kind != EvidenceUnavailable {
+		// Attachment failures describe the absence of a producer at that time.
+		// A current publication for this document supersedes that placeholder.
+		delete(s.state.ProviderDimensions, dimension+"\x00nvim_lsp\x00"+batch.Document)
+	}
 	s.state.Dimensions[dimension] = s.aggregateDimensionLocked(dimension)
 	return evID
 }
@@ -552,7 +635,7 @@ func (s *diagnosticStore) aggregateDimensionLocked(dimension string) DiagnosticD
 
 // recordFindingsLocked upserts every finding of the batch as a current item. It returns
 // the current items, the ones that were announced as new, and the set of IDs reported.
-func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID string) (current, added []DiagnosticItem, seen map[string]bool) {
+func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID string, baselineKnown bool) (current, added []DiagnosticItem, seen map[string]bool) {
 	seen = map[string]bool{}
 	occurrences, placements := map[string]int{}, map[string]bool{}
 	for _, finding := range batch.Findings {
@@ -580,6 +663,15 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		// Stale means the document changed, not that the finding went away.
 		// Only a verified resolution followed by a return is a regression.
 		announce := !existed || item.Status == DiagnosticStatusResolved
+		if announce {
+			item.BaselineMissing = !baselineKnown
+		}
+		if batch.Baseline {
+			announce = false
+			if !existed {
+				item.BaselineMissing = false
+			}
+		}
 		persisting := existed && item.Status == DiagnosticStatusStale
 		item.Status = DiagnosticStatusCurrent
 		item.StaleReason, item.StaleRevision, item.ResolvedAt = "", "", time.Time{}
@@ -687,7 +779,7 @@ func (s *diagnosticStore) documentChanged(documents []string, revision string, o
 func (s *diagnosticStore) addNotice(kind string, item DiagnosticItem) {
 	s.state.Sequence++
 	s.state.Notices = append(s.state.Notices, DiagnosticNotice{
-		Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Kind: kind, ID: item.ID,
+		Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Kind: kind, ID: item.ID, BaselineMissing: item.BaselineMissing,
 		Severity: item.Finding.Severity, Document: item.Document, Attribution: item.Attribution,
 	})
 }

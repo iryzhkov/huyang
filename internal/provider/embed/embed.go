@@ -659,6 +659,11 @@ func (b *Backend) runBootstrap(g *generation) bootstrapOutcome {
 			return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "prepending shipped runtime: "+err.Error(), err)}
 		}
 	}
+	// Neovim does not advertise publication versions by default. Servers such
+	// as gopls then omit them, leaving no proof that a push describes our edit.
+	if err := g.nvim.ExecLua(`vim.lsp.config("*", { capabilities = { textDocument = { publishDiagnostics = { versionSupport = true } } } })`, nil); err != nil {
+		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "enabling diagnostic publication versions: "+err.Error(), err)}
+	}
 	var handshake map[string]any
 	if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
 		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "loading huyang kernel: "+err.Error(), err)}

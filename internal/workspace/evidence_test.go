@@ -153,7 +153,7 @@ func TestDiagnosticBarrierPermutationsNeverCallIncompleteEvidenceClean(t *testin
 	}
 }
 
-func TestDiagnosticPushAcceptsFreshPublishWithOrderedChangeBarrier(t *testing.T) {
+func TestDiagnosticPushRejectsSyntaxBarrierWithoutVersionProof(t *testing.T) {
 	workspace, _ := evidenceWorkspace(t)
 	report, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
 		Kind: EvidencePush, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
@@ -162,13 +162,14 @@ func TestDiagnosticPushAcceptsFreshPublishWithOrderedChangeBarrier(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Confidence != ConfidenceAuthoritative {
-		t.Fatalf("confidence=%s want %s", report.Confidence, ConfidenceAuthoritative)
+	if report.Confidence != ConfidenceProvisional {
+		t.Fatalf("confidence=%s want provisional", report.Confidence)
 	}
 }
 
 func TestDiagnosticRecordReportsCurrentObservationDespiteHistoricalUnavailableEvidence(t *testing.T) {
 	workspace, _ := evidenceWorkspace(t)
+	version := int64(1)
 	_, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
 		Kind: EvidenceUnavailable, ProviderID: "nvim_lsp", Producer: "nvim_lsp", Document: "main.go",
 		Reason: "lsp_not_configured", Selected: true,
@@ -178,7 +179,7 @@ func TestDiagnosticRecordReportsCurrentObservationDespiteHistoricalUnavailableEv
 	}
 	report, err := workspace.RecordDiagnosticEvidence(DiagnosticBatch{
 		Kind: EvidencePush, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
-		Complete: true, ChangeBarrier: true, Selected: true,
+		Complete: true, ChangeBarrier: true, Selected: true, DocumentVersion: &version, ExpectedVersion: &version,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +259,7 @@ func TestCulpritAttributionUsesEvidenceNotTiming(t *testing.T) {
 func TestDiagnosticResolutionCreatesDurableNotice(t *testing.T) {
 	workspace, _ := evidenceWorkspace(t)
 	now := time.Now().UTC()
-	batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: "pyright#1", Producer: "pyright", Document: "main.py", ResultID: "r1", Complete: true, Selected: true, ObservedAt: now, Findings: []DiagnosticFinding{finding("bad")}}
+	batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: "pyright#1", Producer: "pyright", Document: "main.py", ResultID: "r1", Complete: true, Selected: true, ObservedAt: now, Findings: []DiagnosticFinding{finding("bad")}}
 	if _, err := workspace.RecordDiagnosticEvidence(batch); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +282,7 @@ func TestDocumentContentChangeMarksFindingsStaleNotCurrentOrResolved(t *testing.
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: "gopls#1", Producer: "gopls", Document: path,
+	batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: "gopls#1", Producer: "gopls", Document: path,
 		DocumentRevision: "wsrev_238", ResultID: "r1", Complete: true, Selected: true, ObservedAt: now,
 		Findings: []DiagnosticFinding{finding("undefined: OpenRequest")}}
 	first, err := workspace.RecordDiagnosticEvidence(batch)
@@ -359,7 +360,7 @@ func TestDiagnosticNoticesAreDeliveredOnceAndPagedByCursor(t *testing.T) {
 	workspace, _ := evidenceWorkspace(t)
 	now := time.Now().UTC()
 	for index, message := range []string{"one", "two", "three"} {
-		batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
+		batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
 			ResultID: message, Complete: true, Selected: true, ObservedAt: now.Add(time.Duration(index) * time.Second),
 			Findings: []DiagnosticFinding{finding("one"), finding("two"), finding("three")}[:index+1]}
 		if _, err := workspace.RecordDiagnosticEvidence(batch); err != nil {
@@ -399,7 +400,7 @@ func TestDiagnosticLedgerPrunesConsumedNoticesResolvedItemsAndUnreferencedEviden
 	workspace, _ := evidenceWorkspace(t)
 	now := time.Now().UTC()
 	old := now.Add(-2 * diagnosticRetentionWindow)
-	batch := DiagnosticBatch{Kind: EvidencePull, ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
+	batch := DiagnosticBatch{Kind: EvidencePull, DocumentVersion: diagnosticVersion(1), ExpectedVersion: diagnosticVersion(1), ProviderID: "gopls#1", Producer: "gopls", Document: "main.go",
 		ResultID: "r1", Complete: true, Selected: true, ObservedAt: old, Findings: []DiagnosticFinding{finding("kept"), finding("gone")}}
 	first, err := workspace.RecordDiagnosticEvidence(batch)
 	if err != nil {

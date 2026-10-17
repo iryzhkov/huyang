@@ -89,7 +89,7 @@ func (h *Handlers) canonicalFindings(workspace *workspacecore.Workspace, paths [
 			continue
 		}
 		findings = append(findings, workspacecore.ComparableFinding{
-			Path: path, Line: item.Finding.Range.StartLine + 1, Severity: item.Finding.Severity,
+			Path: path, Line: diagnosticLine(item.Finding), Severity: item.Finding.Severity,
 			Code: item.Finding.Code, Message: item.Finding.Message,
 		})
 	}
@@ -169,6 +169,12 @@ func comparableFindings(path string, report any) []workspacecore.ComparableFindi
 		})
 	}
 	return findings
+}
+
+// diagnosticLine preserves the provider contract's one-based line in every
+// public diagnostic renderer.
+func diagnosticLine(finding workspacecore.DiagnosticFinding) int {
+	return finding.Range.StartLine
 }
 
 // severityRank maps the kernel's severity names onto the numbers the rest of

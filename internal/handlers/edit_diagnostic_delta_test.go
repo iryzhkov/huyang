@@ -23,7 +23,7 @@ func TestEditDiagnosticDeltaAndSummaryFollowLedgerTransitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	finding := workspacecore.DiagnosticFinding{Severity: 2, Message: "existing warning"}
-	batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePull, ProviderID: "pyright#1", Producer: "pyright",
+	batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePull, DocumentVersion: testDiagnosticVersion(1), ExpectedVersion: testDiagnosticVersion(1), ProviderID: "pyright#1", Producer: "pyright",
 		Document: path, ResultID: "before", Complete: true, Selected: true,
 		Findings: []workspacecore.DiagnosticFinding{finding}}
 	record := func() workspacecore.DiagnosticReport {
@@ -70,7 +70,7 @@ func TestEditDiagnosticSeverityFilterKeepsInformationAndHintsInDiagnostics(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePull, ProviderID: "bashls#1", Producer: "bashls",
+	batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePull, DocumentVersion: testDiagnosticVersion(1), ExpectedVersion: testDiagnosticVersion(1), ProviderID: "bashls#1", Producer: "bashls",
 		Document: "main.sh", ResultID: "r1", Complete: true, Selected: true,
 		Findings: []workspacecore.DiagnosticFinding{
 			{Severity: 1, Message: "error"}, {Severity: 2, Message: "warning"},
@@ -84,7 +84,7 @@ func TestEditDiagnosticSeverityFilterKeepsInformationAndHintsInDiagnostics(t *te
 	delta := compactDiagnosticDelta(w, report)
 	items := delta["new"].([]map[string]any)
 	if len(items) != 2 || items[0]["message"] != "error" || items[1]["message"] != "warning" ||
-		diagnosticSummary(report) != "2 new diagnostic(s), 0 resolved" {
+		diagnosticSummary(report) != "2 new or pre-existing diagnostic(s) (no baseline), 0 new, 0 resolved" {
 		t.Fatalf("severity leaked into edit reply: %+v; %s", delta, diagnosticSummary(report))
 	}
 	all, err := w.Diagnostics("")

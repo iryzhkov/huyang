@@ -100,6 +100,7 @@ func (p *stubProvider) Call(_ context.Context, request provider.Request) (provid
 				"kind": "lsp_push", "provider_id": "gopls#1", "producer": "gopls",
 				"document": document, "complete": true, "selected": true,
 				"dimension": "edited_documents", "change_barrier": true,
+				"document_version": 2, "expected_version": 2,
 			})
 		}
 		return provider.Result{Value: map[string]any{"batches": batches}}, nil
