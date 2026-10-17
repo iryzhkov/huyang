@@ -112,6 +112,10 @@ local function client_event(client, kind, method, params, bufnr, extra)
     local event = extra or {}
     event.kind, event.method, event.client_id, event.client_name = kind, method, client.id, client.name
     event.server_process_id = client.rpc and client.rpc.pid or vim.NIL
+    if vim.in_fast_event() then
+        event.fast_event, event.snapshots, event.snapshot_skipped = true, vim.NIL, "fast_event"
+        return event
+    end
     event.snapshots = snapshots(client, bufnr, params)
     return event
 end
@@ -132,6 +136,8 @@ local function on_init(client)
     local request_sequence = 0
     client.request = function(...)
         local args = pack(...)
+        -- Keep deprecated dot calls in the original bound method wrapper.
+        if args[1] ~= client then return request(unpack(args, 1, args.n)) end
         local self, method, params, handler, bufnr = unpack(args, 1, 5)
         request_sequence = request_sequence + 1
         local local_id = request_sequence
@@ -161,11 +167,12 @@ local function on_init(client)
             if result[1] then rpc_id = result[3] end
             return client_event(self, "dispatch", method, params, bufnr,
                 { request_sequence = local_id, request_id = rpc_id or vim.NIL,
-                  ok = result[1], returns = values(result, 2), callback_observed = inner ~= nil })
+                  ok = result[1], returns = values(result, 2), callback_observed = inner ~= nil and args.n >= 4 })
         end, unpack(args, 1, args.n))
     end
     client.cancel_request = function(...)
         local args = pack(...)
+        if args[1] ~= client then return cancel(unpack(args, 1, args.n)) end
         local self, id = args[1], args[2]
         observe(function() return client_event(self, "cancel", nil, nil, nil, { request_id = id }) end)
         return forward(cancel, function(result)
@@ -175,6 +182,7 @@ local function on_init(client)
     end
     client.notify = function(...)
         local args = pack(...)
+        if args[1] ~= client then return notify(unpack(args, 1, args.n)) end
         local self, method, params = unpack(args, 1, 3)
         observe(function() return client_event(self, "notify", method, params, nil, { params = params }) end)
         return forward(notify, function(result)

@@ -24,6 +24,10 @@ arguments, nil return slots and thrown error values. It preserves configured
 handlers, settings, roots, capabilities and existing callbacks. The original
 nine-language Go test and all fixture bytes, assertions, eight/thirty attempts
 and timings are unchanged.
+Fast-event client records explicitly set `fast_event=true`, `snapshots=null`
+and `snapshot_skipped=fast_event` before any snapshot APIs are called.
+Deprecated dot calls pass directly to the original bound methods without added
+client-event telemetry. Callback labels respect the original argument count.
 
 Each event identifies the Neovim PID and sequence. Client events identify the
 client and request ID where available. A per-client request sequence also
@@ -44,6 +48,8 @@ The existing report includes `native-observation/` with the generated init,
 observer source, one native JSONL and one native debug LSP log per Neovim PID,
 and a manifest with file sizes, hashes, truncation/failure state and late RPC
 outcomes. The debug log path/level changes only local observation logging.
+Both smoke and strict probe run with the observer, debug logging and a capture
+failure gate. These are instrumented runs; no unobserved acceptance run is claimed.
 Native logging adds overhead; no timing threshold has been changed.
 Smoke and probe share one freshly initialized capture directory and the same
 sixteen-PID bound. Events and JSONL/debug-log names identify their scope.
@@ -69,5 +75,5 @@ provisioning or Chaldea command was executed by the implementation worker.
 Root must source-verify the exact implementation revision on agent-a, compile,
 then capture Rust/Python with `LANGPROBE_LANGUAGES=rust,python` and an explicit
 partial label. Inspect the complete observation manifest and native bodies
-before the unchanged strict nine-language acceptance run. A partial capture
-does not count as acceptance.
+before strict nine-language acceptance with the observer and capture gate.
+A partial capture does not count as acceptance.
