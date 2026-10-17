@@ -155,8 +155,12 @@ func TestPlainRepliesCarryLateFindings(t *testing.T) {
 	workspace := direct.get(workspaceIDFromString(workspaceID))
 	recordTestFinding(t, workspace, filepath.Join(workspace.Identity().Root, "main.go"), 0)
 	late, _ := callPlain(t, session, "workspace_inspect", inspect)
-	if !strings.Contains(late, "main.go:1: error: undefined: x0 (late finding; ") {
-		t.Fatalf("late finding missing from the plain reply:\n%s", late)
+	// The recorded finding has no pre-edit baseline, so the line says it may
+	// be new or pre-existing before saying it came from the notice stream and
+	// is not claimed for this call. The whole line is asserted, exactly once.
+	want := "main.go:1: error: undefined: x0 (no baseline: new or pre-existing) (late finding; not attributed to this call)"
+	if count := strings.Count("\n"+late, "\n"+want+"\n"); count != 1 {
+		t.Fatalf("late finding line %q appears %d times in the plain reply:\n%s", want, count, late)
 	}
 	if again, _ := callPlain(t, session, "workspace_inspect", inspect); strings.Contains(again, "undefined: x0") {
 		t.Fatalf("the same notice was delivered twice:\n%s", again)
