@@ -133,15 +133,89 @@ do
     check("collecting late evidence clears it", #edit.late_evidence().batches == 0)
     check("a later clean publication for the same edit remains observable",
         edit._capture_late("pyright", path, 5, {}, 42) == true)
+    local transient = edit.late_evidence().batches[1]
+    check("late emptiness is incomplete before quiet", transient and transient.complete == false)
+    vim.wait(170)
     local clean = edit.late_evidence().batches[1]
-    check("late clean publication preserves producer identity",
-        clean.provider_id == "pyright#42" and #clean.findings == 0)
+    check("late clean publication preserves producer identity after quiet",
+        clean and clean.provider_id == "pyright#42" and #clean.findings == 0 and clean.complete == true)
+    edit._capture_late("pyright", path, 5, {}, 42)
+    edit._capture_late("pyright", path, 5, { finding }, 42)
+    local superseded = edit.late_evidence().batches
+    check("a transient late empty set is coalesced before collection",
+        #superseded == 1 and #superseded[1].findings == 1 and superseded[1].complete)
     check("an unpended path is ignored", edit._capture_late("pyright", path .. ".other", 5, {}) == false)
     check("a late unversioned positive finding is delivered provisionally",
         edit._capture_late("pyright",path,nil,{finding},42)==true)
     local unversioned=edit.late_evidence().batches[1]
     check("unstamped late findings cannot resolve or claim transaction attribution",
         unversioned.complete==false and unversioned.transaction_id==nil and unversioned.candidates==nil)
+end
+
+-- Late progress is the same veto as on the immediate path. Collection must
+-- retain an incomplete observation until progress ends, without a new push.
+do
+    local saved_client = vim.lsp.get_client_by_id
+    local fake = { id = 9100, name = "late_progress" }
+    vim.lsp.get_client_by_id = function(id) if id == fake.id then return fake end return saved_client(id) end
+    local path = vim.fn.getcwd() .. "/late-progress.py"
+    edit._note_pending_late(path, "progress_tx", "r", 6, 0)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "unit", value = { kind = "begin" } } } })
+    edit._capture_late(fake.name, path, 6, {}, fake.id)
+    vim.wait(170)
+    local during = edit.late_evidence().batches[1]
+    check("late progress veto survives quiet", during and not during.complete and during.progress_pending)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "unit", value = { kind = "end" } } } })
+    local after = edit.late_evidence().batches[1]
+    check("late observation completes after progress ends", after and after.complete and not after.progress_pending)
+    vim.lsp.get_client_by_id = saved_client
+end
+
+-- Checkout reloads keep one LSP lifetime and increasing changedticks. Mixed
+-- line endings must preserve both the bytes and physical line coordinates.
+do
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local function git(args)
+        local cmd = { "git", "-C", dir }
+        vim.list_extend(cmd, args)
+        local out = vim.fn.system(cmd)
+        check("checkout fixture git " .. args[1], vim.v.shell_error == 0, out)
+    end
+    local path = dir .. "/sample.txt"
+    local function write(bytes)
+        local f = assert(io.open(path, "wb")); f:write(bytes); f:close()
+    end
+    write("first\nsecond\n")
+    git({ "init", "-q" }); git({ "add", "." })
+    git({ "-c", "user.name=Unit", "-c", "user.email=unit@localhost", "commit", "-qm", "LF" })
+    local first_commit = vim.trim(vim.fn.system({ "git", "-C", dir, "rev-parse", "HEAD" }))
+    local buf = core.load_buf(path)
+    local tick = vim.api.nvim_buf_get_changedtick(buf)
+    write("first\r\nsecond\nthird\r\n")
+    git({ "add", "." }); git({ "-c", "user.name=Unit", "-c", "user.email=unit@localhost", "commit", "-qm", "mixed" })
+    local mixed_commit = vim.trim(vim.fn.system({ "git", "-C", dir, "rev-parse", "HEAD" }))
+    core.load_buf(path)
+    check("mixed checkout has three physical buffer lines", vim.api.nvim_buf_line_count(buf) == 3)
+    check("mixed endings retain CR only on CRLF lines",
+        vim.deep_equal(vim.api.nvim_buf_get_lines(buf,0,-1,false), { "first\r", "second", "third\r" }))
+    local function bytes()
+        local sep = vim.bo[buf].fileformat == "dos" and "\r\n" or "\n"
+        return table.concat(vim.api.nvim_buf_get_lines(buf,0,-1,false),sep) .. (vim.bo[buf].endofline and sep or "")
+    end
+    check("mixed ending reload preserves exact bytes", bytes() == "first\r\nsecond\nthird\r\n")
+    local mixed_tick = vim.api.nvim_buf_get_changedtick(buf)
+    git({ "checkout", "-q", first_commit, "--", "sample.txt" })
+    core.load_buf(path)
+    check("git checkout reloads in place with growing versions", core.load_buf(path) == buf
+        and vim.api.nvim_buf_get_changedtick(buf) > mixed_tick and mixed_tick > tick and bytes() == "first\nsecond\n")
+    git({ "checkout", "-q", mixed_commit, "--", "sample.txt" })
+    core.load_buf(path)
+    check("repeated checkout reloads mixed endings", bytes() == "first\r\nsecond\nthird\r\n")
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(dir,"rf")
 end
 
 -- Publication payloads, their versions, and the nonblocking baseline travel

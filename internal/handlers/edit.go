@@ -179,7 +179,7 @@ func (h *Handlers) editRange(ctx context.Context, requestID string, workspace *w
 		return editFailure(requestID, workspace, handle, err)
 	}
 	applied := appliedEdit{
-		files:   []workspacecore.PlanStageFile{{Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After, BeforeExists: true, AfterExists: true, Patch: change.Diff.Patch}},
+		files:   []workspacecore.PlanStageFile{{Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After, BeforeExists: true, AfterExists: true, BeforeDisk: change.Before.Disk, Patch: change.Diff.Patch}},
 		patches: []string{change.Diff.Patch}, fromStateSeq: change.Before.Workspace.StateSeq, replacements: 1,
 		change: &change, resolution: resolution,
 	}
@@ -448,8 +448,20 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 	if len(names) > 0 && len(names) <= 3 {
 		subject = strings.Join(names, ", ")
 	}
+	for _, name := range names {
+		if strings.HasSuffix(name, ".rs") {
+			for _, reason := range report.ProvisionalReasons {
+				switch reason {
+				case "rust_diagnostics_pending", "lsp_starting", "lsp_attach_deadline_exceeded", "work_done_progress_pending", "push_missing_current_document_proof", "pull_incomplete_or_missing_result_id", "diagnostic_barrier_timed_out":
+					return "Rust diagnostics pending for " + subject + "; findings arrive through diagnostic_updates on subsequent replies (" + strings.Join(report.ProvisionalReasons, ", ") + ")"
+				}
+			}
+		}
+	}
 	for _, reason := range report.ProvisionalReasons {
 		switch reason {
+		case "rust_diagnostics_pending":
+			return "Rust diagnostics pending for " + subject + "; findings arrive through diagnostic_updates on subsequent replies"
 		case "lsp_not_configured":
 			return "no language server is configured for " + subject + " (lsp_not_configured); no diagnostics"
 		case "lsp_not_startable":

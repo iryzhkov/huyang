@@ -24,7 +24,7 @@ func TestEditDiagnosticDeltaAndSummaryFollowLedgerTransitions(t *testing.T) {
 	}
 	finding := workspacecore.DiagnosticFinding{Severity: 2, Message: "existing warning"}
 	batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePull, DocumentVersion: testDiagnosticVersion(1), ExpectedVersion: testDiagnosticVersion(1), ProviderID: "pyright#1", Producer: "pyright",
-		Document: path, ResultID: "before", Complete: true, Selected: true,
+		Document: path, DocumentRevision: "before", PreEditDocumentRevision: "before", ResultID: "before", Complete: true, Selected: true,
 		Findings: []workspacecore.DiagnosticFinding{finding}}
 	record := func() workspacecore.DiagnosticReport {
 		t.Helper()
@@ -52,6 +52,8 @@ func TestEditDiagnosticDeltaAndSummaryFollowLedgerTransitions(t *testing.T) {
 		}
 	}
 	batch.ResultID = "after"
+	batch.DocumentRevision = "after"
+	batch.PreEditDocumentRevision = "after"
 	check(record(), 0, "no new diagnostics")
 	batch.Findings = append(batch.Findings, workspacecore.DiagnosticFinding{Severity: 1, Message: "introduced error"})
 	check(record(), 1, "1 new diagnostic(s), 0 resolved")

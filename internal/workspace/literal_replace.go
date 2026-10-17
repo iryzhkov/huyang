@@ -76,5 +76,5 @@ func (w *Workspace) replaceInFile(workspaceID ID, path string, occurrences []Lit
 		}
 		after = append(append(append([]byte(nil), after[:hit.ByteStart]...), replacement...), after[hit.ByteEnd:]...)
 	}
-	return PlanStageFile{Path: read.Path, Before: before, After: after, BeforeExists: true, AfterExists: true, Patch: strings.Join(patches, "")}, patches, nil
+	return PlanStageFile{Path: read.Path, Before: before, After: after, BeforeExists: true, AfterExists: true, BeforeDisk: read.Snapshot.Disk, Patch: strings.Join(patches, "")}, patches, nil
 }

@@ -25,6 +25,9 @@ func TestLangprobeABCD(t *testing.T) {
 	if os.Getenv("HUYANG_LANGPROBE") != "1" {
 		t.Skip("set HUYANG_LANGPROBE=1 for private-service language probes")
 	}
+	if os.Getenv("HUYANG_LANGPROBE_STRICT") == "1" && os.Getenv("HUYANG_LANGPROBE_LANGUAGES") != "" {
+		t.Fatal("strict nine-language acceptance cannot filter languages")
+	}
 	binary := os.Getenv("HUYANG_LANGPROBE_BINARY")
 	if binary == "" {
 		binary = filepath.Join(t.TempDir(), "huyang")
@@ -107,7 +110,10 @@ func TestLangprobeABCD(t *testing.T) {
 				t.Skip("language filter")
 			}
 			if _, err := exec.LookPath(tc.server); err != nil {
-				t.Skipf("%s not installed", tc.server)
+				if os.Getenv("HUYANG_LANGPROBE_STRICT") == "1" {
+					t.Fatalf("required server %s not installed", tc.server)
+				}
+				t.Skipf("%s not installed (not a passing language)", tc.server)
 			}
 			root := filepath.Join(output, tc.name)
 			if source := os.Getenv("HUYANG_LANGPROBE_SOURCE"); source != "" {
@@ -145,9 +151,30 @@ func TestLangprobeABCD(t *testing.T) {
 				}
 			}
 			wire := startProbeMCP(t, binary, socket, filepath.Join(output, tc.name+"-replies.jsonl"))
+			phase, cursor := "", ""
+			line := 0
+			announced := map[string]bool{}
 			call := func(name string, args map[string]any) map[string]any {
 				args["root"] = root
-				return wire.call(t, name, args)
+				if name == "diagnostics" && cursor != "" {
+					args["since"] = cursor
+				}
+				reply := wire.call(t, name, args)
+				if phase != "" {
+					path := tc.path
+					if phase == "D" {
+						path = tc.other
+					}
+					if err := probeIntermediateTransitions(reply, path, phase, line, announced); err != nil {
+						t.Errorf("%s intermediate %s: %v; reply=%+v", phase, name, err, reply)
+					}
+				}
+				if name == "diagnostics" {
+					data, _ := reply["data"].(map[string]any)
+					report, _ := data["diagnostics"].(map[string]any)
+					cursor, _ = report["cursor"].(string)
+				}
+				return reply
 			}
 			call("workspace_open", map[string]any{})
 			call("read", map[string]any{"target": map[string]any{"path": tc.path}})
@@ -157,10 +184,11 @@ func TestLangprobeABCD(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			line := strings.Count(string(original[:strings.Index(string(original), tc.before)]), "\n") + 1
+			line = strings.Count(string(original[:strings.Index(string(original), tc.before)]), "\n") + 1
 			edit := func(path, old, new string) map[string]any {
 				return call("edit_apply", map[string]any{"format": false, "operation": map[string]any{"kind": "replace_literal", "path": path, "old": old, "new": new}})
 			}
+			phase = "A"
 			started := time.Now()
 			a := edit(tc.path, tc.before, tc.broken)
 			aMS := time.Since(started).Milliseconds()
@@ -215,6 +243,7 @@ func TestLangprobeABCD(t *testing.T) {
 			if !correctLine {
 				t.Errorf("A line should be %d", line)
 			}
+			phase = "B"
 			b := edit(tc.path, "hi, ", "hello, ")
 			checkMutation(b)
 			bLate, bFound := collect(tc.path, true)
@@ -223,6 +252,7 @@ func TestLangprobeABCD(t *testing.T) {
 			if (aFound && len(bNew) > 0) || bResolved || (!bFound && b["outcome"] != "provisional") {
 				t.Errorf("B re-announced or falsely resolved: %+v / %+v", b, bLate)
 			}
+			phase = "C"
 			c := edit(tc.path, tc.broken, tc.before)
 			checkMutation(c)
 			cLate, cClean := collect(tc.path, false)
@@ -232,6 +262,7 @@ func TestLangprobeABCD(t *testing.T) {
 				}
 				t.Logf("C remains unverified: producer has not supplied current-version clean evidence")
 			}
+			phase = "D"
 			d := edit(tc.other, "header one", "header two")
 			checkMutation(d)
 			dLate, dFound := collect(tc.other, true)
@@ -246,6 +277,11 @@ func TestLangprobeABCD(t *testing.T) {
 				t.Errorf("D first touch claimed new without baseline or missed error: %+v / %+v", d, dLate)
 			}
 			// Reintroduction after resolution exercises the cached/pull bypass.
+			phase = "reintroduced"
+			// A resolved ID may legitimately be introduced again after C.
+			if cClean {
+				announced = map[string]bool{}
+			}
 			again := edit(tc.path, tc.before, tc.broken)
 			checkMutation(again)
 			againLate, againFound := collect(tc.path, true)
@@ -263,6 +299,61 @@ func TestLangprobeABCD(t *testing.T) {
 			t.Logf("A reported=%v late=%v line=%v B new=%d false-resolved=%v C clean=%v D labelled=%v found=%v A=%dms", aReported, aFound, correctLine, len(bNew), bResolved, cClean, labelled, dFound, aMS)
 		})
 	}
+}
+
+// Every immediate and collected reply passes this check. Eventual state alone
+// cannot reveal an empty -> resolved -> new oscillation between collections.
+func probeIntermediateTransitions(reply map[string]any, path, phase string, line int, announced map[string]bool) error {
+	broken := phase == "A" || phase == "B" || phase == "reintroduced"
+	resolved := append(probeFindings(reply, path, "resolved"), probeUpdates(reply, path, "resolved")...)
+	if broken && len(resolved) > 0 {
+		return fmt.Errorf("resolved a finding while its error remains")
+	}
+	newItems := append(probeFindings(reply, path, "new"), probeUpdates(reply, path, "new")...)
+	// diagnostics.new is a notice snapshot and may repeat an already delivered
+	// edit delta until acknowledged. Only delta/updates announce transitions.
+	events := probeUpdates(reply, path, "new")
+	data, _ := reply["data"].(map[string]any)
+	if _, ok := data["diagnostic_delta"]; ok {
+		events = append(events, probeFindings(reply, path, "new")...)
+	}
+	inReply := map[string]bool{}
+	for _, item := range events {
+		id, _ := item["id"].(string)
+		if inReply[id] {
+			continue
+		}
+		inReply[id] = true
+		if phase == "B" || (announced[id] && phase != "C") {
+			return fmt.Errorf("re-announced %s as new", id)
+		}
+		if phase == "D" && item["baseline_missing"] != true {
+			return fmt.Errorf("first-touch finding %s claimed new without baseline", id)
+		}
+		announced[id] = true
+	}
+	if broken {
+		items := append(newItems, probeFindings(reply, path, "current")...)
+		for _, item := range items {
+			n, _ := item["line"].(float64)
+			if f, ok := item["finding"].(map[string]any); ok {
+				r, _ := f["range"].(map[string]any)
+				n, _ = r["start_line"].(float64)
+			}
+			if n != 0 && int(n) != line {
+				return fmt.Errorf("finding line %d, want %d", int(n), line)
+			}
+		}
+	}
+	for _, item := range newItems {
+		if phase == "D" && item["baseline_missing"] != true {
+			return fmt.Errorf("first-touch finding claimed new without baseline")
+		}
+	}
+	if broken && data["canonical_changed"] == true && len(newItems) == 0 && phase != "B" && reply["outcome"] != "provisional" {
+		return fmt.Errorf("silently clean edit while error remains")
+	}
+	return nil
 }
 
 type probeMCP struct {

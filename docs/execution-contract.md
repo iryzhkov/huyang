@@ -279,6 +279,32 @@ epoch, preparation, provider-recovery and concurrency checks remain part of the
 full suite. The separate read byte-bound and verbose status defects remain
 deferred to the planned usability and bug investigation.
 
+## Diagnostic evidence (M1)
+
+Immediate and late push evidence follow the same completeness rule: the
+publication must cover the expected document version, an empty push must have
+150 ms of quiet, and work-done progress started for that edit vetoes completion.
+Late observations are coalesced by producer/document before ledger insertion;
+an intermediate empty set cannot resolve a superseding positive observation.
+Unversioned positives are provisional and unattributed; unversioned emptiness
+cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof
+is incomplete and delivers late findings via `diagnostic_updates` on later calls.
+
+Baseline validity is bound to the exact pre-edit document revision, including
+object identity and content. An older authoritative coverage dimension alone is
+insufficient after checkout or external writes. Findings without a matching
+baseline retain `baseline_missing`. Refreshing a stale finding produces
+`persisting`, never a new-finding transition. Staged multi-document counts sum
+staged observations without changing the canonical current set.
+
+The compact `diagnostics` result is a notice delta. `since` acknowledges notices
+workspace-wide; after acknowledgement or reconnect, `full: true` recovers current
+finding bodies under `current`. This recovery does not reannounce them as new.
+The persisted diagnostic ledger is version 2. Version-1 data is migrated and the
+new header is saved before use; version-1 binaries reject it. Back up state before
+upgrade if rollback must preserve diagnostic history. Newer unknown ledger
+versions are refused without rewriting them. The tool API namespace is unchanged.
+
 ## Fixtures
 
 The Go fixture has direct and indirect calls, an interface method, branches,

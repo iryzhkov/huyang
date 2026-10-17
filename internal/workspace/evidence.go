@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,7 +15,9 @@ import (
 	"time"
 )
 
-const diagnosticStateVersion = 1
+// Version 2 adds persisting notices and per-document coverage. Version 1
+// binaries reject this ledger rather than misreading its transitions.
+const diagnosticStateVersion = 2
 
 type DiagnosticConfidence string
 
@@ -66,23 +69,24 @@ type CulpritAttribution struct {
 }
 
 type DiagnosticBatch struct {
-	Kind             DiagnosticEvidenceKind `json:"kind"`
-	ProviderID       string                 `json:"provider_id"`
-	Producer         string                 `json:"producer"`
-	ProducerVersion  string                 `json:"producer_version,omitempty"`
-	Document         string                 `json:"document,omitempty"`
-	DocumentRevision string                 `json:"document_revision,omitempty"`
-	DocumentVersion  *int64                 `json:"document_version,omitempty"`
-	ExpectedVersion  *int64                 `json:"expected_version,omitempty"`
-	ResultID         string                 `json:"result_id,omitempty"`
-	TransactionID    string                 `json:"transaction_id,omitempty"`
-	StateSeq         uint64                 `json:"state_seq"`
-	Complete         bool                   `json:"complete"`
-	TimedOut         bool                   `json:"timed_out,omitempty"`
-	Reason           string                 `json:"reason,omitempty"`
-	ProgressPending  bool                   `json:"progress_pending,omitempty"`
-	ChangeBarrier    bool                   `json:"change_barrier,omitempty"`
-	Selected         bool                   `json:"selected"`
+	Kind                    DiagnosticEvidenceKind `json:"kind"`
+	ProviderID              string                 `json:"provider_id"`
+	Producer                string                 `json:"producer"`
+	ProducerVersion         string                 `json:"producer_version,omitempty"`
+	Document                string                 `json:"document,omitempty"`
+	DocumentRevision        string                 `json:"document_revision,omitempty"`
+	PreEditDocumentRevision string                 `json:"pre_edit_document_revision,omitempty"`
+	DocumentVersion         *int64                 `json:"document_version,omitempty"`
+	ExpectedVersion         *int64                 `json:"expected_version,omitempty"`
+	ResultID                string                 `json:"result_id,omitempty"`
+	TransactionID           string                 `json:"transaction_id,omitempty"`
+	StateSeq                uint64                 `json:"state_seq"`
+	Complete                bool                   `json:"complete"`
+	TimedOut                bool                   `json:"timed_out,omitempty"`
+	Reason                  string                 `json:"reason,omitempty"`
+	ProgressPending         bool                   `json:"progress_pending,omitempty"`
+	ChangeBarrier           bool                   `json:"change_barrier,omitempty"`
+	Selected                bool                   `json:"selected"`
 	// Baseline records existing, proven-current pre-edit findings without
 	// announcing them as introduced by a mutation.
 	Baseline bool `json:"baseline,omitempty"`
@@ -249,7 +253,7 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 	if err := json.Unmarshal(content, &store.state); err != nil {
 		return nil, fmt.Errorf("decode diagnostic state: %w", err)
 	}
-	if store.state.Version != diagnosticStateVersion {
+	if store.state.Version != 1 && store.state.Version != diagnosticStateVersion {
 		return nil, fmt.Errorf("unsupported diagnostic state version %d", store.state.Version)
 	}
 	if store.state.Items == nil {
@@ -271,6 +275,14 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 		store.state.ProviderDimensions = map[string]DiagnosticDimension{}
 	}
 	store.migrateDocumentDimensions()
+	if store.state.Version != diagnosticStateVersion {
+		store.state.Version = diagnosticStateVersion
+		// Persist the version before returning: a downgrade must not consume
+		// migrated dimensions or persisting notices under the old version.
+		if err := store.save(); err != nil {
+			return nil, err
+		}
+	}
 	return store, nil
 }
 
@@ -383,7 +395,12 @@ func currentPublication(batch DiagnosticBatch) bool {
 		*batch.DocumentVersion >= *batch.ExpectedVersion
 }
 
-func confidenceFor(batch DiagnosticBatch) (DiagnosticConfidence, []string) {
+func confidenceFor(batch DiagnosticBatch) (confidence DiagnosticConfidence, reasons []string) {
+	defer func() {
+		if confidence == ConfidenceProvisional && (batch.Producer == "rust_analyzer" || batch.Producer == "rust-analyzer") {
+			reasons = append([]string{"rust_diagnostics_pending"}, reasons...)
+		}
+	}()
 	if batch.TimedOut {
 		return ConfidenceProvisional, []string{"diagnostic_barrier_timed_out"}
 	}
@@ -491,7 +508,20 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		dimension = "edited_documents"
 	}
 	prior := s.state.ProviderDimensions[dimension+"\x00"+key]
-	baselineKnown := batch.Baseline || prior.Confidence == ConfidenceAuthoritative
+	baselineKnown := batch.Baseline
+	if !baselineKnown && prior.Confidence == ConfidenceAuthoritative && batch.PreEditDocumentRevision != "" {
+		for _, id := range prior.EvidenceIDs {
+			var previous DiagnosticBatch
+			if evidence, ok := s.state.Evidence[id]; ok && json.Unmarshal(evidence.Payload, &previous) == nil &&
+				previous.DocumentRevision == batch.PreEditDocumentRevision {
+				if proof, _ := confidenceFor(previous); proof != ConfidenceAuthoritative {
+					continue
+				}
+				baselineKnown = true
+				break
+			}
+		}
+	}
 	evID := s.recordEvidenceLocked(batch, confidence, reasons)
 	previous := append([]string(nil), s.state.Active[key]...)
 	previousStale := append([]string(nil), s.state.Stale[key]...)
@@ -1181,6 +1211,20 @@ func weakestConfidence(dimensions map[string]DiagnosticDimension) DiagnosticConf
 		}
 	}
 	return result
+}
+
+// DiagnosticPreEditRevision binds a baseline to the exact before image, using
+// the same content and object identity as native document snapshots.
+func (w *Workspace) DiagnosticPreEditRevision(file PlanStageFile) (string, error) {
+	absolute, err := w.confinedPath(file.Path)
+	if err != nil {
+		return "", err
+	}
+	snapshot := DocumentSnapshot{Workspace: w.Identity(), URI: (&url.URL{Scheme: "file", Path: absolute}).String(), Disk: file.BeforeDisk}
+	if file.BeforeExists {
+		snapshot.ContentSHA256 = hashBytes(file.Before)
+	}
+	return string(revisionFor(snapshot)), nil
 }
 
 func (w *Workspace) RecordDiagnosticEvidence(batch DiagnosticBatch) (DiagnosticReport, error) {

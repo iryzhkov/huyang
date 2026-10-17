@@ -10,6 +10,8 @@ func TestFirstTouchWithoutBaselineIsLabelledAndCleanBaselineProvesNew(t *testing
 			batch := DiagnosticBatch{Kind: EvidencePush, ProviderID: "test#1", Producer: "test", Document: "main.go",
 				Complete: true, Selected: true, DocumentVersion: &v, ExpectedVersion: &v}
 			if baseline {
+				batch.DocumentRevision = "before"
+				batch.PreEditDocumentRevision = "before"
 				batch.Baseline = true
 				if _, err := w.RecordDiagnosticEvidence(batch); err != nil {
 					t.Fatal(err)

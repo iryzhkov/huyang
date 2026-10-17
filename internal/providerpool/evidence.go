@@ -94,6 +94,12 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 				ProviderID: string(descriptor.ID), Producer: descriptor.Backend, Document: path, Selected: true, Dimension: "edited_documents"})
 		}
 	}
+	preEdit := map[string]string{}
+	for _, file := range files {
+		if revision, err := workspace.DiagnosticPreEditRevision(file); err == nil {
+			preEdit[filepath.Clean(filepath.Join(workspace.Identity().Root, file.Path))] = revision
+		}
+	}
 	report := workspacecore.DiagnosticReport{Confidence: workspacecore.ConfidenceAuthoritative}
 	for _, batch := range batches {
 		batch.Selected = true
@@ -103,11 +109,17 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
 			batch.Document = filepath.Join(workspace.Identity().Root, relative)
 		}
+		batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
+		if !staged {
+			if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
+				batch.DocumentRevision = string(snapshot.Revision)
+			}
+		}
 		observed, recordErr := workspace.RecordDiagnosticEvidence(batch)
 		if recordErr != nil {
 			return workspacecore.DiagnosticReport{}, recordErr
 		}
-		mergeDiagnosticReport(&report, observed)
+		mergeDiagnosticReport(&report, observed, staged)
 	}
 	return report, nil
 }
@@ -134,7 +146,32 @@ func selectDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspac
 	return selected
 }
 
-func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed workspacecore.DiagnosticReport) {
+// Late payloads are ordered observations, not competing proof sources. Keep
+// only the newest observation per document/producer, even if it weakens proof:
+// a superseded complete empty set must never resolve a later positive set.
+func coalesceLateDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspacecore.DiagnosticBatch {
+	var out []workspacecore.DiagnosticBatch
+	index := map[string]int{}
+	for _, batch := range batches {
+		key := batch.ProviderID + "\x00" + batch.Document
+		if i, ok := index[key]; ok {
+			prior := out[i]
+			if prior.ExpectedVersion != nil && batch.ExpectedVersion != nil && *batch.ExpectedVersion < *prior.ExpectedVersion {
+				continue
+			}
+			if prior.DocumentVersion != nil && batch.DocumentVersion != nil && *batch.DocumentVersion < *prior.DocumentVersion {
+				continue
+			}
+			out[i] = batch
+		} else {
+			index[key] = len(out)
+			out = append(out, batch)
+		}
+	}
+	return out
+}
+
+func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed workspacecore.DiagnosticReport, staged bool) {
 	rank := func(c workspacecore.DiagnosticConfidence) int {
 		switch c {
 		case workspacecore.ConfidenceAuthoritative:
@@ -167,9 +204,17 @@ func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed work
 		}
 	}
 	report.Coverage, report.Cursor = observed.Coverage, observed.Cursor
-	report.CurrentCount, report.StaleCount = observed.CurrentCount, observed.StaleCount
-	report.Stale = observed.Stale
-	report.PreexistingCount = report.CurrentCount - len(report.New)
+	if staged {
+		// Staged reports count only their own document. Canonical reports
+		// already carry workspace totals and must not be summed.
+		report.CurrentCount += observed.CurrentCount
+		report.StaleCount += observed.StaleCount
+		report.Stale = append(report.Stale, observed.Stale...)
+	} else {
+		report.CurrentCount, report.StaleCount = observed.CurrentCount, observed.StaleCount
+		report.Stale = observed.Stale
+	}
+	report.PreexistingCount = max(0, report.CurrentCount-len(report.New))
 }
 
 // RecordDiagnosticBaseline reads only already-loaded provider buffers. It neither
@@ -230,7 +275,7 @@ func CollectLateEvidence(ctx context.Context, workspace *workspacecore.Workspace
 	}
 	descriptor := backend.Descriptor()
 	recorded := 0
-	for _, batch := range payload.Batches {
+	for _, batch := range coalesceLateDiagnosticBatches(payload.Batches) {
 		batch.Selected = true
 		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
 			batch.Document = filepath.Join(workspace.Identity().Root, relative)
@@ -326,7 +371,7 @@ func corroborateWithProjectCheck(workspace *workspacecore.Workspace, revision, t
 	corroboratable := len(report.ProvisionalReasons) > 0
 	for _, reason := range report.ProvisionalReasons {
 		switch reason {
-		case "diagnostic_barrier_timed_out", "push_missing_current_document_proof", "pull_incomplete_or_missing_result_id", "work_done_progress_pending":
+		case "rust_diagnostics_pending", "diagnostic_barrier_timed_out", "push_missing_current_document_proof", "pull_incomplete_or_missing_result_id", "work_done_progress_pending":
 		default:
 			corroboratable = false
 		}

@@ -193,13 +193,17 @@ func applyReplaceFile(requestID string, workspace *workspacecore.Workspace, requ
 			fromStateSeq: fromStateSeq, replacements: 1, summary: "Preview of replacing " + read.Path + "; canonical bytes unchanged",
 		}, nil
 	}
+	before, err := workspace.Snapshot(request.Path, workspacecore.ProviderLayer{})
+	if err != nil {
+		return appliedEdit{}, mcpapi.Failure(requestID, workspace, "create_failed", err)
+	}
 	diff, after, err := workspace.ApplyFile(workspace.Identity().ID, request.Path, workspacecore.RevisionID(request.RevisionID), workspacecore.FileReplace, content)
 	if err != nil {
 		return appliedEdit{}, editFailure(requestID, workspace, workspacecore.RangeHandle{Path: request.Path}, err)
 	}
 	patch := replacePatch(diff.Path, len(diff.Before), len(diff.After))
 	return appliedEdit{
-		files:        []workspacecore.PlanStageFile{{Path: diff.Path, Before: diff.Before, After: diff.After, BeforeExists: true, AfterExists: true, Patch: patch}},
+		files:        []workspacecore.PlanStageFile{{Path: diff.Path, Before: diff.Before, After: diff.After, BeforeExists: true, AfterExists: true, BeforeDisk: before.Disk, Patch: patch}},
 		patches:      []string{patch},
 		fromStateSeq: fromStateSeq, replacements: 1, summary: "Replaced " + diff.Path,
 		revisions: map[string]workspacecore.RevisionID{diff.Path: after.Revision},

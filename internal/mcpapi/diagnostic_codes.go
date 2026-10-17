@@ -13,7 +13,7 @@ func DiagnosticReasonCodes(reasons []string) []string {
 		"project_check_unavailable": true, "unsupported_diagnostic_evidence": true,
 		"lsp_not_configured": true, "lsp_not_startable": true, "lsp_starting": true,
 		"lsp_attach_deadline_exceeded": true, "no_diagnostic_evidence": true,
-		"diagnostic_reason_unclassified": true,
+		"diagnostic_reason_unclassified": true, "rust_diagnostics_pending": true,
 	}
 	unique := map[string]bool{}
 	for _, reason := range reasons {

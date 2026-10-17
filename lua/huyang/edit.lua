@@ -849,57 +849,85 @@ local function note_published_for(name, path)
     per[path] = true
 end
 
--- Late attachment. A diagnostic verdict answered `unavailable` because the
--- server was still starting names the transaction and the buffer version
--- it spoke for. When a server later publishes for that path, the publish is
--- attributed to that transaction only if its version equals the version the
--- transaction left; a publish for a newer version is ordinary evidence for
--- whatever revision is current. Arrival time alone attributes nothing.
--- Both tables are bounded: a path is pending once, and at most
--- LATE_BATCHES_MAX batches wait for the Go side to collect them.
-local pending_late = {}    -- [path] = { transaction_id, revision, expected }
-local late_batches = {}
+-- Pending edits retain their expected document version. Arrival time never
+-- attributes a finding, and superseded publications never enter the ledger.
+local pending_late = {}
+local late_batches = {} -- delayed pulls
+local late_observations = {} -- latest push per producer/document
 local LATE_BATCHES_MAX = 64
+local progress_since -- shared by immediate and late completeness checks
+local PUSH_QUIET_MS = 150
 
-local function note_pending_late(path, transaction_id, revision, expected)
-    if not (path and path ~= "") then return end
-    pending_late[path] = { transaction_id = transaction_id, revision = revision, expected = expected }
+local function publication_complete(version, expected, diagnostics, at, name, since, pull)
+    return version ~= nil and version >= expected
+        and (pull or #diagnostics > 0 or vim.uv.now() - at >= PUSH_QUIET_MS)
+        and not progress_since({ name }, since)
 end
 
--- Record the findings a late publish carries for a pending path. Exposed
--- for the unit test; the publish handler is the production caller.
+local function note_pending_late(path, transaction_id, revision, expected, since, bufnr)
+    if not (path and path ~= "") then return end
+    local previous = pending_late[path]
+    if previous and previous.transaction_id == transaction_id and previous.expected == expected then
+        previous.since = math.min(previous.since, since or vim.uv.now())
+        return
+    end
+    pending_late[path] = { transaction_id = transaction_id, revision = revision, expected = expected,
+        since = since or vim.uv.now(), bufnr = bufnr,
+        tick = bufnr and vim.api.nvim_buf_get_changedtick(bufnr) }
+end
+
 local function capture_late(client_name, path, version, findings, client_id)
     local pending = pending_late[path]
     if not pending then return false end
     if version ~= nil and version ~= pending.expected then return false end
-    -- Unstamped positive findings are useful observations, but cannot prove
-    -- absence or be attributed to a transaction by arrival time.
-    if version == nil and #findings == 0 then return false end
-    late_batches[#late_batches + 1] = {
-        kind = "lsp_push",
-        provider_id = client_name .. "#" .. tostring(client_id or "late"),
-        producer = client_name,
-        document = path,
-        document_revision = version ~= nil and pending.revision or nil,
-        document_version = version,
-        expected_version = pending.expected,
-        transaction_id = version ~= nil and pending.transaction_id or nil,
-        complete = version ~= nil,
-        selected = true,
-        dimension = "edited_documents",
-        reason = "late_attach",
-        findings = findings,
-        candidates = version ~= nil and { { transaction_id = pending.transaction_id, postimage_version_match = true } } or nil,
-    }
-    while #late_batches > LATE_BATCHES_MAX do table.remove(late_batches, 1) end
+    local key = client_name .. "#" .. tostring(client_id or "late") .. "\0" .. path
+    -- Even an unstamped empty set supersedes a queued stamped observation.
+    -- It can weaken proof, but cannot establish absence.
+    if version == nil and #findings == 0 and not late_observations[key] then return false end
+    late_observations[key] = { pending = pending, at = vim.uv.now(),
+        batch = {
+            kind = "lsp_push", provider_id = client_name .. "#" .. tostring(client_id or "late"),
+            producer = client_name, document = path,
+            document_revision = version ~= nil and pending.revision or nil,
+            document_version = version, expected_version = pending.expected,
+            transaction_id = version ~= nil and pending.transaction_id or nil,
+            complete = false, selected = true, dimension = "edited_documents", reason = "late_attach",
+            findings = findings,
+            candidates = version ~= nil and { { transaction_id = pending.transaction_id, postimage_version_match = true } } or nil,
+        } }
+    local keys = vim.tbl_keys(late_observations)
+    table.sort(keys, function(a, b) return late_observations[a].at < late_observations[b].at end)
+    for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
     return true
 end
 
--- The batches late publishes produced since the last call; collecting
--- clears them. The Go side records them into the diagnostic ledger.
+-- No wait here: unfinished observations are retained for a later collection.
+-- Re-evaluate progress and quiet time so an empty push is never final merely
+-- because it arrived after the immediate response's deadline.
 function M.late_evidence()
     local out = late_batches
     late_batches = {}
+    for key, observation in pairs(late_observations) do
+        local batch, pending = observation.batch, observation.pending
+        local buf = pending.bufnr
+        local current = pending_late[batch.document] == pending
+            and (not buf or (vim.api.nvim_buf_is_valid(buf)
+                and vim.api.nvim_buf_get_changedtick(buf) == pending.tick
+                and vim.lsp.util.buf_versions[buf] == pending.expected
+                and not core.disk_moved_on(buf, batch.document)))
+        if not current then
+            late_observations[key] = nil
+        else
+            batch.progress_pending = progress_since({ batch.producer }, pending.since)
+            batch.complete = publication_complete(batch.document_version, pending.expected,
+                batch.findings, observation.at, batch.producer, pending.since, false)
+            if observation.delivered ~= batch.complete then
+                out[#out + 1] = vim.deepcopy(batch)
+                observation.delivered = batch.complete
+            end
+            if batch.complete then late_observations[key] = nil end
+        end
+    end
     return { batches = out }
 end
 
@@ -1000,7 +1028,7 @@ local function wrap_publish_handler(client)
             end
         end
         local result = inner(lsp_err, params, ctx, cfg)
-        if params and params.uri and next(pending_late) then
+        if not lsp_err and params and params.uri and next(pending_late) then
             local okf, fname = pcall(vim.uri_to_fname, params.uri)
             local bufnr = vim.uri_to_bufnr(params.uri)
             if okf and pending_late[fname] and (diagnostic_modes[bufnr] or {})[client.id] ~= "pull" then
@@ -1072,7 +1100,7 @@ vim.api.nvim_create_autocmd("LspProgress", {
 })
 
 -- Whether any of these servers has work open that started after `since`.
-local function progress_since(names, since)
+progress_since = function(names, since)
     for _, name in ipairs(names or {}) do
         for _, began in pairs(progress_open[name] or {}) do
             if began >= since then return true end
@@ -1211,7 +1239,7 @@ function M.diagnostic_evidence(args)
                 -- version later; the publish handler then records it
                 -- against this transaction instead of losing it.
                 if reason == "lsp_starting" or reason == "lsp_attach_deadline_exceeded" then
-                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected)
+                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected, vim.uv.now(), bufnr)
                 end
             end
             for _, client in ipairs(clients) do
@@ -1232,10 +1260,8 @@ function M.diagnostic_evidence(args)
                 -- observations stay provisional even after the barrier.
                 local function fresh_publish()
                     local publication = ((prefer_pull and pull_publications or publications)[bufnr] or {})[client.id]
-                    if not publication or publication.version == nil or publication.version < expected then return false end
-                    -- ts_ls publishes partial empty sets before semantic findings.
-                    -- A short quiet period prevents treating that intermediate set as final.
-                    return prefer_pull or #publication.diagnostics > 0 or vim.uv.now() - publication.at >= 150
+                    return publication ~= nil and publication_complete(publication.version, expected,
+                        publication.diagnostics, publication.at, client.name, barrier_started, prefer_pull)
                 end
                 while not args.baseline and not prefer_pull and vim.uv.now() < attach_deadline and not fresh_publish() do
                     remaining = attach_deadline - vim.uv.now()
@@ -1248,7 +1274,7 @@ function M.diagnostic_evidence(args)
                 end
                 local published = fresh_publish()
                 if not args.baseline then
-                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected)
+                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected, barrier_started, bufnr)
                 end
                 if (not prefer_pull and not args.baseline) or (args.baseline and published) then
                 batches[#batches + 1] = {
