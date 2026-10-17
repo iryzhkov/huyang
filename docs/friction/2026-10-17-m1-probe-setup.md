@@ -67,7 +67,10 @@ Other settings:
   prefix's `tmp`. `LANGPROBE_TMPDIR` overrides it. The inherited `TMPDIR` is never
   used. A path longer than 48 bytes is refused.
 - `/tmp` is refused, and so is anything below it, both as given and after
-  symbolic links are resolved. This covers the prefix, `TMPDIR` and the submit
+  symbolic links are resolved. The destination is resolved with `realpath -m`
+  before anything is created, so a missing directory below a symbolic link to
+  `/tmp` is refused without being created; only the validated canonical path is
+  created, and it is checked again afterwards. This covers the prefix, `TMPDIR` and the submit
   log. The submit log is always `~/.cache/huyang-langprobe/submit.log`.
 - All `HUYANG_LANGPROBE*` variables are cleared, including `_BINARY`, `_SOCKET`,
   `_STATE_DIR` and `_OUTPUT`, so the probe always builds its own binary and uses

@@ -61,18 +61,31 @@ export HUYANG_FRICTION=0
 umask 022
 
 # scratch_dir PATH creates PATH and prints its physical path, refusing /tmp
-# and anything below it both before creation and after symbolic links are
-# resolved: host /tmp is a shared RAM-backed tmpfs.
+# and anything below it: host /tmp is a shared RAM-backed tmpfs. The
+# destination is resolved before anything is created (realpath -m follows
+# symbolic links in the existing ancestors and accepts missing components),
+# so a link to /tmp higher up cannot make mkdir create a directory there.
+# Only the validated canonical path is created, and it is checked again after.
 scratch_dir() {
-	local dir=$1 tmp_root
-	tmp_root=$(cd /tmp 2>/dev/null && pwd -P || echo /tmp)
-	case $dir/ in /tmp/* | "$tmp_root"/*)
-		printf 'langprobe-chaldea: refusing %s: under /tmp\n' "$dir" >&2
+	local given=$1 dir tmp_root
+	command -v realpath >/dev/null || {
+		printf 'langprobe-chaldea: realpath is needed to validate %s\n' "$given" >&2
+		return 1
+	}
+	tmp_root=$(realpath -m /tmp)
+	dir=$(realpath -m -- "$given") || return 1
+	case $given/ in /tmp/* | "$tmp_root"/*)
+		printf 'langprobe-chaldea: refusing %s: under /tmp\n' "$given" >&2
 		return 1
 		;;
 	esac
-	mkdir -p "$dir" 2>/dev/null || return 1
-	dir=$(cd "$dir" && pwd -P) || return 1
+	case $dir/ in /tmp/* | "$tmp_root"/*)
+		printf 'langprobe-chaldea: refusing %s: resolves to %s, under /tmp\n' "$given" "$dir" >&2
+		return 1
+		;;
+	esac
+	mkdir -p -- "$dir" 2>/dev/null || return 1
+	dir=$(cd -- "$dir" && pwd -P) || return 1
 	case $dir/ in /tmp/* | "$tmp_root"/*)
 		printf 'langprobe-chaldea: refusing %s: resolves under /tmp\n' "$dir" >&2
 		return 1
@@ -743,6 +756,27 @@ selftest)
 	ln -sfn /tmp "$prefix/selftest-link"
 	if scratch_dir "$prefix/selftest-link" >/dev/null 2>&1; then
 		log "selftest: a symbolic link to /tmp was accepted"
+		fails=1
+	fi
+	# Missing children below a link to /tmp must be refused before mkdir runs.
+	child=langprobe-selftest-$$-new-scratch
+	if [ -e "/tmp/$child" ]; then
+		log "selftest: /tmp/$child already exists; cannot prove it is not created"
+		fails=1
+	fi
+	for path in "$prefix/selftest-link/$child" "$prefix/selftest-link/$child/deeper"; do
+		if scratch_dir "$path" >/dev/null 2>&1; then
+			log "selftest: $path (below a link to /tmp) was accepted"
+			fails=1
+		fi
+	done
+	if (LANGPROBE_TMPDIR=$prefix/selftest-link/$child export_env) >/dev/null 2>&1; then
+		log "selftest: LANGPROBE_TMPDIR below a link to /tmp was accepted"
+		fails=1
+	fi
+	if [ -e "/tmp/$child" ]; then
+		log "selftest: /tmp/$child was created"
+		rmdir "/tmp/$child/deeper" "/tmp/$child" 2>/dev/null
 		fails=1
 	fi
 	rm -f "$prefix/selftest-link"
