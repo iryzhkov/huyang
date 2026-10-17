@@ -1,6 +1,7 @@
 """Drive the real OpenCode 2.0.30 ACP process; no direct plugin invocation."""
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 from common import canonical, digest, record, require, spawn, stop, write_json
@@ -186,6 +187,32 @@ class ACP:
         await self.task
         self.err.close()
 
+def retain_final_evidence(owner, acp, sessions, initial_capture, final_capture, original_failure):
+    # Ownership evidence must survive even an unreadable or incomplete witness.
+    write_json(owner.case / "acp-ipc-final.json", final_capture)
+    owner.acp_ipc_captures = (initial_capture, final_capture)
+    witness = []
+    witness_parse_error = None
+    line_number = None
+    try:
+        text = (owner.case / "plugin-witness.jsonl").read_text()
+        for line_number, line in enumerate(text.splitlines(), 1):
+            entry = json.loads(line)
+            require(isinstance(entry, dict), "witness entry must be an object")
+            witness.append(entry)
+        require(witness, "actual V2 discovery/setup witness is empty")
+    except (OSError, UnicodeError, ValueError, AssertionError) as error:
+        witness_parse_error = {"line": line_number, "error": repr(error)}
+        acp.failures.append("witness parse failed: " + canonical(witness_parse_error))
+    write_json(owner.case / "acp-report.json", {
+        "sessions": sessions, "notifications": acp.notifications, "selections": acp.selections,
+        "failures": acp.failures, "witness": witness, "witness_parse_error": witness_parse_error,
+        "original_failure": repr(original_failure) if original_failure is not None else None})
+    # A new evidence failure must fail acceptance without masking an earlier error.
+    if original_failure is None:
+        require(not acp.failures, str(acp.failures))
+
+
 async def exercise(binary, env, owner, make_fixture, native_binary, native_sha256):
     from ipc_audit import capture_acp_listener
     acp = await ACP(owner.case).start(binary, env)
@@ -273,13 +300,4 @@ async def exercise(binary, env, owner, make_fixture, native_binary, native_sha25
         try:
             await acp.close()
         finally:
-            # Preserve failure observations even when a prompt rejects before the final checks.
-            witness_path = owner.case / "plugin-witness.jsonl"
-            if witness_path.is_file():
-                witness = [json.loads(line) for line in witness_path.read_text().splitlines()]
-            write_json(owner.case / "acp-ipc-final.json", final_capture)
-            owner.acp_ipc_captures = (initial_capture, final_capture)
-            write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
-                                                      "selections": acp.selections,
-                                                      "failures": acp.failures, "witness": witness})
-            require(not acp.failures, str(acp.failures))
+            retain_final_evidence(owner, acp, sessions, initial_capture, final_capture, sys.exception())

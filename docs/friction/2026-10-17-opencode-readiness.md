@@ -23,8 +23,11 @@ transform. Setup registers these observers and finishes without reading or
 waiting for readiness. Each prompt then requires the genuine final registry to
 contain exactly three lean and thirteen full definitions in their managed
 namespaces, with exact native IDs/names and `options.codemode === false`.
-Unrelated definitions remain untouched. Input definitions and executors must
-exist; the observer neither invokes nor replaces them.
+Unrelated definitions remain untouched. The observer checks input definition
+shape and the adapter-wrapped execute function without invoking or replacing
+either. The Promise adapter always wraps execute, so hasExecute proves only
+the returned shape, not the underlying native executor. Real workflow tool calls
+remain the proof that native execution works.
 
 The synchronous transform only increments a local event generation and
 resolves one pending wake per prompt. It never accesses the editor, reads or
@@ -45,6 +48,12 @@ definition/executor presence, plus ready or failure outcome. Executable tools
 and prompt contents are not serialized. The seven scripted prompts require
 seven distinct native message proofs attributed three to A and four to B.
 Failure entries are also copied into the final ACP report on early rejection.
+Final ownership capture is written before witness parsing. Missing, malformed,
+truncated, empty or non-object witness data leaves the raw file untouched and
+records a witness_parse_error in the ACP report alongside any parsed prefix.
+That error fails acceptance after both reports are written. If an exception is
+already in flight, it is recorded as original_failure and continues to propagate
+without replacement by the witness error.
 
 The generated plugin imports
 `../acceptance-support/opencode_readiness.mjs`. Its exact helper bytes are
@@ -56,36 +65,43 @@ checks and the existing context witness remain in place.
 Public API and ordering proof uses only official source at the immutable
 OpenCode 2.0.30 reference commit
 `f16ef9ad8878279ea2be3cfab7baeed97aef61aa`. The implementation consulted these
-sources as text; it did not install or execute them:
+sources as text; it did not install or execute them. Every range below was
+independently re-read against the complete cached pinned bytes under
+`/home/igor/.cache/huyang-friction/review-oc-src/` after main review round 1.
+The corrected anchors use physical source lines, including blank lines:
 
-- [ToolDomain](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/tool.ts#L61-L66)
+- [ToolDomain](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/tool.ts#L66-L72)
   exposes final-registry `list()` and synchronous transform callbacks.
-  [Info and Options](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/schema/src/tool.ts#L25-L39)
-  put namespace/codemode in options; Info also has name, input and execute.
-- [MCP registration](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool/mcp.ts#L37-L45)
+  [Options](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/schema/src/tool.ts#L27-L42)
+  put namespace/codemode in options.
+  [Info](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/schema/src/tool.ts#L92-L102)
+  has name, input and execute.
+- [MCP registration](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool/mcp.ts#L41-L49)
   uses the unqualified MCP name and server namespace.
-  [Effective names](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool/runtime.ts#L253-L258)
+  [Effective names](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool/runtime.ts#L276-L281)
   normalize the name and prefix the namespace. These managed names need no
   normalization changes.
-- [State rebuild](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/state.ts#L158-L179)
+- [State rebuild](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/state.ts#L172-L194)
   runs transforms synchronously before committing the new value. Resolving a
   Promise wake schedules its continuation after this synchronous callback.
-  [Tool list/snapshot](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool.ts#L209-L223)
+  [Tool list/snapshot](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/tool.ts#L224-L235)
   read the same state; codemode false selects direct tools.
-- [SessionPrompt](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/session.ts#L13-L19)
+- [SessionPrompt](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/session.ts#L14-L20)
   has session/message IDs and delivery, with no model or abort signal.
-  [Hook registration](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/registration.ts#L1-L20)
+  [Hook registration](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/registration.ts#L1-L21)
   returns an asynchronous dispose method.
-- [Promise adaptation](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/adapter.ts#L575-L578)
+- [Promise adaptation](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/adapter.ts#L591-L595)
   awaits the callback Promise; rejected session hooks propagate as defects,
   not successful empty requests.
-  [Hook dispatch](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/plugin/hooks.ts#L80-L86)
+  [Tool list adaptation](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/plugin/src/promise/adapter.ts#L479-L482)
+  wraps every returned execute member in a function.
+  [Hook dispatch](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/plugin/hooks.ts#L88-L95)
   awaits callbacks without swallowing their result.
-- [Prompt preparation](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/prompt.ts#L27-L48)
+- [Prompt preparation](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/prompt.ts#L29-L51)
   awaits activation and the prompt hook.
-  [Session admission](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/session.ts#L140-L172)
+  [Session admission](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/session.ts#L145-L178)
   follows successful preparation; execution wake follows admission.
-  [Context selection](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/context.ts#L113-L133)
+  [Context selection](https://github.com/anomalyco/opencode/blob/f16ef9ad8878279ea2be3cfab7baeed97aef61aa/packages/core/src/session/context.ts#L121-L143)
   subsequently takes the native tool snapshot.
 
 These sources establish ordering for fresh prompts in idle acceptance sessions,
@@ -110,18 +126,30 @@ session proofs and separate deadlines, rechecking later prompts, malformed
 managed catalogs, genuine read errors, disposal, deadlines including hung reads,
 late resolution after failure, and failed observer registration. Fake editors
 reject every access; native tool definitions are frozen and executors fail if
-called. Tests have been written but not run.
+called. The implementation author has not run these tests. The added pure
+Python witness-retention regression mocks all file IO and checks malformed,
+truncated, missing, empty and non-object witness data, report preservation,
+acceptance failure, original exception identity and valid witness handling.
 
-Suggested parent validation on agent-a, after pinning the final integrated
-source revision and preparing a disposable scratch HOME:
+Root reports that agent-a job `c4a8f5f7` passed 21 Node and 94 Python tests
+at `e14ad5929d812a3bc2c86a13418e0a16a0f47e29`, 115 total. Its complete
+4,073-byte evidence has SHA-256
+`c9fd418085b1dd1f57c948f320f5ab6386d1ac6cdffc9f696c252a2bb4e0bdb1`.
+That revision-specific evidence does not validate this follow-up or qualify
+native runtime acceptance.
+
+Parent validation must follow root's agent-a procedure: preserve the supplied
+on-disk HOME at `/home/job`, assert it before writing, and put TMPDIR beneath
+that HOME. After pinning the final integrated revision:
 
 ```sh
 chaldea exec --host agent-a -- sh -c '
-  export HOME="$PWD/.acceptance-readiness-home"
-  export TMPDIR="$HOME/tmp"
-  test "$HOME" = "$PWD/.acceptance-readiness-home" || exit 1
+  set -eu
+  test "$HOME" = /home/job || exit 1
+  export TMPDIR="$HOME/.cache/huyang-friction/opencode-readiness-witness-fix/tmp"
   mkdir -p "$TMPDIR"
   node --test tests/client-acceptance/test_opencode_readiness.mjs
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/client-acceptance -p test_opencode_witness.py
 '
 ```
 
