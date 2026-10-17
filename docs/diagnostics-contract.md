@@ -55,7 +55,14 @@ Each producer/document has one owned request in flight, with at most 16 requests
 30 seconds of retention and 64 watchers per provider process. These limits only
 bound fetching and memory; their expiry never proves absence. Buffer, client
 identity/attachment, version, disk and pending transaction changes cancel stale
-work, and late observations are revalidated before delivery. Repeated payloads do
+work, and late observations are revalidated before delivery. Native request
+cancellation retires the request generation, wakes a waiting caller and schedules
+a replacement within the same budget; a stale callback cannot mutate its
+replacement. Closing a watcher also wakes its caller. Proven push mode survives
+edits while each edit discards the old publication. A current authoritative push
+received during a pull wait is included in the immediate response.
+Push and pull observations retain separate coalescing slots, so an unstamped
+empty push cannot discard an undelivered positive pull. Repeated pull payloads do
 not reannounce findings.
 
 Unversioned push positives are provisional and unattributed; unversioned emptiness

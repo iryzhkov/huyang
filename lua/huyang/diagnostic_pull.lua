@@ -9,9 +9,13 @@ local function close(watch)
     watches[watch.key] = nil
     watch.timer:stop()
     watch.timer:close()
-    if watch.request_id and watch.client.cancel_request then
-        watch.client:cancel_request(watch.request_id)
+    local request_id = watch.request_id
+    watch.generation = watch.generation + 1
+    watch.inflight, watch.request_id = false, nil
+    if request_id and watch.client.cancel_request then
+        watch.client:cancel_request(request_id)
     end
+    if watch.interrupted then watch.interrupted() end
 end
 
 function M.client_current(client, bufnr)
@@ -37,13 +41,33 @@ local function schedule(watch)
     end)
 end
 
+-- Neovim's native refresh may cancel a request and discard its callback.
+-- Retire that generation before scheduling its replacement; a late callback
+-- from the old request must never clear the replacement's in-flight state.
+local function interrupted(watch)
+    if not watch.inflight then return end
+    watch.generation = watch.generation + 1
+    watch.inflight, watch.request_id, watch.again = false, nil, false
+    if watch.interrupted then watch.interrupted() end
+    schedule(watch)
+end
+
+function M.request_cancelled(client_id, request_id)
+    for _, watch in pairs(watches) do
+        if watch.client.id == client_id and watch.request_id == request_id then interrupted(watch) end
+    end
+end
+
 pump = function(watch)
     if not current(watch) or watch.attempts >= MAX_ATTEMPTS then close(watch); return end
     if watch.inflight then return end
     watch.inflight, watch.again = true, false
     watch.attempts = watch.attempts + 1
+    watch.generation = watch.generation + 1
+    local generation = watch.generation
     local sent, request_id = watch.client:request("textDocument/diagnostic", watch.params,
         function(lsp_err, result)
+            if generation ~= watch.generation or not watch.inflight then return end
             watch.inflight, watch.request_id = false, nil
             if not current(watch) then close(watch); return end
             watch.receive(not lsp_err and result or nil)
@@ -52,6 +76,7 @@ pump = function(watch)
             if watch.again then schedule(watch) end
         end, watch.bufnr)
     -- In-process servers can answer synchronously.
+    if generation ~= watch.generation then return end
     if sent and watch.inflight then watch.request_id = request_id end
     if not sent then
         watch.inflight = false
@@ -72,6 +97,7 @@ function M.start(args)
     local watch = {
         key = key, document = args.document, client = args.client, bufnr = args.bufnr,
         params = args.params, current = args.current, receive = args.receive,
+        interrupted = args.interrupted, generation = 0,
         at = vim.uv.now(), attempts = 0, timer = vim.uv.new_timer(),
     }
     watches[key] = watch
@@ -84,7 +110,16 @@ end
 -- No timer, silence or opaque result ID ever promotes a response to complete.
 function M.wake(client_id)
     for _, watch in pairs(watches) do
-        if client_id == nil or watch.client.id == client_id then schedule(watch) end
+        if client_id == nil or watch.client.id == client_id then
+            local requests = watch.client.requests
+            local request = requests and requests[watch.request_id]
+            if watch.inflight and watch.request_id and requests
+                and (not request or request.type == "cancel") then
+                interrupted(watch)
+            else
+                schedule(watch)
+            end
+        end
     end
 end
 

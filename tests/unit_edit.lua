@@ -672,6 +672,211 @@ do
     vim.fn.delete(path)
 end
 
+-- Native refresh cancels buffer diagnostic requests and may drop their RPC
+-- callbacks entirely. Exercise that asynchronous lifecycle, including a stale
+-- callback after replacement, rather than answering inside client:request.
+do
+    local path = vim.fn.tempname() .. ".py"
+    vim.fn.writefile({"value = 1"},path)
+    local buf = core.load_buf(path)
+    local saved_clients, saved_client = vim.lsp.get_clients, vim.lsp.get_client_by_id
+    local saved_attach = vim.lsp.buf_attach_client
+    local pull_coroutine, requests, refreshes = nil, 0, 0
+    local pending, callbacks, emit_cancel = {}, {}, true
+    local diagnostic = {range={start={line=0,character=0},["end"]={line=0,character=1}},
+        severity=1,message="asynchronous late finding"}
+    local fake = {id=9012,name="refresh_cancel_test",config={filetypes={"python"}},
+        attached_buffers={[buf]=true},requests={},
+        handlers={["textDocument/publishDiagnostics"]=function() end},
+        supports_method=function(_,method) return method=="textDocument/diagnostic" end}
+    fake.request=function(_,method,_,callback,bufnr)
+        requests=requests+1
+        pending[requests],callbacks[requests]=callback,callback
+        fake.requests[requests]={type="pending",method=method,bufnr=bufnr}
+        return true,requests
+    end
+    fake.cancel_request=function(_,id)
+        pending[id]=nil -- RequestCancelled is swallowed by the native RPC layer.
+        if fake.requests[id] then fake.requests[id].type="cancel" end
+        if emit_cancel then
+            vim.api.nvim_exec_autocmds("LspRequest",{buffer=buf,data={
+                client_id=fake.id,request_id=id,request=fake.requests[id],
+            }})
+        end
+    end
+    fake.handlers["workspace/diagnostic/refresh"]=function()
+        refreshes=refreshes+1
+        for id,request in pairs(fake.requests) do
+            if request.type=="pending" and request.bufnr==buf then fake:cancel_request(id) end
+        end
+        return "native asynchronous refresh"
+    end
+    vim.lsp.get_client_by_id=function(id)
+        if id==fake.id then return fake end
+        return saved_client(id)
+    end
+    vim.lsp.get_clients=function(filter)
+        if pull_coroutine and coroutine.running()==pull_coroutine then
+            if not filter or filter.bufnr==buf then return {fake} end
+            return {}
+        end
+        return saved_clients(filter)
+    end
+    vim.lsp.buf_attach_client=function(target,id)
+        if id==fake.id then return true end
+        return saved_attach(target,id)
+    end
+    local function launch(wait_ms)
+        local state={started=vim.uv.hrtime()}
+        state.co=coroutine.create(function()
+            state.result=edit.diagnostic_evidence({files={path},wait_ms=wait_ms or 500,
+                transaction_id="edit_async_refresh",revision="wsrev_async_refresh"})
+        end)
+        pull_coroutine=state.co
+        local ok,detail=coroutine.resume(state.co)
+        check("asynchronous pull coroutine starts",ok,detail)
+        return state
+    end
+    local function finish(state)
+        local done=vim.wait(200,function() return coroutine.status(state.co)=="dead" end,1)
+        check("asynchronous evidence caller resumes promptly",done)
+        pull_coroutine=nil
+        return state.result and state.result.batches or {},(vim.uv.hrtime()-state.started)/1e6
+    end
+    local function reply(id,items)
+        local callback=pending[id]
+        pending[id],fake.requests[id]=nil,nil
+        check("owned asynchronous request is still live before reply",callback~=nil,id)
+        if callback then callback(nil,{kind="full",items=vim.deepcopy(items)}) end
+    end
+    local function progress(kind)
+        vim.api.nvim_exec_autocmds("LspProgress",{data={client_id=fake.id,
+            params={token="async-analysis",value={kind=kind}}}})
+    end
+    local function publish(version,items)
+        fake.handlers["textDocument/publishDiagnostics"](nil,
+            {uri=vim.uri_from_bufnr(buf),version=version,diagnostics=items},{})
+    end
+
+    vim.lsp.util.buf_versions[buf]=20
+    local first=launch()
+    reply(requests,{})
+    local initial=finish(first)
+    check("initial asynchronous empty pull stays provisional",
+        #initial==1 and not initial[1].complete and initial[1].document_version==nil,initial)
+    progress("begin")
+    progress("end")
+    vim.wait(50,function() return requests==2 end,1)
+    local cancelled_id=requests
+    local native=fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
+    vim.wait(50,function() return requests==cancelled_id+1 end,1)
+    local replacement=requests
+    check("progress then native refresh replaces a cancelled callback-less request",
+        native=="native asynchronous refresh" and refreshes==1 and replacement==cancelled_id+1
+            and pending[cancelled_id]==nil and pending[replacement]~=nil,
+        {requests=requests,refreshes=refreshes})
+    callbacks[cancelled_id](nil,{kind="full",items={diagnostic}})
+    require("huyang.diagnostic_pull").wake(fake.id)
+    vim.wait(5)
+    check("stale cancelled callback cannot clear the replacement in flight",
+        requests==replacement and pending[replacement]~=nil,requests)
+    reply(replacement,{diagnostic})
+    -- An empty unstamped push must not overwrite the undelivered positive
+    -- pull or suppress the same body when the next collection fetches it.
+    publish(nil,{})
+    local late=edit.late_evidence().batches
+    check("unstamped empty push preserves the undelivered late pull finding",
+        #late==1 and late[1].kind=="lsp_pull" and not late[1].complete
+            and late[1].document_version==nil and late[1].expected_version==20
+            and late[1].transaction_id=="edit_async_refresh"
+            and late[1].findings[1].message==diagnostic.message,late)
+    vim.wait(50,function() return requests==replacement+1 end,1)
+    reply(requests,{diagnostic})
+    check("preserved late positive is delivered exactly once",
+        #edit.late_evidence().batches==0)
+
+    -- The refresh wrapper also recovers if LspRequest delivery is delayed or
+    -- unavailable: native client.requests already marks the request cancelled.
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf]=21
+    emit_cancel=false
+    local cancelled_wait=launch()
+    local before_cancel=requests
+    fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
+    local cancelled_batches,cancelled_ms=finish(cancelled_wait)
+    vim.wait(50,function() return requests==before_cancel+1 end,1)
+    check("native cancellation wakes the immediate caller before its full budget",
+        cancelled_ms<200 and #cancelled_batches==1 and not cancelled_batches[1].complete
+            and requests==before_cancel+1,{cancelled_ms,cancelled_batches,requests})
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf]=22
+    local closed_wait=launch()
+    edit.mark_diagnostic_change(buf)
+    local closed_batches,closed_ms=finish(closed_wait)
+    check("closing a lane wakes its immediate caller without waiting for expiry",
+        closed_ms<200 and #closed_batches==1 and not closed_batches[1].complete,
+        {closed_ms,closed_batches})
+
+    -- A changedtick can move without an LSP version change. A repeated
+    -- collection for the same transaction must bind a new pending postimage.
+    vim.lsp.util.buf_versions[buf]=23
+    local old=launch(5)
+    finish(old)
+    local old_id=requests
+    reply(old_id,{diagnostic})
+    vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 2"})
+    vim.fn.writefile({"value = 2"},path)
+    vim.bo[buf].modified=false
+    core.mark_synced(buf,path)
+    local renewed=launch()
+    local renewed_id=requests
+    reply(renewed_id,{diagnostic})
+    local renewed_batches=finish(renewed)
+    check("same-version changedtick collection binds a fresh pending postimage",
+        renewed_id==old_id+1 and #renewed_batches==1
+            and #renewed_batches[1].findings==1 and not renewed_batches[1].complete,
+        renewed_batches)
+    check("same-version supersession rejects the old queued postimage",
+        #edit.late_evidence().batches==0)
+
+    -- First learn push mode while a pull caller is parked, then edit twice.
+    -- All three current publications must appear in the immediate response.
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf]=24
+    local learned=launch()
+    publish(24,{diagnostic})
+    local learned_batches,learned_ms=finish(learned)
+    check("current push arriving during pull wakes and supplies immediate authority",
+        learned_ms<200 and #learned_batches==2 and learned_batches[2].kind=="lsp_push"
+            and learned_batches[2].complete and learned_batches[2].document_version==24
+            and #learned_batches[2].findings==1,{learned_ms,learned_batches})
+    check("immediately delivered authoritative push is not queued again",
+        #edit.late_evidence().batches==0)
+    local learned_requests=requests
+    for version=25,26 do
+        vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = " .. version})
+        vim.fn.writefile({"value = " .. version},path)
+        vim.bo[buf].modified=false
+        core.mark_synced(buf,path)
+        edit.mark_diagnostic_change(buf)
+        vim.lsp.util.buf_versions[buf]=version
+        local current=launch()
+        publish(version,{diagnostic})
+        local current_batches,current_ms=finish(current)
+        check("proven push mode supplies edited revision " .. version .. " immediately",
+            current_ms<200 and requests==learned_requests and #current_batches==1
+                and current_batches[1].kind=="lsp_push" and current_batches[1].complete
+                and current_batches[1].document_version==version
+                and current_batches[1].expected_version==version
+                and #current_batches[1].findings==1,{current_ms,current_batches,requests})
+    end
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.get_clients,vim.lsp.get_client_by_id=saved_clients,saved_client
+    vim.lsp.buf_attach_client=saved_attach
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(path)
+end
+
 -- map_region: where an edited region ends up once polishing has moved it,
 -- and which old lines below it the ledger has to fold in so an undo puts
 -- the whole change back.
