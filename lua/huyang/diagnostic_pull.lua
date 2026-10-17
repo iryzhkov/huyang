@@ -108,9 +108,14 @@ end
 
 -- Only producer events and later evidence collections trigger another fetch.
 -- No timer, silence or opaque result ID ever promotes a response to complete.
-function M.wake(client_id)
+function M.wake(client_id, reason)
     for _, watch in pairs(watches) do
-        if client_id == nil or watch.client.id == client_id then
+        if (client_id == nil or watch.client.id == client_id)
+            and (reason ~= "progress" or not watch.progress_woken) then
+            -- Pulls can themselves provoke progress. Permit one progress
+            -- follow-up per start/explicit wake, never a recursive chain.
+            -- Explicit collection/refresh re-arms even an in-flight watch.
+            watch.progress_woken = reason == "progress"
             local requests = watch.client.requests
             local request = requests and requests[watch.request_id]
             if watch.inflight and watch.request_id and requests

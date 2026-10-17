@@ -562,6 +562,73 @@ do
     vim.lsp.get_client_by_id=saved_client
 end
 
+-- Every owned response may provoke more progress, including after its callback.
+-- Bound that feedback without blocking explicit collection/refresh wakeups.
+do
+    local watcher = require("huyang.diagnostic_pull")
+    local saved_client = vim.lsp.get_client_by_id
+    local calls, received, callbacks, automatic = 0, {}, {}, true
+    local fake = {id=9014,name="progress_feedback_test"}
+    vim.lsp.get_client_by_id=function(id)
+        if id==fake.id then return fake end
+        return saved_client(id)
+    end
+    local function progress()
+        for _,kind in ipairs({"begin","report","end"}) do
+            vim.api.nvim_exec_autocmds("LspProgress",{data={client_id=fake.id,
+                params={token="owned-request-work",value={kind=kind}}}})
+        end
+    end
+    local function respond(id,items)
+        local callback=callbacks[id]
+        callbacks[id]=nil
+        check("feedback request remains live before response",callback~=nil,id)
+        if callback then callback(nil,{kind="full",items=items or {}}) end
+        progress()
+    end
+    fake.request=function(_,_,_,callback)
+        calls=calls+1
+        local id=calls
+        callbacks[id]=callback
+        if automatic then vim.schedule(function() respond(id) end) end
+        return true,id
+    end
+    local args={client=fake,bufnr=1,document="progress-feedback",params={},
+        current=function() return true end,
+        receive=function(result) received[#received+1]=result end}
+    watcher.start(args)
+    vim.wait(100,function() return #received>=2 end,1)
+    vim.wait(10)
+    check("owned response progress stops at two pulls instead of exhausting sixteen",
+        calls==2 and #received==2,{calls,#received})
+
+    automatic=false
+    watcher.wake(fake.id)
+    vim.wait(100,function() return calls==3 end,1)
+    progress()
+    progress()
+    watcher.wake(fake.id) -- Re-arm while request 3 and old progress are pending.
+    progress()
+    local positive={{message="new body after explicit wake"}}
+    respond(3,positive)
+    vim.wait(100,function() return calls==4 end,1)
+    respond(4,positive)
+    vim.wait(10)
+    check("explicit in-flight wake survives consumed progress allowance and delivers changed body",
+        calls==4 and #received==4 and received[4].items[1].message==positive[1].message,
+        {calls,received})
+    watcher.wake(fake.id)
+    vim.wait(100,function() return calls==5 end,1)
+    respond(5,positive)
+    vim.wait(100,function() return calls==6 end,1)
+    respond(6,positive)
+    vim.wait(10)
+    check("later explicit wake re-arms one progress follow-up without a recursive chain",
+        calls==6 and #received==6,{calls,#received})
+    watcher.cancel_document(args.document)
+    vim.lsp.get_client_by_id=saved_client
+end
+
 -- Full pull bodies can change their opaque ID before analysis begins.
 -- Producer events fetch new facts, but only a stamped push can prove absence.
 for _, final_positive in ipairs({false,true}) do
@@ -987,6 +1054,52 @@ do
                 and #current_batches[2].findings==1 and pending[requests]~=nil,
             {current_ms,current_batches,requests})
     end
+    -- A changed opaque identity with the same empty body is useful
+    -- correlation evidence, with no producer-version or omission authority.
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf]=27
+    local identity=launch()
+    local initial_callback=pending[requests]
+    pending[requests],fake.requests[requests]=nil,nil
+    if initial_callback then initial_callback(nil,{kind="full",resultId="9",items={}}) end
+    local identity_batches=finish(identity)
+    check("initial empty pull retains result identity without completeness",
+        #identity_batches==1 and identity_batches[1].result_id=="9"
+            and not identity_batches[1].complete,identity_batches)
+    local function identity_reply(result,lsp_err)
+        local before_requests=requests
+        require("huyang.diagnostic_pull").wake(fake.id)
+        vim.wait(50,function() return requests==before_requests+1 end,1)
+        local callback=pending[requests]
+        pending[requests],fake.requests[requests]=nil,nil
+        check("identity refresh has an owned live request",callback~=nil,requests)
+        if callback then callback(lsp_err,result) end
+    end
+    identity_reply({kind="full",resultId="12",items={}})
+    local changed_identity=edit.late_evidence().batches
+    check("same empty body with result nine to twelve delivers exact provisional attribution",
+        #changed_identity==1 and changed_identity[1].result_id=="12"
+            and changed_identity[1].kind=="lsp_pull" and changed_identity[1].reason=="late_pull"
+            and changed_identity[1].document==path
+            and changed_identity[1].document_revision=="wsrev_async_refresh"
+            and changed_identity[1].transaction_id=="edit_async_refresh"
+            and changed_identity[1].expected_version==27
+            and changed_identity[1].document_version==nil and not changed_identity[1].complete
+            and changed_identity[1].selected and changed_identity[1].dimension=="edited_documents"
+            and #changed_identity[1].findings==0,changed_identity)
+    identity_reply({kind="full",resultId="12",items={}})
+    check("repeated empty result twelve is delivered exactly once",
+        #edit.late_evidence().batches==0)
+    identity_reply({kind="unchanged",resultId="13"})
+    check("non-full identity change does not fabricate a late full response",
+        #edit.late_evidence().batches==0)
+    identity_reply({kind="full",resultId="13",items={}}, {code=-32800,message="cancelled"})
+    check("error body identity change does not fabricate a late full response",
+        #edit.late_evidence().batches==0)
+    identity_reply({kind="full",resultId="12",items={}})
+    check("non-full and error responses cannot change the last full response signature",
+        #edit.late_evidence().batches==0)
+
     edit.mark_diagnostic_change(buf)
     vim.lsp.get_clients,vim.lsp.get_client_by_id=saved_clients,saved_client
     vim.lsp.buf_attach_client=saved_attach

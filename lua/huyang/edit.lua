@@ -1129,7 +1129,7 @@ vim.api.nvim_create_autocmd("LspProgress", {
             open[token] = vim.uv.now()
         elseif kind == "end" then
             open[token] = nil
-            pull_watch.wake(client.id)
+            pull_watch.wake(client.id, "progress")
         end
     end,
 })
@@ -1378,7 +1378,7 @@ function M.diagnostic_evidence(args)
                             findings = items,
                         }
                     end
-                    local waiting, last_items = true, nil
+                    local waiting, last_response = true, nil
                     local timer = vim.uv.new_timer()
                     local batch = core.await(function(resume)
                         timer:start(pull_remaining, 0, vim.schedule_wrap(function()
@@ -1412,8 +1412,11 @@ function M.diagnostic_evidence(args)
                                 local full = type(result) == "table" and result.kind == "full"
                                     and type(result.items) == "table"
                                 local observed = pull_batch(full and result or nil)
-                                local changed = full and not vim.deep_equal(last_items, result.items)
-                                if full then last_items = vim.deepcopy(result.items) end
+                                -- Equal items can carry a new response identity.
+                                -- Retain it for correlation, never as version proof.
+                                local response = full and { items = result.items, result_id = result.resultId } or nil
+                                local changed = full and not vim.deep_equal(last_response, response)
+                                if full then last_response = vim.deepcopy(response) end
                                 if waiting then
                                     waiting = false
                                     resume(observed)
