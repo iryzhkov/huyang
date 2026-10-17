@@ -55,7 +55,9 @@ Each producer/document has one owned request in flight, with at most 16 requests
 30 seconds of retention and 64 watchers per provider process. These limits only
 bound fetching and memory; their expiry never proves absence. Buffer, client
 identity/attachment, version, disk and pending transaction changes cancel stale
-work, and late observations are revalidated before delivery. Native request
+work, and late observations are revalidated before delivery. Attachment checks accept
+Neovim 0.11 boolean entries and Neovim 0.12 language-ID entries; absent or false
+entries and replaced client objects are rejected. Native request
 cancellation retires the request generation, wakes a waiting caller and schedules
 a replacement within the same budget; a stale callback cannot mutate its
 replacement. Closing a watcher also wakes its caller. Proven push mode survives

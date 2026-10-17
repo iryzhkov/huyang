@@ -74,7 +74,7 @@ local function snapshot(client, bufnr, params)
     if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return out end
     out.path = vim.api.nvim_buf_get_name(bufnr)
     out.loaded = vim.api.nvim_buf_is_loaded(bufnr)
-    out.attached = client.attached_buffers[bufnr] == true
+    out.attached = not not client.attached_buffers[bufnr]
     out.changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
     out.local_version = vim.lsp.util.buf_versions[bufnr]
     if out.loaded then

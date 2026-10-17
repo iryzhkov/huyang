@@ -20,7 +20,7 @@ end
 
 function M.client_current(client, bufnr)
     return vim.lsp.get_client_by_id(client.id) == client
-        and (not client.attached_buffers or client.attached_buffers[bufnr] == true)
+        and (not client.attached_buffers or not not client.attached_buffers[bufnr])
 end
 
 local function current(watch)

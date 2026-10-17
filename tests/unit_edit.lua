@@ -710,6 +710,71 @@ for _, final_positive in ipairs({false,true}) do
     vim.fn.delete(path)
 end
 
+-- Real Neovim clients use boolean attachment entries in 0.11 and language IDs
+-- in 0.12. Exercise the owned request boundary with both representations, then
+-- reject detached buffers and stale client objects before dispatch and delivery.
+do
+    local pull = require("huyang.diagnostic_pull")
+    local saved_client = vim.lsp.get_client_by_id
+    local buf = vim.api.nvim_create_buf(false, true)
+    local document = "attachment-compatibility"
+    local client = {id=9013,attached_buffers={}}
+    local registered = client
+    vim.lsp.get_client_by_id = function(id)
+        if id == client.id then return registered end
+        return saved_client(id)
+    end
+    local requests, received, callback = 0, 0, nil
+    client.request = function(_,_,_,receive)
+        requests = requests + 1
+        callback = receive
+        return true, requests
+    end
+    local function start()
+        callback = nil
+        pull.start({client=client,bufnr=buf,document=document,params={},
+            current=function() return true end,
+            receive=function(result)
+                if result and result.items[1].message == "late positive" then received = received + 1 end
+            end})
+    end
+    local positive = {kind="full",items={{message="late positive"}}}
+    for _, attachment in ipairs({true,"python"}) do
+        client.attached_buffers[buf] = attachment
+        local before_requests, before_received = requests, received
+        start()
+        check("owned pull dispatches for attachment " .. tostring(attachment),
+            requests == before_requests + 1 and callback ~= nil)
+        if callback then callback(nil,positive) end
+        check("owned pull receives positive for attachment " .. tostring(attachment),
+            received == before_received + 1)
+        pull.cancel_document(document,client.id)
+    end
+    for _, invalid in ipairs({"nil attachment","false attachment","replaced client","missing client"}) do
+        local function invalidate()
+            if invalid == "nil attachment" then client.attached_buffers[buf] = nil
+            elseif invalid == "false attachment" then client.attached_buffers[buf] = false
+            elseif invalid == "replaced client" then registered = {id=client.id}
+            else registered = nil end
+        end
+        registered, client.attached_buffers[buf] = client, "python"
+        invalidate()
+        local before_requests = requests
+        start()
+        check(invalid .. " blocks owned pull dispatch",requests == before_requests and callback == nil)
+        pull.cancel_document(document,client.id)
+        registered, client.attached_buffers[buf] = client, "python"
+        start()
+        local pending, before_received = callback, received
+        invalidate()
+        if pending then pending(nil,positive) end
+        check(invalid .. " rejects an in-flight positive",pending ~= nil and received == before_received)
+        pull.cancel_document(document,client.id)
+    end
+    vim.lsp.get_client_by_id = saved_client
+    vim.api.nvim_buf_delete(buf,{force=true})
+end
+
 -- Native refresh cancels buffer diagnostic requests and may drop their RPC
 -- callbacks entirely. Exercise that asynchronous lifecycle, including a stale
 -- callback after replacement, rather than answering inside client:request.
