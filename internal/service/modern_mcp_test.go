@@ -171,8 +171,9 @@ func TestDirectCallAppliesAdvertisedGlobalTimeout(t *testing.T) {
 	direct.setToolTimeout(300 * time.Millisecond)
 	// The advertisement is the handlers' answer, so it is read from them
 	// directly; the dispatcher's enforcement of the same value is what the
-	// blocked edit measures.
-	reopened := direct.handlers.Execute(context.Background(), "req_advertised_timeout", "workspace_open", map[string]any{"kind": "project", "root": root})
+	// blocked edit measures. overview=full, because an unchanged repeated
+	// default overview answers overview_repeated without service_limits.
+	reopened := direct.handlers.Execute(context.Background(), "req_advertised_timeout", "workspace_open", map[string]any{"kind": "project", "root": root, "overview": "full"})
 	data, _ := reopened["data"].(map[string]any)
 	limits, _ := data["service_limits"].(map[string]any)
 	if got := limits["tool_call_timeout_ms"]; reopened["outcome"] != "ok" || got != int64(300) {
