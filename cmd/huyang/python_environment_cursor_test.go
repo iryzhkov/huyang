@@ -113,7 +113,7 @@ func TestM9AcknowledgedCursorCallSequence(t *testing.T) {
 	final := m9CloneHistoricalReply(t, post)
 	final["request_id"] = "diagnostics_final"
 	fixReply := map[string]any{"outcome": "provisional", "request_id": fixed.Transaction,
-		"data": map[string]any{"document_revision": fixed.Revision},
+		"data":               map[string]any{"document_revision": fixed.Revision},
 		"diagnostic_updates": []any{map[string]any{"id": fixed.IDs[0], "kind": "persisting"}}}
 	recovered := map[string]any{"data": map[string]any{"evidence": map[string]any{"payload": selected}}}
 	retired := report("diagcur_8", nil, []any{stale})
@@ -160,7 +160,7 @@ func TestM9AcknowledgedCursorCallSequence(t *testing.T) {
 	defer cancel()
 	p := &m9Probe{
 		t: t, ctx: ctx, dir: dir, root: "/project", events: -1,
-		wire: &probeMCP{in: input, out: bufio.NewScanner(responses), log: log},
+		wire:         &probeMCP{in: input, out: bufio.NewScanner(responses), log: log},
 		evidenceSeen: map[string]bool{}, evidenceBatches: map[string]map[string]any{},
 		postFixCoverage: map[string]any{},
 	}
@@ -177,7 +177,7 @@ func TestM9AcknowledgedCursorCallSequence(t *testing.T) {
 	p.postFixCoverage["observation_plan"] = map[string]any{
 		"sampling_ms": 0, "declared_before_fix": true,
 		"sampling_end": p.historicalEnd.UTC().Format(time.RFC3339Nano),
-		"boundary": "scripted intermediate full report, final full report and evidence recovery",
+		"boundary":     "scripted intermediate full report, final full report and evidence recovery",
 	}
 	m9JSON(t, filepath.Join(dir, "historical-observation-plan.json"), p.postFixCoverage["observation_plan"])
 	p.call("edit_apply", map[string]any{})
