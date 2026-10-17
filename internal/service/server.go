@@ -21,7 +21,7 @@ func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces, client clien
 		Name: "huyang", Title: "Huyang", Version: mcpapi.ServerVersion,
 		Description: "Transactional semantic workspace for coding agents.",
 	}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{}})
-	server.AddReceivingMiddleware(frictionCapabilitiesMiddleware(session))
+	server.AddReceivingMiddleware(frictionCapabilitiesMiddleware(client.session))
 	for _, descriptor := range mcpapi.Catalog(profile) {
 		registerModernTool(server, descriptor, direct, client)
 	}
