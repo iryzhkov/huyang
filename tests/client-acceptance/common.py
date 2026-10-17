@@ -1,0 +1,120 @@
+"""Private acceptance helpers; only Python stdlib, no model or MCP SDK."""
+import asyncio
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import time
+
+KEY = "sk-huyang-acceptance-not-a-secret"
+HERE = Path(__file__).resolve().parent
+FULL = {"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate",
+        "read", "diagnostics", "edit_apply", "change_plan", "revision_diff",
+        "evidence_get", "language_server_status", "language_server_setup"}
+LEAN = {"read", "search", "edit_apply"}
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+def file_hash(path):
+    return digest(Path(path).read_bytes())
+
+def write_json(path, value):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+
+def record(path, **entry):
+    entry = {"time_ns": time.monotonic_ns(), "pid": os.getpid(), **entry}
+    # One append write, also safe for independent recorder processes.
+    data = (canonical(entry) + "\n").encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+
+def snapshot(path):
+    s = Path(path).stat()
+    return {"sha256": file_hash(path), "size": s.st_size, "mtime_ns": s.st_mtime_ns,
+            "inode": s.st_ino}
+
+def environment(case, tool_path):
+    case = Path(case)
+    env = {"PATH": tool_path, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+           "TERM": "dumb", "CI": "1", "NO_COLOR": "1",
+           "DO_NOT_TRACK": "1", "GOTOOLCHAIN": "local", "GOPROXY": "off",
+           "GOSUMDB": "off", "GOTELEMETRY": "off", "GIT_TERMINAL_PROMPT": "0",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+           "npm_config_ignore_scripts": "true", "npm_config_audit": "false",
+           "npm_config_fund": "false", "npm_config_update_notifier": "false",
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+           "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
+           "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1",
+           "OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_DISABLE_TELEMETRY": "1"}
+    # Preserve the namespace's real home, never assign a synthetic HOME.
+    if "HOME" in os.environ:
+        env["HOME"] = os.environ["HOME"]
+    for key, sub in {
+        "TMPDIR": "tmp", "XDG_CONFIG_HOME": "config", "XDG_CACHE_HOME": "cache",
+        "XDG_DATA_HOME": "data", "XDG_STATE_HOME": "state",
+        "XDG_RUNTIME_DIR": "run", "CODEX_HOME": "codex",
+        "CLAUDE_CONFIG_DIR": "claude", "OPENCODE_CONFIG_DIR": "oc-config",
+        "GOPATH": "go", "GOMODCACHE": "go/pkg/mod", "GOCACHE": "go-build",
+        "GOTELEMETRYDIR": "go-telemetry", "npm_config_cache": "npm-cache",
+    }.items():
+        path = case / sub
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        env[key] = str(path)
+    npmrc = case / "empty-npmrc"
+    npmrc.write_text("")
+    env["npm_config_userconfig"] = str(npmrc)
+    global_npmrc = case / "empty-global-npmrc"
+    global_npmrc.write_text("")
+    env["npm_config_globalconfig"] = str(global_npmrc)
+    env["ENABLE_TOOL_SEARCH"] = "false"
+    return env
+
+async def control(event):
+    reader, writer = await asyncio.open_unix_connection(os.environ["ACCEPTANCE_CONTROL"])
+    writer.write((canonical(event) + "\n").encode())
+    await writer.drain()
+    answer = json.loads(await asyncio.wait_for(reader.readline(), 30))
+    writer.close()
+    await writer.wait_closed()
+    require(not answer.get("error"), str(answer))
+    return answer
+
+async def stop(process):
+    # Also reap a client's remaining MCP descendants after its leader exited.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), 5)
+    except asyncio.TimeoutError:
+        os.killpg(process.pid, signal.SIGKILL)
+        await process.wait()
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+async def spawn(command, env, cwd, stdout, stderr, stdin=None):
+    return await asyncio.create_subprocess_exec(
+        *map(str, command), env=env, cwd=cwd, stdin=stdin,
+        stdout=stdout, stderr=stderr, start_new_session=True, limit=8*1024*1024)
+
+def raw_record(path, direction, raw, **extra):
+    record(path, direction=direction, bytes_b64=base64.b64encode(raw).decode(),
+           sha256=digest(raw), **extra)
