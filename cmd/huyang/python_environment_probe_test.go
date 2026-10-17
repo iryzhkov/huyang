@@ -450,7 +450,7 @@ local function snapshot(client, bufnr, params)
         local_version=vim.lsp.util.buf_versions[bufnr], sha256=vim.fn.sha256(body),
         disk_sha256=disk and vim.fn.sha256(disk),
         client_current=vim.lsp.get_client_by_id(client.id) == client,
-        attached=client.attached_buffers[bufnr] == true}
+        attached=not not client.attached_buffers[bufnr]}
 end
 local function observe_client(client)
     -- Preserve every request, callback, error, result and cancellation unchanged.
