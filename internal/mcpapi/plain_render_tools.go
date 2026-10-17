@@ -2,6 +2,7 @@ package mcpapi
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,7 +19,7 @@ func (r *plainReply) read(fields *plainFields) {
 	case fields.has("sections"):
 		r.outline(fields)
 	case isString(fields.peek("content")):
-		r.source(fields, false)
+		r.source(fields, -1)
 	default:
 		r.generic(fields)
 	}
@@ -30,9 +31,10 @@ func isString(value any) bool {
 }
 
 // source prints a header with the full guard and the delivered range, then
-// the exact delivered text. In a batch the continuation of a cut target is
-// printed here, because a batch reply's top-level next holds only failures.
-func (r *plainReply) source(fields *plainFields, inBatch bool) {
+// the exact delivered text. batchIndex is the target's position in a batch,
+// or -1: in a batch the continuation of a cut target is printed here,
+// because a batch reply's top-level next holds only failures.
+func (r *plainReply) source(fields *plainFields, batchIndex int) {
 	path := plainString(fields.take("path"))
 	content := plainString(fields.take("content"))
 	header := plainPath(path)
@@ -59,16 +61,69 @@ func (r *plainReply) source(fields *plainFields, inBatch bool) {
 		r.coverage(coverage)
 	}
 	continuation := plainObject(fields.take("continuation"))
-	if inBatch && continuation != nil {
-		r.linef("continue: read target.path=%s byte_offset=%s expected_revision_id=%s max_bytes=%s", plainValue(path),
-			plainValue(continuation["byte_offset"]), plainValue(continuation["expected_revision_id"]), plainValue(continuation["max_bytes"]))
-	} else if delivered, ok := plainInt(fields.peek("delivered_end_line")); inBatch && ok && continuation == nil {
-		r.linef("continue: read target.path=%s start_line=%d", plainValue(path), delivered+1)
+	delivered, hasDelivered := plainInt(fields.take("delivered_end_line"))
+	switch {
+	case batchIndex >= 0:
+		r.batchContinuation(batchIndex, continuation, delivered, hasDelivered)
+	case len(plainUnknown(continuation, "byte_offset", "expected_revision_id", "max_bytes")) > 0:
+		// The reply's next step repeats the known fields; a field it does
+		// not know is shown rather than lost.
+		r.linef("continuation: %s", plainJSON(continuation))
 	}
-	fields.take("delivered_end_line")
 	if plainBool(fields.take("implicit_workspace")) {
 		r.linef("workspace id=%s (implicit documents workspace)", plainString(plainObject(r.envelope.peek("workspace"))["id"]))
 	}
+}
+
+// batchContinuation prints the call that continues one cut target of a
+// batch. Byte offsets and line numbers count within the target's own
+// selection and numbering, so the call repeats the original target (path,
+// symbol or handle selector, line window) with the batch's effective options
+// and adds only the continuation; any other target would pass the revision
+// guard and return unrelated bytes.
+func (r *plainReply) batchContinuation(index int, continuation map[string]any, delivered int64, hasDelivered bool) {
+	if continuation == nil && !hasDelivered {
+		return
+	}
+	target, known := r.batchTarget(index)
+	switch {
+	case !known && continuation != nil:
+		r.linef("continue: repeat target %d with the same selection and options, adding %s", index, plainPairs(continuation))
+		return
+	case !known:
+		r.linef("continue: repeat target %d with the same selection and options from start_line=%d", index, delivered+1)
+		return
+	case continuation != nil:
+		for key, value := range continuation {
+			target[key] = value
+		}
+	default:
+		delete(target, "byte_offset")
+		target["start_line"] = delivered + 1
+	}
+	r.linef("continue: read targets=%s", plainJSON([]any{target}))
+}
+
+// batchTarget is target index of the call's targets with the call-level
+// options a batch applies to every target that does not set its own.
+func (r *plainReply) batchTarget(index int) (map[string]any, bool) {
+	targets := plainList(r.arguments["targets"])
+	if index < 0 || index >= len(targets) || plainObject(targets[index]) == nil {
+		return nil, false
+	}
+	original := plainObject(targets[index])
+	target := make(map[string]any, len(original)+4)
+	for key, value := range original {
+		target[key] = value
+	}
+	for _, key := range []string{"numbered", "max_lines", "max_bytes", "expected_revision_id"} {
+		if _, own := target[key]; !own {
+			if value, present := r.arguments[key]; present {
+				target[key] = value
+			}
+		}
+	}
+	return target, true
 }
 
 // sourceGuard is the revision a later edit is guarded by. A prepared read
@@ -144,7 +199,7 @@ func (r *plainReply) readBatch(fields *plainFields) {
 	if len(files) > 4 {
 		r.manifest(entries)
 	}
-	for _, raw := range files {
+	for index, raw := range files {
 		target := newPlainFields(plainObject(raw))
 		switch {
 		case target.has("code") && !target.has("content"):
@@ -152,12 +207,23 @@ func (r *plainReply) readBatch(fields *plainFields) {
 		case target.has("sections"):
 			r.outline(target)
 		case isString(target.peek("content")):
-			r.source(target, true)
+			r.source(target, index)
 		default:
 			r.linef("%s: %s", plainPath(plainString(target.take("path"))), plainJSON(target.rest()))
 			continue
 		}
 		r.detail("detail", target.rest())
+	}
+	// The entries repeat each target's size; a field beyond that is shown.
+	var extra []any
+	for index, raw := range entries {
+		if left := plainUnknown(plainObject(raw), "path", "bytes", "lines", "name_path", "section_count", "truncated", "code"); len(left) > 0 {
+			left["index"] = index
+			extra = append(extra, left)
+		}
+	}
+	if len(extra) > 0 {
+		r.linef("entries detail: %s", plainJSON(extra))
 	}
 }
 
@@ -298,7 +364,7 @@ func (r *plainReply) hit(hit *plainFields, rows *plainHitRows) {
 		rows.cut = true
 	}
 	if context, ok := hit.take("context").(string); ok {
-		r.contextRows(path, context, rows)
+		r.contextRows(path, line, context, source, hasSource, match, hasMatch, rows)
 	} else if hasSource {
 		for index, text := range strings.Split(source, "\n") {
 			r.linef("%s:%d:%s", path, line+int64(index), text)
@@ -325,10 +391,14 @@ func (r *plainReply) hit(hit *plainFields, rows *plainHitRows) {
 	}
 }
 
-// contextRows prints a hit's context window grep -C style: matched lines
-// with colons, the others with hyphens, lines already printed skipped and
-// a -- between windows that do not touch.
-func (r *plainReply) contextRows(path, context string, rows *plainHitRows) {
+// contextRows prints a hit's context window grep -C style, merged with the
+// hit's whole matched span: the handler bounds context around the line the
+// match starts on, so the lines of a multi-line match past that window come
+// from the hit's source lines. Matched lines use colons, the others
+// hyphens; lines already printed are skipped and a -- separates windows
+// that do not touch. A matched tail with no text available is reported.
+func (r *plainReply) contextRows(path string, line int64, context, source string, hasSource bool, match string, hasMatch bool, rows *plainHitRows) {
+	window := map[int64]string{}
 	for _, row := range strings.Split(strings.TrimSuffix(context, "\n"), "\n") {
 		numberText, text, _ := strings.Cut(row, "\t")
 		number, err := strconv.ParseInt(numberText, 10, 64)
@@ -336,6 +406,21 @@ func (r *plainReply) contextRows(path, context string, rows *plainHitRows) {
 			r.line(row)
 			continue
 		}
+		window[number] = text
+	}
+	if hasSource {
+		for index, text := range strings.Split(source, "\n") {
+			if _, shown := window[line+int64(index)]; !shown {
+				window[line+int64(index)] = text
+			}
+		}
+	}
+	numbers := make([]int64, 0, len(window))
+	for number := range window {
+		numbers = append(numbers, number)
+	}
+	slices.Sort(numbers)
+	for _, number := range numbers {
 		if rows.printed && rows.path == path && number <= rows.last {
 			continue
 		}
@@ -343,11 +428,17 @@ func (r *plainReply) contextRows(path, context string, rows *plainHitRows) {
 			r.line("--")
 		}
 		separator := "-"
-		if rows.matched[path+":"+numberText] {
+		if rows.matched[path+":"+strconv.FormatInt(number, 10)] {
 			separator = ":"
 		}
-		r.line(path + separator + strconv.FormatInt(number, 10) + separator + text)
+		r.line(path + separator + strconv.FormatInt(number, 10) + separator + window[number])
 		rows.path, rows.last, rows.printed = path, number, true
+	}
+	if !hasSource && hasMatch {
+		last := line + int64(strings.Count(match, "\n"))
+		if _, shown := window[last]; !shown {
+			r.linef("  match continues to line %d; its text past the context is not shown, read the file for it", last)
+		}
 	}
 }
 
@@ -444,7 +535,6 @@ func (r *plainReply) edit(fields *plainFields) {
 		r.generic(fields)
 		return
 	}
-	unknownDelta := r.findings.addDelta(fields.take("diagnostic_delta"))
 	fields.take("late_evidence_batches")
 	fields.take("preview_only")
 	replay := plainBool(fields.take("replayed_request"))
@@ -479,7 +569,6 @@ func (r *plainReply) edit(fields *plainFields) {
 	}
 	r.editExtras(fields)
 	r.verification(fields.take("verification"))
-	r.detail("diagnostic_delta detail", unknownDelta)
 }
 
 // plainGuard is one resulting document revision of an edit.
@@ -685,11 +774,34 @@ func (r *plainReply) workspaceOpen(fields *plainFields) {
 		}
 		r.line(text)
 	}
-	fields.take("service_limits")
-	// Recent commits are orientation an agent rarely acts on; a coverage
-	// limitation on them is still reported.
-	if commits := plainObject(fields.take("recent_commits")); commits != nil && commits["coverage"] != nil {
+	if limits, ok := fields.peek("service_limits").(map[string]any); ok {
+		fields.take("service_limits")
+		if left := plainUnknown(limits, "tool_call_timeout_ms"); len(left) > 0 {
+			r.linef("service limits detail: %s", plainJSON(left))
+		}
+	}
+	if commits, ok := fields.peek("recent_commits").(map[string]any); ok {
+		fields.take("recent_commits")
+		r.recentCommits(commits)
+	}
+}
+
+// recentCommits leaves the commit list out of a plain overview, as
+// orientation an agent rarely acts on, but reports a coverage limitation on
+// it and any field it does not know.
+func (r *plainReply) recentCommits(commits map[string]any) {
+	if commits["coverage"] != nil {
 		r.linef("recent commits coverage: %s", plainJSON(commits["coverage"]))
+	}
+	left := plainUnknown(commits, "commits", "coverage")
+	for _, raw := range plainList(commits["commits"]) {
+		if len(plainUnknown(plainObject(raw), "abbreviated_id", "subject")) > 0 {
+			left["commits"] = commits["commits"]
+			break
+		}
+	}
+	if len(left) > 0 {
+		r.linef("recent commits detail: %s", plainJSON(left))
 	}
 }
 
@@ -702,6 +814,11 @@ func (r *plainReply) topLevel(overview *plainFields) {
 		name := plainPath(plainString(entry["path"]))
 		if entry["kind"] == "directory" {
 			name += "/"
+		}
+		// A directory's file count and a file's kind are summarised away;
+		// any other field is kept beside the name.
+		if left := plainUnknown(entry, "path", "kind", "files"); len(left) > 0 {
+			name += plainJSON(left)
 		}
 		names = append(names, name)
 	}

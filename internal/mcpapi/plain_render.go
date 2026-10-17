@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,6 +142,13 @@ func (r *plainReply) render() {
 	r.envelope.take("guide")
 	data, isMap := r.envelope.take("data").(map[string]any)
 	fields := newPlainFields(data)
+	// A diagnostic delta is merged with the notice stream on every reply,
+	// whichever renderer handles the rest of it: a refusal, a batch or a
+	// tool without a dedicated renderer prints its findings the same way.
+	var unknownDelta map[string]any
+	if plainObject(fields.peek("diagnostic_delta")) != nil {
+		unknownDelta = r.findings.addDelta(fields.take("diagnostic_delta"))
+	}
 	switch {
 	case r.refused():
 		r.refusal(fields)
@@ -158,6 +166,7 @@ func (r *plainReply) render() {
 	default:
 		r.generic(fields)
 	}
+	r.detail("diagnostic_delta detail", unknownDelta)
 	r.detail("detail", fields.rest())
 	r.suffix()
 }
@@ -238,8 +247,12 @@ func (r *plainReply) suffix() {
 // and the request ID where support would need it.
 func (r *plainReply) status() {
 	envelope := r.envelope
-	if transaction := plainObject(envelope.take("transaction")); transaction != nil {
-		r.linef("transaction %s state=%s", plainString(transaction["id"]), plainString(transaction["state"]))
+	if transaction := newPlainFields(plainObject(envelope.take("transaction"))); len(transaction.values) > 0 {
+		text := fmt.Sprintf("transaction %s state=%s", plainString(transaction.take("id")), plainString(transaction.take("state")))
+		if left := transaction.rest(); len(left) > 0 {
+			text += " " + plainJSON(left)
+		}
+		r.line(text)
 	}
 	if plainString(envelope.take("idempotency")) == "replayed" && r.tool != "edit_apply" {
 		r.line("Replayed original receipt; this call made no new mutation")
@@ -260,23 +273,36 @@ func (r *plainReply) status() {
 }
 
 func (r *plainReply) evidence(value any) {
-	evidence := plainObject(value)
-	if evidence == nil {
-		return
-	}
+	evidence := newPlainFields(plainObject(value))
 	var ids []string
-	for _, id := range plainList(evidence["ids"]) {
+	for _, id := range plainList(evidence.take("ids")) {
 		ids = append(ids, plainString(id))
 	}
-	truncated := plainBool(evidence["truncated"])
-	if len(ids) == 0 && !truncated {
+	truncated := plainBool(evidence.take("truncated"))
+	left := evidence.rest()
+	if len(ids) == 0 && !truncated && len(left) == 0 {
 		return
 	}
 	text := "evidence: " + strings.Join(ids, ", ")
 	if truncated {
 		text += " (truncated)"
 	}
+	if len(left) > 0 {
+		text += " " + plainJSON(left)
+	}
 	r.line(text)
+}
+
+// plainUnknown is the part of a nested record outside the keys a renderer
+// prints or deliberately summarises, so a field added later still shows.
+func plainUnknown(value map[string]any, known ...string) map[string]any {
+	left := map[string]any{}
+	for key, item := range value {
+		if !slices.Contains(known, key) {
+			left[key] = item
+		}
+	}
+	return left
 }
 
 // next prints the recovery steps as one line of copyable calls.
@@ -414,10 +440,16 @@ func (r *plainReply) keyValues(fields *plainFields) {
 // incomplete, capped or skipping walk. A complete one says nothing new.
 func (r *plainReply) coverage(coverage map[string]any) {
 	complete, known := coverage["complete"].(bool)
-	if known && complete && !plainBool(coverage["capped"]) && len(plainList(coverage["skipped"])) == 0 {
-		return
+	clean := known && complete && !plainBool(coverage["capped"]) && len(plainList(coverage["skipped"])) == 0
+	unknown := plainUnknown(coverage, "complete", "files_considered", "files_read", "bytes_read", "skipped",
+		"skipped_count", "symlinks_skipped", "capped", "semantic")
+	switch {
+	case !clean:
+		r.linef("coverage incomplete: %s", plainJSON(coverage))
+	case len(unknown) > 0:
+		// Complete, but carrying a field this renderer does not know.
+		r.linef("coverage: %s", plainJSON(coverage))
 	}
-	r.linef("coverage incomplete: %s", plainJSON(coverage))
 }
 
 // batchEffect states what an operations list did before a refusal stopped
@@ -503,6 +535,9 @@ func (p *plainFindings) add(kind string, value any) {
 			p.resolve(finding.id)
 			continue
 		}
+		// A later active announcement wins over an earlier resolution: the
+		// finding is current, so it is no longer counted as resolved.
+		delete(p.resolved, finding.id)
 		if existing := p.byID[finding.id]; existing != nil && finding.id != "" {
 			p.merge(existing, finding)
 			continue
@@ -567,8 +602,8 @@ func (f *plainFinding) text() string {
 	if plainBool(fields.take("baseline_missing")) {
 		text += " (no baseline: new or pre-existing)"
 	}
-	if f.late {
-		text += " (" + f.lateLabel() + ")"
+	if label := f.label(); label != "" {
+		text += " (" + label + ")"
 	}
 	if left := fields.rest(); len(left) > 0 {
 		text += " " + plainJSON(left)
@@ -576,17 +611,29 @@ func (f *plainFinding) text() string {
 	return text
 }
 
-// lateLabel words a notice-stream finding. Its attribution is printed as
-// given; without one the finding is not claimed for this call.
-func (f *plainFinding) lateLabel() string {
-	label := "late finding"
-	if f.kind == "persisting" {
+// label words where a finding came from and who it is attributed to. A
+// notice-stream finding says so, and without an attribution it is not
+// claimed for this call. An attribution is printed whenever one was given,
+// including on a finding this call's delta also announced.
+func (f *plainFinding) label() string {
+	label := ""
+	switch {
+	case !f.late:
+	case f.kind == "persisting":
 		label = "still present"
-	} else if f.kind != "new" && f.kind != "" {
+	case f.kind == "new" || f.kind == "":
+		label = "late finding"
+	default:
 		label = "update kind=" + f.kind
 	}
 	if f.attribution == nil {
-		return label + "; not attributed to this call"
+		if f.late {
+			return label + "; not attributed to this call"
+		}
+		return label
+	}
+	if label != "" {
+		label += "; "
 	}
 	var parts []string
 	for _, key := range plainSortedKeys(f.attribution) {
@@ -597,7 +644,7 @@ func (f *plainFinding) lateLabel() string {
 		}
 		parts = append(parts, key+"="+plainScalar(value))
 	}
-	return label + "; attribution: " + strings.Join(parts, " ")
+	return label + "attribution: " + strings.Join(parts, " ")
 }
 
 // plainSeverity names an LSP severity and keeps any other value explicit.
