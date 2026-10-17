@@ -133,9 +133,8 @@ func newServeFlags(config *serviceConfig, stderr io.Writer) *flag.FlagSet {
 func newMCPFlags(profileName, socketPath *string, stderr io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet("huyang mcp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	// edit is the default because it is what a coding session uses; full
-	// adds the two language-server administration tools.
-	flags.StringVar(profileName, "profile", "edit", "fixed catalog: edit (default), full, orient, or experimental")
+	// full is the canonical coding profile; edit is its one-release alias.
+	flags.StringVar(profileName, "profile", "full", "fixed catalog: full (default), edit (alias), lean, orient, or experimental")
 	flags.StringVar(socketPath, "socket", defaultHuyangSocket(), "Huyang Unix control socket")
 	return flags
 }
@@ -147,7 +146,7 @@ func runMCPAdapter(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: huyang mcp [--profile edit|full|orient|experimental] [--socket PATH]")
+		return errors.New("usage: huyang mcp [--profile full|edit|lean|orient|experimental] [--socket PATH]")
 	}
 	profile, err := modernOnlyProfile(profileName)
 	if err != nil {
@@ -626,9 +625,9 @@ func (s *huyangService) prepareHTTP() error {
 	s.httpToken = token
 	s.httpTokenFile = tokenFile
 	mux := http.NewServeMux()
-	profiles := map[string]mcpapi.Profile{
-		"/mcp": mcpapi.ProfileFull, "/mcp/orient": mcpapi.ProfileOrient,
-		"/mcp/edit": mcpapi.ProfileEdit,
+	profiles := map[string]mcpapi.Profile{"/mcp": mcpapi.ProfileFull}
+	for _, profile := range append(append([]mcpapi.Profile(nil), mcpapi.ProfileOrder...), mcpapi.ProfileExperimental) {
+		profiles["/mcp/"+string(profile)] = profile
 	}
 	for route, profile := range profiles {
 		// An HTTP client announces no session; its calls are spooled under
@@ -755,7 +754,7 @@ func listenPrivateUnix(path string) (*net.UnixListener, os.FileInfo, error) {
 func modernOnlyProfile(name string) (mcpapi.Profile, error) {
 	profile := mcpapi.Profile(name)
 	switch profile {
-	case mcpapi.ProfileFull, mcpapi.ProfileOrient, mcpapi.ProfileEdit:
+	case mcpapi.ProfileFull, mcpapi.ProfileOrient, mcpapi.ProfileEdit, mcpapi.ProfileLean:
 		return profile, nil
 	case mcpapi.ProfileExperimental:
 		// The frozen surface plus whatever is being designed. A caller asks

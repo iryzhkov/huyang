@@ -294,9 +294,8 @@ func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error
 	return t.base.RoundTrip(clone)
 }
 
-// The adapter defaults to the edit profile: a coding session pays for the
-// language-server administration tools only when it asks for full.
-func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
+// The adapter defaults to the canonical full coding profile.
+func TestHuyangMCPAdapterDefaultsToFullAndProxiesService(t *testing.T) {
 	base := t.TempDir()
 	socketPath := filepath.Join(base, "control.sock")
 	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
@@ -320,7 +319,7 @@ func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireProfileCatalog(t, "default adapter", listed.Tools, mcpapi.ProfileEdit)
+	requireProfileCatalog(t, "default adapter", listed.Tools, mcpapi.ProfileFull)
 	_ = session.Close()
 	_ = toAdapterWriter.Close()
 	_ = fromAdapterReader.Close()
@@ -372,7 +371,7 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after service restart: %v", err)
 	}
-	requireProfileCatalog(t, "reconnected adapter", listed.Tools, mcpapi.ProfileEdit)
+	requireProfileCatalog(t, "reconnected adapter", listed.Tools, mcpapi.ProfileFull)
 
 	stopSecond()
 	_, stopSecond = startTestHuyangService(t, stateDir, socketPath, "")
@@ -380,7 +379,7 @@ func TestHuyangMCPAdapterReconnectsAcrossServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same adapter session after second service restart: %v", err)
 	}
-	requireProfileCatalog(t, "twice-reconnected adapter", listed.Tools, mcpapi.ProfileEdit)
+	requireProfileCatalog(t, "twice-reconnected adapter", listed.Tools, mcpapi.ProfileFull)
 }
 
 func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
@@ -399,7 +398,11 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", response.StatusCode)
 	}
 
-	for route, profile := range map[string]mcpapi.Profile{"/mcp": mcpapi.ProfileFull, "/mcp/orient": mcpapi.ProfileOrient, "/mcp/edit": mcpapi.ProfileEdit} {
+	for route, profile := range map[string]mcpapi.Profile{
+		"/mcp": mcpapi.ProfileFull, "/mcp/full": mcpapi.ProfileFull,
+		"/mcp/edit": mcpapi.ProfileEdit, "/mcp/lean": mcpapi.ProfileLean,
+		"/mcp/orient": mcpapi.ProfileOrient, "/mcp/experimental": mcpapi.ProfileExperimental,
+	} {
 		httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 		client := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
 		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
@@ -408,11 +411,13 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s connect: %v", route, err)
 		}
-		listed, err := session.ListTools(context.Background(), nil)
-		if err != nil {
-			t.Fatalf("%s list: %v", route, err)
+		assertProfileCatalog(t, session, profile)
+		if profile == mcpapi.ProfileLean {
+			refused := callModern(t, session, "search", map[string]any{"query": "a", "mode": "references"})
+			if refused["code"] != "invalid_arguments" {
+				t.Fatalf("lean HTTP validation = %#v", refused)
+			}
 		}
-		requireProfileCatalog(t, route, listed.Tools, profile)
 		_ = session.Close()
 	}
 }
@@ -420,7 +425,8 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 // requireProfileCatalog fails unless tools are exactly the catalog of
 // profile. The expectation comes from the registry rather than a hard-coded
 // count, so a deliberate catalog change cannot leave these route and adapter
-// checks behind; the frozen catalog fixtures pin the catalog itself.
+// checks behind; the frozen catalog fixtures pin the catalog itself. Schemas,
+// descriptions and annotations are checked here too, for every transport.
 func requireProfileCatalog(t *testing.T, label string, tools []*mcp.Tool, profile mcpapi.Profile) {
 	t.Helper()
 	got := make([]string, 0, len(tools))
@@ -434,7 +440,38 @@ func requireProfileCatalog(t *testing.T, label string, tools []*mcp.Tool, profil
 	sort.Strings(got)
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
-		t.Errorf("%s catalog = %v, want the %d tools of the %s profile: %v", label, got, len(want), profile, want)
+		t.Fatalf("%s catalog = %v, want the %d tools of the %s profile: %v", label, got, len(want), profile, want)
+	}
+	expected := map[string]mcpapi.ToolDescriptor{}
+	for _, descriptor := range mcpapi.Catalog(profile) {
+		expected[descriptor.Name] = descriptor
+	}
+	if len(tools) != len(expected) {
+		t.Fatalf("%s lists %d tools, want %d", profile, len(tools), len(expected))
+	}
+	for _, tool := range tools {
+		descriptor, ok := expected[tool.Name]
+		if !ok {
+			t.Fatalf("%s advertises unexpected %s", profile, tool.Name)
+		}
+		actualSchema, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedSchema, err := json.Marshal(descriptor.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(actualSchema) != string(expectedSchema) || tool.Description != descriptor.Description {
+			t.Fatalf("%s/%s actual schema or description differs: %s, want %s", profile, tool.Name, actualSchema, expectedSchema)
+		}
+		if tool.Annotations == nil || tool.Annotations.ReadOnlyHint != descriptor.ReadOnly ||
+			tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint != descriptor.Destructive ||
+			tool.Annotations.IdempotentHint != descriptor.Idempotent ||
+			tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
+			t.Fatalf("%s/%s annotations differ: %+v", profile, tool.Name, tool.Annotations)
+		}
+		delete(expected, tool.Name)
 	}
 }
 

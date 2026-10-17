@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -698,12 +699,22 @@ func TestDirectModeRejectsMalformedAndAcceptsLargeArguments(t *testing.T) {
 	}
 }
 
+var profileBudgetOutput = flag.String("profile-budget-output", "", "write actual annotated tools/list token measurements as JSON")
+
 func TestModernCatalogTokenBudgets(t *testing.T) {
 	encoding, err := tiktoken.GetEncoding("cl100k_base")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, profile := range mcpapi.ProfileOrder {
+	type measurement struct {
+		Profile mcpapi.Profile `json:"profile"`
+		Tools   int            `json:"tools"`
+		Bytes   int            `json:"bytes"`
+		Tokens  int            `json:"cl100k_base_tokens"`
+		PerTool map[string]int `json:"per_tool_tokens"`
+	}
+	var measurements []measurement
+	for _, profile := range append(append([]mcpapi.Profile(nil), mcpapi.ProfileOrder...), mcpapi.ProfileExperimental) {
 		session, cleanup := connectOfficialClient(t, profile, newDirectWorkspaces(t.TempDir()))
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil {
@@ -721,6 +732,12 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 			t.Fatal(err)
 		}
 		totalTokens := len(encoding.Encode(string(compact), nil, nil))
+		measured := measurement{Profile: profile, Tools: len(listed.Tools), Bytes: len(compact), Tokens: totalTokens, PerTool: map[string]int{}}
+		// Approximately 0.7K tokens, including the SDK annotations and dialect.
+		// A tokenizer measurement is authoritative; byte/4 is not a substitute.
+		if profile == mcpapi.ProfileLean && totalTokens > 800 {
+			t.Errorf("lean tools/list = %d tokens, budget 800", totalTokens)
+		}
 		t.Logf("profile=%s tools=%d bytes=%d lines=%d cl100k_base_tokens=%d",
 			profile, len(listed.Tools), len(compact), strings.Count(string(pretty), "\n")+1, totalTokens)
 		for _, tool := range listed.Tools {
@@ -729,9 +746,21 @@ func TestModernCatalogTokenBudgets(t *testing.T) {
 				cleanup()
 				t.Fatal(err)
 			}
+			measured.PerTool[tool.Name] = len(encoding.Encode(string(encoded), nil, nil))
 			t.Logf("profile=%s tool=%s bytes=%d cl100k_base_tokens=%d",
 				profile, tool.Name, len(encoded), len(encoding.Encode(string(encoded), nil, nil)))
 		}
+		measurements = append(measurements, measured)
 		cleanup()
+	}
+	if *profileBudgetOutput != "" {
+		artifact := map[string]any{"source_revision": os.Getenv("HUYANG_CATALOG_SOURCE_REVISION"), "tokenizer": "cl100k_base (tiktoken-go)", "wire": "actual SDK tools/list tools array, compact JSON including annotations", "lean_token_limit": 800, "profiles": measurements}
+		encoded, err := json.MarshalIndent(artifact, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(*profileBudgetOutput, append(encoded, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

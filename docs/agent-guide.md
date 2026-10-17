@@ -1,7 +1,9 @@
 # Agent guide: the cheapest correct Huyang call
 
 Huyang is the editor an agent should reach for by default, including for a one-line change
-in a file it already knows. This page names the call to make for each common operation and
+in a file it already knows. `full` is the default coding profile; `edit` is its exact alias
+for one release. The table and workflow advice below describe `full` unless stated otherwise.
+This page names the call to make for each common operation and
 what it costs, so no experimenting is needed. Costs are `cl100k_base` tokens measured by
 `bench/agent-efficiency` on the Go fixture after the efficiency session of 2026-09-13; the
 built-in column models the harness's Read/Edit/Write/Grep tools on the same fixture. The
@@ -86,6 +88,38 @@ What the table says:
   the workspace's commands (declared in `.huyang.toml` or detected from `go.mod`,
   `pyproject.toml`, `package.json`): against the staged sandbox, only when the root is
   trusted, and a failing check or test fails the preparation.
+
+## Lean profile
+
+Use `huyang mcp --profile lean` or HTTP `/mcp/lean` for the small-model surface. It has
+three tools with complete closed schema overrides; the server validates the selected
+schema before dispatching to the same handlers as `full`:
+
+- `read {root, target:{path}, start_line, end_line, max_lines, view}`; `view` is `source`
+  or `outline`. The reply retains the complete `revision_id` and truncation evidence.
+- `search {root, query, mode, paths, context_lines, limit}`; `mode` is `literal` (default)
+  or `regex`, `limit` is 1–200 and context is capped at 20 lines with a warning. Empty
+  query with paths returns M2's bounded file listing.
+- `edit_apply {root, operation:{kind, path, ...}}`; kinds are `replace_literal` (`old`,
+  `new`, optional `expected_count`), `create_file` (`content`, optional `replace` and
+  `revision_id`) and `delete_file` (`revision_id` or `expected_sha256`). Path is required.
+
+Read a path, copy its `revision_id` into a delete or overwrite, and pass the repository
+`root` on the write. Literal edits retain exact-text/count matching and revision-bound
+application. Existing-path creation refuses and returns a copyable overwrite guard;
+`replace:true` without a revision and stale revisions refuse without changing bytes.
+No root is inferred for a relative mutation from a preceding read. Absolute document paths
+still use the exact-document workspace path. Lean has no batches, handles as inputs,
+semantic search, plans, formatter flags or response-mode switches; use `full` for these.
+JSON envelopes and diagnostic evidence remain intact; the plain-reply change is separate.
+Some shared `next` hints may name full-only tools; reconnect with `full` to use those.
+
+The budget harness measures actual SDK tools/list, including annotations, with cl100k_base;
+the target is about 0.7K tokens and the enforced ceiling is 800. The optional `symbol_find`
+was omitted to leave room for mutation guards. See [runtime commands](m7-profile-validation.md).
+Harness source owners select explicit connections: `huyang_full` for Claude/Codex and
+OpenCode's non-Ollama models; OpenCode provider ID `ollama` selects `huyang_lean` per request
+with codemode disabled. Harness configuration and installation are separate from this core.
 
 ## Files outside a repository
 
@@ -354,8 +388,7 @@ Keep both transport representations for compatible consumers and deduplicate for
   start in the background when it is opened, so this is rare after the first call. A
   language that is incidental to the project (not its largest source language, under a
   fifth of its source files and under a hundred files) is reported `on_demand` by
-  `language_server_status` (a `full`-profile tool; the default `edit` profile does not
-  carry it): its server starts on the first call that touches one of its files, which may
+  `language_server_status` (available in `full`, its `edit` alias and `experimental`): its server starts on the first call that touches one of its files, which may
   then answer `lsp_starting` once, or at once when the status call names it in `languages`.
 - Huyang installs no language servers or parsers. A language with none answers
   `lsp_not_configured` (or `lsp_not_startable` when the configured command is missing);

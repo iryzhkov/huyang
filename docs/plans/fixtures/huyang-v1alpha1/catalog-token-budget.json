@@ -1,0 +1,98 @@
+{
+  "lean_token_limit": 800,
+  "profiles": [
+    {
+      "profile": "full",
+      "tools": 13,
+      "bytes": 20847,
+      "cl100k_base_tokens": 4290,
+      "per_tool_tokens": {
+        "change_plan": 1042,
+        "diagnostics": 148,
+        "edit_apply": 708,
+        "evidence_get": 143,
+        "language_server_setup": 157,
+        "language_server_status": 161,
+        "navigate": 279,
+        "read": 555,
+        "revision_diff": 174,
+        "search": 474,
+        "symbol_find": 164,
+        "workspace_inspect": 126,
+        "workspace_open": 169
+      }
+    },
+    {
+      "profile": "orient",
+      "tools": 8,
+      "bytes": 9855,
+      "cl100k_base_tokens": 2053,
+      "per_tool_tokens": {
+        "diagnostics": 148,
+        "evidence_get": 143,
+        "navigate": 279,
+        "read": 555,
+        "search": 474,
+        "symbol_find": 164,
+        "workspace_inspect": 126,
+        "workspace_open": 169
+      }
+    },
+    {
+      "profile": "edit",
+      "tools": 13,
+      "bytes": 20847,
+      "cl100k_base_tokens": 4290,
+      "per_tool_tokens": {
+        "change_plan": 1042,
+        "diagnostics": 148,
+        "edit_apply": 708,
+        "evidence_get": 143,
+        "language_server_setup": 157,
+        "language_server_status": 161,
+        "navigate": 279,
+        "read": 555,
+        "revision_diff": 174,
+        "search": 474,
+        "symbol_find": 164,
+        "workspace_inspect": 126,
+        "workspace_open": 169
+      }
+    },
+    {
+      "profile": "lean",
+      "tools": 3,
+      "bytes": 2397,
+      "cl100k_base_tokens": 541,
+      "per_tool_tokens": {
+        "edit_apply": 222,
+        "read": 166,
+        "search": 153
+      }
+    },
+    {
+      "profile": "experimental",
+      "tools": 13,
+      "bytes": 33468,
+      "cl100k_base_tokens": 6621,
+      "per_tool_tokens": {
+        "change_plan": 1462,
+        "diagnostics": 335,
+        "edit_apply": 866,
+        "evidence_get": 248,
+        "language_server_setup": 262,
+        "language_server_status": 266,
+        "navigate": 466,
+        "read": 1058,
+        "revision_diff": 291,
+        "search": 579,
+        "symbol_find": 269,
+        "workspace_inspect": 255,
+        "workspace_open": 274
+      }
+    }
+  ],
+  "source_revision": "5a52fad79d17210e3788f407b58053a4ec18f14b",
+  "tokenizer": "cl100k_base (tiktoken-go)",
+  "wire": "actual SDK tools/list tools array, compact JSON including annotations"
+}

@@ -4,11 +4,11 @@ Huyang is a local transactional semantic workspace for coding agents. It combine
 long-lived Go service with isolated Neovim providers so MCP clients can navigate, edit,
 verify, and recover changes against an explicit workspace revision.
 
-The MCP surface is `huyang.workspace/v1alpha1`. It has three frozen profiles: `full` (13
-tools), `edit` (11 tools, the default of `huyang mcp`) and `orient` (8 tools). A fourth,
-`experimental`, is `full` plus the input shapes still being designed; a caller asks for it
-by name. There is no legacy or compatibility surface: the embedded Neovim provider is the
-only backend and the tools below are the only tools.
+The MCP surface is `huyang.workspace/v1alpha1`. `full` is the canonical coding profile
+and the default of `huyang mcp` (13 tools). `edit` is an exact alias for one release.
+`orient` is the read-only profile (8 tools); `lean` offers three tools with smaller input
+schemas for small and local models. `experimental` extends `full` with input shapes still
+being designed. The embedded Neovim provider is the only semantic backend.
 
 ## What Huyang provides
 
@@ -35,31 +35,35 @@ an agent's instructions. What the diagnostic evidence behind edit verdicts and t
 
 ## Tools
 
-The `full` profile lists all 13 tools in this order. `edit` and `orient` are fixed subsets
-of it.
+The `full` profile lists all 13 tools below. `edit` has exactly the same tools, schemas,
+descriptions, ordering and annotations. `orient` and `lean` are fixed subsets.
 
-Orientation, in every profile (`full`, `orient`, `edit`, and `experimental`):
+Orientation, in `full`, `edit`, `orient` and `experimental`:
 
 - `workspace_open`, `workspace_inspect`, `search`, `symbol_find`, `navigate`, `read`,
   `diagnostics`, `evidence_get`.
 
-Editing and verification, in `full` and `edit`:
+Editing and preparation, in `full`, `edit` and `experimental`:
 
 - `edit_apply`, `change_plan`, `revision_diff`.
 
-Language-server administration, in `full` (and `experimental`) only. A session on the
-default `edit` profile does not see these two tools:
+Language-server administration, in `full`, its `edit` alias and `experimental`:
 
 - `language_server_status`, `language_server_setup`.
 
 `language_server_setup` only restarts the provider (`action=restart`); Huyang does not
 install language servers or parsers (see [Requirements](#requirements)).
 
-That gives 13 tools in `full`, 8 in `orient`, and 11 in `edit`. The service refuses to start
-if the registered catalog differs from those counts, and every tool declares the scheduler
-class it runs under. The `experimental` profile adds a few experimental arguments to `full`
-and no tools of its own; it is not a contract. The contract is described
-in [docs/plans/huyang-tools-v1alpha1.md](docs/plans/huyang-tools-v1alpha1.md).
+`lean` lists only `read`, `search` and `edit_apply`. Its closed schemas offer path/window
+reads, literal/regex search and single-file literal/create/delete edits. Revision and hash
+guards, diagnostic evidence and JSON reply envelopes use the same handlers as `full`.
+Its annotated tools/list budget is 800 cl100k tokens (target about 0.7K); actual measurements
+come from `TestModernCatalogTokenBudgets`, not a bytes-to-tokens estimate.
+
+The service checks fixed counts (13 in `full` and `edit`, 8 in `orient`, 3 in `lean`).
+`experimental` retains prepared-revision selectors, invariants and response controls;
+it adds no tools after M6. Profiles select presentation, not permissions. See the
+[contract](docs/plans/huyang-tools-v1alpha1.md) and [agent guide](docs/agent-guide.md).
 
 The debugger tools (`debug_session`, `debug_breakpoints`, `debug_control`, `debug_inspect`),
 the `debug` and `debugger` profiles, the `/mcp/debug` route and the nvim-dap dependency were
@@ -116,9 +120,12 @@ client at all, because the renderer that puts an envelope on the wire did not co
 
 The suite includes a contract walk that calls every operation kind and navigation relation
 the catalog advertises. An advertised value with no implementation behind it fails there.
-The three frozen catalogs and the experimental one are also compared byte for byte against
+The four frozen catalogs (including the `edit` alias) and the experimental one are compared byte for byte against
 `docs/plans/fixtures/huyang-v1alpha1/catalog-*.json`; a deliberate schema change is adopted
-with `go test ./internal/mcpapi -run TestFrozenCatalog -update` and reviewed as a diff.
+with `go test ./internal/mcpapi -run '^TestFrozenCatalogIsUnchanged$' -update` and reviewed
+as a diff. This regenerates all profile catalogs and `contract-schema.json` from actual
+schemas. `-catalog-fixture-dir DIR` writes artifacts for guarded import; see
+[the M7 runtime commands](docs/m7-profile-validation.md).
 
 The sole shipped executable is `bin/huyang`.
 
@@ -136,7 +143,7 @@ Start the long-lived service:
 |---|---|---|
 | `--socket PATH` | `$HUYANG_SOCKET`, else `<runtime dir>/huyang/control.sock` | Private Unix control socket, mode 0600. The runtime directory is `$XDG_RUNTIME_DIR` when it is set to an absolute path, else `/run/user/<uid>` when that is a real directory (not a symbolic link) owned by the current user and not group- or world-writable, else `$TMPDIR/huyang-<uid>`. |
 | `--state-dir PATH` | `$HUYANG_STATE_DIR`, else `$XDG_STATE_HOME/huyang`, else `~/.local/state/huyang` | Durable service state directory, mode 0700. |
-| `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Routes are `/mcp` (`full`), `/mcp/orient` and `/mcp/edit`; there is no route for `experimental`. Every request needs `Authorization: Bearer <token>`. The transport is stateless. |
+| `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Fixed routes are `/mcp/full`, `/mcp/edit`, `/mcp/lean`, `/mcp/orient` and `/mcp/experimental`; `/mcp` aliases `full`. Every request needs `Authorization: Bearer <token>`. The transport is stateless. |
 | `--pprof LOOPBACK:PORT` | unset | Optional `net/http/pprof` listener behind the same bearer token, for heap and goroutine profiles of the live service. |
 | `--provider-quota N` | 4 | Maximum concurrent provider-backed jobs. |
 | `--max-providers N` | 4 | Maximum live providers, including canonical and sandbox providers. |
@@ -171,7 +178,7 @@ Connect an MCP client through the stdio adapter:
 ./bin/huyang mcp --profile full
 ```
 
-`huyang mcp` accepts `--profile edit|full|orient|experimental` (default `edit`) and
+`huyang mcp` accepts `--profile full|edit|lean|orient|experimental` (default `full`) and
 `--socket PATH` (default as for `serve`, derived the same way, so the adapter finds the
 service's socket even when a harness starts it without `XDG_RUNTIME_DIR`). It refuses any
 other profile name. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
@@ -339,7 +346,7 @@ before restarting the service that agents are using.
 
 Wait for `$XDG_RUNTIME_DIR/huyang/control.sock` to reappear, then confirm with a
 `workspace_open` and a `workspace_inspect` call; a session on the `full` profile can also
-call `language_server_status`, which the default `edit` profile does not carry. On the first start after an upgrade
+call `language_server_status` (also present in the `edit` alias). On the first start after an upgrade
 from a pre-S20b build the service migrates the receipts out of `registry.json` and splits
 the plan files into per-plan records; it logs the counts it kept and dropped.
 

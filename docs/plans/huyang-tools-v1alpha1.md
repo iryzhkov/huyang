@@ -26,9 +26,9 @@ choice for the new default.
 The complete modern coding catalog is 13 tools: 11 shared orientation/editing tools and two
 language-server administration tools added after the S00 freeze. It was 19 until the four
 debugging tools, `verify_run` and `code_actions` were removed on 2026-10-17. `full` carries
-all 13; `huyang mcp` defaults to
-`edit`, and a fixed `orient` profile reduces context further when an orchestrator already
-knows the session's job. Profiles filter presentation only; they are not permissions or
+all 13; `huyang mcp` defaults to `full`, and `edit` is its exact alias for one release.
+`orient` retains read-only discovery and `lean` offers three tools with closed, smaller
+schemas for small models. Profiles filter presentation only; they are not permissions or
 separate implementations. A large-change plan is part of editing, not a separate mode.
 
 ## Design rules
@@ -90,16 +90,27 @@ from the model-facing roster. The adapter releases its lease on clean disconnect
 
 - `orient`: `workspace_open`, `workspace_inspect`, `search`, `symbol_find`, `navigate`,
   `read`, `diagnostics`, `evidence_get`.
-- `edit`: the orientation foundation plus `edit_apply`, `change_plan` and
-  `revision_diff`.
-- `full`: all 13 tools. It is the only frozen profile that carries
-  `language_server_status` and `language_server_setup`.
+- `full`: all 13 tools, including `language_server_status` and `language_server_setup`.
+  It is the canonical coding profile and startup default.
+- `edit`: exact alias of `full` for one release, including tool order, schemas,
+  descriptions, annotations and discovery behavior.
+- `lean`: `read`, `search`, `edit_apply` with complete per-profile input overrides.
+  `read` accepts only `root`, `target:{path}`, `start_line`, `end_line`, `max_lines` and
+  `view:source|outline`. `search` accepts `root`, `query`, `mode:literal|regex`, `paths`,
+  `context_lines`, `limit`. `edit_apply` accepts `root` and one `operation` with a required
+  `path` and kind `replace_literal|create_file|delete_file`; its fields are `old`, `new`,
+  `expected_count`, `content`, `replace`, `revision_id`, `expected_sha256`.
+  Full-only arguments and operation kinds are refused by the transport schema validator.
+  Handler guards still enforce literal count/exact bytes, missing-target creation,
+  overwrite revision and delete revision/hash preconditions. Read replies retain copyable
+  revisions. The optional `symbol_find` is omitted for the approximately 0.7K-token target
+  (800-token annotated tools/list ceiling).
 - `experimental`: `full` plus the arguments still being designed. It carries no tools of
   its own since `execution_graph` and `path_explain` were removed. It is opt-in by name
   and is not a contract.
 
 The `debug` and `debugger` profiles were removed with the debugger on 2026-10-17. The
-`huyang mcp` default is `edit`.
+`huyang mcp` default is `full`.
 
 The profile is selected by a fixed server startup argument or HTTP endpoint, not a custom MCP
 negotiation. Switching profile is a client/session boundary, never a hidden server-side mode
@@ -902,10 +913,10 @@ durability protocol when the context cannot be confused with Git.
    `syntax_query` tool.
 2. Hover remains `navigate(relation="hover")`; no overlapping `symbol_inspect` is added.
 3. Search's compact fallback is the fixed file-grouped rendering specified above.
-4. Portable stdio launch is `huyang mcp --profile edit|full|orient|experimental`,
-   defaulting to `edit` (as amended; the S00 text said `full|orient|edit|debug` defaulting
-   to `full`). Streamable HTTP routes are `/mcp`, `/mcp/orient` and `/mcp/edit`, with `/mcp`
-   equal to `full`; `/mcp/debug` was removed with the debugger. These are fixed catalogs,
+4. Portable stdio launch is `huyang mcp --profile full|edit|lean|orient|experimental`,
+   defaulting to `full`. Streamable HTTP exposes `/mcp/<profile>` for all five names;
+   `/mcp` also serves `full`, and `/mcp/edit` is identical to `/mcp/full` for one release.
+   `/mcp/debug` was removed with the debugger. These are fixed catalogs,
    not protocol negotiation. There is no legacy endpoint; administration beyond the two
    language-server tools remains CLI and configuration.
 5. (Removed 2026-10-17 with the debugger: the debugger-evaluate side-effect policy.)
@@ -1654,3 +1665,39 @@ Counts: 13 tools in `full`, 8 in `orient`, 11 in `edit`; the experimental profil
 plus experimental arguments. The catalog fixtures are regenerated, `catalog-experimental.json`
 loses the two tools and the invariant kind, and `contract-schema.json` moves to
 `fixture_version` `huyang.tools/v1alpha1-m6`. `docs/execution-contract.md` is deleted.
+
+### 2026-10-17: canonical full, edit alias and lean schemas (amendment 7, M7)
+
+`full` becomes the coding default. `edit` is retained for one release as an exact alias:
+same tools/list names, order, input schemas, descriptions, annotations and handler paths,
+including language-server status/restart. Pin coding clients to `--profile full`.
+`orient` remains useful for read-only discovery. `experimental` remains separate because
+prepared-revision selectors, invariants and response controls still require an opt-in
+contract after M6 removed its execution tools; removing that scaffolding would remove
+surviving features outside this milestone.
+
+`lean` adds three closed per-profile schema overrides as specified under workflow
+profiles. Overrides are used both for discovery and strict server validation before
+dispatch, never as an alternate write path. Literal/count guards, overwrite/delete
+revision checks, create-if-missing semantics, diagnostic evidence, resource caps and
+trusted sandbox preparation remain unchanged. Relative project mutations still need an
+explicit root or workspace; a prior read does not authorize an implicit mutation.
+Copyable document revision guards remain in read/edit/refusal JSON envelopes.
+
+HTTP exposes each exact profile at `/mcp/full`, `/mcp/edit`, `/mcp/lean`,
+`/mcp/orient` and `/mcp/experimental`; `/mcp` remains an alias of full.
+Descriptions are shortened without changing the remaining input vocabulary.
+
+All five catalog fixtures and the contract fixture must be regenerated deliberately.
+The generator now derives the contract's catalog names and actual per-profile input
+schemas from descriptors, replacing stale hand-maintained shapes and rules. The fixture
+version becomes `huyang.tools/v1alpha1-m7`. The token harness measures real annotated SDK
+tools/list using cl100k_base, with an 800-token ceiling for lean and a source-revision
+tagged artifact. Source preparation leaves stale M4–M6 fixture bytes untouched until
+Chaldea generation and guarded import; see [runtime commands](../m7-profile-validation.md).
+
+JSON mode and current reply envelopes remain the default. The M8 plain renderer is a
+separate change; M7 does not reinterpret experimental response controls or receipts.
+The former `docs/execution-contract.md` was deleted in M6 and is not recreated.
+Its surviving diagnostic guarantees in [the diagnostic contract](../diagnostics-contract.md)
+are preserved.
