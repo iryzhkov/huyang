@@ -18,8 +18,10 @@ fake.create = function(config)
     if fail_create then error("launch failed") end
     if nested then local fn = nested; nested = nil; fn() end
     next_id = next_id + 1
-    local client = { id = next_id, name = config.name, initialized = true,
-        requests = {}, attached_buffers = {}, flags = {}, progress = { pending = {} } }
+    local client = { id = next_id, name = config.name, initialized = true, config = config,
+        requests = {}, attached_buffers = {}, flags = {}, progress = { pending = {} },
+        handlers = { ["textDocument/publishDiagnostics"] = function() end },
+        supports_method = function() return false end }
     callbacks[client.id] = config.on_exit
     function client:stop()
         self.stopping = true
@@ -34,7 +36,10 @@ package.loaded["vim.lsp.client"] = fake
 vim.lsp.get_clients = function(filter)
     local out = {}
     for _, client in pairs(live) do
-        if not filter or not filter.bufnr or client.attached_buffers[filter.bufnr] then out[#out + 1] = client end
+        if (not filter or not filter.bufnr or client.attached_buffers[filter.bufnr])
+            and (not filter or not filter.name or client.name == filter.name) then
+            out[#out + 1] = client
+        end
     end
     table.sort(out, function(a,b) return a.id < b.id end)
     return out
@@ -72,9 +77,12 @@ assert(live[a.id] and not live[b.id] and live[c.id] and peak == 2, "LRU reuse or
 
 reset(1)
 a = start("a")
+local buf = vim.api.nvim_create_buf(false, true)
+a.attached_buffers[buf] = true
 local co = coroutine.create(function()
     limits.begin_request()
-    vim.lsp.get_clients()
+    limits.touch_buffer(buf)
+    vim.lsp.get_clients({ bufnr = buf })
     coroutine.yield()
     limits.end_request()
 end)
@@ -83,11 +91,97 @@ denied(function() start("busy") end)
 assert(live[a.id], "active caller lost server")
 assert(coroutine.resume(co))
 assert(start("replacement") and not live[a.id], "release did not unpin server")
+vim.api.nvim_buf_delete(buf, { force = true })
+
+-- A recently used server survives enumeration regardless of client ID order.
+-- Run the real baseline collector too: it visits every loaded workspace buffer.
+local edit = require("huyang.edit")
+for _, scan in ipairs({ "all", "name", "buffer", "raw", "baseline" }) do
+    reset(3)
+    local buffers = {}
+    for i, ft in ipairs({ "go", "sh", "c" }) do
+        local bnr = vim.api.nvim_create_buf(false, false)
+        vim.api.nvim_buf_set_name(bnr, vim.fn.getcwd() .. "/huyang-limit-unit-" .. i .. "." .. ft)
+        vim.bo[bnr].filetype = ft
+        vim.bo[bnr].modified = false
+        buffers[i] = bnr
+    end
+    local go = start("gopls")
+    local bash = start("bashls")
+    local clang = start("clangd")
+    for i, client in ipairs({ go, bash, clang }) do client.attached_buffers[buffers[i]] = true end
+    co = coroutine.create(function()
+        limits.begin_request()
+        limits.touch_buffer(buffers[1])
+        limits.end_request()
+        limits.begin_request()
+        if scan == "all" then vim.lsp.get_clients()
+        elseif scan == "name" then
+            vim.lsp.get_clients({ name = "gopls" })
+            vim.lsp.get_clients({ name = "bashls" })
+            vim.lsp.get_clients({ name = "clangd" })
+        elseif scan == "buffer" then
+            for _, bnr in ipairs(buffers) do vim.lsp.get_clients({ bufnr = bnr }) end
+        elseif scan == "raw" then
+            for _, bnr in ipairs(buffers) do limits.list_clients({ bufnr = bnr }) end
+        else edit.diagnostic_evidence({ baseline = true, wait_ms = 0 }) end
+        coroutine.yield()
+        limits.end_request()
+    end)
+    assert(coroutine.resume(co))
+    assert(start("rust_analyzer") and not live[bash.id] and live[go.id] and live[clang.id],
+        scan .. " enumeration changed recency or pinned an idle client")
+    assert(start("lua_ls") and not live[clang.id] and live[go.id],
+        scan .. " enumeration lost recently used gopls")
+    assert(coroutine.resume(co))
+    for _, bnr in ipairs(buffers) do vim.api.nvim_buf_delete(bnr, { force = true }) end
+end
+
+-- Loading a new language at capacity must survive the real diagnostic
+-- collector's all-client reuse scan and FileType replay in one tool request.
+reset(2)
+local scratch = (vim.env.TMPDIR or (vim.fn.stdpath("cache") .. "/huyang-limits"))
+    .. "/limits-" .. vim.fn.getpid()
+vim.fn.mkdir(scratch, "p")
+local path = scratch .. "/new.huyangunit"
+vim.fn.writefile({ "new language" }, path)
+buf = vim.fn.bufadd(path)
+vim.fn.bufload(buf)
+vim.bo[buf].filetype = "huyangunit"
+local go = start("gopls", { filetypes = { "go" } })
+local bash = start("bashls", { filetypes = { "sh" } })
+local saved_enabled = vim.lsp._enabled_configs
+vim.lsp.config("huyang_limit_unit_new", { cmd = { "sh" }, filetypes = { "huyangunit" } })
+vim.lsp._enabled_configs = { huyang_limit_unit_new = {} }
+local fresh
+local new_group = vim.api.nvim_create_augroup("huyang_limit_new_language", {})
+vim.api.nvim_create_autocmd("FileType", { group = new_group, buffer = buf, callback = function()
+    fresh = start("new_language", { filetypes = { "huyangunit" } })
+    fresh.attached_buffers[buf] = true
+    vim.api.nvim_exec_autocmds("LspAttach", { buffer = buf, data = { client_id = fresh.id } })
+end })
+co = coroutine.create(function()
+    limits.begin_request()
+    local evidence = edit.diagnostic_evidence({ files = { path }, wait_ms = 0 })
+    assert(fresh and not live[go.id] and live[bash.id] and live[fresh.id] and peak == 2,
+        "new-language FileType replay could not evict an idle server")
+    assert(#evidence.batches == 1 and evidence.batches[1].producer == "new_language")
+    assert(limits.request_error() == nil, "enumeration caused a false capacity refusal")
+    assert(start("other") and live[fresh.id] and not live[bash.id],
+        "actually used diagnostic client was not pinned")
+    denied(function() start("too_many") end, "used diagnostic client")
+    limits.end_request()
+end)
+assert(coroutine.resume(co))
+vim.lsp._enabled_configs = saved_enabled
+vim.api.nvim_del_augroup_by_id(new_group)
+vim.api.nvim_buf_delete(buf, { force = true })
+vim.fn.delete(scratch, "rf")
 
 -- A buffer awaited by a request protects asynchronously attached clients.
 reset(1)
 a = start("a")
-local buf = vim.api.nvim_create_buf(false, true)
+buf = vim.api.nvim_create_buf(false, true)
 co = coroutine.create(function()
     limits.begin_request()
     limits.touch_buffer(buf)
@@ -172,8 +266,16 @@ vim.api.nvim_create_autocmd("FileType", { group = group, buffer = buf, callback 
     restored.attached_buffers[buf] = true
     vim.api.nvim_exec_autocmds("LspAttach", { buffer = buf, data = { client_id = restored.id } })
 end })
-limits.reattach_buffer(buf)
-limits.reattach_buffer(buf)
+co = coroutine.create(function()
+    limits.begin_request()
+    limits.touch_buffer(buf)
+    vim.lsp.get_clients() -- housekeeping must not pin the idle replacement
+    limits.reattach_buffer(buf)
+    limits.reattach_buffer(buf)
+    assert(limits.request_error() == nil, "reattachment hit false capacity")
+    limits.end_request()
+end)
+assert(coroutine.resume(co))
 assert(reattached == 1 and restored and not live[b.id] and count() == 1)
 vim.api.nvim_del_augroup_by_id(group)
 vim.api.nvim_buf_delete(buf, { force = true })

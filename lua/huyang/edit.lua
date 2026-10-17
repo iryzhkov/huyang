@@ -18,6 +18,7 @@ local resolve_symbol, doc_block_start, decl_block_top =
     index.resolve_symbol, index.doc_block_start, index.decl_block_top
 local closure = require("huyang.closure")
 local cap = require("huyang.cap")
+local limits = require("huyang.limits")
 
 -- Neovim 0.12 moved the diff to vim.text.diff and deprecated vim.diff; one
 -- name for it here keeps the rest of the file indifferent to the version.
@@ -1201,7 +1202,7 @@ function M.diagnostic_evidence(args)
             if bufnr >= 0 and vim.api.nvim_buf_is_loaded(bufnr)
                 and (not args.baseline or (not vim.bo[bufnr].modified and not core.disk_moved_on(bufnr, path))) then
             local filetype = vim.bo[bufnr].filetype
-            for _, existing in ipairs(args.baseline and {} or vim.lsp.get_clients()) do
+            for _, existing in ipairs(args.baseline and {} or limits.list_clients()) do
                 local config = existing.config or {}
                 local filetypes = config.filetypes
                 -- The embedded provider owns exactly one workspace, so a
@@ -1212,7 +1213,8 @@ function M.diagnostic_evidence(args)
                     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
                 end
             end
-            local clients = vim.lsp.get_clients({ bufnr = bufnr })
+            local clients = args.baseline and limits.list_clients({ bufnr = bufnr })
+                or vim.lsp.get_clients({ bufnr = bufnr })
             local configured = enabled_lsp_configs_for(vim.bo[bufnr].filetype)
             if not args.baseline and #clients == 0 and #configured > 0 then
                 pcall(function()

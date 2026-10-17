@@ -26,6 +26,12 @@ function M.end_request()
     requests[coroutine.running()] = nil
 end
 
+-- Enumeration is housekeeping, not evidence that a request used a client.
+-- Baseline collection must also bypass the request-use wrapper below.
+function M.list_clients(filter)
+    return (raw_clients or vim.lsp.get_clients)(filter)
+end
+
 function M.touch_buffer(bufnr)
     local request = current()
     if request then request.buffers[bufnr] = true end
@@ -128,10 +134,13 @@ function M.setup(max_servers, hold)
     if installed then return end
     installed = true
     raw_clients = vim.lsp.get_clients
+    -- A lookup only counts as use for a buffer explicitly touched by this
+    -- request (normally core.load_buf). Global/name scans and lookups for
+    -- other loaded buffers must not refresh recency or consume idle slots.
     vim.lsp.get_clients = function(filter)
         local clients = raw_clients(filter)
         local request = current()
-        if request then
+        if request and filter and filter.bufnr ~= nil and request.buffers[filter.bufnr] then
             for _, client in ipairs(clients) do touch(client, request) end
         end
         return clients
