@@ -13,6 +13,7 @@ import sys
 
 sys.dont_write_bytecode = True
 from common import HERE, clean_home_preflight, guard_scratch_job, environment, file_hash, require, write_json
+import nss_control
 
 PINS = {
     "claude": ("2.1.301", "node_modules/@anthropic-ai/claude-code-linux-x64/claude"),
@@ -51,9 +52,12 @@ def main():
     p.add_argument("--tool-path", default=os.defpath)
     p.add_argument("--gopls-artifact", type=Path)
     p.add_argument("--gopls-sha256")
+    p.add_argument("--nvim-nss-control", action="store_true", help="opt in to pinned native-Nvim NSS acquisition control")
     args = p.parse_args()
     job = guard_scratch_job(args.job, namespace_required)
     require(not job.exists(), "bootstrap --job must be new (retain prior artifacts on failure)")
+    if args.nvim_nss_control:
+        nss_control.sources(job)  # Validate exact job mounts/accounts/maps before any writes.
     job.mkdir(parents=True, mode=0o700)
     tools, logs = job / "tools", job / "bootstrap"
     tools.mkdir()
@@ -62,6 +66,7 @@ def main():
     try:
         home_preflight = clean_home_preflight(job / "home-bootstrap-preflight.json", namespace_required)
         env = environment(job / "bootstrap-env", args.tool_path)
+        nss = nss_control.provision(job, env, command) if args.nvim_nss_control else None
         for name in ("package.json", "package-lock.json"):
             shutil.copyfile(HERE / name, tools / name)
         lock = json.loads((tools / "package-lock.json").read_text())
@@ -110,7 +115,7 @@ def main():
             "binaries": binaries, "gopls": {"path": str(bindir / "gopls"),
                 "version": version.strip(), "sha256": file_hash(bindir / "gopls"), "build": build},
             "home_preflight": home_preflight,
-            "synthetic_credentials_only": True, "scripts": "ignored"})
+            "nss_control": nss, "synthetic_credentials_only": True, "scripts": "ignored"})
     except BaseException as error:
         write_json(job / "bootstrap-report.json", {"status": "failed", "error": repr(error),
             "home_preflight_report": str(job / "home-bootstrap-preflight.json")})

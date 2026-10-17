@@ -451,6 +451,95 @@ prepared scratch acquisition wrapper is for root review and one bounded dispatch
 it does not change the full launcher, enable NSS controls in acceptance, establish
 a strace fix, or establish any native-client pass.
 
+## Opt-in native Neovim NSS acquisition control
+
+This harness-only delta starts at implementation parent
+72cbe76c9265a7bbd972b9e4d7bd942f35dffdd7. Cherry-pick only its owned-file
+commit onto M8 d0 before rebasing M9. The supporting module is
+tests/client-acceptance/nss_control.py; the existing provision helper is
+bootstrap.py.
+
+Root's NSS-only job 59cae96a-8999-4931-9d5b-34fdf4ea74d7 retained three
+complete traces with zero unknown records. Baseline libc lookups made four nscd
+attempts; wrapped native Nvim plus its Python lookup helper made zero, and a
+separate fresh-buffer native Nvim made zero. Raw loader diagnostics proved native
+getpwuid binding to the pinned wrapper. Full passwd/group enumeration, by-ID,
+by-name and missing-name results matched, including all fields. Kernel UID/GID,
+maps, namespaces and HOME matched. This measurement qualifies neither a full
+client workflow nor strace 7.2, Go sampling or a tracer fix. The inherited Python
+helper also proved that an unbounded Nvim subtree would leak the preload.
+
+Add --nvim-nss-control to both bootstrap.py and run.py to opt in.
+Bootstrap privately acquires and extracts Debian nss_wrapper 1.1.16-1. Run refuses
+a missing or different bootstrap manifest and requires this exact native Nvim:
+
+| Input | SHA-256 |
+|---|---|
+| Native Nvim 0.12.5 executable | 23489b431f020180b1cd82268a0ffefec8165aa4e61224188f8a6e1d68a8681c |
+| Debian libnss-wrapper_1.1.16-1_amd64.deb | 7f1c57d82bf64e31cc5bbd2e254a460c1236ce19f847fd0079839f28ae390ad9 |
+| Extracted libnss_wrapper.so | f78a1f924b674de69b65975f3bc61bbc9ebe0918125b5a322217f031fc928413 |
+
+The package URL is fixed to Debian's HTTPS pool in the supporting module.
+Acquisition is bounded to 1 MiB and 120 seconds; extraction has a 30-second
+deadline. SHA-256 trust is retained; package signatures are not independently
+verified. No system package or loader installation occurs.
+
+Before writes on opt-in bootstrap, and again before creating fixtures and each
+native exec, the guard validates the actual disposable job. Agent-a's three
+zero-indexed slots are exactly slot-[0-2]. A UUID-bound HOME mount must share its
+filesystem with read-only sibling .identity/passwd and .identity/group
+mounts. UID/GID maps must each be exactly 0 0 1, real/effective/saved IDs and the
+supplementary group must remain zero, and the initial user namespace is refused.
+Account sources must be regular UID0/GID0 mode-0444 files with these complete bytes:
+
+~~~text
+job:x:0:0::/home/job:/bin/sh
+job:x:0:
+~~~
+
+The first line is passwd, the second group. Both NSS databases must have exactly
+one files-only policy entry. Fixtures copy the validated source bytes verbatim
+into J/nss with private permissions. No pw_dir or HOME is rewritten; shadow,
+gshadow, host account databases and credential contents are never read.
+
+The existing bin/nvim Python launcher stays free of NSS until its final native
+execve. It requires the pinned executable and owned, sealed headless init.
+Only that exec environment receives LD_PRELOAD, the two fixture variables and
+binding diagnostics. Service, model clients and tracer environments remain clean.
+The init uses Neovim's public function-form LSP cmd to remove all NSS_WRAPPER_*
+and loader controls during synchronous vim.lsp.rpc.start, then restores them in
+Nvim even on a spawn error. Its exact Python/wire/gopls argv, native RPC transport,
+capabilities, before_init and gopls settings remain the same. No shell, extra
+producer process or diagnostic producer is substituted. The relay checks its
+environment and memory maps before spawning the same gopls, so Go inherits no NSS
+control. This cleanup is source-inspected implementation, pending fresh runtime
+verification with the actual clients and independent tracer experiment.
+
+Retain J/nss/manifest.json, J/nss/{passwd,group}, acquisition logs and every
+case's nss-init.json, raw nss-bindings.<pid>, nss-producer-<pid>.{json,maps} and
+nss-binding-proof.json, alongside all existing raw traces and artifacts.
+Manifests bind package/library/native/fixture hashes and exact job identity,
+mountinfo and public NSS policy. Each raw binding file is limited to 8 MiB when
+read; boundary files are limited to 1 MiB maps and 64 KiB JSON. Complete NSS case
+evidence above 55 MiB fails and stays on disk without truncation. Native
+getpwuid-to-wrapper proof and clean producer boundary evidence are required;
+missing, changed or oversized evidence fails. These bounds validate retained
+outputs; they do not impose a new process limit on gopls or Go.
+
+network_audit and ipc_audit retain their exact proof, destination rules and
+unknown-record failure behavior. Any nscd attempt remains forbidden, including
+failed attempts. This control supplies no destination exemption or acceptance
+credit. A fresh actual workflow must still pass every existing gate.
+
+Prepared synthetic checks cover slot0/1/2 and slot3 refusal, mount provenance,
+identity/maps, full account bytes, files-only policy, pin/fixture tampering,
+native exec isolation, changed init, symlinks, binding attribution and relay
+leaks. Parent's focused agent-a command is
+python3 -B -m unittest discover -s tests/client-acceptance -p test_nss_control.py.
+All syntax checks, tests, builds, linters, generators, provisioning, downloads,
+clients, Chaldea, SSH and services are NOT RUN in this implementation session.
+No push, independent review or fleet update is claimed.
+
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,

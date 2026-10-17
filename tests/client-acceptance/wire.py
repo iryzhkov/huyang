@@ -9,6 +9,7 @@ import signal
 import sys
 
 from common import canonical, control, digest, raw_record, record, require, snapshot
+from nss_control import producer_boundary
 
 async def mcp(args):
     command = args.command
@@ -104,6 +105,7 @@ async def frame(reader):
 
 async def lsp(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    producer_boundary(args.log, command)
     child = await asyncio.create_subprocess_exec(*command, stdin=asyncio.subprocess.PIPE,
                                                 stdout=asyncio.subprocess.PIPE)
     assert child.stdin is not None and child.stdout is not None

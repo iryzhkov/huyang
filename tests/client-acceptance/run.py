@@ -17,6 +17,7 @@ from common import (HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_
                     guard_scratch_job, canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
 from model_server import Controller
 import opencode
+import nss_control
 from workflow import CODEX_SCHEMA_PROVENANCE, Workflow
 
 async def capture(command, env, cwd, path, timeout=20):
@@ -83,23 +84,26 @@ def recorder(case, candidate, control_path):
     path.chmod(0o755)
     return path
 
-def headless_init(case, gopls):
+def headless_init(case, gopls, nss=False):
     cmd = [sys.executable, "-B", str(HERE / "wire.py"), "--log", str(case / "lsp-wire.jsonl"),
            "lsp", "--", str(gopls)]
     # JSON strings are valid Lua strings for these absolute Linux paths (reject exotic escapes).
     require(all("\\" not in part and "\n" not in part for part in cmd), "unsupported escaped job path")
     quoted = ", ".join(json.dumps(part) for part in cmd)
+    command = nss_control.producer_command(quoted) if nss else "{" + quoted + "}"
     text = ("vim.opt.swapfile = false\nvim.opt.shadafile = 'NONE'\n"
             + "local caps = vim.lsp.protocol.make_client_capabilities()\n"
             + "caps.textDocument.diagnostic = nil\n"
             + "caps.textDocument.publishDiagnostics.versionSupport = true\n"
-            + "vim.lsp.config('gopls', {\n  cmd = {" + quoted + "},\n"
+            + "vim.lsp.config('gopls', {\n  cmd = " + command + ",\n"
             + "  filetypes = {'go', 'gomod'}, root_markers = {'go.mod'}, capabilities = caps,\n"
             + "  before_init = function(params) params.capabilities.textDocument.diagnostic = nil end,\n"
             + "  settings = {gopls = {diagnosticsDelay = '0s'}},\n"
             + "})\nvim.lsp.enable('gopls')\n")
     path = case / "init.lua"
-    path.write_text(text)
+    path.write_text((nss_control.PRODUCER_LUA if nss else "") + text)
+    if nss:
+        write_json(case / "nss-init.json", {"sha256": file_hash(path)})
     return path
 
 def traced(args, case, label, command):
@@ -312,7 +316,7 @@ async def run_case(client, args, manifest, candidate, runtime):
     env.update(ACCEPTANCE_CONTROL=str(owner.control_path),
                ACCEPTANCE_FIXTURE=str(case / "fixture"), ACCEPTANCE_CANDIDATE=str(candidate),
                ACCEPTANCE_WITNESS=str(case / "plugin-witness.jsonl"),
-               HUYANG_RUNTIME_PATH=str(runtime), HUYANG_HEADLESS_INIT=str(headless_init(case, args.job / "bin/gopls")),
+               HUYANG_RUNTIME_PATH=str(runtime), HUYANG_HEADLESS_INIT=str(headless_init(case, args.job / "bin/gopls", args.nvim_nss_control)),
                HUYANG_FRICTION="0", HUYANG_SOCKET=str(case / "h.sock"))
     wrapper = recorder(case, candidate, owner.control_path)
     write_json(case / "case-manifest.json", {
@@ -322,6 +326,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         "plugin_sha256": args.plugin_sha256 if client == "opencode" else None,
         "home_preflight": home_preflight, "codex_model_catalog": model_catalog,
         "codex_schema_conversion": CODEX_SCHEMA_PROVENANCE if client == "codex" else None,
+        "nss_control": manifest.get("nss_control"),
         "recorder_sha256": file_hash(wrapper), "runtime_files": manifest["candidate_runtime_files"]})
     stdout = (case / "service.stdout").open("wb")
     stderr = (case / "service.stderr").open("wb")
@@ -385,6 +390,12 @@ async def run_case(client, args, manifest, candidate, runtime):
             except Exception as error:
                 owner.acp_ipc_proof = {"allowed_connect_records": [], "violations": [repr(error)]}
             write_json(case / "acp-ipc-proof.json", owner.acp_ipc_proof)
+        if args.nvim_nss_control:
+            try:
+                nss_control.finish_case(case, args.job, args.nvim)
+            except Exception as error:
+                owner.fail(error)
+                success = False
         try:
             audit = network_audit(case, owner.port, args.job, owner.acp_ipc_proof)
             write_json(case / "destination-audit.json", audit)
@@ -399,10 +410,13 @@ async def run_case(client, args, manifest, candidate, runtime):
 
 async def main(args):
     args.job = guard_scratch_job(args.job, namespace_required)
+    nss = nss_control.verify(args.job, args.nvim) if args.nvim_nss_control else None
+    require(args.nvim_nss_control or not (args.job / "nss").exists(), "NSS bootstrap requires explicit run opt-in")
     for name in ("candidate", "runtime", "nvim", "plugin", "strace"):
         setattr(args, name, getattr(args, name).resolve())
     manifest = json.loads((args.job / "bootstrap-report.json").read_text())
     require(manifest["status"] == "bootstrapped-not-accepted", "bootstrap did not complete")
+    require(manifest.get("nss_control") == nss, "NSS bootstrap/runtime opt-ins or manifests differ")
     manifest["runtime_home_preflight"] = clean_home_preflight(args.job / "home-runtime-preflight.json", namespace_required)
     require(file_hash(args.job / "tools/package-lock.json") == manifest["package_lock_sha256"],
             "bootstrap lock changed")
@@ -435,8 +449,10 @@ async def main(args):
     require(match and tuple(map(int, match.groups())) >= (0, 11), "Neovim >=0.11 required")
     manifest["nvim"] = {"path": str(args.nvim), "sha256": file_hash(args.nvim), "version": nvim_version}
     nvim_launcher = args.job / "bin/nvim"
-    nvim_launcher.write_text("#!" + sys.executable + "\nimport os, sys\nos.execv("
-                             + repr(str(args.nvim)) + ", [" + repr(str(args.nvim)) + ", *sys.argv[1:]])\n")
+    launcher = (nss_control.launcher_source(args.nvim, args.job) if args.nvim_nss_control else
+                "#!" + sys.executable + "\nimport os, sys\nos.execv("
+                + repr(str(args.nvim)) + ", [" + repr(str(args.nvim)) + ", *sys.argv[1:]])\n")
+    nvim_launcher.write_text(launcher)
     nvim_launcher.chmod(0o755)
     manifest["nvim_launcher_sha256"] = file_hash(nvim_launcher)
     manifest["candidate_go_build"] = await capture(["go", "version", "-m", candidate], env, args.job,
@@ -461,6 +477,7 @@ if __name__ == "__main__":
     p.add_argument("--plugin", required=True, type=Path)
     p.add_argument("--plugin-sha256", required=True)
     p.add_argument("--nvim", required=True, type=Path)
+    p.add_argument("--nvim-nss-control", action="store_true", help="require bootstrap's pinned native-Nvim NSS control")
     p.add_argument("--strace", required=True, type=Path)
     p.add_argument("--tool-path", default=os.defpath)
     p.add_argument("--case-deadline", type=int, default=300)
