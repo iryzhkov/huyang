@@ -24,6 +24,9 @@
 #           setup, then run CMD from the repository root in the same
 #           environment (for example: run go vet ./...)
 #   env     print the environment exports for an interactive shell
+#   selftest
+#           check the /tmp and inherited-override guards locally; no
+#           downloads and no jobs
 #   submit [MODE [ARGS]]
 #           run MODE (default probe) once on a job host through chaldea
 #           exec and return the report; never retries, and passes the exit
@@ -38,13 +41,18 @@
 #   LANGPROBE_PREFIX     tool prefix (default tests/.deps/langprobe)
 #   LANGPROBE_LABEL      free text recorded in the summary, for example
 #                        "baseline 6188357, not M1 acceptance"
-#   LANGPROBE_LANGUAGES  comma-separated subset; the run is then marked
-#                        partial and can never count as acceptance
+#   LANGPROBE_LANGUAGES  comma-separated subset, for diagnosis only: the probe
+#                        then runs without HUYANG_LANGPROBE_STRICT and the
+#                        summary marks it partial, never acceptance
 #   LANGPROBE_TIMEOUT    go test timeout (default 45m)
 #   LANGPROBE_HOST       submit host (default agent-a)
 #   LANGPROBE_SKIP_SMOKE set to 1 to skip the Neovim smoke in probe mode
 #   LANGPROBE_TMPDIR     short canonical TMPDIR (default ~/.cache/hf, else
-#                        the prefix's tmp when HOME is not writable)
+#                        the prefix's tmp when HOME is not writable); never
+#                        /tmp or below, and the inherited TMPDIR is ignored
+#
+# The submit log goes to ~/.cache/huyang-langprobe. No path the script
+# writes may resolve to /tmp or below.
 set -euo pipefail
 
 # Tests must never write the real friction spool.
@@ -52,11 +60,33 @@ export HUYANG_FRICTION=0
 # Huyang refuses group- or world-writable runtime and state directories.
 umask 022
 
+# scratch_dir PATH creates PATH and prints its physical path, refusing /tmp
+# and anything below it both before creation and after symbolic links are
+# resolved: host /tmp is a shared RAM-backed tmpfs.
+scratch_dir() {
+	local dir=$1 tmp_root
+	tmp_root=$(cd /tmp 2>/dev/null && pwd -P || echo /tmp)
+	case $dir/ in /tmp/* | "$tmp_root"/*)
+		printf 'langprobe-chaldea: refusing %s: under /tmp\n' "$dir" >&2
+		return 1
+		;;
+	esac
+	mkdir -p "$dir" 2>/dev/null || return 1
+	dir=$(cd "$dir" && pwd -P) || return 1
+	case $dir/ in /tmp/* | "$tmp_root"/*)
+		printf 'langprobe-chaldea: refusing %s: resolves under /tmp\n' "$dir" >&2
+		return 1
+		;;
+	esac
+	printf '%s\n' "$dir"
+}
+
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$script_dir/.." && pwd)
-prefix=${LANGPROBE_PREFIX:-$repo/tests/.deps/langprobe}
-mkdir -p "$prefix"
-prefix=$(cd "$prefix" && pwd)
+prefix=$(scratch_dir "${LANGPROBE_PREFIX:-$repo/tests/.deps/langprobe}") || {
+	printf 'langprobe-chaldea: FAILED: unusable prefix %s\n' "${LANGPROBE_PREFIX:-$repo/tests/.deps/langprobe}" >&2
+	exit 1
+}
 downloads=$prefix/downloads
 out=$prefix/out
 languages_all=go,rust,python,typescript,javascript,java,cpp,c,bash
@@ -88,7 +118,7 @@ npm_packages=(pyright@1.1.413 typescript-language-server@6.0.0 typescript@6.0.3 
 log() { printf 'langprobe-chaldea: %s\n' "$*" >&2; }
 die() {
 	log "FAILED: $*"
-	printf 'FAILED: %s\n' "$*" >>"$out/failures.txt" 2>/dev/null || true
+	{ printf 'FAILED: %s\n' "$*" >>"$out/failures.txt"; } 2>/dev/null || true
 	exit 1
 }
 
@@ -96,12 +126,14 @@ export_env() {
 	# go test puts Unix sockets under t.TempDir(), and a socket path must fit
 	# in 108 bytes, so tests get a short TMPDIR. It is a real directory, never
 	# a symbolic link, because Huyang compares canonical paths.
-	local tmp=${LANGPROBE_TMPDIR:-$HOME/.cache/hf}
-	if ! mkdir -p "$tmp" 2>/dev/null; then
-		tmp=$prefix/tmp
-		mkdir -p "$tmp"
+	# The inherited TMPDIR is never used: it may be host /tmp.
+	local tmp
+	if [ -n "${LANGPROBE_TMPDIR:-}" ]; then
+		tmp=$(scratch_dir "$LANGPROBE_TMPDIR") || die "LANGPROBE_TMPDIR $LANGPROBE_TMPDIR is not usable"
+	else
+		tmp=$(scratch_dir "$HOME/.cache/hf") || tmp=$(scratch_dir "$prefix/tmp") ||
+			die "neither $HOME/.cache/hf nor $prefix/tmp is usable as TMPDIR"
 	fi
-	tmp=$(cd "$tmp" && pwd -P)
 	[ "${#tmp}" -le 48 ] || die "TMPDIR $tmp is ${#tmp} bytes; go test socket paths need at most 48 (set LANGPROBE_TMPDIR)"
 	export TMPDIR=$tmp
 	# HOME stays the invoking user's. Every tool that would write under it
@@ -120,7 +152,10 @@ export_env() {
 	export HUYANG_HEADLESS_INIT=$prefix/nvim-init.lua
 	export LANGPROBE_LSPCONFIG=$prefix/nvim-lspconfig
 	export PATH=$prefix/bin:$prefix/npm/node_modules/.bin:$JAVA_HOME/bin:$PATH
+	# Inherited probe overrides could select a stale binary or reuse existing
+	# sockets and state; the probe's private defaults must always apply.
 	unset HUYANG_LANGPROBE HUYANG_LANGPROBE_STRICT HUYANG_LANGPROBE_LANGUAGES HUYANG_LANGPROBE_SOURCE
+	unset HUYANG_LANGPROBE_BINARY HUYANG_LANGPROBE_SOCKET HUYANG_LANGPROBE_STATE_DIR HUYANG_LANGPROBE_OUTPUT
 	unset HUYANG_SOCKET HUYANG_STATE_DIR AGENT99_HEADLESS_INIT
 	mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$CARGO_HOME" "$prefix/bin"
 }
@@ -512,20 +547,25 @@ LUA
 }
 
 probe() {
-	local languages=${LANGPROBE_LANGUAGES:-$languages_all} rc lang status verdict=PASS
+	local languages=${LANGPROBE_LANGUAGES:-$languages_all} rc lang status verdict=PASS strict=1
 	local output=$out/langprobe
 	rm -rf "$output"
 	mkdir -p "$output"
+	# Strict mode asserts every intermediate reply and refuses a language
+	# filter, so a subset runs without it and is only ever partial.
 	if [ "$languages" != "$languages_all" ]; then
 		export HUYANG_LANGPROBE_LANGUAGES=$languages
+		strict=
+		log "running TestLangprobeABCD for $languages (partial, not strict, never acceptance)"
 	else
 		unset HUYANG_LANGPROBE_LANGUAGES
+		log "running TestLangprobeABCD for all nine languages (strict)"
 	fi
-	log "running TestLangprobeABCD for $languages (strict)"
 	set +e
-	# Strict mode asserts every intermediate reply; a build without it ignores
-	# the variable, so a baseline run is weaker and must be labelled as such.
-	(cd "$repo/cmd/huyang" && HUYANG_FRICTION=0 HUYANG_LANGPROBE=1 HUYANG_LANGPROBE_STRICT=1 HUYANG_LANGPROBE_OUTPUT=$output \
+	# A build without strict support ignores the variable, so a baseline run
+	# is weaker and must be labelled as such.
+	(cd "$repo/cmd/huyang" && { [ -z "$strict" ] || export HUYANG_LANGPROBE_STRICT=1; } &&
+		HUYANG_FRICTION=0 HUYANG_LANGPROBE=1 HUYANG_LANGPROBE_OUTPUT=$output \
 		go test -run '^TestLangprobeABCD$' -count=1 -v -timeout "${LANGPROBE_TIMEOUT:-45m}" .) 2>&1 |
 		tee "$out/go-test.txt" >&2
 	rc=${PIPESTATUS[0]}
@@ -595,7 +635,7 @@ begin() {
 		printf 'host %s, started %s\n' "$(uname -n)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 		printf 'languages %s\n' "${LANGPROBE_LANGUAGES:-$languages_all}"
 		if [ -n "${LANGPROBE_LANGUAGES:-}" ] && [ "$LANGPROBE_LANGUAGES" != "$languages_all" ]; then
-			printf 'PARTIAL: a language subset never counts as acceptance\n'
+			printf 'PARTIAL: a language subset runs without strict mode and never counts as acceptance\n'
 		fi
 	} >"$out/summary.txt"
 	write_manifest
@@ -603,7 +643,7 @@ begin() {
 }
 
 submit() {
-	local inner=${1:-probe} host=${LANGPROBE_HOST:-agent-a} scratch rc
+	local inner=${1:-probe} host=${LANGPROBE_HOST:-agent-a} rc
 	local -a env_args=(HUYANG_FRICTION=0)
 	local name
 	[ $# -gt 0 ] && shift
@@ -612,8 +652,6 @@ submit() {
 	done
 	case $inner in setup | check | probe | suite | race | run) ;; *) die "submit takes setup, check, probe, suite, race or run" ;; esac
 	command -v chaldea >/dev/null || die "chaldea is not on PATH"
-	scratch=${TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/huyang-langprobe}
-	mkdir -p "$scratch"
 	cd "$repo"
 	# One dispatch only. A busy refusal is reported so the caller can register
 	# a Chaldea wait; an uncertain outcome is never re-run, and the journal
@@ -622,10 +660,10 @@ submit() {
 	chaldea exec --host "$host" \
 		--artifact tests/.deps/langprobe/out/summary.txt \
 		--artifact tests/.deps/langprobe/out/langprobe-report.tar.gz \
-		-- env "${env_args[@]}" bash tests/langprobe-chaldea.sh "$inner" "$@" 2>&1 | tee "$scratch/submit.log"
+		-- env "${env_args[@]}" bash tests/langprobe-chaldea.sh "$inner" "$@" 2>&1 | tee "$out/submit.log"
 	rc=${PIPESTATUS[0]}
 	set -e
-	if [ "$rc" != 0 ] && grep -qE '^chaldea: host .* refused: .*nothing dispatched' "$scratch/submit.log"; then
+	if [ "$rc" != 0 ] && grep -qE '^chaldea: host .* refused: .*nothing dispatched' "$out/submit.log"; then
 		log "BUSY: host $host refused before dispatch, nothing ran (exit $rc); not retried"
 	elif [ "$rc" != 0 ]; then
 		log "chaldea exec exit $rc; if the outcome is uncertain, inspect the journal it names and do not re-run"
@@ -687,8 +725,44 @@ env)
 	;;
 submit)
 	shift
-	out=${TMPDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/huyang-langprobe}
+	# The submit log lives in one task cache, never in the inherited TMPDIR.
+	submit_log_dir=$(scratch_dir "$HOME/.cache/huyang-langprobe") ||
+		die "$HOME/.cache/huyang-langprobe is not usable for the submit log"
+	out=$submit_log_dir
 	submit "$@"
+	;;
+selftest)
+	# Static guards only: no downloads, no jobs, nothing under /tmp is created.
+	fails=0
+	for path in /tmp /tmp/ /tmp/langprobe-selftest-never-created; do
+		if scratch_dir "$path" >/dev/null 2>&1; then
+			log "selftest: $path was accepted"
+			fails=1
+		fi
+	done
+	ln -sfn /tmp "$prefix/selftest-link"
+	if scratch_dir "$prefix/selftest-link" >/dev/null 2>&1; then
+		log "selftest: a symbolic link to /tmp was accepted"
+		fails=1
+	fi
+	rm -f "$prefix/selftest-link"
+	if (LANGPROBE_TMPDIR=/tmp/langprobe-selftest-never-created export_env) >/dev/null 2>&1; then
+		log "selftest: LANGPROBE_TMPDIR under /tmp was accepted"
+		fails=1
+	fi
+	left=$(
+		export HUYANG_LANGPROBE_BINARY=/stale HUYANG_LANGPROBE_SOCKET=/stale HUYANG_LANGPROBE_STATE_DIR=/stale
+		export HUYANG_LANGPROBE_OUTPUT=/stale HUYANG_SOCKET=/stale HUYANG_STATE_DIR=/stale TMPDIR=/tmp
+		export_env >/dev/null
+		env | grep -E '^(HUYANG_LANGPROBE[A-Z_]*|HUYANG_SOCKET|HUYANG_STATE_DIR)=' || true
+		case $TMPDIR/ in /tmp/*) echo "TMPDIR=$TMPDIR" ;; esac
+	) || left="export_env failed"
+	if [ -n "$left" ]; then
+		log "selftest: export_env left $(printf '%s' "$left" | tr '\n' ' ')"
+		fails=1
+	fi
+	[ "$fails" = 0 ] || exit 1
+	log "selftest: guards ok"
 	;;
 *)
 	awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"

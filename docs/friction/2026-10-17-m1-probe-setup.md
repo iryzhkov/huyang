@@ -61,12 +61,20 @@ that this digest was not pinned.
 Other settings:
 
 - `umask 022` and `HUYANG_FRICTION=0` are set at the top of the script.
-- `TMPDIR` is `~/.cache/hf`, a real directory with no symbolic link, so Unix
-  sockets under `t.TempDir()` stay inside the 108-byte limit. If `HOME` is not
-  writable, `TMPDIR` falls back to the prefix's `tmp`. A path longer than 48 bytes
-  is refused.
-- The `HUYANG_LANGPROBE*`, `HUYANG_SOCKET` and `HUYANG_STATE_DIR` variables are
-  cleared, except where a mode sets them on purpose.
+- `TMPDIR` is `~/.cache/hf`, resolved to its physical path, so Unix sockets
+  under `t.TempDir()` stay inside the 108-byte limit and Huyang's path comparisons
+  see no symbolic link. If `HOME` is not writable, `TMPDIR` falls back to the
+  prefix's `tmp`. `LANGPROBE_TMPDIR` overrides it. The inherited `TMPDIR` is never
+  used. A path longer than 48 bytes is refused.
+- `/tmp` is refused, and so is anything below it, both as given and after
+  symbolic links are resolved. This covers the prefix, `TMPDIR` and the submit
+  log. The submit log is always `~/.cache/huyang-langprobe/submit.log`.
+- All `HUYANG_LANGPROBE*` variables are cleared, including `_BINARY`, `_SOCKET`,
+  `_STATE_DIR` and `_OUTPUT`, so the probe always builds its own binary and uses
+  its own private socket and state. `HUYANG_SOCKET` and `HUYANG_STATE_DIR` are
+  cleared as well. Only `probe` sets the variables it needs again.
+- `tests/langprobe-chaldea.sh selftest` checks these guards without downloading
+  anything or creating anything under `/tmp`.
 
 ## Modes
 
@@ -87,8 +95,9 @@ journal entry that chaldea names.
 `probe` runs the test with `HUYANG_LANGPROBE=1` and `HUYANG_LANGPROBE_STRICT=1`. It
 succeeds only if each of the nine subtests reports `--- PASS`. A `SKIP`, `FAIL` or
 missing subtest fails the run, and so does a top-level skip.
-`LANGPROBE_LANGUAGES` selects a subset, and the summary then marks the run as
-partial: a subset run never counts as acceptance.
+`LANGPROBE_LANGUAGES` selects a subset, for diagnosis only. Strict mode refuses a
+language filter, so a subset runs without `HUYANG_LANGPROBE_STRICT`. The summary
+marks such a run as partial, and it never counts as acceptance.
 
 Every mode leaves two artifacts in `tests/.deps/langprobe/out/`:
 
