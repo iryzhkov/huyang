@@ -1,11 +1,13 @@
 """Synthetic runtime-audit and pinned-catalog regressions; no writes or processes."""
 import copy
+from contextlib import ExitStack
+from io import StringIO
 import sys
 import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.dont_write_bytecode = True
 import ipc_audit as ipc
@@ -308,6 +310,104 @@ class CodexCatalogTests(unittest.TestCase):
                 acceptance.codex_direct_catalog(CASE)
         write_bytes.assert_not_called()
         write_json.assert_not_called()
+
+
+class ClientSelectionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.argv = [
+            "--job", str(JOB), "--job-isolated",
+            "--candidate", "/synthetic/input/huyang",
+            "--runtime", "/synthetic/source",
+            "--source-commit", "a" * 40,
+            "--plugin", "/synthetic/input/huyang-profiles.js",
+            "--plugin-sha256", acceptance.PLUGIN_SHA256,
+            "--nvim", "/synthetic/bin/nvim", "--strace", "/synthetic/bin/strace",
+        ]
+
+    async def test_main_records_only_actual_selection_and_never_passes_a_partial_run(self):
+        scenarios = [
+            ([], {}, ["claude", "codex", "opencode"], "all", "passed"),
+            (["--clients", "opencode", "claude", "codex"], {},
+             ["claude", "codex", "opencode"], "all", "passed"),
+            (["--clients", "codex", "codex"], {}, ["codex"], "partial", "partial-passed"),
+            (["--clients", "claude", "--clients", "codex"], {},
+             ["codex"], "partial", "partial-passed"),
+            (["--clients", "opencode", "claude", "opencode"], {},
+             ["claude", "opencode"], "partial", "partial-passed"),
+            (["--clients", "claude"], {}, ["claude"], "partial", "partial-passed"),
+            (["--clients", "opencode"], {}, ["opencode"], "partial", "partial-passed"),
+            (["--clients", "codex"], {"codex": False}, ["codex"], "partial", "partial-failed"),
+            (["--clients", "opencode", "claude"], {"opencode": False},
+             ["claude", "opencode"], "partial", "partial-failed"),
+            ([], {"codex": False}, ["claude", "codex", "opencode"], "all", "failed"),
+        ]
+        for selection, failures, expected_clients, scope, status in scenarios:
+            with self.subTest(selection=selection, failures=failures):
+                args = acceptance.parse_args(self.argv + selection)
+                bootstrap = {
+                    "status": "bootstrapped-not-accepted", "nss_control": None,
+                    "go_cli": {"path": "/synthetic/bin/go", "sha256": acceptance.PLUGIN_SHA256},
+                    "package_lock_sha256": acceptance.PLUGIN_SHA256,
+                    "binaries": {name: {"path": str(JOB / "bin" / name),
+                                       "sha256": acceptance.PLUGIN_SHA256}
+                                 for name in ("claude", "codex", "opencode")},
+                    "gopls": {"sha256": acceptance.PLUGIN_SHA256},
+                }
+                # Keep the real parser, main, require and report construction.
+                # Mock every filesystem/process boundary reached by preflight.
+                with ExitStack() as stack:
+                    for name, value in {
+                        "guard_scratch_job": JOB, "clean_home_preflight": {},
+                        "file_hash": acceptance.PLUGIN_SHA256, "environment": {},
+                    }.items():
+                        stack.enter_context(patch.object(acceptance, name, return_value=value))
+                    for name in ("pin", "recheck"):
+                        stack.enter_context(patch.object(acceptance.telemetry_control, name))
+                    stack.enter_context(patch.object(acceptance.telemetry_control, "prepare",
+                                                     new=AsyncMock(return_value={"mode": "off"})))
+                    stack.enter_context(patch.object(acceptance, "capture", new=AsyncMock(
+                        side_effect=["NVIM v0.12.5", "synthetic candidate build metadata"])))
+                    stack.enter_context(patch.object(Path, "resolve", autospec=True,
+                                                     side_effect=lambda path: path))
+                    stack.enter_context(patch.object(Path, "read_text",
+                                                     return_value=acceptance.json.dumps(bootstrap)))
+                    stack.enter_context(patch.object(Path, "exists", return_value=False))
+                    stack.enter_context(patch.object(Path, "is_file", return_value=True))
+                    stack.enter_context(patch.object(Path, "rglob", return_value=[]))
+                    for name in ("chmod", "write_text"):
+                        stack.enter_context(patch.object(Path, name))
+                    for name in ("copyfile", "copytree"):
+                        stack.enter_context(patch.object(acceptance.shutil, name))
+                    writes = stack.enter_context(patch.object(acceptance, "write_json"))
+                    cases = stack.enter_context(patch.object(acceptance, "run_case", new=AsyncMock(
+                        side_effect=lambda client, *unused: failures.get(client, True))))
+                    if status.endswith("failed"):
+                        with self.assertRaisesRegex(AssertionError, "actual-client acceptance failed"):
+                            await acceptance.main(args)
+                    else:
+                        await acceptance.main(args)
+
+                self.assertEqual([call.args[0] for call in cases.await_args_list], expected_clients)
+                saved = {call.args[0]: call.args[1] for call in writes.call_args_list}
+                manifest = saved[JOB / "runtime-manifest.json"]
+                report = saved[JOB / "report.json"]
+                self.assertEqual(manifest["selected_clients"], expected_clients)
+                self.assertEqual(manifest["scope"], scope)
+                self.assertEqual(report, {
+                    "status": status, "scope": scope, "selected_clients": expected_clients,
+                    "cases": {client: failures.get(client, True) for client in expected_clients},
+                    "source_commit": "a" * 40,
+                })
+                if scope == "partial":
+                    self.assertNotEqual(report["status"], "passed")
+
+    def test_parser_rejects_unknown_and_empty_client_selection(self):
+        for selection in (["--clients", "unknown"], ["--clients"],
+                          ["--clients", "codex", "unknown"]):
+            with self.subTest(selection=selection), patch("sys.stderr", new_callable=StringIO):
+                with self.assertRaises(SystemExit) as error:
+                    acceptance.parse_args(self.argv + selection)
+                self.assertEqual(error.exception.code, 2)
 
 
 if __name__ == "__main__":

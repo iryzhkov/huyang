@@ -21,6 +21,8 @@ import nss_control
 import telemetry_control
 from workflow import CODEX_SCHEMA_PROVENANCE, Workflow
 
+CLIENTS = ("claude", "codex", "opencode")
+
 async def capture(command, env, cwd, path, timeout=20):
     with Path(path).open("wb") as output:
         process = await spawn(command, env, cwd, output, asyncio.subprocess.STDOUT)
@@ -417,6 +419,8 @@ async def run_case(client, args, manifest, candidate, runtime):
 
 async def main(args):
     args.job = guard_scratch_job(args.job, namespace_required)
+    selected_clients = [client for client in CLIENTS if client in args.clients]
+    scope = "all" if len(selected_clients) == len(CLIENTS) else "partial"
     nss = nss_control.verify(args.job, args.nvim) if args.nvim_nss_control else None
     require(args.nvim_nss_control or not (args.job / "nss").exists(), "NSS bootstrap requires explicit run opt-in")
     for name in ("candidate", "runtime", "nvim", "plugin", "strace"):
@@ -470,15 +474,23 @@ async def main(args):
     manifest["preflight_telemetry"] = preflight_telemetry
     manifest["harness_files"] = {str(p.relative_to(HERE)): file_hash(p) for p in sorted(HERE.rglob("*"))
                                  if p.is_file() and "__pycache__" not in p.parts}
+    manifest["selected_clients"] = selected_clients
+    manifest["scope"] = scope
     write_json(args.job / "runtime-manifest.json", manifest)
     outcomes = {}
-    for client in ("claude", "codex", "opencode"):
+    for client in selected_clients:
         outcomes[client] = await run_case(client, args, manifest, candidate, runtime)
-    write_json(args.job / "report.json", {"status": "passed" if all(outcomes.values()) else "failed",
+    status = "passed" if all(outcomes.values()) else "failed"
+    if scope == "partial":
+        status = "partial-" + status
+    write_json(args.job / "report.json", {"status": status, "scope": scope,
+                                         "selected_clients": selected_clients,
                                          "cases": outcomes, "source_commit": args.source_commit})
-    require(all(outcomes.values()), "actual-client acceptance failed; preserve entire --job directory")
+    require(all(outcomes.values()),
+            ("partial actual-client" if scope == "partial" else "actual-client")
+            + " acceptance failed; preserve entire --job directory")
 
-if __name__ == "__main__":
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--job", required=True, type=Path)
     p.add_argument("--job-isolated", required=True, action="store_true")
@@ -492,7 +504,12 @@ if __name__ == "__main__":
     p.add_argument("--strace", required=True, type=Path)
     p.add_argument("--tool-path", default=os.defpath)
     p.add_argument("--case-deadline", type=int, default=300)
-    a = p.parse_args()
+    p.add_argument("--clients", nargs="+", choices=CLIENTS, default=CLIENTS,
+                   help="clients to run in canonical order; a subset produces a partial result")
+    return p.parse_args(argv)
+
+if __name__ == "__main__":
+    a = parse_args()
     a.job = guard_scratch_job(a.job, namespace_required)
     try:
         asyncio.run(main(a))
