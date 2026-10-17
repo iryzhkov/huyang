@@ -116,12 +116,13 @@ func TestReadTargetsListsADirectoryTargetInPlace(t *testing.T) {
 }
 
 func TestStartLinePastTheEndIsAnEmptyWindow(t *testing.T) {
-	handlers, workspaceID, _ := literalFixture(t, map[string]string{"three.txt": "one\ntwo\nthree\n"})
+	handlers, workspaceID, _ := literalFixture(t, map[string]string{"three.txt": "one\ntwo\nthree\n", "empty.txt": ""})
 	result := handlers.Execute(context.Background(), "req_eof", "read", map[string]any{
 		"workspace_id": workspaceID, "target": map[string]any{"path": "three.txt"}, "start_line": 10, "end_line": 20,
 	})
 	data, _ := result["data"].(map[string]any)
-	if result["outcome"] != "ok" || data["content"] != "" || data["lines"] != 3 || data["start_line"] != 10 {
+	if result["outcome"] != "ok" || data["content"] != "" || data["line_count"] != 3 || data["lines"] != 3 ||
+		data["start_line"] != 10 || data["past_end"] != true || data["end_line"] != nil {
 		t.Fatalf("past-the-end window = %#v", result)
 	}
 	if warnings := mcpapi.Warnings(result); len(warnings) != 1 || !strings.Contains(warnings[0], "past the last line, 3") {
@@ -132,6 +133,25 @@ func TestStartLinePastTheEndIsAnEmptyWindow(t *testing.T) {
 	})
 	if warnings := mcpapi.Warnings(batch); batch["outcome"] != "ok" || len(warnings) != 1 || !strings.HasPrefix(warnings[0], "three.txt: ") {
 		t.Fatalf("a batch target past its end lost its warning: %#v", batch)
+	}
+	batchData, _ := batch["data"].(map[string]any)
+	if files, _ := batchData["files"].([]map[string]any); len(files) != 1 || files[0]["line_count"] != 3 || files[0]["content"] != "" {
+		t.Fatalf("a batch target past its end lost its line count: %#v", batchData)
+	}
+	// The last line itself is still an ordinary one-line window.
+	last := handlers.Execute(context.Background(), "req_last", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "three.txt"}, "start_line": 3,
+	})
+	if data := last["data"].(map[string]any); data["content"] != "three\n" || data["past_end"] != nil || len(mcpapi.Warnings(last)) != 0 {
+		t.Fatalf("read of the last line = %#v", last)
+	}
+	// An empty document has no line to start at, and says so.
+	empty := handlers.Execute(context.Background(), "req_empty", "read", map[string]any{
+		"workspace_id": workspaceID, "target": map[string]any{"path": "empty.txt"}, "start_line": 1,
+	})
+	if data, _ := empty["data"].(map[string]any); empty["outcome"] != "ok" || data["line_count"] != 0 ||
+		len(mcpapi.Warnings(empty)) != 1 || !strings.Contains(mcpapi.Warnings(empty)[0], "empty document") {
+		t.Fatalf("window into an empty document = %#v", empty)
 	}
 	// A reversed window is still a malformed request.
 	reversed := handlers.Execute(context.Background(), "req_reversed", "read", map[string]any{

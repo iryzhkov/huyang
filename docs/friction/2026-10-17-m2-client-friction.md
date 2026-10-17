@@ -1,7 +1,7 @@
 # M2 client paths, argument tolerance and recovery — 2026-10-17
 
-Implementation branch: `t3/m2-client-friction`, prepared on the M1 tip `7455e65` while M1
-is still open. It is to be rebased onto `main` after M1 merges. The starting point is the
+Implementation branch: `t3/m2-client-friction`, prepared on the M1 tip `7455e65` and
+rebased onto `main` at `2a61b61` (the PR 17 merge) after M1 merged, without conflicts. The starting point is the
 prototype commit `75dff44` (parent `ef16bef`, ten files), cherry-picked without conflicts;
 the M1 diagnostic code, caps, probes and tests are untouched. Source proposal:
 `jocasta:006bf908b36a24860685792cf95cbfc7@1`, sections 6a to 6c, 9 and 10; roadmap item M2.
@@ -51,10 +51,11 @@ Added here:
 - **Implicit documents workspace for `targets`**: every target names an absolute path, so
   one exact documents workspace is opened over just those files. A relative path, a handle
   or a directory in such a batch is refused whole, with the repair for that target.
-- **`start_line` past the end** is an empty window with `lines`, `start_line` and a warning
-  naming the last line, for canonical and prepared reads; a multi-target read now carries a
-  target's warnings, prefixed with its path. The document's line count is the existing
-  `lines` field rather than a new `line_count`, so one name means one thing.
+- **`start_line` past the end** is an empty window with `line_count`, `past_end: true`,
+  `start_line` and a warning naming the last line, for canonical and prepared reads; `lines`
+  carries the same count, as on every source read, so existing consumers keep their field.
+  An empty document says it is empty. A multi-target read now carries a target's warnings,
+  prefixed with its path.
 - **Symlink escape**: the guard and its refusal stay. The workspace now raises typed
   `SymlinkEscapeError` and `NotRegularTextError` (same text as before), so the handler adds
   `data.resolved_path` and a `next` step without matching error text: outside the root, a
@@ -93,7 +94,8 @@ The `workspace` package changes are additive: two error types, `ScopedPaths` and
 - `internal/handlers/read_listing_test.go`: directory and root listings, the substring trap
   (`other/pkg/` is not `pkg/`), the 200-entry bound, no listing through an escaping
   symlink, a directory target in `targets`, the past-the-end window (single and batch) with
-  a reversed window still refused, the symlink-escape `next` followed to a documents read,
+  `line_count` and `past_end` (single and batch), the last line still an ordinary window,
+  an empty document, a reversed window still refused, the symlink-escape `next` followed to a documents read,
   an in-root link, implicit `targets` (named files only; relative and directory targets
   refused), absolute directory reads in and outside a working tree, and the empty-query
   listing with its bound and its refusal without `paths`.

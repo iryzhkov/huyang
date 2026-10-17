@@ -1541,9 +1541,12 @@ reconnect. This is not part of the MCP surface; an older adapter simply sends ne
   and `total`, bounded by `limit`, and a warning that it listed rather than searched; it
   shares the directory read's listing. Without `paths` it is still `search_failed`, now
   with two `next` steps.
-- A `start_line` past the last line answers `ok` with empty `content`, `lines` and
-  `start_line`, and a warning naming the last line. It was `invalid_line_range`; a reversed
-  window still is. A prepared-revision read behaves the same.
+- A `start_line` past the last line answers `ok` with empty `content`, `line_count`,
+  `past_end: true`, `start_line`, and a warning naming the last line; `lines` carries the
+  same count, as on every source read. It was `invalid_line_range`; a reversed window still
+  is. A prepared-revision read behaves the same, with `end_line` the document's last line.
+  In `targets`, the target's data carries the same fields and its warning is prefixed with
+  its path.
 - A read through a symbolic link that leaves the root, or of a path that is itself a link,
   is still `read_failed`; when the link leads to a regular file the reply adds
   `data.resolved_path` and a `next` step: outside the root, a read of that absolute path

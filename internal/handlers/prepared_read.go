@@ -65,6 +65,7 @@ func (h *Handlers) readPrepared(requestID string, workspace *workspacecore.Works
 	result := mcpapi.Envelope(requestID, workspace, "ok", "",
 		fmt.Sprintf("Read %s at %s", path, view.PreparedRevision), data)
 	if pastEnd != nil {
+		data["line_count"], data["past_end"] = pastEnd.total, true
 		result = mcpapi.AddWarnings(result, pastEnd.warning())
 	}
 	return result

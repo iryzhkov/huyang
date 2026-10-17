@@ -514,10 +514,11 @@ func (h *Handlers) readPath(ctx context.Context, requestID string, workspace *wo
 	if errors.As(rangeErr, &pastEnd) {
 		// Paging past the end, or guessing at a length, wants the length,
 		// not a refusal: the window is empty and the reply says where the
-		// document ends.
+		// document ends. line_count names that length for this reply;
+		// lines, which every source read carries, holds the same number.
 		data := map[string]any{
 			"path": read.Path, "content": "", "revision_id": read.Snapshot.Revision,
-			"lines": pastEnd.total, "start_line": pastEnd.start,
+			"lines": pastEnd.total, "line_count": pastEnd.total, "start_line": pastEnd.start, "past_end": true,
 		}
 		result := mcpapi.Envelope(requestID, workspace, "ok", "", fmt.Sprintf("Read %s: start_line %d is past the end; the document has %d lines", read.Path, pastEnd.start, pastEnd.total), data)
 		return mcpapi.AddWarnings(result, pastEnd.warning())

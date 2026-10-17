@@ -108,7 +108,8 @@ named files, as a single target does.
   `limit`) under `data.files`, with a warning saying it listed rather than searched. It is
   the same listing as a directory read, scoped by pattern rather than by directory.
 - A `start_line` past the end of a file is an empty window, not a refusal: `content` is
-  empty, `lines` is the document's line count, and a warning names the last line.
+  empty, `line_count` (and `lines`, as on every read) is the document's line count,
+  `past_end` is true, and a warning names the last line to start from.
 - A path through a symlink that leaves the workspace is still refused, but `next` names
   where the link leads: read that absolute path with no `workspace_id` or `root` and it is
   opened as its own exact document. A link that leads elsewhere inside the workspace names
