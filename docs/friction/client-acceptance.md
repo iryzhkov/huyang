@@ -120,14 +120,63 @@ Huyang daemon/socket/state, and synthetic model key
 `sk-huyang-acceptance-not-a-secret`. Child environments are constructed from
 an allowlist. HOME is never assigned a new value, and no auth/config is copied
 from it. Claude uses bare/dontAsk/strict MCP and no builtins. Codex uses private
-CODEX_HOME/custom Responses provider and no approval prompts. OpenCode uses
+CODEX_HOME/custom Responses provider and no approval prompts. Its supported
+`[features] plugins=false` disables curated-plugin startup sync without redirecting
+chatgpt.com or exempting external traffic. The Codex case explicitly covers **direct
+tools**, not the bundled model's default `code_mode_only` mode. The same pinned
+binary and `gpt-6.1-sol` slug use a job-local `model_catalog_json`: the exact bundled
+entry from [rust-v0.163.0](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/models-manager/models.json)
+is preserved byte-for-byte except `tool_mode="direct"` and
+`supports_search_tool=false`. Its source file SHA is
+`8f32fc36f69a37b095edb86fd91e569876de89ee6c4de08bcafe1660027aa06e`, and the committed
+entry SHA is `84908db89e40af232436afe55da355d33b73d5c653ef402b2a820ce3012340f8`.
+The runner guards the entry bytes and records original/override/catalog hashes,
+source URL and the two overrides in the case manifest and
+codex-model-catalog-provenance.json. MCP uses supported
+`omit_tools_from=["deferred","code_mode"]`, `startup_readiness="catalog"` and a
+131072-byte input-schema threshold to preserve the actual schemas. All 13 formal
+Huyang descriptors and exact schema comparisons remain required. Job-local
+`RUST_LOG=codex_core=debug,codex_mcp=debug` and `log_dir` retain startup/exposure
+diagnostics for these synthetic cases only. Default code-mode execution is not
+qualified by this case. OpenCode uses
 private OPENCODE_CONFIG_DIR/XDG roots, codemode:false, policy restrictions and ACP.
 Its provider IDs acceptance and ollama both select the openai-compatible package,
-at distinct routes on the same numeric-loopback mock; neither uses an Ollama API.
+at distinct inference routes on the same numeric-loopback mock. Native Ollama
+provider discovery can also issue GET `/ollama/api/tags`; the mock returns an empty
+model list as an explicit auxiliary response, without advancing any workflow.
+Job-only `OPENCODE_DISABLE_MODELS_FETCH=1` disables the remote models catalog.
+The job config also sets `providers.lmstudio.settings.baseURL` and
+`providers.vllm.settings.baseURL` beneath the same mock port. Their exact auxiliary
+GET routes return empty catalogs: `/lmstudio/api/v1/models` returns `{"models":[]}`,
+`/vllm/health` returns 200 `{}`, and `/vllm/v1/models` returns `{"data":[]}`.
+These discovery requests are recorded separately; they never advance inference
+or advertise Huyang tools. All other methods/routes retain their existing gates.
+ROOT's reader checked these keys/routes at `v2.0.30` (`f16ef9ad`), including the
+[pinned startup](https://github.com/anomalyco/opencode/blob/v2.0.30/packages/cli/src/server-process.ts)
+and [local-provider discovery](https://github.com/anomalyco/opencode/blob/v2.0.30/packages/core/src/plugin/provider/local.ts)
+implementations. No models-file schema is assumed and OPENCODE_MODELS_PATH is unset.
 
-strace records connect/sendto/sendmsg/execve for the actual client and service
-process trees. The destination audit rejects every observed AF_INET/AF_INET6
-destination except the case's selected 127.0.0.1 model port. Every observed AF_UNIX
+strace records timestamped network, process, namespace and FD lifecycle syscalls
+for the actual client and service process trees (`-ff -ttt -T -y`, retained exit
+records). A bounded parser reconstructs unfinished/resumed calls and retains each
+exact original line. Any parser error or unsupported outbound socket shape fails.
+Only connect/sendto/sendmsg destination arguments are audited; payload text and
+bind/listen/getsockname metadata cannot masquerade as outbound destinations.
+Failed connects and EINPROGRESS remain audited, and a separate actual connect to
+the selected model port is required.
+
+The destination audit rejects every observed AF_INET/AF_INET6 destination except
+the case's selected 127.0.0.1 model port and exact native ACP connect records proven
+by ipc_audit.py. Captures after ACP initialize and immediately before teardown must
+prove pinned executable path/SHA, process start times/ancestry, network namespace,
+expected native serve child, and its FD socket inode bound to one listening
+127.0.0.1 endpoint distinct from the model port. Both captures and complete
+timestamped process/bind/listen/getsockname/FD lifecycle evidence must agree through
+the last connect, including TID mappings. A clean proof returns exact original
+(path,line) records; only those client connect records are exempt. Every returned
+record must match the independently audited trace. Any proof error grants nothing.
+No service/sendto/sendmsg, discovery, external or ambient-socket exemption exists.
+Every observed AF_UNIX
 destination must be an absolute path resolving inside J; external, abstract,
 unnamed and undecodable addresses fail. This includes failed ambient socket
 lookups. The complete destination report, including violations, is retained.
@@ -144,7 +193,9 @@ ACCEPTANCE_CONTROL and ACCEPTANCE_FIXTURE assignments before exec, independent
 of whether a client clears its MCP child environment. The candidate adapter connects to the
 explicit private production socket. Both directions of MCP are byte-forwarded
 with backpressure; observers parse copies. Protocol stdout contains only the
-candidate stream. Initialize/initialized/list and every result are checked:
+candidate stream. Legacy initialize/initialized/list or stateless `server/discover`
+with the observed 2026-07-28 metadata/version, complete tools capability and Huyang
+server identity is required before list/calls. Each actual list reply and every result are checked:
 exactly one TextContent, absent structuredContent, and no advertised outputSchema.
 The recorder never edits a result or catalog.
 
@@ -160,7 +211,10 @@ text in the actual client's next model HTTP request. Plain data:/evidence lines
 are part of that visible text, not structuredContent or an independent SDK path.
 
 Messages SSE, Responses SSE (including namespace preservation), and compatible
-Chat SSE have separate encoders and shared per-case workflow state. Title-only
+Chat SSE have separate encoders and shared per-case workflow state. Formal
+Responses input.additional_tools descriptors are inspected alongside top-level
+tools, preserving native namespaces; orchestration descriptions are never a tool
+catalog or an SDK fallback. Title-only
 requests have a separate, explicit auxiliary response path and cannot advance
 the workflow. Missing/deferred/unknown direct tools fail rather than invoking a
 fake discovery or SDK fallback.
@@ -168,12 +222,23 @@ fake discovery or SDK fallback.
 The read's exact body drives the postimage. Replay and stale refusal must retain
 file SHA, inode, size and mtime; replay must retain the original workspace and
 document receipt guards. Actual MCP params/replies are matched to the mock's
-calls and client-visible text; unmatched calls fail. Refined output must reveal
-the second real frozen hit. The final client transcript must carry the observed
+calls and client-visible text; unmatched calls fail. Successful text is exact.
+OpenCode's stale refusal alone may use its observed `tool.execution` JSON envelope:
+exact error/content keys, empty content, and message equal to the real MCP error
+text after removing its single final newline. Both raw texts and the checked mapping
+are retained; the real MCP result must still be isError with one TextContent.
+Refined output must reveal the second real frozen hit. The final client transcript
+must carry the observed
 revision/result-set/finding tokens.
 
 The Neovim init uses the public native vim.lsp API with a real gopls process.
-Push version support is negotiated and pull diagnostics are not enabled.
+Push version support is negotiated and pull diagnostics are not enabled. A native
+`before_init` callback clears the client pull capability after merging. Advertising
+that client capability alone does not enable pull. The relay records the actual
+gopls initialize result and rejects a diagnosticProvider, dynamic diagnostic
+registration, or any upstream textDocument/diagnostic or workspace/diagnostic
+request. Every held producer must have a successful observed initialize result.
+Versioned push support remains required; no producer frame is rewritten.
 `wire.py lsp` preserves Content-Length headers and body bytes in both directions.
 It forwards all progress/requests/responses normally, holds only actual
 postimage publishDiagnostics frames, and never constructs a diagnostic.
@@ -206,8 +271,10 @@ managed huyang MCP registration; the real candidate transform must produce
 full/lean registrations. HTTP tools must be full13 or lean3 with their actual
 MCP schemas; lean additionally matches the frozen reduced M7 schema fixture.
 
-One ACP process creates two simultaneous sessions in the same Location. First A
-runs lean while B runs full; then A full while B lean. Both run independent
+One ACP process creates two simultaneous sessions in the same Location. A bounded
+condition wait requires both actual full/lean tools/list replies before ACP prompts;
+an empty primary model catalog remains a failure if the client emits one.
+First A runs lean while B runs full; then A full while B lean. Both run independent
 fixtures and markers concurrently. A same-provider model named ollama must
 remain full; ollama/mock2 must remain lean. B switches back to full. ACP selection
 responses with configOptions prove the exact selected model through the request’s
@@ -219,6 +286,38 @@ supply proof; there is no unconditional notification wait.
 An unavailable provider/model must error without inference. Lean runs
 read/search/guarded edit/stale refusal/reread. Refinement, diagnostics and replay
 are never sent to lean because their inputs/tools are absent by design.
+
+## c237 runtime evidence and bounded corrections
+
+Actual agent-a job `c2375b9f` used source `a2e4acd` and returned full-client acceptance
+exit 1: Claude, Codex and OpenCode cases were all **failed**. These are provenance
+cases, not a production verdict. Corrections in this harness remain unvalidated
+until ROOT runs a new disposable job.
+
+Claude used real stateless discovery; the legacy-only observer rejected full13
+before forwarding it, leading to empty HTTP catalogs. Codex exposed orchestration
+`input.additional_tools` with `functions.exec` and no direct full13 catalog, and
+attempted external startup traffic. OpenCode inferred before its MCP catalogs
+arrived, called the auxiliary tags route, advertised the client pull capability
+despite the initial caps-table removal, and wrapped its real stale refusal. The old
+relay rejected that capability before forwarding initialize, so c237 proves no
+actual gopls initialize result or pull/push outcome. Its external
+DNS/443, ambient Unix lookups and discovery ports remain audit failures unless
+supported startup configuration eliminates them. Native ACP control IPC requires
+the separate ownership proof below.
+The observed ephemeral port `44187` was the pinned native ACP process calling its
+own `serve --stdio --port 0` child's private `/api/*` endpoints. It is separate
+from provider discovery. c237 has no required ownership captures/lifecycle trace,
+so its audit remains failed and cannot pass retroactively. Future runs may exempt
+only exact connects proven by the native ACP ownership procedure above; no port
+number, API payload, or loopback address alone supplies ownership. Runtime must
+confirm the configured discovery and remote-fetch controls remove their respective
+ambient destinations. No substitute MCP/diagnostic result is introduced.
+
+ROOT separately reported all 14 helper-only synthetic tests passing on agent-a
+job `69bc9da9-7452-4f98-bb50-e2b876e7c666`, exact helper source `cc7207e`.
+The companion cherry-pick `7ac7c71` preserves the same tree. This is helper-unit
+evidence only; no integrated or actual-client pass is claimed here.
 
 ## Artifacts and remaining limitations
 
@@ -232,11 +331,16 @@ J/c/{claude,codex,opencode} case directory. Case directories include:
 - client stdout/stderr or duplex ACP client.jsonl, service stdout/stderr,
   model-http.jsonl with raw requests and emitted SSE/auxiliary JSON;
 - mcp-wire.jsonl raw duplex bytes, mcp-catalog-{full,lean}.json,
+  mcp-catalogs.jsonl (every actual connection/request catalog), http-catalogs.jsonl
+  (all HTTP tools and additional_tools, including empty/auxiliary/rejected catalogs),
   events.jsonl and workflow.jsonl linking exact model/MCP calls and replies;
 - lsp-wire-<pid>.jsonl with real producer upstream/held/released frame bytes,
   timestamps and hashes;
 - audit-{client,service}.<pid>, destination-audit.json, plugin-witness.jsonl,
-  selections.jsonl, acp-report.json and the case report.json.
+  selections.jsonl, acp-report.json, acp-ipc-initial.json, acp-ipc-final.json,
+  acp-ipc-proof.json and the case report.json;
+- Codex's generated direct model catalog, codex-model-catalog-provenance.json and
+  job-local codex/log diagnostics (only the synthetic acceptance session).
 
 Native packages/caches under J/tools, J/bin, J/node_modules, J/bootstrap-env and
 J/preflight need not be returned if the parent archives the manifests, lockfiles

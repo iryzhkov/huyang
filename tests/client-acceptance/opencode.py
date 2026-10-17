@@ -41,6 +41,11 @@ def configure(case, plugin, recorder, port, plugin_sha256):
                                "limit": {"context": 128000, "output": 4096},
                                "capabilities": {"tools": True, "input": ["text"], "output": ["text"]}}
                        for model in ("mock", "mock2", "ollama")}}
+    # Pinned native discovery respects these base URLs; empty mock catalogs
+    # leave configured inference models untouched, without probing ambient ports.
+    for provider in ("lmstudio", "vllm"):
+        providers[provider] = {"settings": {
+            "baseURL": "http://127.0.0.1:" + str(port) + "/" + provider + "/v1"}}
     write_json(configdir / "opencode.json", {
         "update": "disable", "share": "disabled", "model": "acceptance/mock",
         "providers": providers,
@@ -75,6 +80,7 @@ class ACP:
         return self
 
     async def read(self):
+        assert self.process.stdout is not None
         try:
             while line := await self.process.stdout.readline():
                 record(self.case / "client.jsonl", direction="from-client", raw=line.decode())
@@ -171,13 +177,23 @@ class ACP:
         await self.task
         self.err.close()
 
-async def exercise(binary, env, owner, make_fixture):
+async def exercise(binary, env, owner, make_fixture, native_binary, native_sha256):
+    from ipc_audit import capture_acp_listener
     acp = await ACP(owner.case).start(binary, env)
     sessions = []
     witness = []
+    initial_capture = None
+    final_capture = None
     try:
         await acp.rpc("initialize", {"protocolVersion": 1, "clientCapabilities": {},
                                     "clientInfo": {"name": "huyang-acceptance", "version": "1"}})
+        try:
+            initial_capture = capture_acp_listener(acp.process.pid, native_binary, native_sha256, owner.port)
+        except Exception as error:
+            initial_capture = {"violations": [repr(error)]}
+        write_json(owner.case / "acp-ipc-initial.json", initial_capture)
+        require(not initial_capture["violations"], "ACP listener ownership capture failed: "
+                + canonical(initial_capture["violations"]))
         for _ in range(2):
             created = await acp.rpc("session/new", {"cwd": str(owner.case / "fixture"), "mcpServers": []})
             require("sessionId" in created, "ACP session/new lacks sessionId")
@@ -187,6 +203,9 @@ async def exercise(binary, env, owner, make_fixture):
             sessions.append(created["sessionId"])
         a, b = sessions
         require(a != b, "ACP returned one session for both creations")
+        # Native registration/catalog loading is asynchronous; start inference only
+        # after the real loader has returned both tools/list replies. No MCP calls here.
+        await asyncio.wait_for(owner.catalogs_ready({"full", "lean"}), 30)
 
         async def prompt(session, nonce, profile, provider, probe=False):
             root = make_fixture(nonce)
@@ -229,8 +248,16 @@ async def exercise(binary, env, owner, make_fixture):
         # Both selected catalogs came from distinct real MCP registrations.
         require(set(owner.catalogs) == {"full", "lean"}, "plugin did not discover both actual profiles")
     finally:
-        await acp.close()
-        write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
-                                                  "selections": acp.selections,
-                                                  "failures": acp.failures, "witness": witness})
-        require(not acp.failures, str(acp.failures))
+        try:
+            final_capture = capture_acp_listener(acp.process.pid, native_binary, native_sha256, owner.port)
+        except Exception as error:
+            final_capture = {"violations": [repr(error)]}
+        try:
+            await acp.close()
+        finally:
+            write_json(owner.case / "acp-ipc-final.json", final_capture)
+            owner.acp_ipc_captures = (initial_capture, final_capture)
+            write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
+                                                      "selections": acp.selections,
+                                                      "failures": acp.failures, "witness": witness})
+            require(not acp.failures, str(acp.failures))

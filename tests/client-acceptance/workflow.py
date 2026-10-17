@@ -100,6 +100,11 @@ def tool_catalog(body):
             require(not definition.get("defer_loading"), "deferred tool discovery unsupported: " + qualified)
             answer[base] = {"name": name, "namespace": namespace, "schema": schema}
     visit(body.get("tools", []))
+    # Responses can carry formal declarations in developer additional_tools items.
+    # Inspect those descriptors only, never tool descriptions or orchestration text.
+    for item in body.get("input", []) if isinstance(body.get("input"), list) else []:
+        if item.get("type") == "additional_tools":
+            visit(item.get("tools", []))
     return answer
 
 def shape(schema):
@@ -140,6 +145,9 @@ class Workflow:
     async def advance(self, body, protocol):
         require(not self.done, "primary request after workflow completion")
         catalog = tool_catalog(body)
+        self.catalogs.append({"sha256": digest(canonical(catalog).encode()), "tools": catalog,
+                              "sessionId": self.session, "providerID": self.provider})
+        record(self.log, nonce=self.nonce, step=self.step, catalog=self.catalogs[-1])
         require(set(catalog) == (FULL if self.profile == "full" else LEAN),
                 self.nonce + ": wrong actual model catalog: " + str(sorted(catalog)))
         expected_prefix = "huyang_full_" if self.profile == "full" else "huyang_lean_"
@@ -154,15 +162,13 @@ class Workflow:
             if self.profile == "lean":
                 require(shape(expected) == shape(self.owner.lean_schemas[base]),
                         "candidate lean schema differs from M7 closed schema: " + base)
-        self.catalogs.append({"sha256": digest(canonical(catalog).encode()), "tools": catalog,
-                              "sessionId": self.session, "providerID": self.provider})
-        record(self.log, nonce=self.nonce, step=self.step, catalog=self.catalogs[-1])
         if self.pending:
             outputs = results(body, protocol)
             call_id = self.pending["call_id"]
             require(call_id in outputs, "missing real client tool output for " + call_id)
             text = outputs[call_id]
-            wire = self.owner.match_reply(self.pending, text)
+            wire = self.owner.match_reply(self.pending, text, protocol)
+            text = wire["model_visible_plain_text"]
             self.replies.append({"call_id": call_id, "text": text, "mcp": wire})
             record(self.log, nonce=self.nonce, step=self.step, call_id=call_id, plain=text, mcp=wire)
             self.observe_notice(text, wire)

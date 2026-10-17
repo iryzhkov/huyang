@@ -118,6 +118,7 @@ async def lsp(args):
     released = set()
     post = {}
     baseline = set()
+    initialize_ids = set()
     async def emit(raw, message, delayed=False):
         stdout.write(raw)
         await stdout.drain()
@@ -143,6 +144,7 @@ async def lsp(args):
                     held[:] = keep
 
     async def upstream():
+        assert child.stdin is not None
         while True:
             try:
                 raw, message = await frame(stdin)
@@ -153,7 +155,10 @@ async def lsp(args):
             method = message.get("method")
             p = message.get("params", {})
             if method == "initialize":
+                initialize_ids.add(message["id"])
                 await control({"kind": "lsp-initialize", "message": message, "relay": os.getpid()})
+            if method in ("textDocument/diagnostic", "workspace/diagnostic"):
+                await control({"kind": "lsp-pull-request", "message": message, "relay": os.getpid()})
             if method in ("textDocument/didOpen", "textDocument/didChange"):
                 doc = p["textDocument"]
                 texts = [doc.get("text", "")] if method.endswith("didOpen") else [
@@ -171,6 +176,11 @@ async def lsp(args):
             except asyncio.IncompleteReadError:
                 return
             raw_record(log, "from-gopls", raw)
+            if "method" not in message and message.get("id") in initialize_ids:
+                initialize_ids.remove(message["id"])
+                await control({"kind": "lsp-initialize-result", "message": message, "relay": os.getpid()})
+            if message.get("method") == "client/registerCapability":
+                await control({"kind": "lsp-registration", "message": message, "relay": os.getpid()})
             async with lock:
                 if message.get("method") == "textDocument/publishDiagnostics":
                     p = message["params"]

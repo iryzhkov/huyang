@@ -33,7 +33,16 @@ class Controller:
         self.catalogs = {}
         self.initialized = set()
         self.initialize_replies = set()
+        self.discovered = {}
+        self.mcp_catalogs = []
+        self.http_catalogs = []
+        self.discovery = []
+        self.acp_ipc_proof: dict | None = None
+        self.acp_ipc_captures: tuple[dict | None, dict | None] | None = None
         self.lsp_initializations = []
+        self.lsp_initialize_results = []
+        self.lsp_registrations = []
+        self.lsp_pull_requests = []
         self.listed = set()
 
     def fail(self, error):
@@ -88,12 +97,21 @@ class Controller:
             # The recorder supplies connection=<pid>, never reuse only request ID.
             if event["direction"] == "to-candidate":
                 method = m.get("method")
-                if method == "initialize":
+                if method in ("initialize", "server/discover"):
                     self.pending[key] = event
                 if method == "notifications/initialized":
                     require((event["connection"], profile) in self.initialize_replies,
                             "initialized notification preceded actual initialize result")
                     self.initialized.add((event["connection"], profile))
+                if method in ("tools/list", "tools/call"):
+                    connection = (event["connection"], profile)
+                    version = self.discovered.get(connection)
+                    require(connection in self.initialized or version is not None,
+                            "MCP request preceded negotiated legacy/stateless handshake")
+                    if version is not None:
+                        require(m.get("params", {}).get("_meta", {}).get(
+                            "io.modelcontextprotocol/protocolVersion") == version,
+                            "stateless MCP request changed negotiated protocol version")
                 if method == "tools/call":
                     p = m["params"]
                     require(p["name"] in (FULL if profile == "full" else LEAN), "unexpected MCP tool")
@@ -114,9 +132,24 @@ class Controller:
                 if method == "initialize":
                     require("protocolVersion" in m["result"], "candidate did not negotiate MCP initialize")
                     self.initialize_replies.add((event["connection"], profile))
+                elif method == "server/discover":
+                    result = m["result"]
+                    version = request["message"].get("params", {}).get("_meta", {}).get(
+                        "io.modelcontextprotocol/protocolVersion")
+                    require(version == "2026-07-28" and version in result.get("supportedVersions", []),
+                            "unsupported stateless MCP negotiation")
+                    require(result.get("resultType") == "complete" and isinstance(
+                        result.get("capabilities", {}).get("tools"), dict),
+                        "stateless discovery did not advertise a complete tools server")
+                    require(result.get("_meta", {}).get("io.modelcontextprotocol/serverInfo", {}).get(
+                        "name") == "huyang", "stateless discovery identified another server")
+                    self.discovered[(event["connection"], profile)] = version
                 elif method == "tools/list":
-                    require((event["connection"], profile) in self.initialized, "tools/list before initialized")
                     tools = m["result"]["tools"]
+                    catalog = {"connection": event["connection"], "request_id": m["id"],
+                               "profile": profile, "tools": tools}
+                    self.mcp_catalogs.append(catalog)
+                    record(self.case / "mcp-catalogs.jsonl", **catalog)
                     require({t["name"] for t in tools} == (FULL if profile == "full" else LEAN),
                             "wrong actual MCP profile catalog")
                     require(not any("outputSchema" in t for t in tools), "plain tools advertise outputSchema")
@@ -135,11 +168,26 @@ class Controller:
                                "before": request.get("before"), "after": event.get("after"), "matched": False}
                     self.receipts.append(receipt)
         elif kind == "lsp-initialize":
+            self.lsp_initializations.append(event)
             caps = event["message"]["params"]["capabilities"]["textDocument"]
             require(caps.get("publishDiagnostics", {}).get("versionSupport") is True,
                     "real LSP did not negotiate versioned push publications")
-            require("diagnostic" not in caps, "pull diagnostics was unexpectedly enabled")
-            self.lsp_initializations.append(event)
+        elif kind == "lsp-initialize-result":
+            self.lsp_initialize_results.append(event)
+            message = event["message"]
+            require("error" not in message and isinstance(message.get("result"), dict),
+                    "gopls initialize did not succeed")
+            caps = message["result"].get("capabilities")
+            require(isinstance(caps, dict) and caps.get("diagnosticProvider") is None,
+                    "gopls advertised a pull diagnostic provider")
+        elif kind == "lsp-registration":
+            self.lsp_registrations.append(event)
+            require(not any(r.get("method") in ("textDocument/diagnostic", "workspace/diagnostic")
+                            for r in event["message"]["params"]["registrations"]),
+                    "gopls dynamically registered pull diagnostics")
+        elif kind == "lsp-pull-request":
+            self.lsp_pull_requests.append(event)
+            raise AssertionError("Neovim requested pull diagnostics; delayed push proof invalid")
         elif kind == "lsp-publication":
             p = event["message"]["params"]
             uri = p["uri"]
@@ -161,6 +209,10 @@ class Controller:
                             "released diagnostic differs from upstream frame bytes")
                     self.deliveries.setdefault(p["uri"], []).append(event)
         return {"ok": True}
+
+    async def catalogs_ready(self, profiles):
+        async with self.condition:
+            await self.condition.wait_for(lambda: set(profiles) <= set(self.catalogs))
 
     async def baseline(self, root):
         uri = (Path(root) / "main.go").as_uri()
@@ -191,12 +243,32 @@ class Controller:
                 for event in self.deliveries.get(uri, [])) or self.failures)
         require(not self.failures, str(self.failures))
 
-    def match_reply(self, call, visible):
+    def match_reply(self, call, visible, protocol):
         for receipt in self.receipts:
             if not receipt["matched"] and receipt["params"].get("name") == call["base"] and (
                     receipt["params"].get("arguments") == call["arguments"]):
                 text = receipt["result"]["content"][0]["text"]
-                require(text == visible, "client model-visible result differs from real MCP text")
+                plain = visible
+                mapping = "exact-text"
+                if (protocol == "chat" and call["step"] == "stale"
+                        and receipt["result"].get("isError") is True):
+                    # OpenCode 2.0.30 renders MCP errors as tool.execution JSON,
+                    # removing the single final newline from the error message.
+                    envelope = json.loads(visible)
+                    require(isinstance(envelope, dict) and set(envelope) == {"error", "content"}
+                            and envelope["content"] == [], "unknown client error envelope")
+                    error = envelope["error"]
+                    require(isinstance(error, dict) and set(error) == {"type", "message"}
+                            and error["type"] == "tool.execution"
+                            and error["message"] == text.removesuffix("\n"),
+                            "client error message differs from real MCP refusal")
+                    plain = error["message"]
+                    mapping = "opencode-tool.execution-single-final-newline"
+                else:
+                    require(text == visible, "client model-visible result differs from real MCP text")
+                receipt["model_visible_text"] = visible
+                receipt["model_visible_plain_text"] = plain
+                receipt["model_visible_mapping"] = mapping
                 receipt["matched"] = True
                 return receipt
         raise AssertionError("no exact MCP call/reply matches actual model result " + call["call_id"])
@@ -230,6 +302,30 @@ class Controller:
                     raw = gzip.decompress(raw)
                 body = json.loads(raw) if raw else {}
                 path = urlsplit(target).path
+                catalog = {"method": method, "target": target, "model": body.get("model"),
+                           "tools": body.get("tools", []),
+                           "additional_tools": [item for item in body.get("input", [])
+                               if isinstance(item, dict) and item.get("type") == "additional_tools"]
+                               if isinstance(body.get("input"), list) else []}
+                self.http_catalogs.append(catalog)
+                record(self.case / "http-catalogs.jsonl", **catalog)
+                discovery = {
+                    "/ollama/api/tags": ("ollama", b'{"models":[]}'),
+                    "/lmstudio/api/v1/models": ("lmstudio", b'{"models":[]}'),
+                    "/vllm/health": ("vllm", b'{}'),
+                    "/vllm/v1/models": ("vllm", b'{"data":[]}'),
+                }
+                if method == "GET" and path in discovery and not raw:
+                    # Exact native discovery routes, separate from inference and MCP.
+                    provider, payload = discovery[path]
+                    entry = {"auxiliary": "provider-discovery", "providerID": provider,
+                             "method": method, "path": path, "response": json.loads(payload)}
+                    self.discovery.append(entry)
+                    record(self.http_log, **entry)
+                    raw_record(self.http_log, "auxiliary-response-json", payload,
+                               auxiliary="provider-discovery", providerID=provider)
+                    await self.send(writer, payload, "application/json")
+                    return
                 if method == "HEAD" and path == "/api/hello":
                     await self.send(writer, b"", "application/json", head_only=True)
                     return
@@ -401,7 +497,13 @@ class Controller:
     def report(self):
         return {"failures": self.failures, "http_request_count": self.count,
                 "initialized_connections": sorted(self.initialized),
+                "discovered_connections": [{"connection": c, "profile": p, "protocolVersion": v}
+                                           for (c, p), v in sorted(self.discovered.items())],
+                "mcp_catalogs": self.mcp_catalogs, "http_catalogs": self.http_catalogs,
+                "provider_discovery": self.discovery,
                 "listed_connections": sorted(self.listed), "released_uris": sorted(self.released),
                 "baseline": self.clean, "held": self.held, "deliveries": self.deliveries,
                 "lsp_initializations": self.lsp_initializations,
+                "lsp_initialize_results": self.lsp_initialize_results,
+                "lsp_registrations": self.lsp_registrations, "lsp_pull_requests": self.lsp_pull_requests,
                 "workflows": [w.report() for w in self.workflows.values()]}

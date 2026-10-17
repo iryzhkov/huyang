@@ -95,6 +95,7 @@ def headless_init(case, gopls):
             + "caps.textDocument.publishDiagnostics.versionSupport = true\n"
             + "vim.lsp.config('gopls', {\n  cmd = {" + quoted + "},\n"
             + "  filetypes = {'go', 'gomod'}, root_markers = {'go.mod'}, capabilities = caps,\n"
+            + "  before_init = function(params) params.capabilities.textDocument.diagnostic = nil end,\n"
             + "  settings = {gopls = {diagnosticsDelay = '0s'}},\n"
             + "})\nvim.lsp.enable('gopls')\n")
     path = case / "init.lua"
@@ -102,45 +103,108 @@ def headless_init(case, gopls):
     return path
 
 def traced(args, case, label, command):
-    return [str(args.strace), "-ff", "-qq", "-s", "4096", "-e",
-            "trace=connect,sendto,sendmsg,execve", "-o", str(case / ("audit-" + label)), *map(str, command)]
+    return [str(args.strace), "-ff", "-ttt", "-T", "-y", "-s", "4096", "-e",
+            "trace=network,process,close,close_range,dup,dup2,dup3,fcntl,unshare,setns",
+            "-o", str(case / ("audit-" + label)), *map(str, command)]
 
-def network_audit(case, port, job):
-    files = sorted(path for path in case.glob("audit-*") if path.is_file())
+def network_audit(case, port, job, ipc_proof=None):
+    from ipc_audit import destination_text, read_trace_records
+    parsed = read_trace_records(case)
     report = {"ip_destinations": [], "unix_destinations": [], "execve_recorded": [],
+              "model_connects": [], "acp_ipc_records": [],
               "execve_policy": "recorded only; no executable allowlist asserted",
-              "unix_allowed_root": str(job.resolve()), "violations": []}
-    if not files:
-        report["violations"].append("missing destination trace")
-    for path in files:
-        for line in path.read_text(errors="replace").splitlines():
-            entry = {"path": path.name, "line": line}
-            if "execve(" in line:
-                report["execve_recorded"].append(entry)
+              "unix_allowed_root": str(job.resolve()), "violations": list(parsed["violations"])}
+    allowed = set()
+    if ipc_proof is not None:
+        if ipc_proof["violations"]:
+            report["violations"].extend("ACP IPC proof: " + v for v in ipc_proof["violations"])
+        else:
+            allowed = {(r["path"], r["line"]) for r in ipc_proof["allowed_connect_records"]}
+            if any(not re.fullmatch(r"audit-client\.\d+", path) for path, _ in allowed):
+                report["violations"].append("ACP IPC exemption contains non-client trace records")
+                allowed.clear()
+    used = set()
+    for syscall in parsed["records"]:
+        if "call" not in syscall:
+            continue  # Parser-validated signal/exit metadata has no destination.
+        originals = syscall["original_records"]
+        entry = {"tid": syscall["tid"], "call": syscall["call"], "result": syscall["result"],
+                 "start_ns": syscall["start_ns"], "end_ns": syscall["end_ns"],
+                 "text": syscall["text"], "original_records": originals}
+        if syscall["call"] in ("execve", "execveat"):
+            report["execve_recorded"].append(entry)
+        try:
+            require(syscall["complete"] is True, "incomplete syscall destination evidence")
+            address = destination_text(syscall)
+            if address is None:
                 continue
-            if "AF_INET" in line:
+            entry["destination"] = address
+            if re.search(r"\bsa_family=AF_INET6?\b", address):
                 report["ip_destinations"].append(entry)
-                if not ("AF_INET6" not in line and 'inet_addr("127.0.0.1")' in line
-                        and "htons(" + str(port) + ")" in line):
-                    report["violations"].append("unexpected IP destination: " + line)
-            if "AF_UNIX" in line:
+                host = re.search(r'\bsin_addr=inet_addr\("([^"]+)"\)', address)
+                dest_port = re.search(r"\bsin_port=htons\((\d+)\)", address)
+                port_number = int(dest_port[1]) if dest_port is not None else None
+                loopback = ("AF_INET6" not in address and host is not None
+                            and host[1] == "127.0.0.1" and port_number is not None)
+                if loopback and port_number == port:
+                    if syscall["call"] == "connect":
+                        report["model_connects"].append(entry)
+                    continue
+                keys = {(r["path"], r["line"]) for r in originals}
+                if loopback and syscall["call"] == "connect" and keys and keys <= allowed:
+                    used.update(keys)
+                    entry["classification"] = "proven-native-acp-private-api"
+                    report["acp_ipc_records"].append(entry)
+                    continue
+                raise AssertionError("unexpected IP destination")
+            if re.search(r"\bsa_family=AF_UNIX\b", address):
                 report["unix_destinations"].append(entry)
-                # Abstract/unnamed/truncated addresses are not an ambient-socket exception.
-                match = re.search(r'\bsun_path=("(?:[^"\\]|\\.)*")', line)
-                try:
-                    require(match is not None, "unknown or abstract AF_UNIX address")
-                    assert match is not None
-                    address = ast.literal_eval(match[1])
-                    require(isinstance(address, str) and Path(address).is_absolute(),
-                            "AF_UNIX destination is not an absolute job path")
-                    require(Path(address).resolve().is_relative_to(job.resolve()),
-                            "AF_UNIX destination escaped the job allowlist")
-                    entry["resolved_destination"] = str(Path(address).resolve())
-                except (AssertionError, ValueError, SyntaxError, OSError, RuntimeError) as error:
-                    report["violations"].append(str(error) + ": " + line)
-    if not report["ip_destinations"]:
-        report["violations"].append("no real loopback model connect captured")
+                match = re.search(r'\bsun_path=("(?:[^"\\]|\\.)*")', address)
+                require(match is not None, "unknown or abstract AF_UNIX address")
+                assert match is not None
+                destination = ast.literal_eval(match[1])
+                require(isinstance(destination, str) and Path(destination).is_absolute(),
+                        "AF_UNIX destination is not an absolute job path")
+                require(Path(destination).resolve().is_relative_to(job.resolve()),
+                        "AF_UNIX destination escaped the job allowlist")
+                entry["resolved_destination"] = str(Path(destination).resolve())
+                continue
+            raise AssertionError("unknown non-NULL socket destination")
+        except (AssertionError, ValueError, SyntaxError, OSError, RuntimeError) as error:
+            report["violations"].append(str(error) + ": " + canonical(entry))
+    if used != allowed:
+        report["violations"].append("ACP IPC proof records do not exactly match audited connect records")
+    if not report["model_connects"]:
+        report["violations"].append("no real model-port connect captured")
     return report
+
+def codex_direct_catalog(case):
+    """Explicit direct-tool coverage using the otherwise unchanged pinned entry."""
+    source_path = HERE / "codex-model-entry.json"
+    raw = source_path.read_bytes()
+    require(digest(raw) == "84908db89e40af232436afe55da355d33b73d5c653ef402b2a820ce3012340f8",
+            "pinned Codex source model entry changed")
+    source = raw.decode("utf-8")
+    original = json.loads(source)
+    require(original["slug"] == "gpt-6.1-sol" and original["tool_mode"] == "code_mode_only"
+            and original["supports_search_tool"] is True, "unexpected pinned Codex model defaults")
+    override, modes = re.subn(r'("tool_mode"\s*:\s*)"code_mode_only"', r'\1"direct"', source)
+    override, searches = re.subn(r'("supports_search_tool"\s*:\s*)true', r'\1false', override)
+    require(modes == searches == 1 and json.loads(override) == {
+        **original, "tool_mode": "direct", "supports_search_tool": False},
+        "Codex model override changed more than its two authorized fields")
+    path = case / "codex" / "model-catalog.json"
+    path.write_bytes(b'{"models":[' + override.encode("utf-8") + b']}\n')
+    provenance = {
+        "coverage": "explicit-direct-tools-only", "model_slug": original["slug"],
+        "source_url": "https://raw.githubusercontent.com/openai/codex/rust-v0.163.0/codex-rs/models-manager/models.json",
+        "source_sha256": "8f32fc36f69a37b095edb86fd91e569876de89ee6c4de08bcafe1660027aa06e",
+        "source_entry": str(source_path), "source_entry_sha256": digest(raw),
+        "override_entry_sha256": digest(override.encode("utf-8")),
+        "catalog": str(path), "catalog_sha256": file_hash(path),
+        "overrides": {"tool_mode": "direct", "supports_search_tool": False}}
+    write_json(case / "codex-model-catalog-provenance.json", provenance)
+    return provenance
 
 async def cli(client, args, case, env, owner, binary, wrapper):
     root = fixture(case, client + "-full")
@@ -164,13 +228,17 @@ async def cli(client, args, case, env, owner, binary, wrapper):
             'model = "gpt-6.1-sol"\nmodel_provider = "acceptance"\napproval_policy = "never"\n'
             'sandbox_mode = "danger-full-access"\nweb_search = "disabled"\nproject_root_markers = []\n'
             'cli_auth_credentials_store = "file"\n'
-            '[features]\nenable_request_compression = false\napps = false\nmulti_agent = false\nhooks = false\n'
+            + "model_catalog_json = " + json.dumps(str(case / "codex/model-catalog.json")) + "\n"
+            + "log_dir = " + json.dumps(str(case / "codex/log")) + "\n"
+            + '[features]\nenable_request_compression = false\napps = false\nmulti_agent = false\nhooks = false\nplugins = false\n'
             '[model_providers.acceptance]\nname = "Private deterministic mock"\n'
             + "base_url = " + json.dumps(base + "/v1") + "\n"
             + 'env_key = "HUYANG_MOCK_KEY"\nwire_api = "responses"\nrequires_openai_auth = false\n'
             'supports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0\n'
             '[mcp_servers.huyang]\ncommand = ' + json.dumps(mcp[0]) + "\nargs = " + json.dumps(mcp[1:])
             + '\nrequired = true\nstartup_timeout_sec = 30\ntool_timeout_sec = 30\n'
+            'startup_readiness = "catalog"\nomit_tools_from = ["deferred", "code_mode"]\n'
+            'tool_input_schema_max_bytes = 131072\n'
             'default_tools_approval_mode = "auto"\n')
         (case / "codex" / "config.toml").write_text(config)
         command = [str(binary), "exec", "--strict-config", "--ignore-rules", "--skip-git-repo-check",
@@ -204,6 +272,11 @@ async def run_case(client, args, manifest, candidate, runtime):
     tool_path = str(args.job / "bin") + ":" + str(args.nvim.parent) + ":" + args.tool_path
     home_preflight = clean_home_preflight(case / "home-preflight.json", namespace_required)
     env = environment(case, tool_path)
+    if client == "opencode":
+        env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"
+    if client == "codex":
+        env["RUST_LOG"] = "codex_core=debug,codex_mcp=debug"
+    model_catalog = codex_direct_catalog(case) if client == "codex" else None
     owner = await Controller(case, json.loads((HERE / "lean-schemas.json").read_text())).start()
     env.update(ACCEPTANCE_CONTROL=str(owner.control_path),
                ACCEPTANCE_FIXTURE=str(case / "fixture"), ACCEPTANCE_CANDIDATE=str(candidate),
@@ -216,7 +289,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         "environment_keys": sorted(env), "model_port": owner.port, "service_socket": str(case / "h.sock"),
         "binary": manifest["binaries"][client], "candidate_sha256": file_hash(candidate),
         "plugin_sha256": args.plugin_sha256 if client == "opencode" else None,
-        "home_preflight": home_preflight,
+        "home_preflight": home_preflight, "codex_model_catalog": model_catalog,
         "recorder_sha256": file_hash(wrapper), "runtime_files": manifest["candidate_runtime_files"]})
     stdout = (case / "service.stdout").open("wb")
     stderr = (case / "service.stderr").open("wb")
@@ -237,20 +310,26 @@ async def run_case(client, args, manifest, candidate, runtime):
                     + ", " + repr(list(map(str, traced(args, case, "client", [binary]))))
                     + " + __import__('sys').argv[1:])\n")
                 launcher.chmod(0o755)
-                await opencode.exercise(launcher, env, owner, lambda nonce: fixture(case, nonce))
+                await opencode.exercise(launcher, env, owner, lambda nonce: fixture(case, nonce),
+                                        binary, manifest["binaries"][client]["sha256"])
                 require(file_hash(case / "oc-config/plugins/huyang-profiles.js") == args.plugin_sha256,
                         "discovered plugin changed during the actual client run")
             else:
                 await cli(client, args, case, env, owner, binary, wrapper)
         require(not owner.failures, str(owner.failures))
-        require(owner.initialized and owner.initialized == owner.listed,
-                "missing actual MCP initialized/tools/list handshake")
+        negotiated = owner.initialized | set(owner.discovered)
+        require(negotiated and negotiated == owner.listed,
+                "missing actual MCP legacy/stateless negotiation and tools/list")
         full = [w for w in owner.workflows.values() if w.profile == "full" and not w.probe]
         require(full and all(w.done and w.late and w.set_handle and w.guard for w in full),
                 "full-profile evidence incomplete")
         require(all(w.done for w in owner.workflows.values()), "unfinished scenario")
         require(all(r["matched"] for r in owner.receipts), "unscripted or unmatched actual MCP call")
+        initialized_relays = {e["relay"] for e in owner.lsp_initialize_results}
+        require(initialized_relays, "missing actual gopls initialize result")
         for uri, held in owner.held.items():
+            require(all(e["relay"] in initialized_relays for e in held),
+                    "delayed producer lacks actual initialize-result evidence")
             require([e["sha256"] for e in owner.deliveries.get(uri, [])] == [e["sha256"] for e in held],
                     "gopls publication bytes/order/count changed at release")
         require(file_hash(binary) == manifest["binaries"][client]["sha256"], "client self-modified")
@@ -262,8 +341,20 @@ async def run_case(client, args, manifest, candidate, runtime):
             await stop(service)
         stdout.close()
         stderr.close()
+        if client == "opencode":
+            # The parser reads client AND service traces. Both trees must be
+            # stopped/flushed before proof, not only ACP at exercise teardown.
+            try:
+                from ipc_audit import audit_acp_ipc
+                captures = owner.acp_ipc_captures
+                require(captures is not None, "missing native ACP ownership captures")
+                assert captures is not None
+                owner.acp_ipc_proof = audit_acp_ipc(case, owner.port, *captures)
+            except Exception as error:
+                owner.acp_ipc_proof = {"allowed_connect_records": [], "violations": [repr(error)]}
+            write_json(case / "acp-ipc-proof.json", owner.acp_ipc_proof)
         try:
-            audit = network_audit(case, owner.port, args.job)
+            audit = network_audit(case, owner.port, args.job, owner.acp_ipc_proof)
             write_json(case / "destination-audit.json", audit)
             require(not audit["violations"], canonical(audit["violations"]))
         except Exception as error:
