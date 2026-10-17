@@ -27,6 +27,8 @@ type capacityProvider struct {
 	closed                     atomic.Bool
 	failClose                  atomic.Bool
 	unhealthy                  atomic.Bool
+	debugActive                atomic.Bool
+	debugQueryFail             atomic.Bool
 	closeStarted, closeProceed chan struct{}
 }
 
@@ -69,6 +71,21 @@ func (b *capacityProvider) Health(ctx context.Context) provider.Health {
 		return provider.Health{State: provider.HealthFailed}
 	}
 	return b.stubProvider.Health(ctx)
+}
+func (b *capacityProvider) DebugActive(context.Context) (bool, error) {
+	if b.debugQueryFail.Load() {
+		return false, errors.New("debug activity unavailable")
+	}
+	return b.debugActive.Load(), nil
+}
+func (b *capacityProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
+	switch request.Operation {
+	case "debug_launch", "debug_attach":
+		b.debugActive.Store(true)
+	case "debug_stop":
+		b.debugActive.Store(false)
+	}
+	return b.stubProvider.Call(ctx, request)
 }
 func capWorkspace(t *testing.T) *workspacecore.Workspace {
 	t.Helper()
@@ -137,6 +154,7 @@ func TestCapacityProtectsLeasesDebugAndSandbox(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				f.opened[0].debugActive.Store(true)
 				release = func() {}
 			default:
 				_, release = capCanonical(t, p, a)
@@ -371,30 +389,102 @@ func TestCapacityReaperAndPreparedPlanRelease(t *testing.T) {
 		t.Fatalf("expected staged pair and two canonical generations: %d", len(f.opened))
 	}
 }
-func TestCapacityDebugHoldSurvivesRestartAndHealthReplacement(t *testing.T) {
+func TestCapacityInactiveDebugDoesNotSurviveReplacement(t *testing.T) {
 	p, f := capPool(t, 1)
 	w, other := capWorkspace(t), capWorkspace(t)
-	_, r, err := p.Debug(context.Background(), w)
-	r()
+	backend, r, err := p.Debug(context.Background(), w)
+	if err != nil {
+		r()
+		t.Fatal(err)
+	}
+	_, err = backend.Call(context.Background(), provider.Request{Operation: "debug_launch"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	r()
+	if _, r, err = p.Restart(context.Background(), w); !errors.Is(err, ErrProviderBusy) {
+		r()
+		t.Fatalf("restart discarded an active debug session: %v", err)
+	}
+	// The provider died with its session: replacement must not inherit ownership.
+	f.opened[0].unhealthy.Store(true)
+	_, r = capCanonical(t, p, w)
+	r()
 	_, r, err = p.Restart(context.Background(), w)
 	r()
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.opened[1].unhealthy.Store(true)
-	_, r = capCanonical(t, p, w)
-	r()
 	for i, c := range f.configs {
-		if !c.Debug || !c.PinLanguageServers {
-			t.Fatalf("generation %d lost debug hold: %+v", i, c)
+		if c.PinLanguageServers || (i > 0 && c.Debug) {
+			t.Fatalf("generation %d resurrected inactive ownership: %+v", i, c)
 		}
 	}
-	if _, r, err := p.Canonical(context.Background(), other); !errors.Is(err, ErrProviderCapacity) {
-		r()
-		t.Fatalf("replacement was evictable: %v", err)
+	_, r = capCanonical(t, p, other)
+	r()
+}
+
+func TestCapacityRecoversAfterDebugListAndStoppedSessions(t *testing.T) {
+	for _, operations := range [][]string{
+		{"debug_breakpoints"},
+		{"debug_stop"},
+		{"debug_launch", "debug_stop"},
+	} {
+		t.Run(fmt.Sprint(operations), func(t *testing.T) {
+			p, f := capPool(t, DefaultMaxProviders)
+			for i := 0; i < 2*DefaultMaxProviders+1; i++ {
+				w := capWorkspace(t)
+				backend, release, err := p.Debug(context.Background(), w)
+				if err != nil {
+					release()
+					t.Fatalf("workspace %d: %v", i, err)
+				}
+				for _, operation := range operations {
+					if _, err := backend.Call(context.Background(), provider.Request{Operation: operation}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				release()
+			}
+			_, release := capCanonical(t, p, capWorkspace(t))
+			release()
+			if f.peak.Load() > DefaultMaxProviders || !f.opened[0].closed.Load() {
+				t.Fatal("capacity was exceeded or inactive debugging was retained")
+			}
+		})
+	}
+}
+
+func TestCapacityRetainsDebugActivityUntilSessionOrTargetsEnd(t *testing.T) {
+	for _, ownership := range []string{"session", "trace_targets", "query_failure"} {
+		t.Run(ownership, func(t *testing.T) {
+			p, f := capPool(t, 1)
+			w, other := capWorkspace(t), capWorkspace(t)
+			// Adoption uses the same generation as canonical operations.
+			first, release := capCanonical(t, p, w)
+			release()
+			backend, release, err := p.Debug(context.Background(), w)
+			if err != nil || backend != first {
+				release()
+				t.Fatalf("debug adoption: %v", err)
+			}
+			f.opened[0].debugActive.Store(ownership != "query_failure")
+			f.opened[0].debugQueryFail.Store(ownership == "query_failure")
+			release()
+			if _, r, err := p.Canonical(context.Background(), other); !errors.Is(err, ErrProviderCapacity) {
+				r()
+				t.Fatalf("active ownership discarded: %v", err)
+			}
+			// Exit or the last target's cleanup releases live ownership without
+			// another acquisition or a daemon restart.
+			f.opened[0].debugActive.Store(false)
+			f.opened[0].debugQueryFail.Store(false)
+			_, release = capCanonical(t, p, other)
+			release()
+			if !f.opened[0].closed.Load() || f.peak.Load() > 1 {
+				t.Fatal("debug ownership did not release its reservation safely")
+			}
+		})
 	}
 }
 
@@ -411,7 +501,7 @@ func TestCapacityPassesLanguageServerLimitAndPinsOwnedProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, c := range f.configs {
-		if c.MaxLanguageServers != 2 || c.PinLanguageServers != (i != 0) {
+		if c.MaxLanguageServers != 2 || c.PinLanguageServers != (i == 2) {
 			t.Fatalf("config[%d]=%+v", i, c)
 		}
 	}

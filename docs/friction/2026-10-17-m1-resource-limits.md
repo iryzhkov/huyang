@@ -13,8 +13,10 @@ Implementation branch: `t3/m1-resource-limits`, isolated at parent `6188357`
   its victim's slot; lookups of other idle providers continue.
 - Leased providers remain pinned until explicit release, even after cancellation.
   Debug ownership and sandbox/plan ownership also prevent capacity eviction.
-  Restart and unhealthy-provider replacement refuse to close a leased generation;
-  debug ownership survives either replacement path.
+  Restart and unhealthy-provider replacement refuse to close a leased generation.
+  Active sessions and temporary trace targets are queried before idle eviction;
+  explicit restart also refuses while that activity is live. Ownership is local
+  to the running generation and is never inherited by a replacement.
 - A failed launch returns its reservation. A failed close retains it. A successful
   close returns it exactly once. Pool shutdown stops admission and joins in-flight
   starts before closing all owned providers. The existing idle reaper and plan
@@ -29,9 +31,11 @@ Implementation branch: `t3/m1-resource-limits`, isolated at parent `6188357`
 - A Lua admission hook is installed before the user's headless init. It covers
   native auto-attach and direct client creation, including reentrant starts.
   Clients used by active tool requests, outstanding requests/progress, initializing
-  clients and unsaved buffers are held. Transactions, sandbox providers and debug
-  providers pin their clients. Adopting a canonical provider for debugging pins its
-  existing clients and future generations.
+  clients and unsaved buffers are held. Transactions and sandbox providers pin
+  their clients. Live debug sessions and temporary trace targets pin clients
+  dynamically, including in canonical providers reused for debugging. Debug
+  module discovery, list calls, no-op stop and saved launch configuration do not
+  claim ownership. Session exit/stop and final trace-target cleanup unpin clients.
 - Server admission evicts an idle LRU client and waits for its exit callback.
   Stopping clients still consume capacity. Exhaustion or an unconfirmed exit
   produces `language_server_capacity`; swallowed auto-attach errors are retained
@@ -45,7 +49,33 @@ host-tuned budget. This is cgroup pressure/throttling, not memory-triggered LRU
 eviction or an OOM guarantee. The caps bound providers and LSP clients, not their
 memory use or arbitrary helper-process counts.
 
-## Validation
+## Review correction: live debug ownership
+
+Opus main review found that the original sticky slot flag permanently exhausted
+the default four-provider pool after four workspaces touched any debug tool.
+The correction removes that flag and the permanent client-hold adoption path.
+The embedded provider reports current Lua session/trace activity without starting
+a generation; failed activity queries conservatively retain the provider. Lua LSP
+admission uses the same activity query, so stop, exit and final trace cleanup
+release client protection immediately.
+
+Added regressions cover more than four distinct workspaces issuing list, no-op
+stop and launch/stop; canonical adoption; active session/trace retention; query
+failure; restart refusal during activity; replacement without inherited ownership;
+idle reaping after activity ends; and real Lua lifecycle/client unpinning.
+
+Validation for this correction is **deferred**: the parent has not granted the
+sole Chaldea exec slot, which is occupied by probe bootstrap. No build, Go test,
+Lua test or vet has been dispatched for this correction. Run the providerpool
+race tests, embedded-provider capacity test and `tests/unit_limits.lua` through
+`chaldea exec --host agent-a` after the slot is released, with
+`HUYANG_FRICTION=0` for every Go test.
+
+Nonblocking review follow-ups remain outside this correction: an absent shipped
+runtime path silently disables Lua LSP admission, and verify-stage provider
+capacity failures lack a diagnostic reason. No fleet host was changed.
+
+## Prior resource-cap validation
 
 All builds/tests/vet ran through `chaldea exec --host agent-a`; every Go test had
 `HUYANG_FRICTION=0`. Scratch was under `~/.cache/huyang-friction/`.

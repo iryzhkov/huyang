@@ -3058,6 +3058,27 @@ function M.dispatch(tool, args)
     return fn(args or {})
 end
 
+-- Resource ownership follows live sessions and temporary trace targets, not
+-- tool access or remembered launch configuration. This query must not load DAP,
+-- adopt a session, or yield: LSP admission also calls it inside Client.create.
+function M.active()
+    if state.claiming then return true end
+    if state.exit == nil then
+        if state.session and not state.session.closed then return true end
+        for session in pairs(state.children) do
+            if not session.closed then return true end
+        end
+    end
+    local dap = package.loaded["dap"]
+    local session = dap and dap.session()
+    if session and not session.closed and session ~= state.finished
+        and (state.exit == nil or not our_session(session)) then return true end
+    for _, entry in ipairs(state.breakpoints) do
+        if entry.trace_owner and ledger_line(entry) then return true end
+    end
+    return false
+end
+
 -- For tests.
 M._state = function() return state end
 M._test = {

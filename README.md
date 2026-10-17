@@ -144,8 +144,10 @@ The process limits are independent of job quotas. Zero selects the bounded defau
 limits are refused. Opening and closing processes count toward capacity. When the provider
 pool is full, it closes the least recently used idle canonical provider before admitting a
 replacement. A lease lasts until its caller releases it, including cancellation cleanup and
-background work. Leased or locked slots, debug providers and sandbox providers held by a
-plan are never evicted for capacity. If every slot is held, opening fails with
+background work. Leased or locked slots, providers with a live debug session or temporary
+trace targets, and sandbox providers held by a plan are never evicted for capacity.
+Debug list and no-op stop calls do not claim ownership; session stop/exit and final
+trace-target cleanup release it. If every slot is held, opening fails with
 `provider capacity exhausted`; finish or discard work before retrying, or raise
 `--max-providers`. The existing 15 minute idle reaper and plan expiry also release capacity.
 Workspace IDs survive eviction, and reopening advances the provider epoch.
@@ -154,7 +156,8 @@ Language servers use a separate LRU within each provider, installed before the h
 init can auto-attach servers. Revisiting a loaded buffer restarts its evicted server on demand.
 Clients used by active tool calls, clients with outstanding
 requests or work progress, clients still initializing, and clients attached to unsaved
-buffers are held. Transactions, sandbox providers and debug providers pin their clients.
+buffers are held. Transactions, sandbox providers, live debug sessions and temporary trace
+targets pin their clients. Debug protection ends with the session or final trace target.
 An eviction waits for the server's exit callback before reusing its slot; a slow exit or
 an all-held pool returns `language_server_capacity` instead of exceeding the bound. Retry
 after work finishes, or raise `--max-language-servers` for a plan that needs more languages

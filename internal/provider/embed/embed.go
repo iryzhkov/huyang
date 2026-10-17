@@ -460,11 +460,9 @@ func (b *Backend) Close(context.Context) error {
 		g.within(stopTimeout, func() {
 			_ = g.nvim.ExecLua("pcall(function() for _, client in ipairs(vim.lsp.get_clients()) do client:stop(true) end vim.wait(2000, function() return #vim.lsp.get_clients() == 0 end, 20) end)", nil)
 		})
-		if b.config.Debug {
-			g.within(stopTimeout, func() {
-				_ = g.nvim.ExecLua(`pcall(function() require("huyang.dap").shutdown_sync() end)`, nil)
-			})
-		}
+		g.within(stopTimeout, func() {
+			_ = g.nvim.ExecLua(`pcall(function() local dap = package.loaded["huyang.dap"]; if dap then dap.shutdown_sync() end end)`, nil)
+		})
 		g.within(stopTimeout, func() { _ = g.nvim.Command("qa!") })
 		select {
 		case <-g.done:
@@ -531,7 +529,7 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 	// Install admission before init can start any language servers.
 	if b.config.RuntimePath != "" {
 		runtime := strings.NewReplacer("\\", "\\\\", "'", "\\'", "\n", "\\n", "\r", "\\r").Replace(b.config.RuntimePath)
-		args = append(args, "--cmd", fmt.Sprintf("lua vim.opt.runtimepath:prepend('%s'); require('huyang.limits').setup(%d, %t)", runtime, b.config.MaxLanguageServers, b.config.PinLanguageServers || b.config.Debug))
+		args = append(args, "--cmd", fmt.Sprintf("lua vim.opt.runtimepath:prepend('%s'); require('huyang.limits').setup(%d, %t)", runtime, b.config.MaxLanguageServers, b.config.PinLanguageServers))
 	}
 	if b.config.InitFile != "" {
 		args = append(args, "--clean", "-u", b.config.InitFile)

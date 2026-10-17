@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+func TestDebugActivityDoesNotStartAReplacement(t *testing.T) {
+	b := &Backend{
+		config:     Config{Root: "unused", Debug: true, Executable: "huyang-test-missing-neovim"},
+		generation: &generation{epoch: 1, done: make(chan error)},
+	}
+	if active, err := b.DebugActive(context.Background()); err != nil || active {
+		t.Fatalf("dead generation retained debug ownership: %v %v", active, err)
+	}
+	b.generation = nil
+	if active, err := b.DebugActive(context.Background()); err != nil || active {
+		t.Fatalf("absent generation retained debug ownership: %v %v", active, err)
+	}
+}
+
 func TestReplacementWaitsForRetiringProcessTree(t *testing.T) {
 	b := &Backend{
 		config:     Config{Root: "unused", Executable: "huyang-test-missing-neovim"},
@@ -44,6 +58,7 @@ func TestCloseWaitsForAlreadyDeadGenerationTree(t *testing.T) {
 func TestOwnedLanguageServerCapacityAndDebugAdoption(t *testing.T) {
 	backend, _, _ := testBackend(t, false, func(c *Config) {
 		c.MaxLanguageServers = 2
+		c.Debug = true // Debug mode alone must not permanently pin clients.
 		c.InitFile = filepath.Join(t.TempDir(), "init.lua")
 		if err := os.WriteFile(c.InitFile, []byte("vim.g.limits_before_init = package.loaded['huyang.limits'] ~= nil\n"), 0600); err != nil {
 			t.Fatal(err)
@@ -88,12 +103,27 @@ func TestOwnedLanguageServerCapacityAndDebugAdoption(t *testing.T) {
   assert(limit_exited.limit_b and not limit_exited.limit_a,"wrong victim")
   assert(#vim.lsp.get_clients() == 2,"client count = " .. #vim.lsp.get_clients())
  `)
-	if err := backend.HoldLanguageServers(context.Background()); err != nil {
-		t.Fatal(err)
+	execLua(t, backend, `
+  local dap = require("huyang.dap")
+  assert(not dap.active(), "discovery claimed debug ownership")
+  dap._state().session = { closed = false }
+ `)
+	if active, err := backend.DebugActive(context.Background()); err != nil || !active {
+		t.Fatalf("active session not observed: %v %v", active, err)
 	}
 	execLua(t, backend, `
   local id=limit_start("limit_d")
-  assert(id==nil,"debug adoption did not pin language servers")
+  assert(id==nil,"active debug session did not pin language servers")
   assert(#vim.lsp.get_clients()==2 and not limit_exited.limit_a and not limit_exited.limit_c)
+  require("huyang.dap")._state().exit = { reason = "exited" }
+ `)
+	if active, err := backend.DebugActive(context.Background()); err != nil || active {
+		t.Fatalf("exit retained debug ownership: %v %v", active, err)
+	}
+	execLua(t, backend, `
+  local id=assert(limit_start("limit_after_exit"), "session exit did not unpin clients")
+  assert(vim.wait(1000,function() return vim.lsp.get_client_by_id(id).initialized end))
+  assert(#vim.lsp.get_clients()==2)
+  require("huyang.dap")._state().session = nil
  `)
 }

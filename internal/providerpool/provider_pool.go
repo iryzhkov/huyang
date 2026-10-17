@@ -72,7 +72,6 @@ type providerSlot struct {
 	mu       sync.Mutex
 	backend  provider.Provider
 	root     string
-	debug    bool
 	users    int
 	lastUsed time.Time
 	epoch    uint64 // last generation closed; replacement epochs must advance
@@ -111,8 +110,9 @@ func (p *Pool) Canonical(ctx context.Context, workspace *workspacecore.Workspace
 	return p.workspaceProvider(ctx, workspace, false)
 }
 
-// debug returns the workspace provider, starting it in debug mode when no
-// provider is running yet. A healthy canonical provider is reused.
+// Debug leases the workspace provider for a debugger operation. Acquiring it
+// does not claim session ownership: idle eviction queries the running debugger.
+// A healthy canonical provider is reused.
 func (p *Pool) Debug(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, func(), error) {
 	return p.workspaceProvider(ctx, workspace, true)
 }
@@ -131,22 +131,10 @@ func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.W
 	if err := ctx.Err(); err != nil {
 		return nil, func() {}, err
 	}
-	// Debug ownership survives explicit and health-driven replacement.
-	debug = debug || slot.debug
 	if existing := slot.backend; existing != nil {
 		health := existing.Health(ctx)
 		if health.State == provider.HealthHealthy || health.State == provider.HealthStarting {
-			if debug && !slot.debug {
-				if owned, ok := existing.(*ownedProvider); ok {
-					if holder, ok := owned.Provider.(interface{ HoldLanguageServers(context.Context) error }); ok {
-						if err := holder.HoldLanguageServers(ctx); err != nil {
-							return nil, func() {}, err
-						}
-					}
-				}
-			}
 			workspace.SyncProviderEpoch(existing.Descriptor().Epoch)
-			slot.debug = slot.debug || debug
 			return existing, p.leaseLocked(slot), nil
 		}
 		if slot.users != 0 {
@@ -162,7 +150,6 @@ func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.W
 	}
 	slot.backend = backend
 	slot.root = identity.Root
-	slot.debug = debug
 	workspace.SyncProviderEpoch(backend.Descriptor().Epoch)
 	return backend, p.leaseLocked(slot), nil
 }
@@ -191,6 +178,10 @@ func (p *Pool) Restart(ctx context.Context, workspace *workspacecore.Workspace) 
 	if slot.users != 0 {
 		slot.mu.Unlock()
 		return nil, func() {}, ErrProviderBusy
+	}
+	if p.debugActiveLocked(ctx, slot) {
+		slot.mu.Unlock()
+		return nil, func() {}, fmt.Errorf("%w: active debug session or trace targets", ErrProviderBusy)
 	}
 	err := p.closeSlotLocked(slot)
 	slot.mu.Unlock()

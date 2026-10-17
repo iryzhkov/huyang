@@ -97,7 +97,7 @@ func (p *Pool) evictLRU() bool {
 		if !slot.mu.TryLock() {
 			continue
 		}
-		if slot.backend != nil && !slot.debug && slot.users == 0 {
+		if slot.backend != nil && slot.users == 0 {
 			candidates = append(candidates, candidate{slot, slot.lastUsed})
 		}
 		slot.mu.Unlock()
@@ -111,13 +111,34 @@ func (p *Pool) evictLRU() bool {
 		// A caller may have leased this slot since the snapshot. Recheck under
 		// its lock, and never block lookups of other idle providers while closing.
 		evicted := false
-		if slot.backend != nil && !slot.debug && slot.users == 0 && slot.lastUsed.Equal(candidate.used) {
+		if slot.backend != nil && slot.users == 0 && slot.lastUsed.Equal(candidate.used) && !p.debugActiveLocked(context.Background(), slot) {
 			evicted = p.closeSlotLocked(slot) == nil
 		}
 		slot.mu.Unlock()
 		if evicted {
 			return true
 		}
+	}
+	return false
+}
+
+// debugActiveLocked queries this generation rather than remembering that a debug
+// tool once touched it. Callers hold slot.mu and have checked there are no leases,
+// so a tool cannot start a session between this check and closing the provider.
+// A failed query is not evidence that it is safe to discard debug state.
+func (p *Pool) debugActiveLocked(ctx context.Context, slot *providerSlot) bool {
+	if slot.backend == nil {
+		return false
+	}
+	backend := slot.backend
+	if owned, ok := backend.(*ownedProvider); ok {
+		backend = owned.Provider
+	}
+	if debugger, ok := backend.(interface {
+		DebugActive(context.Context) (bool, error)
+	}); ok {
+		active, err := debugger.DebugActive(ctx)
+		return active || err != nil
 	}
 	return false
 }
@@ -144,7 +165,7 @@ func (p *Pool) openOwned(root string, debug bool, epoch uint64, pinned bool) (pr
 	backend, err := p.factory.Open(OpenConfig{
 		Root: root, InitFile: huyangHeadlessInit(), RuntimePath: ShippedRuntimePath(),
 		Debug: debug, AfterEpoch: epoch, MaxLanguageServers: p.limits.MaxLanguageServers,
-		PinLanguageServers: pinned || debug,
+		PinLanguageServers: pinned,
 	})
 	if err != nil {
 		p.capacityMu.Lock()
