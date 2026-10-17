@@ -559,7 +559,7 @@ class DiscoveryRelayTests(unittest.IsolatedAsyncioTestCase):
 
 class WorkflowSchemaTests(unittest.IsolatedAsyncioTestCase):
     def workflow(self, tools):
-        owner = SimpleNamespace(case=Path("/synthetic/case"), catalogs={"full": tools},
+        owner = SimpleNamespace(case=Path("/synthetic/case"), catalogs={"full": tools}, failures=[],
                                 schemas={("full", t["name"]): t["inputSchema"] for t in tools})
         with patch("workflow.snapshot", return_value={"sha256": "synthetic"}):
             return Workflow(owner, "schema-probe", "/synthetic/case/fixture", probe=True)

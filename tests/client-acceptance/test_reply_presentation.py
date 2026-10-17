@@ -3,7 +3,9 @@ import base64
 import copy
 import io
 import json
+import os
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -301,6 +303,175 @@ class PresentationTests(unittest.TestCase):
 
 
 class ControllerTests(unittest.TestCase):
+    @staticmethod
+    def opencode_case(text=REFUSAL):
+        manifest = {"client": "opencode", "binary": {"version": "opencode v2.0.30",
+                    "sha256": "3eb9af9b4ab07d4de85b68a2678a1e17534f9cfa833ade80b80831e51972da72"}}
+        call = {"call_id": "call_oc_stale", "name": "huyang_full_edit_apply", "base": "edit_apply",
+                "arguments": {"root": "/synthetic/fixture", "operation": {"path": "main.go"}},
+                "profile": "full", "step": "stale"}
+        result = {"content": [{"type": "text", "text": text}], "isError": True}
+        params = {"name": call["base"], "arguments": copy.deepcopy(call["arguments"])}
+        receipt = {"params": params, "result": result, "profile": "full", "matched": False,
+                   "connection": 41, "request_id": 2,
+                   "request": {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": params},
+                   "response": {"jsonrpc": "2.0", "id": 2, "result": result}}
+        return [manifest, call, receipt]
+
+    def chat_match(self, fixture, visible, extra_receipts=()):
+        manifest, call, receipt = fixture
+        owner = Controller("/synthetic", {})
+        owner.receipts = [receipt, *extra_receipts]
+        body = {"messages": [{"role": "tool", "tool_call_id": call["call_id"], "content": visible}]}
+        original_body, original_result = copy.deepcopy(body), copy.deepcopy(receipt["result"])
+        with patch.object(Path, "read_text", return_value=json.dumps(manifest)):
+            matched = owner.match_reply(call, results(body, "chat")[call["call_id"]], "chat", body)
+        self.assertEqual(body, original_body)
+        self.assertEqual(receipt["result"], original_result)
+        return matched
+
+    def test_opencode_stale_envelope_preserves_raw_values_and_maps_one_lf(self):
+        fixture = self.opencode_case()
+        visible = json.dumps({"error": {"type": "tool.execution", "message": REFUSAL[:-1]}, "content": []})
+        matched = self.chat_match(fixture, visible)
+        self.assertTrue(matched["matched"])
+        self.assertEqual(matched["model_visible_mapping"], "opencode-tool.execution-single-final-newline")
+        self.assertEqual(matched["model_visible_plain_text"], REFUSAL[:-1])
+        self.assertEqual(matched["model_visible_text"], visible)
+        self.assertEqual(matched["result"]["content"][0]["text"], REFUSAL)
+
+    def test_opencode_exact_first_including_stale_error_and_success(self):
+        for error, step in ((True, "stale"), (False, "reread"), (None, "read")):
+            with self.subTest(error=error, step=step):
+                fixture = self.opencode_case()
+                fixture[1]["step"] = step
+                if error is None:
+                    fixture[2]["result"].pop("isError")
+                else:
+                    fixture[2]["result"]["isError"] = error
+                matched = self.chat_match(fixture, REFUSAL)
+                self.assertTrue(matched["matched"])
+                self.assertEqual(matched["model_visible_mapping"], "exact-text")
+                self.assertEqual(matched["model_visible_plain_text"], REFUSAL)
+                self.assertEqual(matched["model_visible_text"], REFUSAL)
+        fixture = self.opencode_case("success\n")
+        fixture[1]["step"] = "read"
+        fixture[2]["result"]["isError"] = False
+        with self.assertRaises(AssertionError):
+            self.chat_match(fixture, "success")
+        self.assertFalse(fixture[2]["matched"])
+
+    def test_opencode_envelope_rejects_whitespace_and_error_gate_changes(self):
+        for label, text, message, step, error in (
+            ("crlf", REFUSAL[:-1] + "\r\n", REFUSAL[:-1], "stale", True),
+            ("double-terminal-lf", REFUSAL + "\n", REFUSAL, "stale", True),
+            ("two-lfs-removed", REFUSAL + "\n", REFUSAL[:-1], "stale", True),
+            ("two-bytes-removed", REFUSAL, REFUSAL[:-2], "stale", True),
+            ("non-stale", REFUSAL, REFUSAL[:-1], "edit", True),
+            ("absent-error", REFUSAL, REFUSAL[:-1], "stale", None),
+            ("false-error", REFUSAL, REFUSAL[:-1], "stale", False),
+            ("success-lf-removed", "success\n", "success", "read", False),
+        ):
+            with self.subTest(label=label):
+                fixture = self.opencode_case(text)
+                fixture[1]["step"] = step
+                if error is None:
+                    fixture[2]["result"].pop("isError")
+                else:
+                    fixture[2]["result"]["isError"] = error
+                visible = json.dumps({"error": {"type": "tool.execution", "message": message}, "content": []})
+                with self.assertRaises(AssertionError):
+                    self.chat_match(fixture, visible)
+                self.assertFalse(fixture[2]["matched"])
+
+    def test_opencode_envelope_rejects_unknown_keys_type_or_nonempty_content(self):
+        changes = (
+            ("extra-envelope-key", lambda e: e.update(extra="unknown")),
+            ("extra-error-key", lambda e: e["error"].update(extra="unknown")),
+            ("wrong-error-type", lambda e: e["error"].update(type="other")),
+            ("nonempty-content", lambda e: e.update(content=[{"type": "text", "text": "unexpected"}])),
+        )
+        for label, change in changes:
+            with self.subTest(label=label):
+                fixture = self.opencode_case()
+                envelope = {"error": {"type": "tool.execution", "message": REFUSAL[:-1]}, "content": []}
+                change(envelope)
+                with self.assertRaises(AssertionError):
+                    self.chat_match(fixture, json.dumps(envelope))
+                self.assertFalse(fixture[2]["matched"])
+
+    def test_opencode_chat_rejects_wrong_pin_and_ambiguous_receipts(self):
+        for field, wrong in (("client", "claude"), ("version", "opencode v2.0.31"), ("sha256", "wrong")):
+            with self.subTest(field=field):
+                fixture = self.opencode_case()
+                if field == "client":
+                    fixture[0][field] = wrong
+                else:
+                    fixture[0]["binary"][field] = wrong
+                with self.assertRaisesRegex(AssertionError, "unsupported native client/API"):
+                    self.chat_match(fixture, REFUSAL)
+                self.assertFalse(fixture[2]["matched"])
+        fixture = self.opencode_case()
+        duplicate = copy.deepcopy(fixture[2])
+        duplicate["connection"], duplicate["request_id"] = 42, 3
+        with self.assertRaisesRegex(AssertionError, "ambiguous"):
+            self.chat_match(fixture, REFUSAL, [duplicate])
+        self.assertFalse(fixture[2]["matched"])
+        self.assertFalse(duplicate["matched"])
+
+    def test_claude_match_reply_uses_original_recorded_frames_and_api(self):
+        # This test may write only inside the disposable Chaldea HOME.
+        self.assertEqual(os.environ.get("HOME"), "/home/job", "requires disposable scratch HOME")
+        home = Path("/home/job")
+        self.assertEqual(home.resolve(), home)
+        self.assertTrue(home.is_dir())
+        f = case("claude")
+        request = (json.dumps(f[-1]["request"], ensure_ascii=False) + "\n").encode()
+        response = (json.dumps(f[-1]["response"], ensure_ascii=False) + "\n").encode()
+        rows = []
+        for direction, chunk in (
+            ("to-candidate", request[:17]), ("to-candidate", request[17:]),
+            ("to-client", response[:23]), ("to-client", response[23:]),
+        ):
+            rows.append({"pid": 41, "direction": direction,
+                         "bytes_b64": base64.b64encode(chunk).decode(), "sha256": digest(chunk)})
+        recording = ("\n".join(json.dumps(row) for row in rows) + "\n").encode()
+        raw_http = json.dumps(f[4], ensure_ascii=False).encode()
+        evidence = {"method": "POST", "target": "/v1/messages?beta=true",
+                    "sha256": digest(raw_http), "bytes": len(raw_http)}
+        with tempfile.TemporaryDirectory(prefix="reply-presentation-", dir=home) as directory:
+            directory = Path(directory)
+            manifest_path, wire_path = directory / "case-manifest.json", directory / "mcp-wire.jsonl"
+            manifest_path.write_text(json.dumps(f[0]))
+            wire_path.write_bytes(recording)
+            owner = Controller(directory, {})
+            owner.receipts = [f[-1]]
+            for wrong in ({**evidence, "method": "GET"}, {**evidence, "target": "/v1/responses"}):
+                with self.assertRaisesRegex(AssertionError, "wrong native HTTP API"):
+                    owner.match_reply(f[2], f[3], f[1], f[4], wrong)
+                self.assertFalse(f[-1]["matched"])
+            before = copy.deepcopy(f)
+            receipt = owner.match_reply(f[2], results(f[4], f[1])[f[2]["call_id"]], f[1], f[4], evidence)
+            presentation = receipt["presentation"]
+            self.assertEqual(presentation["mapping"], "claude-messages-stale-error-single-final-newline")
+            self.assertEqual(presentation["wire_request"]["sha256"], digest(request))
+            self.assertEqual(presentation["wire_request"]["bytes"], len(request))
+            self.assertEqual(presentation["wire_response"]["sha256"], digest(response))
+            self.assertEqual(presentation["wire_response"]["bytes"], len(response))
+            self.assertEqual(presentation["wire_request"]["connection"], 41)
+            self.assertEqual(presentation["binding"]["request_id"], 2)
+            self.assertEqual(presentation["binding"]["mcp_meta"]["claudecode/toolUseId"], f[2]["call_id"])
+            self.assertEqual(presentation["raw_typed_output"], before[3])
+            self.assertEqual(presentation["http_request"], evidence)
+            self.assertEqual(presentation["wire_text"]["sha256"], digest(REFUSAL.encode()))
+            self.assertEqual(presentation["visible_payload"]["sha256"], digest(REFUSAL[:-1].encode()))
+            self.assertEqual(receipt["model_visible_plain_text"], REFUSAL[:-1])
+            self.assertEqual(receipt["result"], before[-1]["result"])
+            self.assertEqual(receipt["request"], before[-1]["request"])
+            self.assertEqual(receipt["response"], before[-1]["response"])
+            self.assertEqual(f[4], before[4])
+            self.assertEqual(wire_path.read_bytes(), recording)
+
     def test_binding_ambiguity_reuse_other_call_and_wrong_api(self):
         f = case()
         owner = Controller("/synthetic", {})
@@ -344,6 +515,9 @@ class ControllerTests(unittest.TestCase):
         path.open = lambda: io.StringIO(recording([frame]).replace(digest(frame), "wrong-hash"))
         with self.assertRaisesRegex(AssertionError, "hash changed"):
             wire_evidence(path, 41, "to-client", message)
+        path.stat = lambda: SimpleNamespace(st_size=128 * 1024 * 1024 + 1)
+        with self.assertRaisesRegex(AssertionError, "exceeds evidence bound"):
+            wire_evidence(path, 41, "to-client", message)
 
     def test_failure_log_is_bounded_and_keeps_original(self):
         owner = Controller("/synthetic", {})
@@ -367,14 +541,30 @@ class FatalWorkflowTests(unittest.IsolatedAsyncioTestCase):
         response = {"kind": "mcp", "direction": "to-client", "connection": 41, "profile": "full",
                     "message": {"jsonrpc": "2.0", "id": 2,
                                 "result": {"content": [{"type": "text", "text": "read reply"}]}}}
+        key = (41, "full", 2)
         with patch("model_server.record"):
             await owner.observe(request)
             with self.assertRaisesRegex(AssertionError, "reused MCP connection/request ID"):
                 await owner.observe(request)
+            for method in ("ping", "roots/list"):
+                server_request = {**response, "message": {"jsonrpc": "2.0", "id": 2, "method": method}}
+                await owner.observe(server_request)
+                self.assertIs(owner.pending[key], request)
+                self.assertEqual(owner.receipts, [])
             await owner.observe(response)
+            self.assertNotIn(key, owner.pending)
+            self.assertEqual(len(owner.receipts), 1)
+            self.assertEqual(owner.receipts[0]["request"], request["message"])
+            self.assertEqual(owner.receipts[0]["response"], response["message"])
+            for method in ("ping", "roots/list"):
+                server_request = {**response, "message": {"jsonrpc": "2.0", "id": 2, "method": method}}
+                await owner.observe(server_request)
+                self.assertNotIn(key, owner.pending)
+                self.assertEqual(len(owner.receipts), 1)
             with self.assertRaisesRegex(AssertionError, "reused MCP response identity"):
                 await owner.observe(response)
         self.assertEqual(len(owner.receipts), 1)
+        self.assertEqual(owner.failures, [])
 
     def workflow(self):
         owner = Controller("/synthetic", {})

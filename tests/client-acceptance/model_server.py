@@ -154,7 +154,7 @@ class Controller:
                     self.pending[key] = event
                 elif method == "tools/list":
                     self.pending[key] = event
-            elif key in self.pending:
+            elif "method" not in m and key in self.pending:
                 request = self.pending.pop(key)
                 method = request["message"]["method"]
                 require("error" not in m, "MCP protocol error: " + canonical(m))
@@ -199,7 +199,7 @@ class Controller:
                                "request_connection": request["connection"],
                                "response_connection": event["connection"]}
                     self.receipts.append(receipt)
-            elif key in self.call_requests:
+            elif "method" not in m and key in self.call_requests:
                 raise AssertionError("reused MCP response identity")
         elif kind == "lsp-initialize":
             self.lsp_initializations.append(event)
