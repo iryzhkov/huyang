@@ -5,8 +5,10 @@
 #
 # What it does: builds bin/huyang, starts `huyang serve` on disposable XDG
 # directories, drives a fixed 20-round scenario through `huyang mcp --profile
-# full` (workspace_open, workspace_inspect, search, read, edit_apply,
-# diagnostics on a temporary copy of tests/testproj), prints one table, writes
+# full --reply-style json` (workspace_open, workspace_inspect, search, read,
+# edit_apply, diagnostics on a temporary copy of tests/testproj; the scenario
+# parses the envelope, so it pins the JSON style), then measures the same read
+# and a few calls in the default plain style, prints one table, writes
 # docs/plans/budget/<date>-<sha>.json and compares against
 # docs/plans/budget/baseline.json. The first run writes the baseline.
 #
@@ -16,6 +18,12 @@
 #   state_bytes        size of the state directory after the rounds         +50%
 #   long_functions     Go functions over BUDGET_FUNC_LINES (80) lines        +0
 #   largest_go_file    line count of the largest Go file                     +10%
+#   plain_read_bytes   text bytes of a plain five-line read                  +25%
+#   plain_search_bytes text bytes of a plain one-file search                 +25%
+# Hard presentation gates (fail regardless of the baseline): a plain reply
+# carries no structuredContent, a plain read keeps its full revision_id and is
+# smaller than the JSON text of the same read, and a plain search prints
+# path:line:text rows.
 # Informational only:
 #   provider_rss_kb    summed VmRSS of serve's children (embedded Neovim)
 #   registry_bytes, receipts_bytes, plans_bytes, journals_bytes, diag_bytes
@@ -23,6 +31,9 @@
 #                      commit-journals/, diagnostics/ under the state dir
 #   go_lines, go_test_lines, lua_lines   tracked source line counts
 #   tools_<profile>_bytes                byte size of the tools/list reply
+#   json_read_bytes, plain_open_bytes, plain_preview_bytes
+#                      text bytes of the JSON read and of a plain first
+#                      workspace_open and create-file preview
 # Provider-dependent calls run against the real Neovim when `nvim` is on PATH;
 # otherwise their outcome is recorded but not required to be ok.
 set -euo pipefail
@@ -66,8 +77,8 @@ children_rss_kb() {
 bytes_of() { [ -e "$1" ] && du -sb "$1" | cut -f1 || echo 0; }
 
 # --- MCP stdio session helpers -------------------------------------------------
-session_start() {   # $1 profile
-  coproc MCP { bin/huyang mcp --profile "$1" --socket "$SOCK"; }
+session_start() {   # $1 profile, $2 reply style (default json: the scenario parses envelopes)
+  coproc MCP { bin/huyang mcp --profile "$1" --reply-style "${2:-json}" --socket "$SOCK"; }
   exec 3<&"${MCP[0]}" 4>&"${MCP[1]}"   # plain descriptors survive $(...) subshells
   rpc initialize '{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"budget","version":"0"}}' >/dev/null
   printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}' >&4
@@ -91,6 +102,14 @@ rpc() {   # $1 method, $2 params JSON -> prints the "result" object
 }
 call() {   # $1 tool, $2 arguments JSON -> prints structuredContent
   rpc tools/call "$(jq -cn --arg name "$1" --argjson args "$2" '{name:$name,arguments:$args}')" | jq -c '.structuredContent'
+}
+call_text() {   # $1 tool, $2 arguments JSON -> prints the first text block; fails when a plain session sends structuredContent
+  local result
+  result="$(rpc tools/call "$(jq -cn --arg name "$1" --argjson args "$2" '{name:$name,arguments:$args}')")"
+  if [ -n "${PLAIN_SESSION:-}" ] && [ "$(printf '%s' "$result" | jq 'has("structuredContent")')" = true ]; then
+    echo "budget: plain $1 reply carried structuredContent" >&2; return 1
+  fi
+  printf '%s' "$result" | jq -j '.content[0].text'
 }
 require_ok() {   # $1 label, $2 result; accepts ok or provisional
   local outcome; outcome="$(printf '%s' "$2" | jq -r '.outcome')"
@@ -143,7 +162,32 @@ for round in $(seq 1 "$BUDGET_ROUNDS"); do
   # "unavailable" is honest for the fixture: no language server is configured for TOML.
   case "$DIAG_OUTCOME" in ok|provisional|unavailable) ;; *) echo "budget: diagnostics outcome=$DIAG_OUTCOME: $diag" >&2; exit 1;; esac
 done
+READ_ARGS="$(jq -cn --arg root "$TMP/proj" '{root:$root,target:{path:"config.toml"},start_line:1,end_line:5}')"
+JSON_READ_BYTES="$(call_text read "$READ_ARGS" | wc -c)"
 session_stop
+
+# --- plain presentation --------------------------------------------------------
+session_start full plain
+PLAIN_SESSION=1
+PLAIN_OPEN="$(call_text workspace_open "$(jq -cn --arg root "$TMP/proj" '{root:$root}')")" || exit 1
+PLAIN_READ="$(call_text read "$READ_ARGS")" || exit 1
+PLAIN_SEARCH="$(call_text search "$(jq -cn --arg root "$TMP/proj" '{root:$root,query:"808",paths:["config.toml"]}')")" || exit 1
+PLAIN_PREVIEW="$(call_text edit_apply "$(jq -cn --arg root "$TMP/proj" '{root:$root,operation:{kind:"create_file",path:"budget-plain.txt",content:"plain\n"},preview_only:true}')")" || exit 1
+unset PLAIN_SESSION
+session_stop
+PLAIN_OPEN_BYTES="$(printf '%s' "$PLAIN_OPEN" | wc -c)"
+PLAIN_READ_BYTES="$(printf '%s' "$PLAIN_READ" | wc -c)"
+PLAIN_SEARCH_BYTES="$(printf '%s' "$PLAIN_SEARCH" | wc -c)"
+PLAIN_PREVIEW_BYTES="$(printf '%s' "$PLAIN_PREVIEW" | wc -c)"
+printf '%s' "$PLAIN_READ" | head -1 | grep -Eq 'revision_id=docrev_[0-9a-f]{64}' ||
+  { echo "budget: plain read lost its full revision_id: $PLAIN_READ" >&2; exit 1; }
+[ "$PLAIN_READ_BYTES" -lt "$JSON_READ_BYTES" ] ||
+  { echo "budget: plain read ($PLAIN_READ_BYTES B) is not smaller than its JSON text ($JSON_READ_BYTES B)" >&2; exit 1; }
+printf '%s' "$PLAIN_SEARCH" | grep -Eq '^config\.toml:[0-9]+:' ||
+  { echo "budget: plain search printed no path:line:text row: $PLAIN_SEARCH" >&2; exit 1; }
+printf '%s' "$PLAIN_PREVIEW" | grep -q '^Preview: create budget-plain.txt' ||
+  { echo "budget: plain preview receipt missing: $PLAIN_PREVIEW" >&2; exit 1; }
+[ ! -e "$TMP/proj/budget-plain.txt" ] || { echo "budget: a plain preview created its file" >&2; exit 1; }
 sleep 1
 POST_RSS="$(rss_kb "$SERVE_PID")"
 PROVIDER_RSS="$(children_rss_kb "$SERVE_PID")"
@@ -188,13 +232,17 @@ jq -n --arg date "$DATE" --arg sha "$SHA" --arg provider "$PROVIDER" --arg diag 
   --argjson plans "$PLANS_BYTES" --argjson journals "$JOURNALS_BYTES" --argjson diagb "$DIAG_BYTES" \
   --argjson go "$GO_LINES" --argjson gotest "$GO_TEST_LINES" --argjson lua "$LUA_LINES" \
   --argjson largest "$LARGEST_GO_FILE" --argjson longf "$LONG_FUNCTIONS" --argjson rounds "$BUDGET_ROUNDS" \
-  --argjson tools "$TOOLS_JSON" --argjson maxf "$BUDGET_FUNC_LINES" '{
+  --argjson tools "$TOOLS_JSON" --argjson maxf "$BUDGET_FUNC_LINES" \
+  --argjson jsonread "$JSON_READ_BYTES" --argjson plainread "$PLAIN_READ_BYTES" --argjson plainsearch "$PLAIN_SEARCH_BYTES" \
+  --argjson plainopen "$PLAIN_OPEN_BYTES" --argjson plainpreview "$PLAIN_PREVIEW_BYTES" '{
   date:$date, sha:$sha, rounds:$rounds, provider:$provider, diagnostics_outcome:$diag,
   cold_rss_kb:$cold, post_rss_kb:$post, provider_rss_kb:$prov,
   state_bytes:$state, registry_bytes:$registry, receipts_bytes:$receipts, plans_bytes:$plans,
   journals_bytes:$journals, diag_bytes:$diagb,
   go_lines:$go, go_test_lines:$gotest, lua_lines:$lua, largest_go_file:$largest,
-  long_functions:$longf, long_function_threshold:$maxf, tools_bytes:$tools }' >"$OUT"
+  long_functions:$longf, long_function_threshold:$maxf, tools_bytes:$tools,
+  json_read_bytes:$jsonread, plain_read_bytes:$plainread, plain_search_bytes:$plainsearch,
+  plain_open_bytes:$plainopen, plain_preview_bytes:$plainpreview }' >"$OUT"
 
 BASELINE="$OUT_DIR/baseline.json"
 STATUS=0
@@ -216,7 +264,9 @@ check post_rss_kb 25
 check state_bytes 50
 check long_functions 0
 check largest_go_file 10
-for key in provider_rss_kb registry_bytes receipts_bytes plans_bytes journals_bytes diag_bytes go_lines go_test_lines lua_lines; do
+check plain_read_bytes 25
+check plain_search_bytes 25
+for key in provider_rss_kb registry_bytes receipts_bytes plans_bytes journals_bytes diag_bytes go_lines go_test_lines lua_lines json_read_bytes plain_open_bytes plain_preview_bytes; do
   printf '%-20s %12s %12s\n' "$key" "$(jq -r ".$key" "$OUT")" -
 done
 for profile in full orient edit; do

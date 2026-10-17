@@ -287,7 +287,7 @@ func (h *Handlers) finishEdit(ctx context.Context, requestID string, workspace *
 	var evidenceIDs []string
 	if semanticEditTargets(workspace, applied.files) {
 		var detail string
-		outcome, detail, evidenceIDs = h.refreshEditDiagnostics(ctx, requestID, workspace, applied.files, data)
+		outcome, detail, evidenceIDs = h.refreshEditDiagnostics(ctx, requestID, workspace, applied.files, applied.revisions, data)
 		summary += "; " + detail
 	}
 	data["revision"] = fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
@@ -402,7 +402,7 @@ func (h *Handlers) checkpointEdit(ctx context.Context, requestID string, workspa
 // diagnostics of the edited documents. It fills data's diagnostic_delta and
 // verification and returns the outcome the evidence supports, the wording
 // for the summary, and the evidence IDs.
-func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string, workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, data map[string]any) (string, string, []string) {
+func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string, workspace *workspacecore.Workspace, files []workspacecore.PlanStageFile, revisions map[string]workspacecore.RevisionID, data map[string]any) (string, string, []string) {
 	revision := fmt.Sprintf("wsrev_%d", workspace.Identity().StateSeq)
 	backend, release, err := h.pool.Resync(ctx, workspace)
 	defer release()
@@ -414,7 +414,7 @@ func (h *Handlers) refreshEditDiagnostics(ctx context.Context, requestID string,
 		if late, lateErr := providerpool.CollectLateEvidence(ctx, workspace, backend); lateErr == nil && late > 0 {
 			data["late_evidence_batches"] = late
 		}
-		report, err = providerpool.RecordDiagnostics(ctx, workspace, backend, files, revision, "edit_"+requestID)
+		report, err = providerpool.RecordAppliedDiagnostics(ctx, workspace, backend, files, revisions, revision, "edit_"+requestID)
 	}
 	if err != nil {
 		data["verification"] = h.unavailability(ctx, workspace, "unavailable", []string{err.Error()})

@@ -36,6 +36,9 @@ type serviceConfig struct {
 	ProviderQuota      int
 	MaxProviders       int
 	MaxLanguageServers int
+	// ReplyStyle presents the replies of the HTTP routes; the Unix socket
+	// takes each adapter's own --reply-style from its hello.
+	ReplyStyle mcpapi.ReplyStyle
 }
 
 // controlHello is what an adapter says when it connects. The session is the
@@ -44,7 +47,10 @@ type serviceConfig struct {
 // the client started.
 type controlHello struct {
 	Profile string
-	Session string `json:",omitempty"`
+	// ReplyStyle is the adapter's --reply-style; an adapter older than the
+	// option sends none and gets the default.
+	ReplyStyle string `json:",omitempty"`
+	Session    string `json:",omitempty"`
 	// Cwd is the working directory the client started the adapter in. It
 	// is the only place the client's directory can come from, for the same
 	// reason as the session; see client_paths.go for what it is used for.
@@ -91,7 +97,7 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N]; HTTP requests may set X-Huyang-Client to receive diagnostic_updates as a per-client delta")
+			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--reply-style plain|json] [--pprof LOOPBACK:PORT] [--provider-quota N]; HTTP requests may set X-Huyang-Client to receive diagnostic_updates as a per-client delta")
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 		defer stop()
@@ -127,28 +133,38 @@ func newServeFlags(config *serviceConfig, stderr io.Writer) *flag.FlagSet {
 	flags.IntVar(&config.MaxProviders, "max-providers", providerpool.DefaultMaxProviders, "maximum live providers, including sandbox providers; zero selects the default")
 	flags.IntVar(&config.MaxLanguageServers, "max-language-servers", providerpool.DefaultMaxLanguageServers, "maximum language-server clients per provider; zero selects the default")
 	flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
+	flags.Func("reply-style", "presentation of the HTTP routes' replies: plain (default; one text block, no structuredContent) or json (the envelope as text plus structuredContent)", func(value string) error {
+		style, err := mcpapi.ParseReplyStyle(value)
+		config.ReplyStyle = style
+		return err
+	})
 	return flags
 }
 
-func newMCPFlags(profileName, socketPath *string, stderr io.Writer) *flag.FlagSet {
+func newMCPFlags(profileName, socketPath, replyStyle *string, stderr io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet("huyang mcp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	// full is the canonical coding profile; edit is its one-release alias.
 	flags.StringVar(profileName, "profile", "full", "fixed catalog: full (default), edit (alias), lean, orient, or experimental")
 	flags.StringVar(socketPath, "socket", defaultHuyangSocket(), "Huyang Unix control socket")
+	flags.StringVar(replyStyle, "reply-style", string(mcpapi.DefaultReplyStyle), "reply presentation: plain (default; one text block for the model, no structuredContent) or json (the envelope as text plus structuredContent, for tests and typed consumers)")
 	return flags
 }
 
 func runMCPAdapter(arguments []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	var profileName, socketPath string
-	flags := newMCPFlags(&profileName, &socketPath, stderr)
+	var profileName, socketPath, styleName string
+	flags := newMCPFlags(&profileName, &socketPath, &styleName, stderr)
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: huyang mcp [--profile full|edit|lean|orient|experimental] [--socket PATH]")
+		return errors.New("usage: huyang mcp [--profile full|edit|lean|orient|experimental] [--reply-style plain|json] [--socket PATH]")
 	}
 	profile, err := modernOnlyProfile(profileName)
+	if err != nil {
+		return err
+	}
+	style, err := mcpapi.ParseReplyStyle(styleName)
 	if err != nil {
 		return err
 	}
@@ -164,7 +180,7 @@ func runMCPAdapter(arguments []string, stdin io.Reader, stdout, stderr io.Writer
 	if err := staleSocketPin(socketPath, pinnedBy); err != nil {
 		return err
 	}
-	return proxyHuyangMCP(socketPath, profile, stdin, stdout)
+	return proxyHuyangMCP(socketPath, profile, style, stdin, stdout)
 }
 
 // staleSocketPin explains a pinned socket that cannot be reached because it
@@ -208,6 +224,9 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	}
 	if config.ProviderQuota < 1 {
 		return nil, errors.New("provider quota must be positive")
+	}
+	if config.ReplyStyle == "" {
+		config.ReplyStyle = mcpapi.DefaultReplyStyle
 	}
 	if err := mcpapi.ValidateRegistry(); err != nil {
 		return nil, err
@@ -345,6 +364,10 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 	if err != nil {
 		return
 	}
+	style, err := mcpapi.ParseReplyStyle(hello.ReplyStyle)
+	if err != nil {
+		return
+	}
 	transport := &mcp.IOTransport{
 		Reader: structReadCloser{Reader: reader, Closer: connection},
 		Writer: connection,
@@ -353,7 +376,7 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 	if filepath.IsAbs(hello.Cwd) {
 		cwd = filepath.Clean(hello.Cwd)
 	}
-	_ = newSDKServer(profile, s.direct, clientConnection{session: hello.Session, cwd: cwd}).Run(ctx, transport)
+	_ = newSDKServer(profile, style, s.direct, clientConnection{session: hello.Session, cwd: cwd}).Run(ctx, transport)
 }
 
 // proxyMessage is the part of a JSON-RPC frame the proxy inspects.
@@ -383,6 +406,7 @@ func proxyIDKey(id json.RawMessage) string {
 type mcpProxy struct {
 	socketPath string
 	profile    mcpapi.Profile
+	replyStyle mcpapi.ReplyStyle
 	stdout     io.Writer
 	// session and cwd are announced on every connection, so a reconnect
 	// after a service restart keeps the identity and directory it had.
@@ -408,7 +432,7 @@ type mcpProxy struct {
 // the client a test plays.
 var adapterWorkingDirectory = os.Getwd
 
-func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, stdout io.Writer) error {
+func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, style mcpapi.ReplyStyle, stdin io.Reader, stdout io.Writer) error {
 	// A client that exports no session id still runs one adapter per
 	// session, so the adapter names itself: without it every call from such
 	// a client is spooled under the daemon's one anonymous id.
@@ -418,7 +442,7 @@ func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, 
 	}
 	cwd, _ := adapterWorkingDirectory()
 	proxy := &mcpProxy{
-		socketPath: socketPath, profile: profile, stdout: stdout, session: session, cwd: cwd,
+		socketPath: socketPath, profile: profile, replyStyle: style, stdout: stdout, session: session, cwd: cwd,
 		backendEvents: make(chan proxyLineEvent, 32), done: make(chan struct{}),
 		outstanding: make(map[string][]byte),
 	}
@@ -531,7 +555,8 @@ func (p *mcpProxy) dial(restarting bool) error {
 		_ = candidate.Close()
 		return err
 	}
-	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile), Session: p.session, Cwd: p.cwd}); err != nil {
+	hello := controlHello{Profile: string(p.profile), ReplyStyle: string(p.replyStyle), Session: p.session, Cwd: p.cwd}
+	if err := json.NewEncoder(candidate).Encode(hello); err != nil {
 		return fail(fmt.Errorf("identify service connection: %w", err))
 	}
 	reader := bufio.NewReader(candidate)
@@ -632,7 +657,7 @@ func (s *huyangService) prepareHTTP() error {
 	for route, profile := range profiles {
 		// An HTTP client announces no session; its calls are spooled under
 		// the service process the way they always were.
-		server := newSDKServer(profile, s.direct, clientConnection{})
+		server := newSDKServer(profile, s.config.ReplyStyle, s.direct, clientConnection{})
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true})
 		mux.Handle(route, requireBearer(token, handler))
 	}

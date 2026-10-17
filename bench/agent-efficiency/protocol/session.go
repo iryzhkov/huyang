@@ -118,7 +118,8 @@ func (s *session) startService() error {
 
 func (s *session) connect() error {
 	binary := filepath.Join(s.root, "bin", "huyang")
-	adapter := exec.Command(binary, "mcp", "--socket", s.socket(), "--profile", "full")
+	// The protocol benchmark decodes the envelope, so it pins the JSON style.
+	adapter := exec.Command(binary, "mcp", "--socket", s.socket(), "--profile", "full", "--reply-style", "json")
 	adapter.Env = s.environment()
 	adapter.Stderr = os.Stderr
 	client := mcp.NewClient(&mcp.Implementation{Name: "huyang-bench", Version: "1"}, nil)

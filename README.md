@@ -178,10 +178,25 @@ Connect an MCP client through the stdio adapter:
 ./bin/huyang mcp --profile full
 ```
 
-`huyang mcp` accepts `--profile full|edit|lean|orient|experimental` (default `full`) and
-`--socket PATH` (default as for `serve`, derived the same way, so the adapter finds the
-service's socket even when a harness starts it without `XDG_RUNTIME_DIR`). It refuses any
-other profile name. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
+`huyang mcp` accepts `--profile full|edit|lean|orient|experimental` (default `full`),
+`--reply-style plain|json` (default `plain`) and `--socket PATH` (default as for `serve`,
+derived the same way, so the adapter finds the service's socket even when a harness starts
+it without `XDG_RUNTIME_DIR`). It refuses any other profile or style name.
+
+The reply style is presentation only. `plain` sends each result as one text block and no
+`structuredContent`: a read is a header line with the full `revision_id` and the delivered
+line range followed by the exact source, a search is `path:line:text` rows and a footer, an
+edit is one receipt line with the per-path `revision_id` and the workspace `wsrev`, then
+the diagnostic findings, and a refusal is `code: message` with a copyable `next:` step.
+Findings, provisional and unavailable diagnostic reasons, truncation, replay status and
+every guard token are always in that text. `json` is the earlier wire shape (the compact
+JSON envelope as text plus the same envelope in `structuredContent`) for tests, benchmarks
+and typed consumers that parse it; the experimental `response_format` and `response_mode`
+arguments keep their meaning there. A plain session refuses `response_format=both` or
+`structured` before the call runs. The canonical envelope, receipts, replay and evidence
+are the same in both styles. `huyang serve --reply-style plain|json` (default `plain`) sets
+the style of the HTTP routes. See [plain replies](docs/plans/huyang-tools-v1alpha1.md#2026-10-17-plain-replies-by-default-amendment-8-m8)
+for the grammar. When a pinned socket (`--socket` or `HUYANG_SOCKET`) does not exist and
 lies in another UID's `/run/user/<n>/`, the adapter fails with an error that names both UIDs
 and the socket it would use without the pin; it never substitutes that path for the pinned
 one. The third
@@ -305,7 +320,8 @@ systemctl --user enable --now huyang.service
 ```
 
 Register the MCP command in each harness as
-`~/.local/share/huyang/bin/huyang mcp --profile full`, with no socket. The service and the
+`~/.local/share/huyang/bin/huyang mcp --profile full`, with no socket. That registration
+receives plain replies; a consumer that parses the envelope adds `--reply-style json`. The service and the
 adapter derive the same socket for the same user: `$XDG_RUNTIME_DIR/huyang/control.sock`,
 else `/run/user/<uid>/huyang/control.sock` when that directory is a real directory owned by
 the user and not group- or world-writable, else `$TMPDIR/huyang-<uid>/huyang/control.sock`.

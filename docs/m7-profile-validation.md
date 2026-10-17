@@ -102,4 +102,6 @@ The separate harness worker owns OpenCode 2.0.30 V2 per-request routing:
 provider ID `ollama` selects `huyang_lean`, others `huyang_full`, codemode false.
 Those connections use `--profile lean|full` or the exact
 `/mcp/lean|full` routes implemented here. Core code does not change harness repositories
-or installed configuration. JSON envelopes remain current; M8 plain replies are separate.
+or installed configuration. M7 was validated with JSON envelopes. Since M8 (amendment 8 of
+the contract) those connections receive plain replies by default; a consumer that parses
+the envelope adds `--reply-style json`.

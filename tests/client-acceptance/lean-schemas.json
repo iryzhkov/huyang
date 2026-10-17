@@ -1,0 +1,137 @@
+{
+  "read": {
+    "type": "object",
+    "properties": {
+      "root": {
+        "type": "string"
+      },
+      "target": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ]
+      },
+      "start_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "end_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_lines": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "view": {
+        "type": "string",
+        "enum": [
+          "source",
+          "outline"
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "target"
+    ],
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "search": {
+    "type": "object",
+    "properties": {
+      "root": {
+        "type": "string"
+      },
+      "query": {
+        "type": "string"
+      },
+      "mode": {
+        "type": "string",
+        "enum": [
+          "literal",
+          "regex"
+        ]
+      },
+      "paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "context_lines": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200
+      }
+    },
+    "additionalProperties": false,
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  },
+  "edit_apply": {
+    "type": "object",
+    "properties": {
+      "root": {
+        "type": "string"
+      },
+      "operation": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "replace_literal",
+              "create_file",
+              "delete_file"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "expected_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "expected_sha256": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path"
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "operation"
+    ],
+    "$schema": "https://json-schema.org/draft/2020-12/schema"
+  }
+}

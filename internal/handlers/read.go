@@ -141,30 +141,10 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		result := h.readOne(ctx, fmt.Sprintf("%s_%d", requestID, index), workspace, single)
 		if result["outcome"] != "ok" {
 			failed++
-			failure := map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]}
-			// The candidates are the recovery; a failed target that dropped
-			// them left only a summary to parse.
-			if data, _ := result["data"].(map[string]any); data != nil {
-				if data["candidates"] != nil {
-					failure["candidates"] = data["candidates"]
-				}
-				if data["coverage"] != nil {
-					failure["coverage"] = data["coverage"]
-				}
-			}
+			failure, entry, targetRecovery := readManyFailure(single, result, index)
 			files = append(files, failure)
-			entries = append(entries, map[string]any{"path": readTargetLabel(single), "code": result["code"]})
-			for _, raw := range mcpapi.AnySlice(result["next"]) {
-				if step, ok := raw.(map[string]any); ok {
-					identified := make(map[string]any, len(step)+2)
-					for key, value := range step {
-						identified[key] = value
-					}
-					identified["target_index"] = index
-					identified["target_path"] = readTargetLabel(single)
-					recovery = append(recovery, identified)
-				}
-			}
+			entries = append(entries, entry)
+			recovery = append(recovery, targetRecovery...)
 			continue
 		}
 		data := readTargetData(result["data"], readTargetLabel(single))
@@ -197,6 +177,33 @@ func (h *Handlers) readMany(ctx context.Context, requestID string, workspace *wo
 		result["next"] = recovery
 	}
 	return mcpapi.AddWarnings(result, warnings...)
+}
+
+func readManyFailure(single readRequest, result map[string]any, index int) (failure, entry map[string]any, recovery []any) {
+	failure = map[string]any{"path": readTargetLabel(single), "code": result["code"], "error": result["summary"], "next": result["next"]}
+	// The candidates are the recovery; a failed target that dropped
+	// them left only a summary to parse.
+	if data, _ := result["data"].(map[string]any); data != nil {
+		if data["candidates"] != nil {
+			failure["candidates"] = data["candidates"]
+		}
+		if data["coverage"] != nil {
+			failure["coverage"] = data["coverage"]
+		}
+	}
+	entry = map[string]any{"path": readTargetLabel(single), "code": result["code"]}
+	for _, raw := range mcpapi.AnySlice(result["next"]) {
+		if step, ok := raw.(map[string]any); ok {
+			identified := make(map[string]any, len(step)+2)
+			for key, value := range step {
+				identified[key] = value
+			}
+			identified["target_index"] = index
+			identified["target_path"] = readTargetLabel(single)
+			recovery = append(recovery, identified)
+		}
+	}
+	return failure, entry, recovery
 }
 
 // readTargetData normalises one target's payload into the map a multi-target

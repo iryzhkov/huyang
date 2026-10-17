@@ -55,8 +55,8 @@ func TestServeAndMCPDefaultSocketsAgree(t *testing.T) {
 			t.Setenv("TMPDIR", temp)
 			root := useRunUserRoot(t, private)
 			serve := newServeFlags(&serviceConfig{}, io.Discard).Lookup("socket").DefValue
-			profile, socket := "", ""
-			mcp := newMCPFlags(&profile, &socket, io.Discard).Lookup("socket").DefValue
+			profile, socket, style := "", "", ""
+			mcp := newMCPFlags(&profile, &socket, &style, io.Discard).Lookup("socket").DefValue
 			if serve != mcp {
 				t.Fatalf("serve default %q differs from mcp default %q", serve, mcp)
 			}

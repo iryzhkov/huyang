@@ -41,8 +41,11 @@ separate implementations. A large-change plan is part of editing, not a separate
    work, not mandatory ceremony for changing one function.
 5. One operation schema is used by `edit_apply` and `change_plan`; the two paths cannot
    drift semantically.
-6. Structured content is authoritative. The text rendering is compact, deterministic and
-   sufficient for clients that lose structured content.
+6. In the JSON reply style, structured content is authoritative and the text rendering is
+   compact, deterministic and sufficient for clients that lose structured content. In the
+   plain reply style (the default since amendment 8) there is no structured content; the
+   canonical envelope remains the typed source of truth inside the service and its plain
+   rendering keeps every guard, finding, refusal code and next step.
 7. Empty, partial, capped, stale and provisional results are distinct states.
 8. Results say what may happen next through machine-readable `next` entries.
 9. Detailed diffs, diagnostics and command output are addressable as evidence instead of
@@ -472,7 +475,12 @@ because it introduces a new enum value and fields that are absent today.
 
 ### Compact text fallback
 
-Clients that lose `structuredContent` receive exactly this deterministic shape:
+This section is the original design and was not shipped in this form. The JSON reply
+style sends the compact JSON envelope as text; the plain reply style of amendment 8 is the
+shipped text presentation.
+
+The original design proposed that clients that lose `structuredContent` receive exactly
+this deterministic shape:
 
 ```text
 7 matches in 3 files [complete] set=set_... rev=wsrev_...
@@ -1696,8 +1704,84 @@ tools/list using cl100k_base, with an 800-token ceiling for lean and a source-re
 tagged artifact. Source preparation leaves stale M4–M6 fixture bytes untouched until
 Chaldea generation and guarded import; see [runtime commands](../m7-profile-validation.md).
 
-JSON mode and current reply envelopes remain the default. The M8 plain renderer is a
-separate change; M7 does not reinterpret experimental response controls or receipts.
+M7 itself kept JSON replies as the default and did not reinterpret experimental response
+controls or receipts; amendment 8 changes the default presentation.
 The former `docs/execution-contract.md` was deleted in M6 and is not recreated.
 Its surviving diagnostic guarantees in [the diagnostic contract](../diagnostics-contract.md)
 are preserved.
+
+### 2026-10-17: plain replies by default (amendment 8, M8)
+
+A breaking presentation change inside `v1alpha1`. Tool names, input schemas, the
+canonical envelope, durable receipts, idempotent replay, the diagnostic ledger and evidence
+are unchanged, and the frozen catalog fixtures are unaffected because the choice is a
+startup option rather than a schema field.
+
+- `huyang mcp --reply-style plain|json`, default `plain`; `huyang serve --reply-style
+  plain|json`, default `plain`, for the HTTP routes. The adapter sends its style in the
+  control hello; a hello without one (an adapter older than this change) gets `plain`, and
+  an unknown style is not served.
+- `json` is the earlier wire shape: `CompactTextEnvelope` as JSON text plus
+  `CompactStructuredEnvelope` in `structuredContent`, with the experimental
+  `response_format` and `response_mode` semantics as before. Every consumer that parses the
+  envelope pins it: the service and live test suites, `bench/agent-efficiency`,
+  `tests/budget.sh` and the language probe.
+- `plain` sends one `TextContent` and no `structuredContent`; `isError` is unchanged. It is
+  rendered from the finalized envelope after the receipt was persisted, through the same
+  normalization the structured copy uses, never through the compact receipt, so
+  `response_mode=compact` cannot remove findings. `response_format=both|structured` is
+  refused as `invalid_arguments` before the call runs; `response_format=text` is accepted.
+
+Presentation addendum, the plain grammar (`key=value` attributes; unusual paths and
+structured values are JSON-encoded; every line ends with a newline):
+
+- read: `PATH[#NAME_PATH] (revision_id=ID; [kind=K;] lines=S-E/TOTAL[; bytes=O-E/N]
+  [; truncated=max_lines|max_bytes][; handle=H][; relocated][; no_final_newline])`, then
+  the exact delivered text. `lines=` is the delivered range. A prepared read writes
+  `prepared_revision=prep_...; plan_id=...; plan_revision=N` instead of `revision_id`. A
+  batch prints one block per target in request order (a manifest first when there are more
+  than four), a failed target as `PATH: CODE: message` with its candidates and `next`, and
+  a cut target's continuation as `continue:`. An outline is `PATH outline (L of N
+  declarations[; truncated])` and one `S-E kind name handle=H` row per declaration.
+  History and changes views are printed as summary plus JSON data.
+- search: `PATH:LINE:TEXT` per matched line, `PATH-LINE-TEXT` for context, `--` between
+  windows that do not touch; the text is the whole source line read from the revision the
+  search read (a document that changed since prints `PATH:LINE` and a note), cut to 400
+  bytes around the match with `[...]`. Requested handles follow a hit as `  handle=H
+  column=C`. Footer: `[R of [at least ]]T matches in F files; complete|incomplete
+  [; match_limit=N][; all_matches_eligible=false][; refined from P: retained R, eliminated
+  E][; result_set=H]`; the handle is printed whenever more matches exist, the set is
+  incomplete, refined or not all-match eligible, or handles were requested. Context lines
+  are now read only at the searched revision, in both styles; a hit whose document changed
+  gets none and a warning.
+- edit_apply: `VERB PATH (revision=wsrev_N; revision_id=ID[; replacements=N])`, or `VERB N
+  paths (...)` followed by `  PATH revision_id=ID` lines; `Preview: verb PATHS (revision=...;
+  canonical_changed=false)` followed by requested patches; `Replayed original receipt; no
+  new mutation (original revision=...; ...)` followed by the historical guards and
+  `Current revision unconfirmed`. Then `at` locations, `format:`, `git:`, `source:`,
+  `relocated:` and verbose records, and `diagnostics CONFIDENCE[ (reasons unchanged since
+  your last reply)]: reasons [codes]` whenever a verification block exists.
+- findings, on every tool: `PATH:LINE: SEVERITY: MESSAGE [CODE] (PRODUCER)`, with
+  `(no baseline: new or pre-existing)`, and for a notice-stream entry `(late finding;
+  attribution: ...)` or `(late finding; not attributed to this call)` (`still present` for
+  a persisting one). `diagnostic_delta` and `diagnostic_updates` are merged by finding ID,
+  the delta's location winning and the notice's attribution and last kind kept; resolved
+  findings are counted on one `resolved:` line; `findings truncated` is printed when the
+  notices were capped.
+- refusals: `CODE: SUMMARY[ (retryable=B)]`, then repair data (`actual:` text,
+  `candidates:`, `locations:`, incomplete coverage, other fields as `key=value` or JSON),
+  for an operations list `operation I refused; operations 0-K stay applied ...` and
+  `failed operation recovery:`.
+- suffix of every reply: non-`ok` outcome or code with the summary, transaction state,
+  replay, `receipt not persisted`, `request_id` where support needs it, findings,
+  `warning:` lines, `evidence:` when it addresses findings or a failure, `detail: {...}`
+  for any field not rendered, and `next: tool key=value (action) - note; ...`.
+- workspace_open: `Workspace ROOT (id=ws_...; revision=wsrev_N; kind=K; N entries)`, the
+  top-level names, commands with source and trust state, capabilities that are not
+  available, the provider; a repeated open is one line ending `overview unchanged`. The
+  guide, recent commits and service limits are left out.
+- Any other tool, and any variant without a dedicated renderer, prints its summary and its
+  data as JSON, with the same suffix.
+
+Client acceptance (Claude Code, Codex, OpenCode) is recorded with the M8 runtime
+validation, not here.

@@ -1132,7 +1132,14 @@ function M.diagnostic_evidence(args)
         end
     end
     local transaction_id = args.transaction_id
-    local revision = args.revision
+    -- New coordinators supply receipt revisions by provider path. When the map
+    -- is present a missing entry stays unknown; never borrow the workspace
+    -- revision or another edited file's postimage. Keep the scalar wire shape
+    -- for older callers and preparation-scoped evidence.
+    local function document_revision(path)
+        if args.document_revisions then return args.document_revisions[path] end
+        return args.revision
+    end
     local batches = {}
     local wait_ms = math.max(0, tonumber(args.wait_ms) or 1500)
     -- One budget covers the whole file set. A transaction touching many files
@@ -1160,7 +1167,7 @@ function M.diagnostic_evidence(args)
             producer = "nvim_lsp",
             producer_version = table.concat(configured, ","),
             document = vim.api.nvim_buf_get_name(bufnr),
-            document_revision = revision,
+            document_revision = document_revision(vim.api.nvim_buf_get_name(bufnr)),
             transaction_id = transaction_id,
             complete = false,
             selected = true,
@@ -1201,6 +1208,7 @@ function M.diagnostic_evidence(args)
             local bufnr = args.baseline and vim.fn.bufnr(path) or load_buf(path)
             if bufnr >= 0 and vim.api.nvim_buf_is_loaded(bufnr)
                 and (not args.baseline or (not vim.bo[bufnr].modified and not core.disk_moved_on(bufnr, path))) then
+            local revision = document_revision(vim.api.nvim_buf_get_name(bufnr))
             local filetype = vim.bo[bufnr].filetype
             for _, existing in ipairs(args.baseline and {} or limits.list_clients()) do
                 local config = existing.config or {}

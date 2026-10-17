@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iryzhkov/huyang/internal/mcpapi"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -12,7 +13,7 @@ func TestResponseFormatsAvoidDuplicateSource(t *testing.T) {
 	payload := strings.Repeat("source-payload", 10000)
 	envelope := map[string]any{"outcome": "ok", "summary": "Read min.txt", "data": map[string]any{"content": payload}}
 	for _, format := range []string{"both", "text", "structured"} {
-		result, err := renderToolResponse("read", map[string]any{"response_format": format}, envelope, false)
+		result, err := renderToolResponse("read", map[string]any{"response_format": format}, envelope, false, mcpapi.ReplyStyleJSON)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +40,7 @@ func TestCompactMutationRetainsEvidenceAndRefusals(t *testing.T) {
 		"data":               map[string]any{"canonical_changed": true, "revision": "wsrev_2", "verification": map[string]any{"confidence": "unavailable"}, "diffs": strings.Repeat("patch", 10000)},
 		"diagnostic_updates": []any{map[string]any{"id": "diag_1"}},
 	}
-	result, err := renderToolResponse("edit_apply", map[string]any{"response_mode": "compact"}, envelope, false)
+	result, err := renderToolResponse("edit_apply", map[string]any{"response_mode": "compact"}, envelope, false, mcpapi.ReplyStyleJSON)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestCompactMutationRetainsEvidenceAndRefusals(t *testing.T) {
 		t.Fatal("mutated original evidence")
 	}
 	envelope["outcome"], envelope["code"] = "conflict", "stale_revision"
-	result, err = renderToolResponse("edit_apply", map[string]any{"response_mode": "compact"}, envelope, true)
+	result, err = renderToolResponse("edit_apply", map[string]any{"response_mode": "compact"}, envelope, true, mcpapi.ReplyStyleJSON)
 	if err != nil || !result.IsError || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "stale_revision") {
 		t.Fatal("refusal lost")
 	}
