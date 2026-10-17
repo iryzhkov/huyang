@@ -9,8 +9,9 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// Lua must serialize its pull/push slots across RPCs: the real late coalescer
-// deliberately keeps only the last observation for a provider/document.
+// The captured Rust failure came from complete push omission retiring pull
+// findings under a shared provider/document key. Serialized delivery must retain
+// each stream just as a mixed RPC does; push proof covers only push origins.
 func TestLateEvidenceSerializedPullPushLedger(t *testing.T) {
 	for _, positive := range []bool{false, true} {
 		name := "empty_push"
@@ -52,10 +53,10 @@ func TestLateEvidenceSerializedPullPushLedger(t *testing.T) {
 				push.Findings = finding("authoritative push finding")
 			}
 
-			// Both array orders collide, regardless of evidence kind or strength.
+			// Both array orders retain the independent stream lanes.
 			for _, mixed := range [][]workspacecore.DiagnosticBatch{{lastPull, push}, {push, lastPull}} {
 				coalesced := coalesceLateDiagnosticBatches(mixed)
-				if len(coalesced) != 1 || coalesced[0].Kind != mixed[1].Kind {
+				if len(coalesced) != 2 || coalesced[0].Kind != mixed[0].Kind || coalesced[1].Kind != mixed[1].Kind {
 					t.Fatalf("unexpected late coalescing contract: %+v", coalesced)
 				}
 			}
@@ -80,19 +81,17 @@ func TestLateEvidenceSerializedPullPushLedger(t *testing.T) {
 						t.Fatalf("collection %d lost facts or proved omission: %+v", i, report)
 					}
 				} else {
-					if report.Confidence != workspacecore.ConfidenceAuthoritative ||
-						report.CurrentCount != len(push.Findings) || len(report.Resolved) != 4 {
+					if report.Confidence != workspacecore.ConfidenceProvisional ||
+						report.CurrentCount != 2+len(push.Findings) || len(report.Resolved) != 2 {
 						t.Fatalf("current push did not establish its exact body: %+v", report)
 					}
-					if positive && (len(report.Current) != 1 ||
-						report.Current[0].Finding.Message != push.Findings[0].Message) {
+					if positive && len(report.New) != 1 {
 						t.Fatalf("positive authoritative body lost: %+v", report)
 					}
 				}
 				cursor = report.Cursor
 			}
-			// Draining the Lua slots sends no stale provisional observation after
-			// proof. The real collector must leave coverage and transitions alone.
+			// Draining cannot turn unresolved pull origins into clean coverage.
 			p.batches = nil
 			count, err := CollectLateEvidence(context.Background(), w, p)
 			if err != nil || count != 0 {
@@ -102,8 +101,8 @@ func TestLateEvidenceSerializedPullPushLedger(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if after.Confidence != workspacecore.ConfidenceAuthoritative ||
-				after.CurrentCount != len(push.Findings) || len(after.New) != 0 ||
+			if after.Confidence != workspacecore.ConfidenceProvisional ||
+				after.CurrentCount != 2+len(push.Findings) || len(after.New) != 0 ||
 				len(after.Resolved) != 0 || len(after.Notices) != 0 {
 				t.Fatalf("drained slots weakened current push proof: %+v", after)
 			}

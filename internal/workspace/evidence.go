@@ -15,9 +15,9 @@ import (
 	"time"
 )
 
-// Version 2 adds persisting notices and per-document coverage. Version 1
-// binaries reject this ledger rather than misreading its transitions.
-const diagnosticStateVersion = 2
+// Version 3 retains independent stream coverage. Older binaries must reject
+// this ledger rather than collapse its lanes back into document-wide proof.
+const diagnosticStateVersion = 3
 
 type DiagnosticConfidence string
 
@@ -265,7 +265,7 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 	if err := json.Unmarshal(content, &store.state); err != nil {
 		return nil, fmt.Errorf("decode diagnostic state: %w", err)
 	}
-	if store.state.Version != 1 && store.state.Version != diagnosticStateVersion {
+	if store.state.Version != 1 && store.state.Version != 2 && store.state.Version != diagnosticStateVersion {
 		return nil, fmt.Errorf("unsupported diagnostic state version %d", store.state.Version)
 	}
 	if store.state.Items == nil {
@@ -298,57 +298,37 @@ func newDiagnosticStore(stateDir string, workspaceID ID) (*diagnosticStore, erro
 	return store, nil
 }
 
-// Older ledgers grouped every document under one producer key. Split those
-// dimensions using their retained evidence and re-evaluate the stronger proof
-// rule so an old attachment failure cannot poison that producer forever.
+// Old coverage did not preserve independent streams. Bounded evidence cannot
+// reconstruct every historical origin, so keep the unsplittable key as an
+// explicit provisional dimension. Never rewrite historical resolved items.
 func (s *diagnosticStore) migrateDocumentDimensions() {
 	dimensions := map[string]bool{}
 	for key, dimension := range s.state.ProviderDimensions {
-		if strings.Count(key, "\x00") != 1 {
-			continue
-		}
 		name, _, _ := strings.Cut(key, "\x00")
-		latest := map[string]time.Time{}
-		for _, id := range dimension.EvidenceIDs {
-			evidence, ok := s.state.Evidence[id]
-			if !ok {
-				continue
+		dimensions[name] = true
+		if strings.Count(key, "\x00") < 3 {
+			dimension.State = "incomplete"
+			if confidenceRank(dimension.Confidence) > confidenceRank(ConfidenceProvisional) {
+				dimension.Confidence = ConfidenceProvisional
 			}
-			var batch DiagnosticBatch
-			if json.Unmarshal(evidence.Payload, &batch) != nil || batch.Document == "" {
-				continue
-			}
-			documentKey := key + "\x00" + batch.Document
-			if previous, ok := s.state.ProviderDimensions[documentKey]; ok && len(previous.EvidenceIDs) > 0 {
-				newer := false
-				for _, previousID := range previous.EvidenceIDs {
-					if prior, ok := s.state.Evidence[previousID]; ok && prior.RecordedAt.After(evidence.RecordedAt) {
-						newer = true
-						break
-					}
-				}
-				if newer {
-					continue
-				}
-			}
-			if latest[documentKey].After(evidence.RecordedAt) {
-				continue
-			}
-			confidence, reasons := confidenceFor(batch)
-			state := "complete"
-			if confidence == ConfidenceProvisional || confidence == ConfidenceUnavailable {
-				state = "incomplete"
-			}
-			s.state.ProviderDimensions[documentKey] = DiagnosticDimension{State: state, Confidence: confidence, Reasons: reasons, EvidenceIDs: []string{id}}
-			latest[documentKey] = evidence.RecordedAt
-		}
-		if len(latest) > 0 {
-			delete(s.state.ProviderDimensions, key)
-			dimensions[name] = true
+			dimension.Reasons = appendUnique(dimension.Reasons, "legacy_stream_coverage_unknown")
+			s.state.ProviderDimensions[key] = dimension
 		}
 	}
 	for name := range dimensions {
 		s.state.Dimensions[name] = s.aggregateDimensionLocked(name)
+	}
+	if s.state.Version != diagnosticStateVersion {
+		for name, dimension := range s.state.Dimensions {
+			if !dimensions[name] {
+				dimension.State = "incomplete"
+				if confidenceRank(dimension.Confidence) > confidenceRank(ConfidenceProvisional) {
+					dimension.Confidence = ConfidenceProvisional
+				}
+				dimension.Reasons = appendUnique(dimension.Reasons, "legacy_stream_coverage_unknown")
+				s.state.Dimensions[name] = dimension
+			}
+		}
 	}
 }
 
@@ -614,7 +594,7 @@ func (s *diagnosticStore) recordLocked(batch DiagnosticBatch) (DiagnosticReport,
 	if dimension == "" {
 		dimension = "edited_documents"
 	}
-	prior := s.state.ProviderDimensions[dimension+"\x00"+key]
+	prior := s.state.ProviderDimensions[dimension+"\x00"+key+"\x00"+string(batch.Kind)]
 	baselineKnown := batch.Baseline
 	if !baselineKnown && prior.Confidence == ConfidenceAuthoritative && batch.PreEditDocumentRevision != "" {
 		for _, id := range prior.EvidenceIDs {
@@ -644,22 +624,28 @@ func (s *diagnosticStore) recordLocked(batch DiagnosticBatch) (DiagnosticReport,
 	// A baseline seeds the cache; even a current snapshot may omit findings
 	// while the producer is between partial publications.
 	if !batch.Baseline && batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
-		// A complete observation of this document verifies the absence of
-		// everything it did not report: previously current items and items
-		// left stale by a content change are both resolved.
-		resolved = s.resolveAbsentLocked(append(previous, previousStale...), seen, batch.ObservedAt)
-		s.state.Active[key] = idsOf(current)
-		delete(s.state.Stale, key)
-	} else {
-		s.state.Active[key] = appendUnique(previous, idsOf(current)...)
-		s.state.Stale[key] = withoutIDs(previousStale, seen)
+		// Omission proves withdrawal only within this stream. Rejected
+		// withdrawals retain their original current/stale membership.
+		resolved = s.resolveAbsentLocked(append(previous, previousStale...), seen, batch.Kind, batch.ObservedAt)
+	}
+	removed := map[string]bool{}
+	for _, item := range resolved {
+		removed[item.ID] = true
+	}
+	s.state.Active[key] = appendUnique(withoutIDs(previous, removed), idsOf(current)...)
+	for id := range seen {
+		removed[id] = true
+	}
+	s.state.Stale[key] = withoutIDs(previousStale, removed)
+	if batch.Kind != EvidenceProjectCheck {
+		s.state.Dimensions[dimension] = s.aggregateDimensionLocked(dimension)
 	}
 	report := s.reportLocked(added, resolved, evID, reasons)
-	// Mutation-time verification needs the confidence of this observation. The
-	// persisted coverage remains historical and is returned by diagnostics queries.
-	report.Confidence = confidence
+	// Observation confidence cannot hide an independent incomplete lane.
+	if confidenceRank(confidence) < confidenceRank(report.Confidence) {
+		report.Confidence = confidence
+	}
 	report.Current = append([]DiagnosticItem(nil), current...)
-	report.ProvisionalReasons = append([]string(nil), reasons...)
 	return report, nil
 }
 
@@ -800,7 +786,7 @@ func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence
 		s.state.Dimensions[dimension] = updated
 		return evID
 	}
-	providerDimension := dimension + "\x00" + batch.ProviderID + "\x00" + batch.Document
+	providerDimension := dimension + "\x00" + batch.ProviderID + "\x00" + batch.Document + "\x00" + string(batch.Kind)
 	if prior, ok := s.state.ProviderDimensions[providerDimension]; ok {
 		updated.EvidenceIDs = recentEvidenceIDs(prior.EvidenceIDs, evID)
 	}
@@ -808,7 +794,12 @@ func (s *diagnosticStore) recordEvidenceLocked(batch DiagnosticBatch, confidence
 	if confidence == ConfidenceAuthoritative && batch.Kind != EvidenceUnavailable {
 		// Attachment failures describe the absence of a producer at that time.
 		// A current publication for this document supersedes that placeholder.
-		delete(s.state.ProviderDimensions, dimension+"\x00nvim_lsp\x00"+batch.Document)
+		placeholder := dimension + "\x00nvim_lsp\x00" + batch.Document
+		for key := range s.state.ProviderDimensions {
+			if key == placeholder || strings.HasPrefix(key, placeholder+"\x00") {
+				delete(s.state.ProviderDimensions, key)
+			}
+		}
 	}
 	s.state.Dimensions[dimension] = s.aggregateDimensionLocked(dimension)
 	return evID
@@ -844,7 +835,70 @@ func (s *diagnosticStore) aggregateDimensionLocked(dimension string) DiagnosticD
 			aggregate.State = providerEvidence.State
 		}
 	}
+	// Latest item provenance is shared across lanes. It cannot prove that
+	// another historical origin refreshed, or repair unknown legacy origins.
+	for _, memberships := range []map[string][]string{s.state.Active, s.state.Stale} {
+		for key, ids := range memberships {
+			prefix := dimension + "\x00" + key + "\x00"
+			relevant := dimension == "edited_documents"
+			if !relevant {
+				for lane := range s.state.ProviderDimensions {
+					if strings.HasPrefix(lane, prefix) {
+						relevant = true
+						break
+					}
+				}
+			}
+			if !relevant {
+				continue
+			}
+			for _, id := range ids {
+				item := s.state.Items[id]
+				unknown := len(item.EvidenceKinds) == 0
+				for _, kind := range item.EvidenceKinds {
+					if _, ok := s.state.ProviderDimensions[prefix+string(kind)]; !knownDiagnosticKind(kind) || !ok {
+						unknown = true
+					}
+				}
+				reason := ""
+				if unknown {
+					reason = "diagnostic_origin_coverage_unknown"
+				} else if item.Status == DiagnosticStatusStale {
+					reason = staleReasonDocumentChanged
+				}
+				if reason != "" {
+					if confidenceRank(aggregate.Confidence) > confidenceRank(ConfidenceProvisional) {
+						aggregate.State, aggregate.Confidence = "incomplete", ConfidenceProvisional
+					}
+					aggregate.Reasons = appendUnique(aggregate.Reasons, reason)
+				}
+			}
+		}
+	}
 	return aggregate
+}
+
+func knownDiagnosticKind(kind DiagnosticEvidenceKind) bool {
+	switch kind {
+	case EvidencePush, EvidencePull, EvidenceWorkspace, EvidenceProjectCheck:
+		return true
+	default:
+		return false
+	}
+}
+
+// Historical kinds deliberately over-approximate outstanding origins, even
+// after recurrence. Empty/unknown sets never establish withdrawal coverage.
+func streamCoversItem(item DiagnosticItem, kind DiagnosticEvidenceKind) bool {
+	if len(item.EvidenceKinds) == 0 || !knownDiagnosticKind(kind) {
+		return false
+	}
+	for _, origin := range item.EvidenceKinds {
+		if !knownDiagnosticKind(origin) || origin != kind {
+			return false
+		}
+	}
+	return true
 }
 
 // recordFindingsLocked upserts every finding of the batch as a current item. It returns
@@ -902,6 +956,10 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		item.StateSeq = batch.StateSeq
 		item.LastSeen = batch.ObservedAt
 		item.EvidenceIDs = recentEvidenceIDs(item.EvidenceIDs, evID)
+		if existed && len(item.EvidenceKinds) == 0 {
+			// Refresh is positive evidence, not proof of missing legacy history.
+			item.EvidenceKinds = []DiagnosticEvidenceKind{EvidenceUnavailable}
+		}
 		item.EvidenceKinds = appendUniqueKind(item.EvidenceKinds, batch.Kind)
 		s.state.Items[id] = item
 		if announce {
@@ -919,15 +977,16 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 	return current, added, seen
 }
 
-// resolveAbsentLocked marks every listed item the batch did not report as resolved.
-func (s *diagnosticStore) resolveAbsentLocked(ids []string, seen map[string]bool, observedAt time.Time) []DiagnosticItem {
+// resolveAbsentLocked resolves omitted items only when this stream covers all
+// their known historical positive origins.
+func (s *diagnosticStore) resolveAbsentLocked(ids []string, seen map[string]bool, kind DiagnosticEvidenceKind, observedAt time.Time) []DiagnosticItem {
 	var resolved []DiagnosticItem
 	for _, id := range ids {
 		if seen[id] {
 			continue
 		}
 		item, ok := s.state.Items[id]
-		if !ok {
+		if !ok || !streamCoversItem(item, kind) {
 			continue
 		}
 		item.Status = DiagnosticStatusResolved
@@ -994,6 +1053,33 @@ func (s *diagnosticStore) documentChangedLocked(documents []string, revision str
 			s.state.Active[key] = remaining
 		}
 	}
+	// Invalidate every lane, including one whose finding ID was most recently
+	// refreshed by another stream. An empty old lane also needs new proof.
+	dimensions := map[string]bool{}
+	for key, dimension := range s.state.ProviderDimensions {
+		parts := strings.Split(key, "\x00")
+		if len(parts) < 3 || !names[parts[2]] {
+			continue
+		}
+		current := false
+		if len(dimension.EvidenceIDs) > 0 {
+			var batch DiagnosticBatch
+			evidence := s.state.Evidence[dimension.EvidenceIDs[len(dimension.EvidenceIDs)-1]]
+			current = json.Unmarshal(evidence.Payload, &batch) == nil && revision != "" && batch.DocumentRevision == revision
+		}
+		if !current {
+			dimension.State = "incomplete"
+			if confidenceRank(dimension.Confidence) > confidenceRank(ConfidenceProvisional) {
+				dimension.Confidence = ConfidenceProvisional
+			}
+			dimension.Reasons = appendUnique(dimension.Reasons, staleReasonDocumentChanged)
+			s.state.ProviderDimensions[key] = dimension
+			dimensions[parts[0]], changed = true, true
+		}
+	}
+	for name := range dimensions {
+		s.state.Dimensions[name] = s.aggregateDimensionLocked(name)
+	}
 	return changed
 }
 
@@ -1043,10 +1129,24 @@ func (s *diagnosticStore) staleItemsLocked() []DiagnosticItem {
 
 func (s *diagnosticStore) reportLocked(added, resolved []DiagnosticItem, evID string, reasons []string) DiagnosticReport {
 	current, stale := s.countsLocked()
+	reasons = appendUnique(reasons, diagnosticCoverageReasons(s.state.Dimensions)...)
 	return DiagnosticReport{Confidence: weakestConfidence(s.state.Dimensions), Coverage: cloneDimensions(s.state.Dimensions),
 		New: added, Resolved: resolved, Stale: s.staleItemsLocked(), PreexistingCount: current - len(added),
 		CurrentCount: current, StaleCount: stale, ProvisionalReasons: reasons,
 		EvidenceIDs: []string{evID}, Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence)}
+}
+
+func diagnosticCoverageReasons(dimensions map[string]DiagnosticDimension) []string {
+	var reasons []string
+	names := make([]string, 0, len(dimensions))
+	for name := range dimensions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		reasons = appendUnique(reasons, dimensions[name].Reasons...)
+	}
+	return reasons
 }
 
 func (s *diagnosticStore) query(since string, retained ...string) (DiagnosticReport, error) {
@@ -1104,6 +1204,7 @@ func (s *diagnosticStore) query(since string, retained ...string) (DiagnosticRep
 		New: added, Current: currentItems, Resolved: resolved, Stale: stale, PreexistingCount: preexisting, CurrentCount: current, StaleCount: staleCount,
 		EvidenceIDs: evidenceIDsFromDimensions(s.state.Dimensions), Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Notices: notices,
 		NoticesTruncated: truncated}
+	report.ProvisionalReasons = diagnosticCoverageReasons(s.state.Dimensions)
 	if len(s.state.Dimensions) == 0 {
 		report.Confidence = ConfidenceUnavailable
 		report.Coverage = map[string]DiagnosticDimension{"edited_documents": {State: "unavailable", Confidence: ConfidenceUnavailable, Reasons: []string{"no_diagnostic_evidence"}}}

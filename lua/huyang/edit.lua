@@ -842,9 +842,10 @@ local function note_published_for(name, path)
 end
 
 -- Pending edits retain their expected document version. Arrival time never
--- attributes a finding, and superseded publications never enter the ledger.
+-- attributes a finding; superseded postimages never enter the ledger.
 local pending_late = {}
-local late_observations = {} -- latest observation per stream/producer/document
+local late_observations = {} -- latest slot plus bounded undelivered positives
+local late_sequence = 0
 local LATE_BATCHES_MAX = 64
 local progress_since -- shared by immediate and late completeness checks
 local PUSH_QUIET_MS = 150
@@ -883,9 +884,18 @@ end
 local function queue_late(batch, pending, client)
     if not pending then return end
     local key = batch.provider_id .. "\0" .. batch.document .. "\0" .. batch.kind
-    late_observations[key] = { pending = pending, client = client, at = vim.uv.now(), batch = batch }
+    local prior = late_observations[key]
+    if prior and prior.delivered == nil and #prior.batch.findings > 0 then
+        -- A provisional replacement cannot erase an undelivered positive.
+        -- Preserve its own metadata; never stamp it with the newer version.
+        prior.superseded = true
+        late_observations[key .. "\0" .. prior.sequence] = prior
+    end
+    late_sequence = late_sequence + 1
+    late_observations[key] = { pending = pending, client = client, at = vim.uv.now(),
+        sequence = late_sequence, batch = batch }
     local keys = vim.tbl_keys(late_observations)
-    table.sort(keys, function(a, b) return late_observations[a].at < late_observations[b].at end)
+    table.sort(keys, function(a, b) return late_observations[a].sequence < late_observations[b].sequence end)
     for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
 end
 
@@ -915,12 +925,11 @@ end
 -- Any currently open progress vetoes completion; empty pushes also need quiet.
 function M.late_evidence()
     pull_watch.wake()
-    local out, sent = {}, {}
+    local out = {}
     local keys = vim.tbl_keys(late_observations)
-    -- The stream suffix orders pulls before pushes. Send their positive facts
-    -- first, then the push proof: Go coalesces each RPC by producer/document,
-    -- and a provisional batch after a complete push would weaken ledger proof.
-    table.sort(keys)
+    -- Both streams can be delivered in one RPC. Ordering carries no authority
+    -- across streams; the ledger retains their independent coverage.
+    table.sort(keys, function(a, b) return late_observations[a].sequence < late_observations[b].sequence end)
     for _, key in ipairs(keys) do
         local observation = late_observations[key]
         local batch, pending = observation.batch, observation.pending
@@ -930,15 +939,13 @@ function M.late_evidence()
             late_observations[key] = nil
         else
             batch.progress_pending = progress_since({ batch.producer }, 0)
-            batch.complete = batch.kind ~= "lsp_pull" and publication_complete(batch.document_version, pending.expected,
-                batch.findings, observation.at, batch.producer, 0)
-            local producer_document = batch.provider_id .. "\0" .. batch.document
-            if not sent[producer_document] and observation.delivered ~= batch.complete then
+            batch.complete = not observation.superseded and batch.kind ~= "lsp_pull"
+                and publication_complete(batch.document_version, pending.expected,
+                    batch.findings, observation.at, batch.producer, 0)
+            if observation.delivered ~= batch.complete then
                 out[#out + 1] = require("huyang.python_environment").normalize_batch(vim.deepcopy(batch))
                 observation.delivered = batch.complete
-                sent[producer_document] = true
-                -- A deferred push remains pending, even if already complete.
-                if batch.complete then late_observations[key] = nil end
+                if batch.complete or observation.superseded then late_observations[key] = nil end
             end
         end
     end
@@ -980,7 +987,6 @@ local SILENT_AFTER = 1
 -- params.version in its own handler, so the wrapper below is what recovers it.
 -- Neovim's codelens, inlay_hint, semantic_tokens and linked_editing_range all
 -- compare against util.buf_versions the same way.
-local diagnostic_modes = {} -- [bufnr][client.id] = client once push mode is proven
 local publications = {} -- [bufnr][client.id] = the actual publication, never editor cache
 local publish_version = {}  -- [bufnr] = { [client.name] = version }
 local stamps_version = {}   -- [client.name] = true once a version is seen
@@ -1070,11 +1076,14 @@ local function wrap_publish_handler(client)
                         message = d.message or "",
                     }
                 end
-                if capture_late(client.name, fname, version, findings, client.id)
-                    and version == pending_late[fname].expected then
-                    diagnostic_modes[bufnr] = diagnostic_modes[bufnr] or {}
-                    diagnostic_modes[bufnr][client.id] = client
-                    pull_watch.cancel_document(fname, client.id)
+                capture_late(client.name, fname, version, findings, client.id)
+                local pending = pending_late[fname]
+                if version == pending.expected and pending_current(fname, pending)
+                    and pull_watch.client_current(client, bufnr) then
+                    -- Wake the immediate caller to include this push, while
+                    -- keeping the independent pull request and watcher alive.
+                    local waiter = pending.push_waiters and pending.push_waiters[client.id]
+                    if waiter then waiter() end
                 end
             end
         end
@@ -1088,7 +1097,7 @@ M._wrap_publish_handler = wrap_publish_handler
 -- dispatch another LSP message. A later publish is therefore for this change.
 function M.mark_diagnostic_change(bufnr)
     local path = vim.api.nvim_buf_get_name(bufnr)
-    -- A producer's proven push mode survives edits; its old payload does not.
+    -- Every edit discards old publications and cancels superseded pull work.
     publish_version[bufnr] = nil
     publications[bufnr] = nil
     pull_watch.cancel_document(path)
@@ -1139,7 +1148,6 @@ vim.api.nvim_create_autocmd("LspDetach", {
     group = vim.api.nvim_create_augroup("huyang_pull_detach", { clear = true }),
     callback = function(ev)
         local client_id = ev.data and ev.data.client_id
-        if diagnostic_modes[ev.buf] and client_id then diagnostic_modes[ev.buf][client_id] = nil end
         pull_watch.cancel_document(vim.api.nvim_buf_get_name(ev.buf), client_id)
     end,
 })
@@ -1301,7 +1309,6 @@ function M.diagnostic_evidence(args)
                 -- cached publication partial, including work already running.
                 local barrier_started = args.baseline and 0 or vim.uv.now()
                 local prefer_pull = client:supports_method("textDocument/diagnostic", bufnr)
-                    and (diagnostic_modes[bufnr] or {})[client.id] ~= client
                 local remaining = math.max(1, attach_deadline - vim.uv.now())
                 local barrier_acked = false
                 if not args.baseline and not prefer_pull and client:supports_method("textDocument/documentSymbol", bufnr) then
@@ -1318,7 +1325,6 @@ function M.diagnostic_evidence(args)
                     return publication ~= nil and publication_complete(publication.version, expected,
                         publication.diagnostics, publication.at, client.name, barrier_started)
                 end
-                if fresh_publish() then prefer_pull = false end
                 while not args.baseline and not prefer_pull and vim.uv.now() < attach_deadline and not fresh_publish() do
                     remaining = attach_deadline - vim.uv.now()
                     sleep(math.min(25, math.max(1, remaining)))
@@ -1380,6 +1386,13 @@ function M.diagnostic_evidence(args)
                             resume(pull_batch(nil))
                         end))
                         local provider = client.server_capabilities and client.server_capabilities.diagnosticProvider
+                        pending.push_waiters = pending.push_waiters or {}
+                        pending.push_waiters[client.id] = function()
+                            if waiting then
+                                waiting = false
+                                resume(pull_batch(nil))
+                            end
+                        end
                         pull_watch.start({
                             client = client, bufnr = bufnr, document = path,
                             params = {
@@ -1388,7 +1401,6 @@ function M.diagnostic_evidence(args)
                             },
                             current = function()
                                 return pending_current(path, pending)
-                                    and (diagnostic_modes[bufnr] or {})[client.id] ~= client
                             end,
                             interrupted = function()
                                 if waiting then
@@ -1411,7 +1423,9 @@ function M.diagnostic_evidence(args)
                                 end
                             end,
                         })
+                        if published then pending.push_waiters[client.id]() end
                     end)
+                    pending.push_waiters[client.id] = nil
                     timer:stop()
                     timer:close()
                     batches[#batches + 1] = batch
@@ -1431,11 +1445,6 @@ function M.diagnostic_evidence(args)
                             late_observations[authoritative.provider_id .. "\0" .. path .. "\0lsp_push"] = nil
                         else
                             capture_late(client.name, path, push.version, items, client.id)
-                        end
-                        if push.version == expected then
-                            diagnostic_modes[bufnr] = diagnostic_modes[bufnr] or {}
-                            diagnostic_modes[bufnr][client.id] = client
-                            pull_watch.cancel_document(path, client.id)
                         end
                     end
                 end

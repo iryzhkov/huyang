@@ -28,8 +28,8 @@ func TestDiagnosticStateUpgradePersistsVersionAndRejectsDowngrade(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := upgraded.state.ProviderDimensions["edited_documents\x00test#1\x00"+path]; !ok {
-		t.Fatal("document migration missing")
+	if got := upgraded.state.ProviderDimensions["edited_documents\x00test#1"].Confidence; got != ConfidenceProvisional {
+		t.Fatalf("unsplittable legacy coverage claimed proof: %s", got)
 	}
 	bytes, err := os.ReadFile(upgraded.path)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestDiagnosticStateUpgradePersistsVersionAndRejectsDowngrade(t *testing.T) 
 	if err := json.Unmarshal(bytes, &persisted); err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Version != 2 || !strings.Contains(string(bytes), "persisting") {
+	if persisted.Version != diagnosticStateVersion || !strings.Contains(string(bytes), "persisting") {
 		t.Fatal("upgrade not persisted")
 	}
 	// The old loader's exact guard is Version != 1; the persisted header must

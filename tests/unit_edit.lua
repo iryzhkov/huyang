@@ -661,19 +661,17 @@ for _, final_positive in ipairs({false,true}) do
     expected_requests=requests+1
     fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
     vim.wait(100,function() return requests==expected_requests end,1)
-    local pending_pull=edit.late_evidence().batches
-    check("simultaneous provisional slots send only the pull first",
-        #pending_pull==1 and pending_pull[1].kind=="lsp_pull" and not pending_pull[1].complete
-            and pending_pull[1].findings[1].message=="simultaneous pull finding",pending_pull)
-    local pending_push=edit.late_evidence().batches
-    check("deferred unstamped positive push is delivered on the next collection",
-        #pending_push==1 and pending_push[1].kind=="lsp_push" and not pending_push[1].complete
-            and pending_push[1].document_version==nil and pending_push[1].transaction_id==nil
-            and pending_push[1].findings[1].message==pushed.message,pending_push)
+    local pending_streams=edit.late_evidence().batches
+    check("simultaneous provisional push and pull retain both lanes in one RPC",
+        #pending_streams==2 and pending_streams[1].kind=="lsp_push" and not pending_streams[1].complete
+            and pending_streams[1].document_version==nil and pending_streams[1].transaction_id==nil
+            and pending_streams[1].findings[1].message==pushed.message
+            and pending_streams[2].kind=="lsp_pull" and not pending_streams[2].complete
+            and pending_streams[2].findings[1].message=="simultaneous pull finding",pending_streams)
     check("both provisional slots are delivered exactly once",#edit.late_evidence().batches==0)
 
     -- Now queue the pull first and let the stamped push become complete before
-    -- either is collected. Neither the facts nor the deferred proof may vanish.
+    -- either is collected. Neither stream may swallow the other.
     response={kind="full",resultId="simultaneous-authority",items={{
         range=diagnostic.range,severity=1,message="pull before authoritative push",
     }}}
@@ -686,23 +684,23 @@ for _, final_positive in ipairs({false,true}) do
     vim.wait(170)
     local before_proof=edit.late_evidence().batches
     check("complete push cannot swallow a simultaneous provisional pull",
-        #before_proof==1 and before_proof[1].kind=="lsp_pull" and not before_proof[1].complete
+        #before_proof==2 and before_proof[1].kind=="lsp_pull" and not before_proof[1].complete
             and before_proof[1].document_version==nil
             and before_proof[1].findings[1].message=="pull before authoritative push",before_proof)
-    local proof=edit.late_evidence().batches
-    check("deferred current push retains its exact authoritative body",
-        #proof==1 and proof[1].kind=="lsp_push" and proof[1].complete
-            and proof[1].document_version==9 and proof[1].expected_version==9
-            and proof[1].transaction_id=="edit_causal_pull"
-            and #proof[1].findings==#final_items
-            and (not final_positive or proof[1].findings[1].message==diagnostic.message),proof)
-    check("delivered provisional slots cannot downgrade the authoritative push",
+    local proof=before_proof[2]
+    check("current push retains its own authoritative body alongside the pull",
+        proof and proof.kind=="lsp_push" and proof.complete
+            and proof.document_version==9 and proof.expected_version==9
+            and proof.transaction_id=="edit_causal_pull"
+            and #proof.findings==#final_items
+            and (not final_positive or proof.findings[1].message==diagnostic.message),proof)
+    check("unchanged stream payloads are not delivered twice",
         #edit.late_evidence().batches==0)
     local stopped=requests
     vim.wait(10)
     edit.late_evidence()
     vim.wait(10)
-    check("a versioned push cancels the owned pull lane",requests==stopped,requests)
+    check("a versioned push leaves the independent bounded pull lane alive",requests>stopped,requests)
     edit.mark_diagnostic_change(buf)
     vim.lsp.get_clients, vim.lsp.get_client_by_id = saved_clients, saved_client
     vim.lsp.buf_attach_client = saved_attach
@@ -787,7 +785,9 @@ do
     local pull_coroutine, requests, refreshes = nil, 0, 0
     local pending, callbacks, emit_cancel = {}, {}, true
     local diagnostic = {range={start={line=0,character=0},["end"]={line=0,character=1}},
-        severity=1,message="asynchronous late finding"}
+        severity=1,code="E0308",source="rust-analyzer",message="expected i32, found &'static str"}
+    local push_diagnostic = {range=diagnostic.range,severity=1,code="E0308",source="rustc",
+        message="mismatched types expected i32, found &str"}
     local fake = {id=9012,name="refresh_cancel_test",config={filetypes={"python"}},
         attached_buffers={[buf]=true},requests={},
         handlers={["textDocument/publishDiagnostics"]=function() end},
@@ -942,12 +942,12 @@ do
     check("same-version supersession rejects the old queued postimage",
         #edit.late_evidence().batches==0)
 
-    -- First learn push mode while a pull caller is parked, then edit twice.
-    -- All three current publications must appear in the immediate response.
+    -- A push wakes the immediate caller without cancelling its independent
+    -- pull. Repeat across edits to prevent learned push mode suppressing pulls.
     edit.mark_diagnostic_change(buf)
     vim.lsp.util.buf_versions[buf]=24
     local learned=launch()
-    publish(24,{diagnostic})
+    publish(24,{push_diagnostic})
     local learned_batches,learned_ms=finish(learned)
     check("current push arriving during pull wakes and supplies immediate authority",
         learned_ms<200 and #learned_batches==2 and learned_batches[2].kind=="lsp_push"
@@ -955,7 +955,18 @@ do
             and #learned_batches[2].findings==1,{learned_ms,learned_batches})
     check("immediately delivered authoritative push is not queued again",
         #edit.late_evidence().batches==0)
-    local learned_requests=requests
+    local alive_id=requests
+    check("push arrival keeps the original pull request in flight",pending[alive_id]~=nil,alive_id)
+    reply(alive_id,{diagnostic})
+    require("huyang.diagnostic_pull").wake(fake.id)
+    vim.wait(50,function() return requests==alive_id+1 end,1)
+    reply(requests,{})
+    local after_push=edit.late_evidence().batches
+    check("provisional empty pull preserves undelivered independent positive after push",
+        #after_push==2 and after_push[1].kind=="lsp_pull" and not after_push[1].complete
+            and #after_push[1].findings==1 and after_push[1].findings[1].source=="rust-analyzer"
+            and after_push[2].kind=="lsp_pull" and not after_push[2].complete
+            and #after_push[2].findings==0,after_push)
     for version=25,26 do
         vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = " .. version})
         vim.fn.writefile({"value = " .. version},path)
@@ -963,15 +974,18 @@ do
         core.mark_synced(buf,path)
         edit.mark_diagnostic_change(buf)
         vim.lsp.util.buf_versions[buf]=version
+        local before_requests=requests
         local current=launch()
-        publish(version,{diagnostic})
+        publish(version,{push_diagnostic})
         local current_batches,current_ms=finish(current)
-        check("proven push mode supplies edited revision " .. version .. " immediately",
-            current_ms<200 and requests==learned_requests and #current_batches==1
-                and current_batches[1].kind=="lsp_push" and current_batches[1].complete
-                and current_batches[1].document_version==version
-                and current_batches[1].expected_version==version
-                and #current_batches[1].findings==1,{current_ms,current_batches,requests})
+        check("current push preserves independent pull on edited revision " .. version,
+            current_ms<200 and requests==before_requests+1 and #current_batches==2
+                and current_batches[1].kind=="lsp_pull" and not current_batches[1].complete
+                and current_batches[2].kind=="lsp_push" and current_batches[2].complete
+                and current_batches[2].document_version==version
+                and current_batches[2].expected_version==version
+                and #current_batches[2].findings==1 and pending[requests]~=nil,
+            {current_ms,current_batches,requests})
     end
     edit.mark_diagnostic_change(buf)
     vim.lsp.get_clients,vim.lsp.get_client_by_id=saved_clients,saved_client

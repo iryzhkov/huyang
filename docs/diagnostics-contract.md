@@ -37,9 +37,11 @@ publication must cover the expected document version, an empty push must have
 150 ms of quiet, and work-done progress started for that edit vetoes completion.
 Late pushes and pulls recheck buffer validity, loaded state, path, changedtick,
 LSP version and disk currency at collection. Any currently open producer progress
-vetoes late completion. Observations are coalesced by producer/document before
-ledger insertion; an intermediate empty set cannot resolve a superseding positive
-observation.
+vetoes late completion. Push and pull retain independent lanes per provider and
+document through immediate selection, late coalescing, ledger insertion and
+coverage. A complete publication covers only its declared stream. Within one
+lane, an intermediate empty set cannot resolve a superseding positive observation,
+and a later provisional empty cannot discard an undelivered positive.
 Ordinary `textDocument/diagnostic` responses have no producer document version.
 Both positive and empty full bodies remain provisional: the request's expected
 version, a changed opaque result ID, quiet and progress completion do not prove
@@ -60,17 +62,37 @@ Neovim 0.11 boolean entries and Neovim 0.12 language-ID entries; absent or false
 entries and replaced client objects are rejected. Native request
 cancellation retires the request generation, wakes a waiting caller and schedules
 a replacement within the same budget; a stale callback cannot mutate its
-replacement. Closing a watcher also wakes its caller. Proven push mode survives
-edits while each edit discards the old publication. A current authoritative push
-received during a pull wait is included in the immediate response.
-Push and pull observations retain separate coalescing slots, so an unstamped
-empty push cannot discard an undelivered positive pull. Each late collection sends
-at most one observation per producer/document: an undelivered pull goes first,
-then the retained push on a later collection. Only a sent observation is marked
-delivered; a deferred current push stays queued even when complete. This preserves
-provisional positive facts through Go's
-per-collection coalescing and delivers current push proof last, without replaying
-older provisional slots afterward. Repeated pull payloads do not reannounce findings.
+replacement. Closing a watcher also wakes its caller. A version-matched push
+received during a pull wait wakes the caller; when complete, it is included in
+the immediate response;
+the independent pull watcher and its in-flight request stay alive. Later edits
+continue to collect supported pulls regardless of earlier complete pushes.
+Late collections can deliver both lanes together. Repeated payloads do not
+reannounce findings, and merged current/new bodies deduplicate by finding ID.
+
+Omission resolves a finding only when its nonempty, known historical
+`evidence_kinds` set is wholly covered by that valid complete batch's stream.
+Push-only findings can resolve on complete current push omission, including
+omitted Sources within the push domain. A pull-only or mixed push/pull finding
+cannot resolve on push omission. Rejected withdrawals retain their Active/Stale
+membership. Baselines never withdraw.
+
+Finding identity remains shared across streams and includes source, message,
+severity, code and occurrence; ranges can move without creating a new ID.
+Different source/message findings remain distinct even at the same range with
+the same code. Historical kinds are append-only across edits, recurrence and
+bounded evidence-reference pruning. They conservatively over-approximate
+outstanding origins and may retain a recurring finding indefinitely. Missing,
+empty or unknown legacy kinds retain unknown coverage after refresh. Latest
+item revision/version fields describe its latest observation, not freshness for
+every historical lane. This model makes no claim of sequential withdrawal or
+precise per-origin freshness.
+
+Provider dimensions retain each lane and aggregate the weakest confidence.
+Document changes invalidate each lane's coverage even when a shared finding ID
+is refreshed by another lane. Immediate observation confidence, diagnostics
+queries and empty later collections cannot turn independent stale/provisional
+origins into authoritative clean coverage.
 
 Unversioned push positives are provisional and unattributed; unversioned emptiness
 cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof
@@ -175,7 +197,12 @@ is never rebound to a new observation.
 The compact `diagnostics` result is a notice delta. `since` acknowledges notices
 workspace-wide; after acknowledgement or reconnect, `full: true` recovers current
 finding bodies under `current`. This recovery does not reannounce them as new.
-The persisted diagnostic ledger is version 2. Version-1 data is migrated and the
-new header is saved before use; version-1 binaries reject it. Back up state before
-upgrade if rollback must preserve diagnostic history. Newer unknown ledger
-versions are refused without rewriting them. The tool API namespace is unchanged.
+The persisted diagnostic ledger is version 3. Version-1 and version-2 data is
+migrated and the new header is saved before use; older binaries reject it.
+Unsplittable legacy provider/document coverage stays provisional with
+`legacy_stream_coverage_unknown`; bounded retained evidence cannot reconstruct
+missing stream proof. Historical resolved records are retained as historical
+records, without claiming verification under the new withdrawal rule. Back up
+state before upgrade if rollback must preserve diagnostic history. Newer unknown
+ledger versions are refused without rewriting them. The tool API namespace is
+unchanged.
