@@ -685,10 +685,10 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 			"trace_bytes_before": call.Before, "trace_bytes_after": call.After})
 	}
 	return map[string]any{
-		"call_boundaries": callBoundaries,
+		"call_boundaries":           callBoundaries,
 		"later_positive_deliveries": laterDeliveries,
-		"final_cut_marker": finalMarker,
-		"outcome":         "historical_post_fix_observation_pending", "historical_observation": true,
+		"final_cut_marker":          finalMarker,
+		"outcome":                   "historical_post_fix_observation_pending", "historical_observation": true,
 		"exact_attribution": true, "no_resolution": true, "analysis_completion_proven": false,
 		"clean_resolution_proven": false, "old_terminal_gate_qualified": false,
 		"classification": classification, "original_observation": candidate,
@@ -1022,7 +1022,7 @@ func m9PositiveRetentionFixture(t *testing.T) (*m9PostFix, []map[string]any, map
 	firstEnd := len(events)
 	items := []any{map[string]any{"range": map[string]any{
 		"start": map[string]any{"line": float64(1), "character": float64(0)},
-		"end": map[string]any{"line": float64(1), "character": float64(1)}},
+		"end":   map[string]any{"line": float64(1), "character": float64(1)}},
 		"severity": float64(1), "code": "reportAssignmentType", "source": "Pyright", "message": "later real positive"}}
 	var selected map[string]any
 	events, selected = m9AppendHistoricalPull(t, fixed, events, items, false)
