@@ -280,6 +280,8 @@ do
     local buf = core.load_buf(path)
     local saved_clients = vim.lsp.get_clients
     local saved_client = vim.lsp.get_client_by_id
+    local saved_attach = vim.lsp.buf_attach_client
+    local pull_coroutine
     local pull_items, responses = {}, 0
     vim.lsp.util.buf_versions[buf] = 4
     local fake = {id=9002,name="pull_test",config={filetypes={"python"}},
@@ -292,9 +294,20 @@ do
             end,40)
             return true,1
         end}
+    -- Only Huyang's diagnostic request sees this protocol stub. Native LSP
+    -- on_lines and VimLeavePre callbacks need the real client registry.
     vim.lsp.get_clients=function(filter)
-        if not filter or filter.bufnr==buf then return {fake} end
-        return {}
+        if pull_coroutine and coroutine.running()==pull_coroutine then
+            if not filter or filter.bufnr==buf then return {fake} end
+            return {}
+        end
+        return saved_clients(filter)
+    end
+    -- The progress check below also stubs get_client_by_id. Never let the
+    -- diagnostic request register this partial client with native tracking.
+    vim.lsp.buf_attach_client=function(bufnr,client_id)
+        if client_id==fake.id then return true end
+        return saved_attach(bufnr,client_id)
     end
     local function timed_pull()
         local result
@@ -302,9 +315,11 @@ do
             result=edit.diagnostic_evidence({files={path},wait_ms=5,
                 transaction_id="edit_pull",revision="wsrev_pull"})
         end)
+        pull_coroutine=co
         local ok,detail=coroutine.resume(co)
         check("late pull starts without blocking",ok,detail)
         vim.wait(500,function() return coroutine.status(co)=="dead" end,1)
+        pull_coroutine=nil
         return result
     end
     local result=timed_pull()
@@ -380,6 +395,7 @@ do
     check("a complete queued pull is delivered once",#edit.late_evidence().batches==0)
     vim.lsp.get_client_by_id=saved_client
     vim.lsp.get_clients=saved_clients
+    vim.lsp.buf_attach_client=saved_attach
     vim.api.nvim_buf_delete(buf,{force=true})
     vim.fn.delete(path)
 end
