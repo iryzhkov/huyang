@@ -1,5 +1,41 @@
 # M9 opt-in Python environment probe — source preparation
 
+## e118 cursor and manager-failure fixture corrections
+
+The agent-a capture `e118beda-e588-475e-b208-af743799ba35` tested
+`44afbe3c3e24570962483be6aed99c9b6d6b39fb`. Its seven known-environment
+truncation failures followed an explicit acknowledgment of `diagcur_3` and
+later full diagnostic reads without `since`. Full reports now retain the
+acknowledged floor instead of adopting unchecked report heads. A successful
+canonical `diagnostics(since)` also advances only that client's compact delivery
+cursor to the explicit acknowledgment. Other sessions, retired cursors and actual
+retention gaps keep their truncation flags. Intermediate replies and the recursive
+post-fix proof, veto and truncation checks are unchanged.
+
+Case 12 had a separate fixture error. Root's `exec.13535` showed pinned uv 0.9.5
+running the actual offline query and exiting zero. The old
+`.python-version` value `999.999.999` is outside uv's version component range.
+In the pinned primary source, [VersionRequest and PythonRequest::parse](https://raw.githubusercontent.com/astral-sh/uv/0.9.5/crates/uv-python/src/discovery.rs)
+use u8 components and fall back to an executable name for unsupported version
+strings. [Version-file parsing](https://raw.githubusercontent.com/astral-sh/uv/0.9.5/crates/uv-python/src/version_files.rs)
+filters those names out. [python find](https://raw.githubusercontent.com/astral-sh/uv/0.9.5/crates/uv/src/commands/python/find.rs)
+uses the default request when none remains. The resulting base interpreter and
+`environment_manager_not_project_environment` were correct production behavior.
+
+The fixture now pins valid unavailable `3.99.0`. Before Huyang starts it invokes
+the canonical private uv executable with `--offline python find --no-python-downloads`
+under the same project directory and allowlisted environment used by the service.
+Only a normal nonzero `exec.ExitError` qualifies. Success, timeout, cancellation,
+signal death and launch failure reject the fixture. The preflight captures bounded
+stdout/stderr with truncation markers, exit/outcome, executable hash, configuration
+bytes and project hashes before/after in `manager-failure-preflight.json`.
+Preparation hashes are captured after fixture writes, including `.python-version`.
+The expected Huyang discovery reason remains `environment_manager_query_failed`;
+no environment resolver production behavior or native acceptance gate changed.
+
+These are source changes awaiting root-owned checks, independent review and a fresh
+complete native matrix. They do not establish a runtime pass.
+
 Original probe parent: integrated M9 `d2a90e1add0981166e8e55a8ddb7402f16736bf5`.
 This combined first probe review fix is based on immutable
 `9062353cfcf1e7595a8012172cecca5bc74de2a1`.

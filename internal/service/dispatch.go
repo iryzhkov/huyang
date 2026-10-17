@@ -343,6 +343,24 @@ func (d *directWorkspaces) executeScheduled(ctx context.Context, requestID, name
 	if workspaceID == "" {
 		workspaceID, _ = arguments["workspace_id"].(string)
 	}
+	// A successful explicit acknowledgment also consumes this session's compact
+	// backlog, while other sessions retain their own delivery cursors.
+	if name == "diagnostics" && ctx.Err() == nil && result["code"] == nil {
+		switch result["outcome"] {
+		case "ok", "provisional", "unavailable":
+			if since, _ := arguments["since"].(string); since != "" {
+				data, _ := result["data"].(map[string]any)
+				// Prepared diagnostics return per-file reports, not a canonical
+				// inbox acknowledgment, even when the call supplies since.
+				switch data["diagnostics"].(type) {
+				case workspacecore.DiagnosticReport, map[string]any:
+					if workspace := d.registry.Lookup(workspacecore.ID(workspaceID)); workspace != nil {
+						d.handlers.RecordDiagnosticAcknowledgment(ctx, workspace, since)
+					}
+				}
+			}
+		}
+	}
 	// Pure reads stay quiet: an agent that only reads should not pay for
 	// the diagnostic churn of a language server behind it. Mutations and
 	// workspace_inspect carry the delta.

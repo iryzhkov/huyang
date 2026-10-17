@@ -170,6 +170,7 @@ type m9Probe struct {
 	lateSeen                                 bool
 	updatesSeen                              bool
 	ackedNote                                string
+	acknowledgedCursor                       uint64
 	lastEditAt                               time.Time
 	quietChecks                              int
 	progressVetoes                           int
@@ -259,6 +260,95 @@ func m9Exec(t *testing.T, parent context.Context, cwd string, env []string, comm
 	return strings.TrimSpace(string(output))
 }
 
+// Bound both streams from the real manager query without changing its exit.
+type m9ManagerOutput struct {
+	bytes.Buffer
+	truncated bool
+}
+
+func (w *m9ManagerOutput) Write(body []byte) (int, error) {
+	size := len(body)
+	const limit = 64 << 10
+	if remaining := limit - w.Len(); size > remaining {
+		body = body[:remaining]
+		w.truncated = true
+	}
+	_, _ = w.Buffer.Write(body)
+	return size, nil
+}
+
+// Prove the negative fixture before Huyang starts. A missing executable,
+// cancellation, timeout or signal is a broken prerequisite, not the intended
+// normal nonzero result of uv's unavailable-version query.
+func (p *m9Probe) verifyManagerFailure() {
+	p.t.Helper()
+	command, err := filepath.EvalSymlinks(filepath.Join(p.tools, "bin", "uv"))
+	if err != nil || !m9Within(p.tools, command) {
+		p.t.Fatalf("uv preflight must resolve to the private pinned executable: %v", err)
+	}
+	m9Executable(p.t, command)
+	binary, err := os.ReadFile(command)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	digest := sha256.Sum256(binary)
+	before := m9Hashes(p.t, p.root)
+	inputs := map[string]string{}
+	inputHashes := map[string]string{}
+	for _, path := range []string{filepath.Join(p.root, ".python-version"), filepath.Join(p.root, "pyproject.toml"),
+		filepath.Join(p.root, ".huyang.toml"), filepath.Join(p.dir, "config", "huyang", "config.toml")} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		inputs[path] = string(body)
+		hash := sha256.Sum256(body)
+		inputHashes[path] = hex.EncodeToString(hash[:])
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+	defer cancel()
+	args := []string{"--offline", "python", "find", "--no-python-downloads"}
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir, cmd.Env, cmd.WaitDelay = p.root, p.env, time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return unix.Kill(-cmd.Process.Pid, unix.SIGKILL) }
+	var stdout, stderr m9ManagerOutput
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err = cmd.Start()
+	if err == nil {
+		stop := m9TrackTree(cmd)
+		err = cmd.Wait()
+		stop(p.t)
+	}
+	exit, exited := err.(*exec.ExitError)
+	code := -1
+	if exited {
+		code = exit.ExitCode()
+	}
+	outcome := "unexpected_success"
+	switch {
+	case ctx.Err() != nil:
+		outcome = "cancelled_or_timed_out"
+	case exited && code > 0:
+		outcome = "nonzero_exit"
+	case err != nil:
+		outcome = "launch_or_abnormal_failure"
+	}
+	after := m9Hashes(p.t, p.root)
+	m9JSON(p.t, filepath.Join(p.dir, "manager-failure-preflight.json"), map[string]any{
+		"command": command, "command_sha256": hex.EncodeToString(digest[:]), "args": args, "cwd": p.root,
+		"fixture_inputs": inputs, "fixture_input_hashes": inputHashes, "before_project_hashes": before, "after_project_hashes": after,
+		"stdout": stdout.String(), "stderr": stderr.String(), "stdout_truncated": stdout.truncated, "stderr_truncated": stderr.truncated,
+		"exit_code": code, "outcome": outcome, "error": fmt.Sprint(err), "context_error": fmt.Sprint(ctx.Err()),
+	})
+	if !maps.Equal(before, after) {
+		p.t.Fatal("uv negative-fixture preflight changed canonical fixture bytes")
+	}
+	if outcome != "nonzero_exit" {
+		p.t.Fatalf("manager_failure requires a concrete normal nonzero uv exit, got %s: %v", outcome, err)
+	}
+}
+
 func (p *m9Probe) venv(path string, dependency bool) string {
 	p.t.Helper()
 	// CPython records the creator's directory in pyvenv.cfg. The tools/bin
@@ -316,7 +406,6 @@ func (p *m9Probe) fixture() {
 	p.root = filepath.Join(p.dir, "root")
 	m9Write(p.t, filepath.Join(p.root, ".huyang.toml"), "# Explicit empty pipeline: no automatic project commands.\n")
 	m9Write(p.t, filepath.Join(p.root, "pyproject.toml"), "[project]\nname = \"m9-probe\"\nversion = \"1.0.0\"\nrequires-python = \">=3.12,<3.13\"\n")
-	m9JSON(p.t, filepath.Join(p.dir, "fixture-preparation-hashes.json"), m9Hashes(p.t, p.root))
 	bin := filepath.Join(p.dir, "bin")
 	for _, name := range []string{"python", "python3", "nvim", "node", "pyright-langserver", "gopls", "git", "sh", "bash", "readlink", "uname", "dirname", "realpath", "uv", "poetry"} {
 		if p.spec.missingManager && name == "uv" {
@@ -374,7 +463,9 @@ func (p *m9Probe) fixture() {
 	if p.spec.manager == "uv" {
 		version := "3.12.8"
 		if p.spec.managerFailure {
-			version = "999.999.999"
+			// uv version components are u8; 999 is parsed as an ignored
+			// executable name rather than an unavailable Python version.
+			version = "3.99.0"
 		}
 		m9Write(p.t, filepath.Join(p.root, ".python-version"), version+"\n")
 	}
@@ -406,6 +497,10 @@ func (p *m9Probe) fixture() {
 	m9Write(p.t, filepath.Join(p.dir, "config", "huyang", "config.toml"), "[trust]\nroots = "+trust+"\n")
 	m9Write(p.t, filepath.Join(p.dir, "init.lua"), m9NeovimInit)
 	p.env = append(p.env, "HUYANG_HEADLESS_INIT="+filepath.Join(p.dir, "init.lua"))
+	m9JSON(p.t, filepath.Join(p.dir, "fixture-preparation-hashes.json"), m9Hashes(p.t, p.root))
+	if p.spec.managerFailure {
+		p.verifyManagerFailure()
+	}
 	m9Exec(p.t, p.ctx, p.root, p.env, filepath.Join(bin, "git"), "init", "-q")
 	p.before = m9Hashes(p.t, p.root)
 	m9JSON(p.t, filepath.Join(p.dir, "before-hashes.json"), p.before)
@@ -625,7 +720,25 @@ func (p *m9Probe) call(name string, args map[string]any) map[string]any {
 		args = map[string]any{}
 	}
 	args["root"] = p.root
+	// Full bodies recover current findings, not acknowledged notice history.
+	// Keep the consumed floor so intermediate transitions remain replayable;
+	// a newer report cursor alone must never acknowledge unchecked notices.
+	if name == "diagnostics" && args["full"] == true && p.acknowledgedCursor > 0 {
+		if _, explicit := args["since"]; !explicit {
+			args["since"] = fmt.Sprintf("diagcur_%d", p.acknowledgedCursor)
+		}
+	}
 	reply := p.wire.call(p.t, name, args)
+	if name == "diagnostics" && reply["code"] == nil && m9Report(reply) != nil {
+		switch reply["outcome"] {
+		case "ok", "provisional", "unavailable":
+			since, _ := args["since"].(string)
+			var acknowledged uint64
+			if _, err := fmt.Sscanf(since, "diagcur_%d", &acknowledged); err == nil && acknowledged > p.acknowledgedCursor {
+				p.acknowledgedCursor = acknowledged
+			}
+		}
+	}
 	p.sequence++
 	m9JSON(p.t, filepath.Join(p.dir, fmt.Sprintf("%03d-%s.json", p.sequence, name)), reply)
 	if p.ackedNote != "" {
@@ -1432,7 +1545,7 @@ func (p *m9Probe) plain() {
 		p.t.Fatal("plain edit lost follow-up guards")
 	}
 	p.collect()
-	text = call("diagnostics", map[string]any{"full": true})
+	text = call("diagnostics", map[string]any{"full": true, "since": fmt.Sprintf("diagcur_%d", p.acknowledgedCursor)})
 	m9Write(p.t, filepath.Join(p.dir, "plain-diagnostics.txt"), text)
 	for _, want := range []string{"python_environment_unresolved", "provisional", "reportAssignmentType"} {
 		if !strings.Contains(text, want) {
