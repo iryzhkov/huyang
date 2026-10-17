@@ -206,17 +206,30 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]map[string]any)[0]
+	// An in-process reply carries the handle as its Go type; an MCP client
+	// receives and sends it back as a JSON string, which is what edit_apply
+	// decodes. Send the wire form.
+	handle := fmt.Sprint(hit["handle"])
+	if hit["handle"] == nil || handle == "" {
+		t.Fatalf("search hit carries no handle: %#v", hit)
+	}
 	arguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "restart-during-diagnostics",
 		"operation": map[string]any{
-			"kind": "replace_range", "target": map[string]any{"handle": hit["handle"]}, "content": "gamma",
+			"kind": "replace_range", "target": map[string]any{"handle": handle}, "content": "gamma",
 		},
 	}
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()
 	done := make(chan map[string]any, 1)
 	go func() { done <- direct.call(requestContext, "edit_apply", arguments) }()
-	<-backend.reached
+	select {
+	case <-backend.reached:
+	case early := <-done:
+		t.Fatalf("edit returned before its post-mutation resync: %#v", early)
+	case <-time.After(30 * time.Second):
+		t.Fatal("edit did not reach its post-mutation resync within 30s")
+	}
 
 	restarted := newDirectWorkspaces(stateDir)
 	replayed := restarted.call(context.Background(), "edit_apply", arguments)
