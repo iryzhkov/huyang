@@ -44,7 +44,11 @@ end
 local function set_buffer_bytes(buf, content)
     local bomb = content:sub(1, 3) == "\239\187\191"
     if bomb then content = content:sub(4) end
+    -- Mixed endings use Unix lines with literal trailing CRs. Splitting on
+    -- CRLF merely because one occurs can leave an embedded LF in a line,
+    -- which nvim_buf_set_lines rejects and which loses diagnostic coordinates.
     local dos = content:find("\r\n", 1, true) ~= nil
+        and not content:gsub("\r\n", ""):find("\n", 1, true)
     local separator = dos and "\r\n" or "\n"
     local endofline = content:sub(-#separator) == separator
     if endofline then content = content:sub(1, -#separator - 1) end
@@ -225,5 +229,7 @@ function M.status(args)
     end
     return { active = true, plan_id = active.plan_id, plan_revision = active.plan_revision }
 end
+
+M.set_buffer_bytes = set_buffer_bytes
 
 return M

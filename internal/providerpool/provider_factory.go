@@ -11,11 +11,13 @@ import (
 )
 
 type OpenConfig struct {
-	Root        string
-	InitFile    string
-	RuntimePath string
-	Debug       bool
-	AfterEpoch  uint64
+	Root               string
+	InitFile           string
+	RuntimePath        string
+	Debug              bool
+	AfterEpoch         uint64
+	MaxLanguageServers int
+	PinLanguageServers bool
 }
 
 type Factory interface {
@@ -35,6 +37,7 @@ func (f ConfiguredFactory) Open(config OpenConfig) (provider.Provider, error) {
 		return embedprovider.Open(embedprovider.Config{
 			Root: config.Root, InitFile: config.InitFile,
 			RuntimePath: config.RuntimePath, Debug: config.Debug, AfterEpoch: config.AfterEpoch,
+			MaxLanguageServers: config.MaxLanguageServers, PinLanguageServers: config.PinLanguageServers,
 		})
 	default:
 		return nil, fmt.Errorf(

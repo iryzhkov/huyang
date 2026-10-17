@@ -117,6 +117,13 @@ type appliedEdit struct {
 }
 
 func (h *Handlers) edit(ctx context.Context, requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	if preview, _ := arguments["preview_only"].(bool); !preview {
+		backend, release := h.pool.Existing(workspace)
+		if backend != nil {
+			_ = providerpool.RecordDiagnosticBaseline(ctx, workspace, backend)
+		}
+		release()
+	}
 	if _, listed := arguments["operations"]; listed {
 		return h.editOperations(ctx, requestID, workspace, arguments)
 	}
@@ -172,7 +179,7 @@ func (h *Handlers) editRange(ctx context.Context, requestID string, workspace *w
 		return editFailure(requestID, workspace, handle, err)
 	}
 	applied := appliedEdit{
-		files:   []workspacecore.PlanStageFile{{Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After, BeforeExists: true, AfterExists: true, Patch: change.Diff.Patch}},
+		files:   []workspacecore.PlanStageFile{{Path: change.Diff.Path, Before: change.Diff.Before, After: change.Diff.After, BeforeExists: true, AfterExists: true, BeforeDisk: change.Before.Disk, Patch: change.Diff.Patch}},
 		patches: []string{change.Diff.Patch}, fromStateSeq: change.Before.Workspace.StateSeq, replacements: 1,
 		change: &change, resolution: resolution,
 	}
@@ -441,8 +448,20 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 	if len(names) > 0 && len(names) <= 3 {
 		subject = strings.Join(names, ", ")
 	}
+	for _, name := range names {
+		if strings.HasSuffix(name, ".rs") {
+			for _, reason := range report.ProvisionalReasons {
+				switch reason {
+				case "rust_diagnostics_pending", "lsp_starting", "lsp_attach_deadline_exceeded", "work_done_progress_pending", "push_missing_current_document_proof", "pull_incomplete_or_missing_result_id", "diagnostic_barrier_timed_out":
+					return "Rust diagnostics pending for " + subject + "; findings arrive through diagnostic_updates on subsequent replies (" + strings.Join(report.ProvisionalReasons, ", ") + ")"
+				}
+			}
+		}
+	}
 	for _, reason := range report.ProvisionalReasons {
 		switch reason {
+		case "rust_diagnostics_pending":
+			return "Rust diagnostics pending for " + subject + "; findings arrive through diagnostic_updates on subsequent replies"
 		case "lsp_not_configured":
 			return "no language server is configured for " + subject + " (lsp_not_configured); no diagnostics"
 		case "lsp_not_startable":
@@ -462,13 +481,18 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 // diagnosticSummary words the post-edit diagnostic outcome so the agent
 // can read the verdict without opening the delta.
 func diagnosticSummary(report workspacecore.DiagnosticReport) string {
-	current := 0
+	current, unknown := 0, 0
 	for _, item := range report.New {
-		if item.Status != workspacecore.DiagnosticStatusStale {
+		if includeEditDiagnostic(item) {
+			if item.BaselineMissing {
+				unknown++
+			}
 			current++
 		}
 	}
 	switch {
+	case unknown > 0:
+		return fmt.Sprintf("%d new or pre-existing diagnostic(s) (no baseline), %d new, %d resolved", unknown, current-unknown, len(report.Resolved))
 	case current == 0 && len(report.Resolved) == 0:
 		return "no new diagnostics"
 	case current == 0:
@@ -478,6 +502,14 @@ func diagnosticSummary(report workspacecore.DiagnosticReport) string {
 	}
 }
 
+// includeEditDiagnostic is shared by the delta and its summary. Information
+// and hints remain in the ledger and diagnostics tool, outside the edit's
+// new error/warning announcements. Severity zero preserves unspecified severity.
+func includeEditDiagnostic(item workspacecore.DiagnosticItem) bool {
+	return item.Status != workspacecore.DiagnosticStatusStale &&
+		item.Status != workspacecore.DiagnosticStatusResolved && item.Finding.Severity < 3
+}
+
 // compactDiagnosticDelta keeps what an agent acts on from each new finding:
 // where it is, how bad it is and what it says. Resolved findings collapse
 // to their IDs.
@@ -485,12 +517,15 @@ func compactDiagnosticDelta(workspace *workspacecore.Workspace, report workspace
 	root := workspace.Identity().Root + "/"
 	newItems := make([]map[string]any, 0, len(report.New))
 	for _, item := range report.New {
-		if item.Status == workspacecore.DiagnosticStatusStale {
+		if !includeEditDiagnostic(item) {
 			continue
 		}
 		compact := map[string]any{
 			"id": item.ID, "severity": item.Finding.Severity, "message": item.Finding.Message,
-			"path": strings.TrimPrefix(item.Document, root), "line": item.Finding.Range.StartLine + 1,
+			"path": strings.TrimPrefix(item.Document, root), "line": diagnosticLine(item.Finding),
+		}
+		if item.BaselineMissing {
+			compact["baseline_missing"] = true
 		}
 		if item.Finding.Code != "" {
 			compact["code"] = item.Finding.Code

@@ -114,21 +114,290 @@ do
     edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
     check("late publish for a newer version is not attributed",
         edit._capture_late("pyright", path, 6, {}) == false)
-    check("a mismatched publish clears the pending verdict",
-        edit._capture_late("pyright", path, 5, {}) == false)
+    check("an older publish cannot consume the pending verdict",
+        edit._capture_late("pyright", path, 4, {}) == false)
+    check("an unversioned publish cannot consume the pending verdict",
+        edit._capture_late("pyright", path, nil, {}) == false)
     edit._note_pending_late(path, "edit_t1", "wsrev_9", 5)
     local finding = { range = { start_line = 1, start_character = 1, end_line = 1, end_character = 2 }, severity = 1, message = "late" }
     check("late publish for the matching version is captured",
-        edit._capture_late("pyright", path, 5, { finding }) == true)
+        edit._capture_late("pyright", path, 5, { finding }, 42) == true)
     local collected = edit.late_evidence()
     local batch = collected.batches[1]
     check("late evidence names the transaction and the reason",
         #collected.batches == 1 and batch.transaction_id == "edit_t1" and batch.reason == "late_attach"
             and batch.document_revision == "wsrev_9" and batch.expected_version == 5 and batch.document_version == 5
-            and batch.candidates[1].postimage_version_match == true and batch.findings[1].message == "late",
+            and batch.candidates[1].postimage_version_match == true and batch.findings[1].message == "late"
+            and batch.provider_id == "pyright#42",
         batch)
     check("collecting late evidence clears it", #edit.late_evidence().batches == 0)
-    check("an unpended path is ignored", edit._capture_late("pyright", path, 5, {}) == false)
+    check("a later clean publication for the same edit remains observable",
+        edit._capture_late("pyright", path, 5, {}, 42) == true)
+    local transient = edit.late_evidence().batches[1]
+    check("late emptiness is incomplete before quiet", transient and transient.complete == false)
+    vim.wait(170)
+    local clean = edit.late_evidence().batches[1]
+    check("late clean publication preserves producer identity after quiet",
+        clean and clean.provider_id == "pyright#42" and #clean.findings == 0 and clean.complete == true)
+    edit._capture_late("pyright", path, 5, {}, 42)
+    edit._capture_late("pyright", path, 5, { finding }, 42)
+    local superseded = edit.late_evidence().batches
+    check("a transient late empty set is coalesced before collection",
+        #superseded == 1 and #superseded[1].findings == 1 and superseded[1].complete)
+    check("an unpended path is ignored", edit._capture_late("pyright", path .. ".other", 5, {}) == false)
+    check("a late unversioned positive finding is delivered provisionally",
+        edit._capture_late("pyright",path,nil,{finding},42)==true)
+    local unversioned=edit.late_evidence().batches[1]
+    check("unstamped late findings cannot resolve or claim transaction attribution",
+        unversioned.complete==false and unversioned.transaction_id==nil and unversioned.candidates==nil)
+end
+
+-- Late progress is the same veto as on the immediate path. Collection must
+-- retain an incomplete observation until progress ends, without a new push.
+do
+    local saved_client = vim.lsp.get_client_by_id
+    local fake = { id = 9100, name = "late_progress" }
+    vim.lsp.get_client_by_id = function(id) if id == fake.id then return fake end return saved_client(id) end
+    local path = vim.fn.getcwd() .. "/late-progress.py"
+    edit._note_pending_late(path, "progress_tx", "r", 6, 0)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "unit", value = { kind = "begin" } } } })
+    edit._capture_late(fake.name, path, 6, {}, fake.id)
+    vim.wait(170)
+    local during = edit.late_evidence().batches[1]
+    check("late progress veto survives quiet", during and not during.complete and during.progress_pending)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "unit", value = { kind = "end" } } } })
+    local after = edit.late_evidence().batches[1]
+    check("late observation completes after progress ends", after and after.complete and not after.progress_pending)
+    vim.lsp.get_client_by_id = saved_client
+end
+
+-- Checkout reloads keep one LSP lifetime and increasing changedticks. Mixed
+-- line endings must preserve both the bytes and physical line coordinates.
+do
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local function git(args)
+        local cmd = { "git", "-C", dir }
+        vim.list_extend(cmd, args)
+        local out = vim.fn.system(cmd)
+        check("checkout fixture git " .. args[1], vim.v.shell_error == 0, out)
+    end
+    local path = dir .. "/sample.txt"
+    local function write(bytes)
+        local f = assert(io.open(path, "wb")); f:write(bytes); f:close()
+    end
+    write("first\nsecond\n")
+    git({ "init", "-q" }); git({ "add", "." })
+    git({ "-c", "user.name=Unit", "-c", "user.email=unit@localhost", "commit", "-qm", "LF" })
+    local first_commit = vim.trim(vim.fn.system({ "git", "-C", dir, "rev-parse", "HEAD" }))
+    local buf = core.load_buf(path)
+    local tick = vim.api.nvim_buf_get_changedtick(buf)
+    write("first\r\nsecond\nthird\r\n")
+    git({ "add", "." }); git({ "-c", "user.name=Unit", "-c", "user.email=unit@localhost", "commit", "-qm", "mixed" })
+    local mixed_commit = vim.trim(vim.fn.system({ "git", "-C", dir, "rev-parse", "HEAD" }))
+    core.load_buf(path)
+    check("mixed checkout has three physical buffer lines", vim.api.nvim_buf_line_count(buf) == 3)
+    check("mixed endings retain CR only on CRLF lines",
+        vim.deep_equal(vim.api.nvim_buf_get_lines(buf,0,-1,false), { "first\r", "second", "third\r" }))
+    local function bytes()
+        local sep = vim.bo[buf].fileformat == "dos" and "\r\n" or "\n"
+        return table.concat(vim.api.nvim_buf_get_lines(buf,0,-1,false),sep) .. (vim.bo[buf].endofline and sep or "")
+    end
+    check("mixed ending reload preserves exact bytes", bytes() == "first\r\nsecond\nthird\r\n")
+    local mixed_tick = vim.api.nvim_buf_get_changedtick(buf)
+    git({ "checkout", "-q", first_commit, "--", "sample.txt" })
+    core.load_buf(path)
+    check("git checkout reloads in place with growing versions", core.load_buf(path) == buf
+        and vim.api.nvim_buf_get_changedtick(buf) > mixed_tick and mixed_tick > tick and bytes() == "first\nsecond\n")
+    git({ "checkout", "-q", mixed_commit, "--", "sample.txt" })
+    core.load_buf(path)
+    check("repeated checkout reloads mixed endings", bytes() == "first\r\nsecond\nthird\r\n")
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(dir,"rf")
+end
+
+-- Publication payloads, their versions, and the nonblocking baseline travel
+-- together even when the editor cache or an older publication disagrees.
+do
+    local saved_clients = vim.lsp.get_clients
+    local saved_client = vim.lsp.get_client_by_id
+    local path = vim.fn.getcwd() .. "/huyang-publication-unit.py"
+    local buf = buffer_with({ "value = 1" }, "python")
+    vim.api.nvim_buf_set_name(buf, path)
+    vim.bo[buf].modified = false
+    vim.lsp.util.buf_versions[buf] = 4
+    local fake = { id = 9001, name = "proof_test", config = { filetypes = { "python" } },
+        handlers = { ["textDocument/publishDiagnostics"] = function() end },
+        supports_method = function() return false end,
+        request_sync = function() error("baseline must not request LSP analysis") end }
+    vim.lsp.get_clients = function(filter)
+        if filter and filter.bufnr == buf then return { fake } end
+        return {}
+    end
+    edit._wrap_publish_handler(fake)
+    local publish = fake.handlers["textDocument/publishDiagnostics"]
+    local diagnostic = { range = { start = {line=0,character=0}, ["end"]={line=0,character=1} },
+        severity=1,message="bound payload" }
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=4,diagnostics={diagnostic}}, {})
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=3,diagnostics={}}, {})
+    local began = vim.uv.hrtime()
+    local baseline = edit.diagnostic_evidence({baseline=true,wait_ms=0})
+    local elapsed_ms = (vim.uv.hrtime()-began)/1e6
+    check("baseline keeps the finding bound to the newest publication",
+        #baseline.batches==1 and baseline.batches[1].document_version==4
+        and baseline.batches[1].expected_version==4
+        and baseline.batches[1].findings[1].message=="bound payload",baseline)
+    check("baseline adds no attach or analysis wait",elapsed_ms<25,elapsed_ms)
+    vim.lsp.get_client_by_id = function(id)
+        if id == fake.id then return fake end
+        return saved_client(id)
+    end
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "baseline", value = { kind = "begin" } } } })
+    vim.wait(10) -- the token must predate the baseline call
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=4,diagnostics={diagnostic}}, {})
+    check("partial baseline during already-open progress is not accepted",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==0)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "baseline", value = { kind = "end" } } } })
+    check("baseline is available again once existing progress ends",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==1)
+    vim.lsp.get_client_by_id = saved_client
+    publish(nil,{uri=vim.uri_from_bufnr(buf),diagnostics={}}, {})
+    check("an unstamped empty publication cannot become a clean baseline",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==0)
+    vim.lsp.get_clients = saved_clients
+    vim.api.nvim_buf_delete(buf,{force=true})
+end
+
+-- A pull that outlives the edit budget must still reach late evidence. A
+-- response after another buffer change must not be charged to the old edit.
+do
+    local path = vim.fn.tempname() .. ".py"
+    vim.fn.writefile({ "value = 1" }, path)
+    local buf = core.load_buf(path)
+    local saved_clients = vim.lsp.get_clients
+    local saved_client = vim.lsp.get_client_by_id
+    local saved_attach = vim.lsp.buf_attach_client
+    local pull_coroutine
+    local pull_items, responses = {}, 0
+    vim.lsp.util.buf_versions[buf] = 4
+    local fake = {id=9002,name="pull_test",config={filetypes={"python"}},
+        handlers={["textDocument/publishDiagnostics"]=function() end},
+        supports_method=function(_,method) return method=="textDocument/diagnostic" end,
+        request=function(_,_,_,callback)
+            vim.defer_fn(function()
+                responses = responses + 1
+                callback(nil,{kind="full",items=vim.deepcopy(pull_items)})
+            end,40)
+            return true,1
+        end}
+    -- Only Huyang's diagnostic request sees this protocol stub. Native LSP
+    -- on_lines and VimLeavePre callbacks need the real client registry.
+    vim.lsp.get_clients=function(filter)
+        if pull_coroutine and coroutine.running()==pull_coroutine then
+            if not filter or filter.bufnr==buf then return {fake} end
+            return {}
+        end
+        return saved_clients(filter)
+    end
+    -- The progress check below also stubs get_client_by_id. Never let the
+    -- diagnostic request register this partial client with native tracking.
+    vim.lsp.buf_attach_client=function(bufnr,client_id)
+        if client_id==fake.id then return true end
+        return saved_attach(bufnr,client_id)
+    end
+    local function timed_pull()
+        local result
+        local co=coroutine.create(function()
+            result=edit.diagnostic_evidence({files={path},wait_ms=5,
+                transaction_id="edit_pull",revision="wsrev_pull"})
+        end)
+        pull_coroutine=co
+        local ok,detail=coroutine.resume(co)
+        check("late pull starts without blocking",ok,detail)
+        vim.wait(500,function() return coroutine.status(co)=="dead" end,1)
+        pull_coroutine=nil
+        return result
+    end
+    local result=timed_pull()
+    check("a timed-out pull stays incomplete",
+        result and #result.batches==1 and result.batches[1].complete==false,result)
+    vim.wait(70)
+    local late=edit.late_evidence().batches
+    check("a late clean pull carries current version proof and transaction",
+        #late==1 and late[1].kind=="lsp_pull" and late[1].reason=="late_pull"
+        and late[1].document_version==4 and late[1].expected_version==4
+        and late[1].transaction_id=="edit_pull" and late[1].complete==true,late)
+    timed_pull()
+    vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 2"})
+    vim.wait(70)
+    check("a pull response for superseded bytes is not late current evidence",
+        #edit.late_evidence().batches==0)
+    -- Queue the response while its proof is still current, then supersede it
+    -- before collection. Callback-time checks alone miss every case below.
+    local changes = {
+        { "buffer change", function()
+            vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 200"})
+        end },
+        { "external sync", function()
+            vim.fn.writefile({"value = 300"},path)
+            core.sync_buf(buf,path)
+        end },
+        { "disk write", function() vim.fn.writefile({"value = 400"},path) end },
+        { "plan invalidation", function() edit.mark_diagnostic_change(buf) end },
+        { "version change", function() vim.lsp.util.buf_versions[buf] = 5 end },
+    }
+    for _, positive in ipairs({false,true}) do
+        for _, change in ipairs(changes) do
+            vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 1"})
+            vim.bo[buf].modified = false
+            vim.fn.writefile({"value = 1"},path)
+            core.mark_synced(buf,path)
+            edit.mark_diagnostic_change(buf)
+            vim.lsp.util.buf_versions[buf] = 4
+            pull_items = positive and {{
+                range={start={line=0,character=0},["end"]={line=0,character=1}},
+                severity=1,message="queued positive",
+            }} or {}
+            local before = responses
+            timed_pull()
+            vim.wait(100,function() return responses > before end,1)
+            check("pull is queued before " .. change[1],responses==before+1)
+            change[2]()
+            check("queued " .. (positive and "positive" or "empty") .. " pull rejected after " .. change[1],
+                #edit.late_evidence().batches==0)
+        end
+    end
+    -- A queued clean response can cease to be complete after its callback.
+    -- Keep it pending until any currently open progress ends.
+    vim.lsp.get_client_by_id = function(id)
+        if id == fake.id then return fake end
+        return saved_client(id)
+    end
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf] = 4
+    pull_items = {}
+    timed_pull()
+    vim.wait(70)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "pull", value = { kind = "begin" } } } })
+    local pending = edit.late_evidence().batches[1]
+    check("collection-time progress vetoes a queued pull",
+        pending and not pending.complete and pending.progress_pending,pending)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "pull", value = { kind = "end" } } } })
+    local complete = edit.late_evidence().batches[1]
+    check("a queued pull completes after progress ends without another response",
+        complete and complete.complete and not complete.progress_pending,complete)
+    check("a complete queued pull is delivered once",#edit.late_evidence().batches==0)
+    vim.lsp.get_client_by_id=saved_client
+    vim.lsp.get_clients=saved_clients
+    vim.lsp.buf_attach_client=saved_attach
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(path)
 end
 
 -- map_region: where an edited region ends up once polishing has moved it,

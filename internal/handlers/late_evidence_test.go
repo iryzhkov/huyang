@@ -121,6 +121,7 @@ func TestProvisionalSummaryNamesTheReason(t *testing.T) {
 		"lsp_starting":                 "still starting",
 		"lsp_attach_deadline_exceeded": "within the wait",
 		"something_else":               "remain incomplete (something_else)",
+		"rust_diagnostics_pending":     "Rust diagnostics pending",
 	}
 	for reason, want := range cases {
 		got := provisionalSummary(workspacecore.DiagnosticReport{ProvisionalReasons: []string{reason}}, files)

@@ -224,10 +224,15 @@ local function dispatch(id, payload, complete)
     -- A request with no arguments arrives as vim.NIL, which is truthy.
     local args = type(payload.args) == "table" and payload.args or {}
     local co = coroutine.create(function()
+        local limits = require("huyang.limits")
+        limits.begin_request()
         -- LuaJIT pcall is yield-safe, so this catches errors from any resume.
         local ok, result = pcall(function()
             return require("huyang.lsp").dispatch(payload.tool, args)
         end)
+        local capacity_error = limits.request_error()
+        if capacity_error then ok, result = false, capacity_error end
+        limits.end_request()
         pending[id] = nil
         complete(completion(s, ok, result))
     end)

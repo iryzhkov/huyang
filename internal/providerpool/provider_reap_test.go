@@ -15,8 +15,13 @@ import (
 type reapProvider struct {
 	stubProvider
 	closes       atomic.Int32
+	debugActive  atomic.Bool
 	closeStarted chan struct{}
 	closeAllowed chan struct{}
+}
+
+func (p *reapProvider) DebugActive(context.Context) (bool, error) {
+	return p.debugActive.Load(), nil
 }
 
 func (p *reapProvider) Close(context.Context) error {
@@ -160,7 +165,7 @@ func TestReapExistingRefreshesIdleTime(t *testing.T) {
 func TestReapDebugAndBusySlots(t *testing.T) {
 	for _, reuse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fresh_debug", true: "canonical_reused_for_debug"}[reuse], func(t *testing.T) {
-			p, w, _, advance := reapFixture(t)
+			p, w, f, advance := reapFixture(t)
 			if reuse {
 				_, release, err := p.Canonical(context.Background(), w)
 				release()
@@ -173,9 +178,14 @@ func TestReapDebugAndBusySlots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			f.opened[0].debugActive.Store(true)
 			advance(2 * DefaultProviderIdleTimeout)
 			if p.ReapIdle() != 0 {
-				t.Fatal("debug provider reaped")
+				t.Fatal("active debug provider reaped")
+			}
+			f.opened[0].debugActive.Store(false)
+			if p.ReapIdle() != 1 {
+				t.Fatal("ended debug ownership prevented idle reaping")
 			}
 		})
 	}
@@ -264,7 +274,7 @@ func TestConcurrentLeaseAndReap(t *testing.T) {
 				}
 				advance(DefaultProviderIdleTimeout)
 				p.ReapIdle()
-				if backend.(*reapProvider).closes.Load() != 0 {
+				if backend.(*ownedProvider).Provider.(*reapProvider).closes.Load() != 0 {
 					t.Error("leased provider closed")
 				}
 				release()

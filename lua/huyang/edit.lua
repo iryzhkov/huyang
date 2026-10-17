@@ -18,6 +18,7 @@ local resolve_symbol, doc_block_start, decl_block_top =
     index.resolve_symbol, index.doc_block_start, index.decl_block_top
 local closure = require("huyang.closure")
 local cap = require("huyang.cap")
+local limits = require("huyang.limits")
 
 -- Neovim 0.12 moved the diff to vim.text.diff and deprecated vim.diff; one
 -- name for it here keeps the rest of the file indifferent to the version.
@@ -849,60 +850,90 @@ local function note_published_for(name, path)
     per[path] = true
 end
 
--- Late attachment. A diagnostic verdict answered `unavailable` because the
--- server was still starting names the transaction and the buffer version
--- it spoke for. When a server later publishes for that path, the publish is
--- attributed to that transaction only if its version equals the version the
--- transaction left; a publish for a newer version is ordinary evidence for
--- whatever revision is current. Arrival time alone attributes nothing.
--- Both tables are bounded: a path is pending once, and at most
--- LATE_BATCHES_MAX batches wait for the Go side to collect them.
-local pending_late = {}    -- [path] = { transaction_id, revision, expected }
-local late_batches = {}
+-- Pending edits retain their expected document version. Arrival time never
+-- attributes a finding, and superseded publications never enter the ledger.
+local pending_late = {}
+local late_observations = {} -- latest push or pull per producer/document
 local LATE_BATCHES_MAX = 64
+local progress_since -- shared by immediate and late completeness checks
+local PUSH_QUIET_MS = 150
 
-local function note_pending_late(path, transaction_id, revision, expected)
-    if not (path and path ~= "") then return end
-    pending_late[path] = { transaction_id = transaction_id, revision = revision, expected = expected }
+local function publication_complete(version, expected, diagnostics, at, name, since, pull)
+    return version ~= nil and version >= expected
+        and (pull or #diagnostics > 0 or vim.uv.now() - at >= PUSH_QUIET_MS)
+        and not progress_since({ name }, since)
 end
 
--- Record the findings a late publish carries for a pending path. Exposed
--- for the unit test; the publish handler is the production caller.
-local function capture_late(client_name, path, version, findings)
+local function note_pending_late(path, transaction_id, revision, expected, since, bufnr)
+    if not (path and path ~= "") then return end
+    local previous = pending_late[path]
+    if previous and previous.transaction_id == transaction_id and previous.expected == expected then
+        previous.since = math.min(previous.since, since or vim.uv.now())
+        return
+    end
+    pending_late[path] = { transaction_id = transaction_id, revision = revision, expected = expected,
+        since = since or vim.uv.now(), bufnr = bufnr,
+        tick = bufnr and vim.api.nvim_buf_get_changedtick(bufnr) }
+end
+
+local function queue_late(batch, pending)
+    if not pending then return end
+    local key = batch.provider_id .. "\0" .. batch.document
+    late_observations[key] = { pending = pending, at = vim.uv.now(), batch = batch }
+    local keys = vim.tbl_keys(late_observations)
+    table.sort(keys, function(a, b) return late_observations[a].at < late_observations[b].at end)
+    for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
+end
+
+local function capture_late(client_name, path, version, findings, client_id)
     local pending = pending_late[path]
     if not pending then return false end
-    if version ~= nil and version ~= pending.expected then
-        -- The server spoke for a newer buffer; the pending verdict stays
-        -- unanswered and the publish is not this transaction's evidence.
-        pending_late[path] = nil
-        return false
-    end
-    pending_late[path] = nil
-    late_batches[#late_batches + 1] = {
-        kind = "lsp_push",
-        provider_id = client_name .. "#late",
-        producer = client_name,
-        document = path,
-        document_revision = pending.revision,
-        document_version = version,
-        expected_version = pending.expected,
-        transaction_id = pending.transaction_id,
-        complete = true,
-        selected = true,
-        dimension = "edited_documents",
-        reason = "late_attach",
+    if version ~= nil and version ~= pending.expected then return false end
+    local key = client_name .. "#" .. tostring(client_id or "late") .. "\0" .. path
+    -- Even an unstamped empty set supersedes a queued stamped observation.
+    -- It can weaken proof, but cannot establish absence.
+    if version == nil and #findings == 0 and not late_observations[key] then return false end
+    queue_late({
+        kind = "lsp_push", provider_id = client_name .. "#" .. tostring(client_id or "late"),
+        producer = client_name, document = path,
+        document_revision = version ~= nil and pending.revision or nil,
+        document_version = version, expected_version = pending.expected,
+        transaction_id = version ~= nil and pending.transaction_id or nil,
+        complete = false, selected = true, dimension = "edited_documents", reason = "late_attach",
         findings = findings,
-        candidates = { { transaction_id = pending.transaction_id, postimage_version_match = version ~= nil } },
-    }
-    while #late_batches > LATE_BATCHES_MAX do table.remove(late_batches, 1) end
+        candidates = version ~= nil and { { transaction_id = pending.transaction_id, postimage_version_match = true } } or nil,
+    }, pending)
     return true
 end
 
--- The batches late publishes produced since the last call; collecting
--- clears them. The Go side records them into the diagnostic ledger.
+-- No wait here: unfinished observations are retained for a later collection.
+-- Recheck buffer, version and disk currency for both streams at collection.
+-- Any currently open progress vetoes completion; empty pushes also need quiet.
 function M.late_evidence()
-    local out = late_batches
-    late_batches = {}
+    local out = {}
+    for key, observation in pairs(late_observations) do
+        local batch, pending = observation.batch, observation.pending
+        local buf = pending.bufnr
+        local current = pending_late[batch.document] == pending
+            and (not buf or (vim.api.nvim_buf_is_valid(buf)
+                and vim.api.nvim_buf_is_loaded(buf)
+                and vim.api.nvim_buf_get_name(buf) == batch.document
+                and vim.api.nvim_buf_get_changedtick(buf) == pending.tick
+                and vim.lsp.util.buf_versions[buf] == pending.expected
+                and not core.disk_moved_on(buf, batch.document)))
+        if not current then
+            late_observations[key] = nil
+        else
+            batch.progress_pending = progress_since({ batch.producer }, 0)
+            batch.complete = publication_complete(batch.document_version, pending.expected,
+                batch.findings, observation.at, batch.producer, 0, batch.kind == "lsp_pull")
+            if observation.delivered ~= batch.complete then
+                out[#out + 1] = vim.deepcopy(batch)
+                observation.delivered = batch.complete
+            end
+            if batch.complete then late_observations[key] = nil end
+        end
+    end
     return { batches = out }
 end
 
@@ -941,6 +972,9 @@ local SILENT_AFTER = 1
 -- params.version in its own handler, so the wrapper below is what recovers it.
 -- Neovim's codelens, inlay_hint, semantic_tokens and linked_editing_range all
 -- compare against util.buf_versions the same way.
+local diagnostic_modes = {} -- [bufnr][client.id]: keep one stream's finding identities
+local pull_publications = {} -- [bufnr][client.id] = last successful semantic pull
+local publications = {} -- [bufnr][client.id] = the actual publication, never editor cache
 local publish_version = {}  -- [bufnr] = { [client.name] = version }
 local stamps_version = {}   -- [client.name] = true once a version is seen
 
@@ -987,10 +1021,23 @@ local function wrap_publish_handler(client)
                 if (per[client.name] or -1) < version then per[client.name] = version end
             end
         end
+        -- Keep findings and their version together. vim.diagnostic.get may
+        -- still contain a previous version (or a different publication).
+        if not lsp_err and params and params.uri then
+            local bufnr = vim.uri_to_bufnr(params.uri)
+            local per = publications[bufnr] or {}
+            publications[bufnr] = per
+            local prior = per[client.id]
+            if not prior or version == nil or prior.version == nil or version >= prior.version then
+                per[client.id] = { version = version, diagnostics = vim.deepcopy(params.diagnostics or {}),
+                    at = vim.uv.now() }
+            end
+        end
         local result = inner(lsp_err, params, ctx, cfg)
-        if params and params.uri and next(pending_late) then
+        if not lsp_err and params and params.uri and next(pending_late) then
             local okf, fname = pcall(vim.uri_to_fname, params.uri)
-            if okf and pending_late[fname] then
+            local bufnr = vim.uri_to_bufnr(params.uri)
+            if okf and pending_late[fname] and (diagnostic_modes[bufnr] or {})[client.id] ~= "pull" then
                 local findings = {}
                 for _, d in ipairs(params.diagnostics or {}) do
                     local range = d.range or {}
@@ -1007,18 +1054,26 @@ local function wrap_publish_handler(client)
                         message = d.message or "",
                     }
                 end
-                capture_late(client.name, fname, version, findings)
+                if capture_late(client.name, fname, version, findings, client.id) then
+                    diagnostic_modes[bufnr] = diagnostic_modes[bufnr] or {}
+                    diagnostic_modes[bufnr][client.id] = "push"
+                end
             end
         end
         return result
     end
 end
 
+M._wrap_publish_handler = wrap_publish_handler
+
 -- Called immediately after programmatic plan bytes change, before Neovim can
 -- dispatch another LSP message. A later publish is therefore for this change.
 function M.mark_diagnostic_change(bufnr)
     local path = vim.api.nvim_buf_get_name(bufnr)
     publish_version[bufnr] = nil
+    publications[bufnr] = nil
+    pull_publications[bufnr] = nil
+    pending_late[path] = nil
     for _, files in pairs(published_for) do
         files[path] = nil
     end
@@ -1051,7 +1106,7 @@ vim.api.nvim_create_autocmd("LspProgress", {
 })
 
 -- Whether any of these servers has work open that started after `since`.
-local function progress_since(names, since)
+progress_since = function(names, since)
     for _, name in ipairs(names or {}) do
         for _, began in pairs(progress_open[name] or {}) do
             if began >= since then return true end
@@ -1066,6 +1121,16 @@ end
 function M.diagnostic_evidence(args)
     args = args or {}
     local paths = args.files or { args.file }
+    if args.baseline then
+        paths = {}
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            local path = vim.api.nvim_buf_get_name(bufnr)
+            local root = vim.fn.getcwd()
+            if vim.api.nvim_buf_is_loaded(bufnr) and path:sub(1, #root + 1) == root .. "/" then
+                paths[#paths + 1] = path
+            end
+        end
+    end
     local transaction_id = args.transaction_id
     local revision = args.revision
     local batches = {}
@@ -1133,9 +1198,11 @@ function M.diagnostic_evidence(args)
 
     for _, path in ipairs(paths) do
         if path and path ~= "" then
-            local bufnr = load_buf(path)
+            local bufnr = args.baseline and vim.fn.bufnr(path) or load_buf(path)
+            if bufnr >= 0 and vim.api.nvim_buf_is_loaded(bufnr)
+                and (not args.baseline or (not vim.bo[bufnr].modified and not core.disk_moved_on(bufnr, path))) then
             local filetype = vim.bo[bufnr].filetype
-            for _, existing in ipairs(vim.lsp.get_clients()) do
+            for _, existing in ipairs(args.baseline and {} or limits.list_clients()) do
                 local config = existing.config or {}
                 local filetypes = config.filetypes
                 -- The embedded provider owns exactly one workspace, so a
@@ -1146,9 +1213,10 @@ function M.diagnostic_evidence(args)
                     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
                 end
             end
-            local clients = vim.lsp.get_clients({ bufnr = bufnr })
+            local clients = args.baseline and limits.list_clients({ bufnr = bufnr })
+                or vim.lsp.get_clients({ bufnr = bufnr })
             local configured = enabled_lsp_configs_for(vim.bo[bufnr].filetype)
-            if #clients == 0 and #configured > 0 then
+            if not args.baseline and #clients == 0 and #configured > 0 then
                 pcall(function()
                     vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
                 end)
@@ -1162,13 +1230,14 @@ function M.diagnostic_evidence(args)
                     end
                 end
             end
-            while #clients == 0 and #startable > 0 and vim.uv.now() < attach_deadline do
+            while not args.baseline and #clients == 0 and #startable > 0 and vim.uv.now() < attach_deadline do
                 local remaining = attach_deadline - vim.uv.now()
                 sleep(math.min(50, math.max(1, remaining)))
                 clients = vim.lsp.get_clients({ bufnr = bufnr })
             end
-            local expected = vim.api.nvim_buf_get_changedtick(bufnr)
-            if #clients == 0 then
+            local expected_tick = vim.api.nvim_buf_get_changedtick(bufnr)
+            local expected = vim.lsp.util.buf_versions[bufnr]
+            if #clients == 0 and not args.baseline then
                 local reason = #configured == 0 and "lsp_not_configured"
                     or (#startable == 0 and "lsp_not_startable"
                         or (core.starting_server(configured) and "lsp_starting" or "lsp_attach_deadline_exceeded"))
@@ -1177,89 +1246,147 @@ function M.diagnostic_evidence(args)
                 -- version later; the publish handler then records it
                 -- against this transaction instead of losing it.
                 if reason == "lsp_starting" or reason == "lsp_attach_deadline_exceeded" then
-                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected)
+                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected, vim.uv.now(), bufnr)
                 end
             end
             for _, client in ipairs(clients) do
                 wrap_publish_handler(client)
-                local barrier_started = vim.uv.now()
+                -- Baselines have no edit start: all open work can make a
+                -- cached publication partial, including work already running.
+                local barrier_started = args.baseline and 0 or vim.uv.now()
+                local prefer_pull = client:supports_method("textDocument/diagnostic", bufnr)
+                    and (diagnostic_modes[bufnr] or {})[client.id] ~= "push"
                 local remaining = math.max(1, attach_deadline - vim.uv.now())
                 local barrier_acked = false
-                if client:supports_method("textDocument/documentSymbol", bufnr) then
-                    local response = client:request_sync("textDocument/documentSymbol", {
+                if not args.baseline and not prefer_pull and client:supports_method("textDocument/documentSymbol", bufnr) then
+                    local ok = pcall(core.request, client, bufnr, "textDocument/documentSymbol", {
                         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-                    }, remaining, bufnr)
-                    barrier_acked = response ~= nil and response.err == nil
+                    }, remaining)
+                    barrier_acked = ok
                 end
-                -- The transaction marker cleared prior publish state immediately
-                -- after the buffer change. Wait for a later publish; when the server
-                -- omits the optional version, the ordered request above proves it has
-                -- consumed the preceding didChange.
+                -- A syntax barrier only flushes changes. Only a publication's
+                -- own version can establish diagnostic freshness; unversioned
+                -- observations stay provisional even after the barrier.
                 local function fresh_publish()
-                    local published = published_for[client.name]
-                        and published_for[client.name][vim.api.nvim_buf_get_name(bufnr)] == true
-                    local version = (publish_version[bufnr] or {})[client.name]
-                    return published and (version == nil or version == expected)
+                    local publication = ((prefer_pull and pull_publications or publications)[bufnr] or {})[client.id]
+                    return publication ~= nil and publication_complete(publication.version, expected,
+                        publication.diagnostics, publication.at, client.name, barrier_started, prefer_pull)
                 end
-                while vim.uv.now() < attach_deadline and not fresh_publish() do
+                while not args.baseline and not prefer_pull and vim.uv.now() < attach_deadline and not fresh_publish() do
                     remaining = attach_deadline - vim.uv.now()
                     sleep(math.min(25, math.max(1, remaining)))
                 end
-                local namespace = vim.lsp.diagnostic.get_namespace(client.id, false)
+                local publication = ((prefer_pull and pull_publications or publications)[bufnr] or {})[client.id]
                 local diagnostics = {}
-                for _, d in ipairs(vim.diagnostic.get(bufnr, { namespace = namespace })) do
+                for _, d in ipairs(publication and publication.diagnostics or {}) do
                     diagnostics[#diagnostics + 1] = finding(d)
                 end
-                local published = published_for[client.name]
-                    and published_for[client.name][vim.api.nvim_buf_get_name(bufnr)] == true
+                local published = fresh_publish()
+                if not args.baseline then
+                    note_pending_late(vim.api.nvim_buf_get_name(bufnr), transaction_id, revision, expected, barrier_started, bufnr)
+                end
+                if (not prefer_pull and not args.baseline) or (args.baseline and published) then
                 batches[#batches + 1] = {
-                    kind = "lsp_push",
+                    kind = prefer_pull and "lsp_pull" or "lsp_push",
+                    result_id = publication and publication.result_id,
                     provider_id = client.name .. "#" .. client.id,
                     producer = client.name,
                     producer_version = version_string(client),
                     document = vim.api.nvim_buf_get_name(bufnr),
                     document_revision = revision,
-                    document_version = (publish_version[bufnr] or {})[client.name],
+                    document_version = publication and publication.version,
                     expected_version = expected,
                     transaction_id = transaction_id,
                     complete = published,
                     change_barrier = barrier_acked,
-                    progress_pending = not barrier_acked and progress_since({ client.name }, barrier_started),
+                    progress_pending = progress_since({ client.name }, barrier_started),
                     selected = true,
                     dimension = "edited_documents",
                     findings = diagnostics,
                 }
 
-                if client:supports_method("textDocument/diagnostic", bufnr) then
+                end
+                if not args.baseline and prefer_pull then
                     local pull_remaining = math.max(1, attach_deadline - vim.uv.now())
-                    local response = client:request_sync("textDocument/diagnostic", {
-                        textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-                    }, pull_remaining, bufnr)
-                    local pulled = response and not response.err and response.result
-                    if type(pulled) == "table" then
-                        local items = {}
-                        for _, d in ipairs(pulled.items or {}) do
-                            items[#items + 1] = finding(d)
+                    local function pull_batch(pulled)
+                        local current = vim.api.nvim_buf_is_valid(bufnr)
+                            and vim.api.nvim_buf_get_changedtick(bufnr) == expected_tick
+                            and vim.lsp.util.buf_versions[bufnr] == expected
+                        local complete = type(pulled) == "table" and (pulled.kind == "full" or pulled.items ~= nil)
+                        if complete and current then
+                            diagnostic_modes[bufnr] = diagnostic_modes[bufnr] or {}
+                            diagnostic_modes[bufnr][client.id] = "pull"
+                            local per = pull_publications[bufnr] or {}
+                            pull_publications[bufnr] = per
+                            per[client.id] = { version = expected, diagnostics = vim.deepcopy(pulled.items or {}),
+                                result_id = pulled.resultId, at = vim.uv.now() }
                         end
-                        batches[#batches + 1] = {
-                            kind = "lsp_pull",
-                            provider_id = client.name .. "#" .. client.id,
-                            producer = client.name,
-                            producer_version = version_string(client),
-                            document = vim.api.nvim_buf_get_name(bufnr),
-                            document_revision = revision,
-                            result_id = pulled.resultId,
-                            transaction_id = transaction_id,
-                            complete = pulled.kind == "full" or pulled.items ~= nil,
-                            progress_pending = not barrier_acked and progress_since({ client.name }, barrier_started),
-                            selected = true,
-                            dimension = "edited_documents",
+                        local items = {}
+                        for _, d in ipairs(pulled and pulled.items or {}) do items[#items + 1] = finding(d) end
+                        return {
+                            kind = "lsp_pull", provider_id = client.name .. "#" .. client.id,
+                            producer = client.name, producer_version = version_string(client),
+                            document = path, document_revision = revision,
+                            result_id = pulled and pulled.resultId,
+                            -- The request flushes didChange; a response for an
+                            -- unchanged buffer proves the requested version.
+                            document_version = current and complete and expected or nil,
+                            expected_version = expected, transaction_id = transaction_id,
+                            complete = complete == true, selected = true, dimension = "edited_documents",
+                            progress_pending = progress_since({ client.name }, barrier_started),
                             findings = items,
                         }
+                    end
+                    -- Keep this request's proof even if a newer verdict replaces
+                    -- pending_late before its response is collected.
+                    local pending = pending_late[path]
+                    local waiting = true
+                    local timer = vim.uv.new_timer()
+                    local pulled = core.await(function(resume)
+                        timer:start(pull_remaining, 0, vim.schedule_wrap(function()
+                            waiting = false
+                            resume(nil)
+                        end))
+                        local sent = client:request("textDocument/diagnostic", {
+                            textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+                        }, function(lsp_err, result)
+                            if waiting then
+                                waiting = false
+                                resume(not lsp_err and result or nil)
+                            elseif not lsp_err and type(result) == "table"
+                                and (diagnostic_modes[bufnr] or {})[client.id] ~= "push" then
+                                local batch = pull_batch(result)
+                                if batch.document_version ~= nil and batch.complete then
+                                    batch.reason = "late_pull"
+                                    queue_late(batch, pending)
+                                end
+                            end
+                        end, bufnr)
+                        if not sent then waiting = false; resume(nil) end
+                    end)
+                    timer:stop()
+                    timer:close()
+                    if (diagnostic_modes[bufnr] or {})[client.id] == "push" then pulled = nil end
+                    local batch = pull_batch(pulled)
+                    batches[#batches + 1] = batch
+                    if not batch.complete then
+                        -- Some servers advertise pull but cannot finish it
+                        -- while indexing. A publication can still answer this
+                        -- version. Keep the first successful stream consistently.
+                        local push = (publications[bufnr] or {})[client.id]
+                        if push and (diagnostic_modes[bufnr] or {})[client.id] ~= "pull" then
+                            local items = {}
+                            for _, d in ipairs(push.diagnostics) do items[#items + 1] = finding(d) end
+                            if capture_late(client.name, path, push.version, items, client.id) then
+                                diagnostic_modes[bufnr] = diagnostic_modes[bufnr] or {}
+                                diagnostic_modes[bufnr][client.id] = "push"
+                            end
+                        end
                     end
                 end
             end
         end
+    end
     end
     -- The completion carries the batches structurally as well, so the Go
     -- side can read evidence without parsing the value.

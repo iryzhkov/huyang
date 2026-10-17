@@ -70,6 +70,9 @@ func compactDiagnosticItem(item workspacecore.DiagnosticItem) map[string]any {
 	if item.Finding.Code != "" {
 		compact["code"] = item.Finding.Code
 	}
+	if item.BaselineMissing {
+		compact["baseline_missing"] = true
+	}
 	if item.Finding.Source != "" {
 		compact["source"] = item.Finding.Source
 	}

@@ -524,10 +524,11 @@ func OutputEnvelopeSchema() map[string]any {
 		"warnings": map[string]any{"type": "array", "items": stringSchema("Warning.")},
 		"next":     map[string]any{"type": "array", "maxItems": 2},
 		"diagnostic_updates": map[string]any{"type": "array", "items": schemaObject(map[string]any{
-			"id": stringSchema("Stable diagnostic ID."), "kind": enumSchema("new", "resolved"),
+			"id": stringSchema("Stable diagnostic ID."), "kind": enumSchema("new", "persisting", "resolved"),
 			"severity": map[string]any{"type": "integer"}, "path": stringSchema("Affected document, workspace-relative."),
 			"line": map[string]any{"type": "integer"}, "message": stringSchema("What the finding says, bounded."),
-			"attribution": map[string]any{"type": "object"},
+			"attribution":      map[string]any{"type": "object"},
+			"baseline_missing": map[string]any{"type": "boolean", "description": "First observation: finding may be new or pre-existing because no pre-edit baseline exists."},
 		}, "id", "kind")},
 		"diagnostic_updates_truncated": map[string]any{"type": "boolean"},
 		"guide":                        map[string]any{"type": "array", "items": stringSchema("One rule for calling this server at its cheapest, sent once when a workspace is first opened.")},

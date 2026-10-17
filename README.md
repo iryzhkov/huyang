@@ -136,7 +136,33 @@ Start the long-lived service:
 | `--http LOOPBACK:PORT` | unset | Optional Streamable HTTP listener. The host must be a numeric loopback address. Routes are `/mcp` (`full`), `/mcp/orient`, `/mcp/edit`, and `/mcp/debug`; every request needs `Authorization: Bearer <token>`. The transport is stateless. |
 | `--pprof LOOPBACK:PORT` | unset | Optional `net/http/pprof` listener behind the same bearer token, for heap and goroutine profiles of the live service. |
 | `--provider-quota N` | 4 | Maximum concurrent provider-backed jobs. |
+| `--max-providers N` | 4 | Maximum live providers, including canonical, debug and sandbox providers. |
+| `--max-language-servers N` | 4 | Maximum language-server clients per provider (at most 16 across the default pool). |
 | `--external-job-quota N` | 2 | Maximum concurrent external jobs (repository checks and tests). |
+
+The process limits are independent of job quotas. Zero selects the bounded default; negative
+limits are refused. Opening and closing processes count toward capacity. When the provider
+pool is full, it closes the least recently used idle canonical provider before admitting a
+replacement. A lease lasts until its caller releases it, including cancellation cleanup and
+background work. Leased or locked slots, providers with a live debug session or temporary
+trace targets, and sandbox providers held by a plan are never evicted for capacity.
+Debug list and no-op stop calls do not claim ownership; session stop/exit and final
+trace-target cleanup release it. If every slot is held, opening fails with
+`provider capacity exhausted`; finish or discard work before retrying, or raise
+`--max-providers`. The existing 15 minute idle reaper and plan expiry also release capacity.
+Workspace IDs survive eviction, and reopening advances the provider epoch.
+
+Language servers use a separate LRU within each provider, installed before the headless
+init can auto-attach servers. Revisiting a loaded buffer restarts its evicted server on demand.
+Clients used by active tool calls, clients with outstanding
+requests or work progress, clients still initializing, and clients attached to unsaved
+buffers are held. Transactions, sandbox providers, live debug sessions and temporary trace
+targets pin their clients. Debug protection ends with the session or final trace target.
+An eviction waits for the server's exit callback before reusing its slot; a slow exit or
+an all-held pool returns `language_server_capacity` instead of exceeding the bound. Retry
+after work finishes, or raise `--max-language-servers` for a plan that needs more languages
+simultaneously. The bound counts LSP clients; servers may spawn their own helper processes
+and use very different amounts of memory.
 
 The bearer token for `--http` and `--pprof` is generated on first use and stored in
 `<state-dir>/http-token` with mode 0600; the service prints the token file path at start.
@@ -215,11 +241,18 @@ Type=simple
 WorkingDirectory=%h/.local/share/huyang
 ExecStart=%h/.local/share/huyang/bin/huyang serve
 Restart=on-failure
+# Tune to the host's available memory and language mix. Throttles the whole tree.
+MemoryHigh=2G
 RestartSec=2
 
 [Install]
 WantedBy=default.target
 ```
+
+Use `MemoryHigh=2G` as an initial service memory budget and tune it for the host and
+language mix (Java and Rust can need substantially more). It applies memory pressure and
+throttling to the service and its descendants; it does not trigger Huyang LRU eviction or
+guarantee protection from OOM. The process caps bound concurrency, not bytes.
 
 The unit has no `After=default.target`: it is wanted by `default.target`, so that ordering
 would form a cycle with any unit ordered after `huyang.service`, and systemd would break the

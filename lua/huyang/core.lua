@@ -229,13 +229,30 @@ local function sync_buf(bufnr, path)
             .. "nothing was written. Re-read the file and redo the edit, or "
             .. "undo_edit first", rel_path(path))
     end
-    local ok, e = pcall(vim.api.nvim_buf_call, bufnr, function()
-        vim.cmd("silent! edit!")
-    end)
-    if not ok then
-        err("could not reload %s after it changed on disk: %s", rel_path(path), tostring(e))
-    end
+    local file, read_err = io.open(path, "rb")
+    if not file then err("could not reload %s: %s", rel_path(path), tostring(read_err)) end
+    local content = file:read("*a")
+    file:close()
+    -- :edit! closes and reopens the LSP document at version zero. Replace
+    -- the buffer bytes in place so didChange retains a monotonically growing
+    -- version and a late publication cannot refer to a previous open lifetime.
+    require("huyang.transaction").set_buffer_bytes(bufnr, content)
+    vim.bo[bufnr].modified = false
+    local edit = package.loaded["huyang.edit"]
+    if edit then edit.mark_diagnostic_change(bufnr) end
     mark_synced(bufnr, path)
+    -- The canonical edit is already on disk. Notify save-triggered producers
+    -- (notably rust-analyzer's compiler diagnostics) as a normal editor save
+    -- would; client:notify flushes didChange first.
+    for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+        local sync = client.server_capabilities and client.server_capabilities.textDocumentSync
+        local save = type(sync) == "table" and sync.save
+        if save then
+            local params = { textDocument = { uri = vim.uri_from_bufnr(bufnr) } }
+            if type(save) == "table" and save.includeText then params.text = content end
+            client:notify("textDocument/didSave", params, bufnr)
+        end
+    end
     loaded_at[bufnr] = vim.uv.now()
     return true
 end
@@ -522,13 +539,19 @@ local function load_buf(file)
             .. "(create_file makes a new one)", path, base, root)
     end
     local bufnr = vim.fn.bufadd(path)
+    local limits = require("huyang.limits")
+    limits.touch_buffer(bufnr)
     if not vim.api.nvim_buf_is_loaded(bufnr) then
+        -- Seed before FileType can attach a server. Neovim otherwise sends
+        -- didOpen(version=0), which some servers omit from publications.
+        vim.lsp.util.buf_versions[bufnr] = math.max(1, vim.api.nvim_buf_get_changedtick(bufnr))
         vim.fn.bufload(bufnr)
         loaded_at[bufnr] = vim.uv.now()
         mark_synced(bufnr, path)
     else
         sync_buf(bufnr, path)
     end
+    limits.reattach_buffer(bufnr)
     return bufnr, path
 end
 

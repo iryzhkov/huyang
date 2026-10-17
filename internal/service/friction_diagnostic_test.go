@@ -72,7 +72,7 @@ func TestModernEditSpoolsDiagnosticStateOnRepeatedProvisionalResults(t *testing.
 				}
 			}
 			verification := data["verification"].(map[string]any)
-			if verification["reasons_unchanged"] != true || !reflect.DeepEqual(verification["reason_codes"], []any{"push_missing_current_document_proof"}) {
+			if verification["reasons_unchanged"] != true || !reflect.DeepEqual(verification["reason_codes"], []any{"push_missing_current_document_proof", "rust_diagnostics_pending"}) {
 				t.Fatalf("compact reply lost its proof gap: %#v", verification)
 			}
 		}
@@ -100,7 +100,7 @@ func TestModernEditSpoolsDiagnosticStateOnRepeatedProvisionalResults(t *testing.
 		if event["canonical_changed"] != true || event["outcome"] != "provisional" || event["ok"] != true {
 			t.Fatalf("mutation and diagnostics conflated: %#v", event)
 		}
-		if event["verification_confidence"] != "provisional" || !reflect.DeepEqual(event["reason_codes"], []any{"push_missing_current_document_proof"}) {
+		if event["verification_confidence"] != "provisional" || !reflect.DeepEqual(event["reason_codes"], []any{"push_missing_current_document_proof", "rust_diagnostics_pending"}) {
 			t.Fatalf("missing diagnostic state on edit %d: %#v", count, event)
 		}
 	}
