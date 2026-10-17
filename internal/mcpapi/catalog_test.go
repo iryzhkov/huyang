@@ -30,7 +30,7 @@ func TestModernRegistryMatchesFrozenProfiles(t *testing.T) {
 		got := CatalogNames(profile)
 		want := fixture.Catalogs[string(profile)]
 		if !slices.Equal(got, want) {
-			t.Fatalf("%s catalog = %v, want %v", profile, got, want)
+			t.Fatalf("%s catalog = %v, want %v; regenerate all profile/contract fixtures with TestFrozenCatalogIsUnchanged -update", profile, got, want)
 		}
 		first, err := CatalogJSON(profile)
 		if err != nil {
