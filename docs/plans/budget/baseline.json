@@ -19,6 +19,8 @@
   "largest_go_file": 1373,
   "long_functions": 0,
   "long_function_threshold": 80,
+  "plain_read_bytes": 168,
+  "plain_search_bytes": 53,
   "tools_bytes": {
     "full": 79804,
     "orient": 32837,
