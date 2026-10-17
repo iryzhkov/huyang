@@ -147,6 +147,14 @@ init files or provider races caused it. The cached aggregates cannot distinguish
 No concrete Go source defect within M9 is established, so no speculative Go behavior
 change or host installation/configuration change is included.
 
+## Real environment probe source
+
+The integrated source now has an opt-in real Python environment matrix. See
+[the probe report](2026-10-17-m9-python-environment-probe.md) for exact pins, job-local
+provisioning, per-case artifacts, root commands and timing coverage limits. This is
+source preparation on integrated parent `d2a90e1`, not runtime acceptance. Existing
+Go/Python lifecycle entrypoints remain intact.
+
 ## Exact follow-up for the root/operator
 
 Runtime scheduling belongs to the root, on agent-a. After stack integration, run
