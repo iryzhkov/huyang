@@ -87,8 +87,8 @@ type DiagnosticBatch struct {
 	ProgressPending         bool                   `json:"progress_pending,omitempty"`
 	ChangeBarrier           bool                   `json:"change_barrier,omitempty"`
 	Selected                bool                   `json:"selected"`
-	// Baseline records existing, proven-current pre-edit findings without
-	// announcing them as introduced by a mutation.
+	// Baseline seeds or refreshes proven-current pre-edit findings without
+	// announcing them as introduced by a mutation or resolving omitted findings.
 	Baseline bool `json:"baseline,omitempty"`
 	// Staged marks evidence about bytes that only exist inside a preparation.
 	// It is recorded as evidence and kept out of the ledger's current set: a
@@ -533,7 +533,9 @@ func (s *diagnosticStore) record(batch DiagnosticBatch) (DiagnosticReport, error
 		current, added, seen = s.recordFindingsLocked(batch, evID, baselineKnown)
 	}
 	var resolved []DiagnosticItem
-	if batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
+	// A baseline seeds the cache; even a current snapshot may omit findings
+	// while the producer is between partial publications.
+	if !batch.Baseline && batch.Complete && confidenceRank(confidence) >= confidenceRank(ConfidenceCorroborated) {
 		// A complete observation of this document verifies the absence of
 		// everything it did not report: previously current items and items
 		// left stale by a content change are both resolved.

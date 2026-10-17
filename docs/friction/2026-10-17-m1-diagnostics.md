@@ -154,3 +154,49 @@ exceed the 108-byte socket-address limit under the required long canonical TMPDI
 the focused recovery test uses a short test name and passes both transports.
 Do not treat the failed broader attempts as a full-suite pass. No actual old-binary
 downgrade launch, all-nine live acceptance, race suite, push or CI run is claimed.
+
+## Review round 1 fixes (against aab8743)
+
+Worktree: `/home/igor/.t3/worktrees/huyang/huyang-friction-m1-diagnostics`.
+Branch: `huyang-friction/m1-diagnostics`. Clean parent:
+`aab8743a11132936f773f35bfcbc16bcf349c6cb`; GitHub base remains `ef16bef`.
+
+- Block A: delayed pulls now enter the same bounded, coalesced observation queue
+  as pushes. Collection rechecks the request's retained pending identity, valid
+  loaded buffer, path, changedtick, LSP version and disk currency. Superseding
+  bytes or plan invalidation drop the observation. Any currently open producer
+  progress vetoes late completion; a valid pending pull can complete after
+  progress ends without another server response.
+- Block B: baselines only seed or refresh findings and never resolve omissions.
+  Baseline publication checks veto all currently open producer progress,
+  including tokens opened before the call. Exact native pre-edit document
+  revision proof is unchanged; insufficient baseline evidence keeps
+  `baseline_missing`.
+- Regressions cover queued empty and positive pulls superseded after their
+  callbacks, valid late delivery, collection-time progress, an already-open
+  baseline progress token, empty/partial baseline omissions, and no false
+  resolved/new cycle through `RecordDiagnosticBaseline`. The providerpool
+  regression also checks that vetoed baseline evidence cannot establish the
+  exact pre-edit revision proof.
+
+Static review and `git diff --check` passed for this fix round. Runtime
+validation is explicitly deferred. The parent reserved the
+sole local Chaldea exec slot for probe bootstrap and has not granted this worker
+a slot. No builds, Lua/Go tests, vet, or test jobs were dispatched by this worker;
+the passing jobs above describe the earlier implementation only. Huyang's
+untrusted-root preparation does not constitute test validation. The parent
+should run the diagnostic regressions and Lua suite through
+`chaldea exec --host agent-a`, using its pinned Neovim 0.11.5 PATH, canonical
+scratch under `~/.cache/huyang-friction/`, and `HUYANG_FRICTION=0` for every
+Go test. Focused Go selection:
+`go test ./internal/workspace ./internal/providerpool -run 'Baseline|LateEvidence' -count=1 -timeout=2m`.
+Lua selection:
+`nvim --clean --headless -u tests/minimal_init.lua -l tests/unit_edit.lua`.
+
+Nonblocking follow-ups remain outside this focused fix: pending-late attribution
+has no TTL; a late attach with an unknown expected version remains unaccepted;
+unknown disk fingerprints and the RPC/native-snapshot interval can weaken
+baseline binding during an external write; incomplete immediate publications
+are not retained for later completion; Phase C's probe reannouncement exemption
+needs separate judgment. No provider-cap/debug-lifecycle files were changed.
+No push, PR, merge, installation, service restart, Ollama or evaluation occurred.

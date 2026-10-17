@@ -129,3 +129,70 @@ func TestBaselineBoundToExactStageBeforeImage(t *testing.T) {
 		})
 	}
 }
+
+func TestDiagnosticBaselinePartialPublicationAndProgress(t *testing.T) {
+	for _, progress := range []bool{false, true} {
+		t.Run(map[bool]string{false: "seed_only", true: "progress_open"}[progress], func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "a.go")
+			if err := os.WriteFile(path, []byte("package a\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			w, err := workspacecore.New(workspacecore.KindProject, root, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := w.Snapshot(path, workspacecore.ProviderLayer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := int64(1)
+			first := workspacecore.DiagnosticFinding{Message: "first", Severity: 1}
+			omitted := workspacecore.DiagnosticFinding{Message: "omitted", Severity: 1}
+			batch := workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePush,
+				ProviderID: "test#1", Producer: "test", Document: path, Complete: true, Selected: true,
+				DocumentVersion: &v, ExpectedVersion: &v, DocumentRevision: "older_revision",
+				Findings: []workspacecore.DiagnosticFinding{first, omitted}}
+			initial, err := w.RecordDiagnosticEvidence(batch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch.DocumentRevision = string(snapshot.Revision)
+			batch.Findings = []workspacecore.DiagnosticFinding{first}
+			batch.ProgressPending = progress
+			p := &batchProvider{stubProvider: stubProvider{descriptor: provider.Descriptor{ID: "test", Root: root, Epoch: 1}},
+				batches: []workspacecore.DiagnosticBatch{batch}}
+			if err := RecordDiagnosticBaseline(context.Background(), w, p); err != nil {
+				t.Fatal(err)
+			}
+			current, err := w.Diagnostics(initial.Cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.CurrentCount != 2 || len(current.New) != 0 || len(current.Resolved) != 0 {
+				t.Fatalf("partial baseline changed existing findings: %+v", current)
+			}
+			batch.ProgressPending = false
+			batch.PreEditDocumentRevision = string(snapshot.Revision)
+			batch.DocumentRevision = "after_revision"
+			batch.Findings = []workspacecore.DiagnosticFinding{first, omitted, {Message: "new finding", Severity: 1}}
+			after, err := w.RecordDiagnosticEvidence(batch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(after.Resolved) != 0 || len(after.New) != 1 || after.New[0].Finding.Message != "new finding" ||
+				after.New[0].BaselineMissing != progress {
+				t.Fatalf("false return or insufficient baseline proof: %+v", after)
+			}
+			updates, err := w.Diagnostics(initial.Cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, notice := range updates.Notices {
+				if notice.Kind == "resolved" || (notice.Kind == "new" && notice.ID != after.New[0].ID) {
+					t.Fatalf("false resolved/new transition: %+v", notice)
+				}
+			}
+		})
+	}
+}

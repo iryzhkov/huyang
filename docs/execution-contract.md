@@ -284,15 +284,20 @@ deferred to the planned usability and bug investigation.
 Immediate and late push evidence follow the same completeness rule: the
 publication must cover the expected document version, an empty push must have
 150 ms of quiet, and work-done progress started for that edit vetoes completion.
-Late observations are coalesced by producer/document before ledger insertion;
-an intermediate empty set cannot resolve a superseding positive observation.
+Late pushes and pulls recheck buffer validity, loaded state, path, changedtick,
+LSP version and disk currency at collection. Any currently open producer progress
+vetoes late completion. Observations are coalesced by producer/document before
+ledger insertion; an intermediate empty set cannot resolve a superseding positive
+observation.
 Unversioned positives are provisional and unattributed; unversioned emptiness
 cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof
 is incomplete and delivers late findings via `diagnostic_updates` on later calls.
 
-Baseline validity is bound to the exact pre-edit document revision, including
-object identity and content. An older authoritative coverage dimension alone is
-insufficient after checkout or external writes. Findings without a matching
+Baselines only seed or refresh findings; they never resolve omitted findings.
+Any currently open producer progress vetoes a baseline, even if it started before
+the call. Baseline validity is bound to the exact pre-edit document revision,
+including object identity and content. An older authoritative coverage dimension
+alone is insufficient after checkout or external writes. Findings without a matching
 baseline retain `baseline_missing`. Refreshing a stale finding produces
 `persisting`, never a new-finding transition. Staged multi-document counts sum
 staged observations without changing the canonical current set.

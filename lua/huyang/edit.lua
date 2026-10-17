@@ -852,8 +852,7 @@ end
 -- Pending edits retain their expected document version. Arrival time never
 -- attributes a finding, and superseded publications never enter the ledger.
 local pending_late = {}
-local late_batches = {} -- delayed pulls
-local late_observations = {} -- latest push per producer/document
+local late_observations = {} -- latest push or pull per producer/document
 local LATE_BATCHES_MAX = 64
 local progress_since -- shared by immediate and late completeness checks
 local PUSH_QUIET_MS = 150
@@ -876,6 +875,15 @@ local function note_pending_late(path, transaction_id, revision, expected, since
         tick = bufnr and vim.api.nvim_buf_get_changedtick(bufnr) }
 end
 
+local function queue_late(batch, pending)
+    if not pending then return end
+    local key = batch.provider_id .. "\0" .. batch.document
+    late_observations[key] = { pending = pending, at = vim.uv.now(), batch = batch }
+    local keys = vim.tbl_keys(late_observations)
+    table.sort(keys, function(a, b) return late_observations[a].at < late_observations[b].at end)
+    for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
+end
+
 local function capture_late(client_name, path, version, findings, client_id)
     local pending = pending_late[path]
     if not pending then return false end
@@ -884,43 +892,40 @@ local function capture_late(client_name, path, version, findings, client_id)
     -- Even an unstamped empty set supersedes a queued stamped observation.
     -- It can weaken proof, but cannot establish absence.
     if version == nil and #findings == 0 and not late_observations[key] then return false end
-    late_observations[key] = { pending = pending, at = vim.uv.now(),
-        batch = {
-            kind = "lsp_push", provider_id = client_name .. "#" .. tostring(client_id or "late"),
-            producer = client_name, document = path,
-            document_revision = version ~= nil and pending.revision or nil,
-            document_version = version, expected_version = pending.expected,
-            transaction_id = version ~= nil and pending.transaction_id or nil,
-            complete = false, selected = true, dimension = "edited_documents", reason = "late_attach",
-            findings = findings,
-            candidates = version ~= nil and { { transaction_id = pending.transaction_id, postimage_version_match = true } } or nil,
-        } }
-    local keys = vim.tbl_keys(late_observations)
-    table.sort(keys, function(a, b) return late_observations[a].at < late_observations[b].at end)
-    for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
+    queue_late({
+        kind = "lsp_push", provider_id = client_name .. "#" .. tostring(client_id or "late"),
+        producer = client_name, document = path,
+        document_revision = version ~= nil and pending.revision or nil,
+        document_version = version, expected_version = pending.expected,
+        transaction_id = version ~= nil and pending.transaction_id or nil,
+        complete = false, selected = true, dimension = "edited_documents", reason = "late_attach",
+        findings = findings,
+        candidates = version ~= nil and { { transaction_id = pending.transaction_id, postimage_version_match = true } } or nil,
+    }, pending)
     return true
 end
 
 -- No wait here: unfinished observations are retained for a later collection.
--- Re-evaluate progress and quiet time so an empty push is never final merely
--- because it arrived after the immediate response's deadline.
+-- Recheck buffer, version and disk currency for both streams at collection.
+-- Any currently open progress vetoes completion; empty pushes also need quiet.
 function M.late_evidence()
-    local out = late_batches
-    late_batches = {}
+    local out = {}
     for key, observation in pairs(late_observations) do
         local batch, pending = observation.batch, observation.pending
         local buf = pending.bufnr
         local current = pending_late[batch.document] == pending
             and (not buf or (vim.api.nvim_buf_is_valid(buf)
+                and vim.api.nvim_buf_is_loaded(buf)
+                and vim.api.nvim_buf_get_name(buf) == batch.document
                 and vim.api.nvim_buf_get_changedtick(buf) == pending.tick
                 and vim.lsp.util.buf_versions[buf] == pending.expected
                 and not core.disk_moved_on(buf, batch.document)))
         if not current then
             late_observations[key] = nil
         else
-            batch.progress_pending = progress_since({ batch.producer }, pending.since)
+            batch.progress_pending = progress_since({ batch.producer }, 0)
             batch.complete = publication_complete(batch.document_version, pending.expected,
-                batch.findings, observation.at, batch.producer, pending.since, false)
+                batch.findings, observation.at, batch.producer, 0, batch.kind == "lsp_pull")
             if observation.delivered ~= batch.complete then
                 out[#out + 1] = vim.deepcopy(batch)
                 observation.delivered = batch.complete
@@ -1244,7 +1249,9 @@ function M.diagnostic_evidence(args)
             end
             for _, client in ipairs(clients) do
                 wrap_publish_handler(client)
-                local barrier_started = vim.uv.now()
+                -- Baselines have no edit start: all open work can make a
+                -- cached publication partial, including work already running.
+                local barrier_started = args.baseline and 0 or vim.uv.now()
                 local prefer_pull = client:supports_method("textDocument/diagnostic", bufnr)
                     and (diagnostic_modes[bufnr] or {})[client.id] ~= "push"
                 local remaining = math.max(1, attach_deadline - vim.uv.now())
@@ -1328,6 +1335,9 @@ function M.diagnostic_evidence(args)
                             findings = items,
                         }
                     end
+                    -- Keep this request's proof even if a newer verdict replaces
+                    -- pending_late before its response is collected.
+                    local pending = pending_late[path]
                     local waiting = true
                     local timer = vim.uv.new_timer()
                     local pulled = core.await(function(resume)
@@ -1346,8 +1356,7 @@ function M.diagnostic_evidence(args)
                                 local batch = pull_batch(result)
                                 if batch.document_version ~= nil and batch.complete then
                                     batch.reason = "late_pull"
-                                    late_batches[#late_batches + 1] = batch
-                                    while #late_batches > LATE_BATCHES_MAX do table.remove(late_batches, 1) end
+                                    queue_late(batch, pending)
                                 end
                             end
                         end, bufnr)

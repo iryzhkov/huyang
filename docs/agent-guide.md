@@ -272,13 +272,15 @@ Keep both transport representations for compatible consumers and deduplicate for
   reply says so; `huyang trust <root>` on the machine grants it.
 - Diagnostic evidence requires the document version, completeness, a 150 ms quiet
   period for empty pushes, and no work-done progress for that edit. Late pushes
-  use the same rules; superseded observations are coalesced before entering the
-  ledger. Unversioned positive findings remain provisional; unversioned emptiness
-  cannot resolve a finding. Rust may explicitly report `rust_diagnostics_pending`;
+  and pulls recheck the buffer, version and disk at collection; any currently open
+  producer progress vetoes completion. Superseded observations are coalesced before
+  entering the ledger. Unversioned positive findings remain provisional;
+  unversioned emptiness cannot resolve a finding. Rust may explicitly report `rust_diagnostics_pending`;
   its later findings arrive through `diagnostic_updates` on subsequent tool replies.
-- A pre-edit snapshot seeds findings without announcing them as new. A known
-  baseline must name the exact pre-edit document revision; an external write or
-  checkout invalidates older evidence. When no matching baseline exists, findings
+- A pre-edit snapshot seeds or refreshes findings without announcing them as new
+  or resolving omitted findings. Any open producer progress vetoes the snapshot,
+  including work started before the call. A known baseline must name the exact
+  pre-edit document revision; an external write or checkout invalidates older evidence. When no matching baseline exists, findings
   carry `baseline_missing` (new or pre-existing), rather than claiming introduction.
 - Default `diagnostics` reports notice deltas. After `since` acknowledges notices,
   counts can remain without bodies. Use `diagnostics {root, full: true}` to recover

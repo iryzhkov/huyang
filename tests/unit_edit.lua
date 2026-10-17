@@ -222,6 +222,7 @@ end
 -- together even when the editor cache or an older publication disagrees.
 do
     local saved_clients = vim.lsp.get_clients
+    local saved_client = vim.lsp.get_client_by_id
     local path = vim.fn.getcwd() .. "/huyang-publication-unit.py"
     local buf = buffer_with({ "value = 1" }, "python")
     vim.api.nvim_buf_set_name(buf, path)
@@ -249,6 +250,21 @@ do
         and baseline.batches[1].expected_version==4
         and baseline.batches[1].findings[1].message=="bound payload",baseline)
     check("baseline adds no attach or analysis wait",elapsed_ms<25,elapsed_ms)
+    vim.lsp.get_client_by_id = function(id)
+        if id == fake.id then return fake end
+        return saved_client(id)
+    end
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "baseline", value = { kind = "begin" } } } })
+    vim.wait(10) -- the token must predate the baseline call
+    publish(nil,{uri=vim.uri_from_bufnr(buf),version=4,diagnostics={diagnostic}}, {})
+    check("partial baseline during already-open progress is not accepted",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==0)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "baseline", value = { kind = "end" } } } })
+    check("baseline is available again once existing progress ends",
+        #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==1)
+    vim.lsp.get_client_by_id = saved_client
     publish(nil,{uri=vim.uri_from_bufnr(buf),diagnostics={}}, {})
     check("an unstamped empty publication cannot become a clean baseline",
         #edit.diagnostic_evidence({baseline=true,wait_ms=0}).batches==0)
@@ -263,12 +279,17 @@ do
     vim.fn.writefile({ "value = 1" }, path)
     local buf = core.load_buf(path)
     local saved_clients = vim.lsp.get_clients
+    local saved_client = vim.lsp.get_client_by_id
+    local pull_items, responses = {}, 0
     vim.lsp.util.buf_versions[buf] = 4
     local fake = {id=9002,name="pull_test",config={filetypes={"python"}},
         handlers={["textDocument/publishDiagnostics"]=function() end},
         supports_method=function(_,method) return method=="textDocument/diagnostic" end,
         request=function(_,_,_,callback)
-            vim.defer_fn(function() callback(nil,{kind="full",items={}}) end,40)
+            vim.defer_fn(function()
+                responses = responses + 1
+                callback(nil,{kind="full",items=vim.deepcopy(pull_items)})
+            end,40)
             return true,1
         end}
     vim.lsp.get_clients=function(filter)
@@ -300,6 +321,64 @@ do
     vim.wait(70)
     check("a pull response for superseded bytes is not late current evidence",
         #edit.late_evidence().batches==0)
+    -- Queue the response while its proof is still current, then supersede it
+    -- before collection. Callback-time checks alone miss every case below.
+    local changes = {
+        { "buffer change", function()
+            vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 200"})
+        end },
+        { "external sync", function()
+            vim.fn.writefile({"value = 300"},path)
+            core.sync_buf(buf,path)
+        end },
+        { "disk write", function() vim.fn.writefile({"value = 400"},path) end },
+        { "plan invalidation", function() edit.mark_diagnostic_change(buf) end },
+        { "version change", function() vim.lsp.util.buf_versions[buf] = 5 end },
+    }
+    for _, positive in ipairs({false,true}) do
+        for _, change in ipairs(changes) do
+            vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 1"})
+            vim.bo[buf].modified = false
+            vim.fn.writefile({"value = 1"},path)
+            core.mark_synced(buf,path)
+            edit.mark_diagnostic_change(buf)
+            vim.lsp.util.buf_versions[buf] = 4
+            pull_items = positive and {{
+                range={start={line=0,character=0},["end"]={line=0,character=1}},
+                severity=1,message="queued positive",
+            }} or {}
+            local before = responses
+            timed_pull()
+            vim.wait(100,function() return responses > before end,1)
+            check("pull is queued before " .. change[1],responses==before+1)
+            change[2]()
+            check("queued " .. (positive and "positive" or "empty") .. " pull rejected after " .. change[1],
+                #edit.late_evidence().batches==0)
+        end
+    end
+    -- A queued clean response can cease to be complete after its callback.
+    -- Keep it pending until any currently open progress ends.
+    vim.lsp.get_client_by_id = function(id)
+        if id == fake.id then return fake end
+        return saved_client(id)
+    end
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf] = 4
+    pull_items = {}
+    timed_pull()
+    vim.wait(70)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "pull", value = { kind = "begin" } } } })
+    local pending = edit.late_evidence().batches[1]
+    check("collection-time progress vetoes a queued pull",
+        pending and not pending.complete and pending.progress_pending,pending)
+    vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
+        params = { token = "pull", value = { kind = "end" } } } })
+    local complete = edit.late_evidence().batches[1]
+    check("a queued pull completes after progress ends without another response",
+        complete and complete.complete and not complete.progress_pending,complete)
+    check("a complete queued pull is delivered once",#edit.late_evidence().batches==0)
+    vim.lsp.get_client_by_id=saved_client
     vim.lsp.get_clients=saved_clients
     vim.api.nvim_buf_delete(buf,{force=true})
     vim.fn.delete(path)
