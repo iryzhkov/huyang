@@ -260,6 +260,18 @@ func adoptOpenedProject(requestID string, opened map[string]any, arguments map[s
 	return nil
 }
 
+// relativePathRefusal answers a relative path that names no workspace. The
+// next step is the repair - the same call with the repository named by
+// root - because a refusal with an empty next left callers resending the
+// path unchanged.
+func relativePathRefusal(requestID, tool, path string) map[string]any {
+	result := mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
+	result["next"] = []any{
+		map[string]any{"tool": tool, "action": "resend_with_root", "argument": "root", "expected": "absolute path of the repository that holds " + path},
+	}
+	return result
+}
+
 // readImplicitDocument serves a read that names a path but no workspace by
 // opening an exact one-document workspace first and reading through it.
 func (h *Handlers) readImplicitDocument(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
@@ -271,7 +283,7 @@ func (h *Handlers) readImplicitDocument(ctx context.Context, requestID string, a
 	if !filepath.IsAbs(path) {
 		// The service's working directory is not the agent's, so a relative
 		// path without a workspace names nothing useful.
-		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
+		return relativePathRefusal(requestID, "read", path)
 	}
 	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}}, false)
 	if opened["outcome"] != "ok" {

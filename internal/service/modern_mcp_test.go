@@ -30,7 +30,7 @@ func connectOfficialClient(t *testing.T, profile mcpapi.Profile, direct *directW
 func connectOfficialClientAs(t *testing.T, profile mcpapi.Profile, direct *directWorkspaces, session string) (*mcp.ClientSession, func()) {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	server := newSDKServer(profile, direct, session)
+	server := newSDKServer(profile, direct, clientConnection{session: session})
 	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)

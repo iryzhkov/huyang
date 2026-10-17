@@ -1,6 +1,9 @@
 package mcpapi
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ApplyArgumentAliases rewrites the misspellings agents send most often into
 // the arguments the schema declares, and returns a warning for each one that
@@ -12,11 +15,16 @@ import "fmt"
 func ApplyArgumentAliases(tool string, arguments map[string]any) []string {
 	switch tool {
 	case "read":
-		return aliasReadTarget(arguments)
+		var warnings []string
+		warnings = append(warnings, aliasReadTarget(arguments)...)
+		warnings = append(warnings, aliasStringTarget(arguments)...)
+		warnings = append(warnings, hoistTargetOptions(arguments)...)
+		return warnings
 	case "search":
 		var warnings []string
 		warnings = append(warnings, aliasSearchPaths(arguments)...)
 		warnings = append(warnings, renameArgument(tool, arguments, "max_results")...)
+		warnings = append(warnings, clampLimit(tool, arguments)...)
 		return warnings
 	case "revision_diff":
 		return renameArgument(tool, arguments, "to_revision")
@@ -66,6 +74,84 @@ func aliasReadTarget(arguments map[string]any) []string {
 		return []string{"symbol_locator is not a top-level read argument and was read as target.symbol_locator; send target: {symbol_locator: {path, name_path}}"}
 	}
 	return nil
+}
+
+// aliasStringTarget reads a target sent as a bare string as target.path.
+// A string that held a JSON object was already decoded by
+// NormalizeArguments, so what is left here is a path or nothing useful;
+// an empty or JSON-looking string is left to validation.
+func aliasStringTarget(arguments map[string]any) []string {
+	text, ok := arguments["target"].(string)
+	text = strings.TrimSpace(text)
+	if !ok || text == "" || strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") {
+		return nil
+	}
+	arguments["target"] = map[string]any{"path": text}
+	return []string{"target was a string and was read as target.path; send target: {path}"}
+}
+
+// readTargetOptions are read's top-level options that agents put inside
+// target, next to path, because target looks like the thing being read.
+var readTargetOptions = []string{"view", "start_line", "end_line", "max_lines", "numbered"}
+
+// hoistTargetOptions moves read options nested in target up to the top
+// level, where the schema declares them. An option is moved only when the
+// top level does not already carry it, so nothing the caller placed
+// correctly is overwritten; a conflicting pair is left to validation.
+func hoistTargetOptions(arguments map[string]any) []string {
+	target, ok := arguments["target"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	var moved []string
+	for _, name := range readTargetOptions {
+		value, nested := target[name]
+		if _, taken := arguments[name]; !nested || taken {
+			continue
+		}
+		arguments[name] = value
+		delete(target, name)
+		moved = append(moved, name)
+	}
+	if len(moved) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("target.%s is a top-level read argument and was read there; send %s beside target, not inside it",
+		strings.Join(moved, ", target."), strings.Join(moved, ", "))}
+}
+
+// clampLimit reduces a limit above the tool's declared maximum to that
+// maximum with a warning, the way search already treats context_lines. A
+// larger limit asks for more of the same answer, so refusing it costs a
+// turn and teaches nothing a warning would not.
+func clampLimit(tool string, arguments map[string]any) []string {
+	limit, ok := arguments["limit"].(float64)
+	// A fractional limit is a malformed one, left for validation to refuse
+	// rather than rounded into a valid call.
+	if !ok || limit != float64(int64(limit)) {
+		return nil
+	}
+	maximum, ok := declaredMaximum(tool, "limit")
+	if !ok || limit <= float64(maximum) {
+		return nil
+	}
+	arguments["limit"] = float64(maximum)
+	return []string{fmt.Sprintf("limit %d is above the maximum and was reduced to %d", int64(limit), maximum)}
+}
+
+// declaredMaximum is the maximum the catalog declares for a top-level
+// integer property of a tool.
+func declaredMaximum(tool, property string) (int, bool) {
+	for _, descriptor := range Tools {
+		if descriptor.Name != tool {
+			continue
+		}
+		properties, _ := descriptor.InputSchema["properties"].(map[string]any)
+		schema, _ := properties[property].(map[string]any)
+		maximum, ok := schema["maximum"].(int)
+		return maximum, ok
+	}
+	return 0, false
 }
 
 // aliasSearchPaths reads search's path or path_prefix as the paths scope.

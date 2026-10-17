@@ -160,7 +160,7 @@ func validateIntegerBounds(schema map[string]any, number int64, path string) err
 func validateObject(schema map[string]any, value any, path string) error {
 	object, ok := value.(map[string]any)
 	if !ok {
-		return argumentError(schema, path, "%s must be an object", path)
+		return argumentError(schema, path, "%s must be an object%s", path, malformedJSONHint(value))
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if closed, present := schema["additionalProperties"].(bool); present && !closed {
@@ -336,10 +336,33 @@ func sortedKeys(values map[string]any) []string {
 	return keys
 }
 
+// malformedJSONHint explains a string that was meant to be an object or an
+// array. NormalizeArguments already decodes such a string when it is valid
+// JSON, so one that reaches validation failed to parse, and saying where is
+// the repair: "must be an object" alone left callers resending the same
+// broken text.
+func malformedJSONHint(value any) string {
+	text, ok := value.(string)
+	text = strings.TrimSpace(text)
+	if !ok || text == "" || (text[0] != '{' && text[0] != '[') {
+		return ""
+	}
+	var decoded any
+	err := json.Unmarshal([]byte(text), &decoded)
+	// Only a syntax error is malformed text, and only its offset is
+	// repeated: a decoder message can quote the caller's own tokens, and
+	// other errors (a number out of range) are not a broken string at all.
+	var syntax *json.SyntaxError
+	if err == nil || !errors.As(err, &syntax) {
+		return ""
+	}
+	return fmt.Sprintf("; it was sent as a string that is not valid JSON (syntax error at byte %d); send the object itself rather than encoded text", syntax.Offset)
+}
+
 func validateArray(schema map[string]any, value any, path string) error {
 	array, ok := value.([]any)
 	if !ok {
-		return argumentError(schema, path, "%s must be an array", path)
+		return argumentError(schema, path, "%s must be an array%s", path, malformedJSONHint(value))
 	}
 	if maximum, ok := schema["maxItems"].(int); ok && len(array) > maximum {
 		refusal := argumentError(schema, path, "%s has %d items, maximum %d", path, len(array), maximum)

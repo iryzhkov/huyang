@@ -46,6 +46,10 @@ type serviceConfig struct {
 type controlHello struct {
 	Profile string
 	Session string `json:",omitempty"`
+	// Cwd is the working directory the client started the adapter in. It
+	// is the only place the client's directory can come from, for the same
+	// reason as the session; see client_paths.go for what it is used for.
+	Cwd string `json:",omitempty"`
 }
 
 type proxyLineEvent struct {
@@ -351,7 +355,11 @@ func (s *huyangService) serveUnixConnection(ctx context.Context, connection *net
 		Reader: structReadCloser{Reader: reader, Closer: connection},
 		Writer: connection,
 	}
-	_ = newSDKServer(profile, s.direct, hello.Session).Run(ctx, transport)
+	cwd := ""
+	if filepath.IsAbs(hello.Cwd) {
+		cwd = filepath.Clean(hello.Cwd)
+	}
+	_ = newSDKServer(profile, s.direct, clientConnection{session: hello.Session, cwd: cwd}).Run(ctx, transport)
 }
 
 // proxyMessage is the part of a JSON-RPC frame the proxy inspects.
@@ -382,6 +390,10 @@ type mcpProxy struct {
 	socketPath string
 	profile    mcpapi.Profile
 	stdout     io.Writer
+	// session and cwd are announced on every connection, so a reconnect
+	// after a service restart keeps the identity and directory it had.
+	session string
+	cwd     string
 
 	connection *net.UnixConn
 	generation uint64
@@ -398,8 +410,16 @@ type mcpProxy struct {
 }
 
 func proxyHuyangMCP(socketPath string, profile mcpapi.Profile, stdin io.Reader, stdout io.Writer) error {
+	// A client that exports no session id still runs one adapter per
+	// session, so the adapter names itself: without it every call from such
+	// a client is spooled under the daemon's one anonymous id.
+	session := clientSessionID()
+	if session == "" {
+		session = "adapter-" + randomID()
+	}
+	cwd, _ := os.Getwd()
 	proxy := &mcpProxy{
-		socketPath: socketPath, profile: profile, stdout: stdout,
+		socketPath: socketPath, profile: profile, stdout: stdout, session: session, cwd: cwd,
 		backendEvents: make(chan proxyLineEvent, 32), done: make(chan struct{}),
 		outstanding: make(map[string][]byte),
 	}
@@ -512,7 +532,7 @@ func (p *mcpProxy) dial(restarting bool) error {
 		_ = candidate.Close()
 		return err
 	}
-	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile), Session: clientSessionID()}); err != nil {
+	if err := json.NewEncoder(candidate).Encode(controlHello{Profile: string(p.profile), Session: p.session, Cwd: p.cwd}); err != nil {
 		return fail(fmt.Errorf("identify service connection: %w", err))
 	}
 	reader := bufio.NewReader(candidate)
@@ -613,7 +633,7 @@ func (s *huyangService) prepareHTTP() error {
 	for route, profile := range profiles {
 		// An HTTP client announces no session; its calls are spooled under
 		// the service process the way they always were.
-		server := newSDKServer(profile, s.direct, "")
+		server := newSDKServer(profile, s.direct, clientConnection{})
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true})
 		mux.Handle(route, requireBearer(token, handler))
 	}
