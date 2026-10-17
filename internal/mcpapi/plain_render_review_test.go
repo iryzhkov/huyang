@@ -5,7 +5,42 @@ import (
 	"testing"
 )
 
-// Regressions for the first M8 review round.
+// Regressions for the M8 review rounds.
+
+// A clean applied edit leaves its ordinary evidence IDs out, but an unknown
+// field of the evidence record is still printed.
+func TestPlainCleanEditKeepsUnknownEvidenceFields(t *testing.T) {
+	edit := func(evidence map[string]any) string {
+		envelope := okEnvelope("Edited a.go; no new diagnostics", map[string]any{
+			"canonical_changed": true, "changed_paths": []any{"a.go"}, "revision": "wsrev_3", "document_revision": "docrev_a",
+		})
+		envelope["evidence"] = evidence
+		return plainFor(t, "edit_apply", map[string]any{"operation": map[string]any{"kind": "replace_literal"}}, envelope)
+	}
+	guarded := edit(map[string]any{"ids": []any{"ev_1"}, "truncated": false, "future_guard": "g_1"})
+	requireText(t, guarded, "Edited a.go (revision=wsrev_3; revision_id=docrev_a)\n"+`evidence detail: {"future_guard":"g_1"}`+"\n")
+	requireAbsent(t, guarded, "ev_1")
+	ordinary := edit(map[string]any{"ids": []any{"ev_1"}, "truncated": false})
+	requireText(t, ordinary, "Edited a.go (revision=wsrev_3; revision_id=docrev_a)\n")
+}
+
+// An unknown entry field named index keeps its own value; the entry's
+// position is printed outside the source fields.
+func TestPlainBatchEntryFieldNamedIndexKeepsItsValue(t *testing.T) {
+	batch := okEnvelope("Read 2 targets", map[string]any{
+		"entries": []any{
+			map[string]any{"path": "a.txt", "bytes": 2, "lines": 1},
+			map[string]any{"path": "b.txt", "bytes": 2, "lines": 1, "index": "opaque-token"},
+		},
+		"files": []any{
+			map[string]any{"path": "a.txt", "content": "a\n", "revision_id": "docrev_a", "lines": 1},
+			map[string]any{"path": "b.txt", "content": "b\n", "revision_id": "docrev_b", "lines": 1},
+		},
+	})
+	got := plainFor(t, "read", nil, batch)
+	requireContains(t, got, `entries[1] detail: {"index":"opaque-token"}`+"\n")
+	requireAbsent(t, got, "entries[0]", `"index":1`)
+}
 
 func requireAbsent(t *testing.T, got string, unwanted ...string) {
 	t.Helper()
@@ -151,7 +186,7 @@ func TestPlainNestedUnknownFieldsAreKept(t *testing.T) {
 		"entries": []any{map[string]any{"path": "a.txt", "bytes": 2, "lines": 1, "future_digest": "h"}},
 		"files":   []any{map[string]any{"path": "a.txt", "content": "a\n", "revision_id": "docrev_a", "lines": 1}},
 	})
-	requireContains(t, plainFor(t, "read", nil, batch), `entries detail: [{"future_digest":"h","index":0}]`)
+	requireContains(t, plainFor(t, "read", nil, batch), `entries[0] detail: {"future_digest":"h"}`+"\n")
 
 	open := map[string]any{
 		"api_version": APIVersion, "request_id": "req_3", "outcome": "ok", "summary": "Opened",

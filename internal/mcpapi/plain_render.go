@@ -223,11 +223,11 @@ func (r *plainReply) suffix() {
 		r.linef("warning: %s", plainString(warning))
 	}
 	// Evidence IDs address diagnostic and failure evidence; an applied edit
-	// with an authoritative verdict and no findings has nothing to look up.
-	evidence := envelope.take("evidence")
-	if r.tool != "edit_apply" || outcome != "ok" || len(r.findings.items) > 0 || len(r.findings.resolved) > 0 {
-		r.evidence(evidence)
-	}
+	// with an authoritative verdict and no findings has nothing to look up,
+	// so its IDs are left out. A field of the evidence record this renderer
+	// does not know is printed either way.
+	r.evidence(envelope.take("evidence"),
+		r.tool != "edit_apply" || outcome != "ok" || len(r.findings.items) > 0 || len(r.findings.resolved) > 0)
 	workspace := newPlainFields(plainObject(envelope.take("workspace")))
 	workspace.take("id")
 	workspace.take("revision")
@@ -272,7 +272,9 @@ func (r *plainReply) status() {
 	}
 }
 
-func (r *plainReply) evidence(value any) {
+// evidence prints the evidence IDs when withIDs, and any unknown field of
+// the evidence record always.
+func (r *plainReply) evidence(value any, withIDs bool) {
 	evidence := newPlainFields(plainObject(value))
 	var ids []string
 	for _, id := range plainList(evidence.take("ids")) {
@@ -280,6 +282,12 @@ func (r *plainReply) evidence(value any) {
 	}
 	truncated := plainBool(evidence.take("truncated"))
 	left := evidence.rest()
+	if !withIDs {
+		if len(left) > 0 {
+			r.linef("evidence detail: %s", plainJSON(left))
+		}
+		return
+	}
 	if len(ids) == 0 && !truncated && len(left) == 0 {
 		return
 	}

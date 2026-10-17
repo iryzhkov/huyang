@@ -214,16 +214,12 @@ func (r *plainReply) readBatch(fields *plainFields) {
 		}
 		r.detail("detail", target.rest())
 	}
-	// The entries repeat each target's size; a field beyond that is shown.
-	var extra []any
+	// The entries repeat each target's size; a field beyond that is shown
+	// as it is, with the entry's position outside the source fields.
 	for index, raw := range entries {
 		if left := plainUnknown(plainObject(raw), "path", "bytes", "lines", "name_path", "section_count", "truncated", "code"); len(left) > 0 {
-			left["index"] = index
-			extra = append(extra, left)
+			r.linef("entries[%d] detail: %s", index, plainJSON(left))
 		}
-	}
-	if len(extra) > 0 {
-		r.linef("entries detail: %s", plainJSON(extra))
 	}
 }
 
