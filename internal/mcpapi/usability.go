@@ -17,10 +17,6 @@ func usabilityDescriptor(descriptor ToolDescriptor) ToolDescriptor {
 		targets["items"] = withExperimentalProperties(targets["items"].(map[string]any), readByteProperties())
 		extra["targets"] = targets
 		descriptor.Description += " Experimental: max_bytes bounds each source selection, including a single minified line; byte_offset and expected_revision_id continue that same selection safely. Offsets count UTF-8 bytes after line selection and numbering; retain the same target/options on continuation. Outline/history views do not accept byte windows."
-	case "debug_session":
-		extra["program"] = stringSchema("Program to launch. For Delve in a nested Go module, use the absolute module directory for both program and cwd. Relative program/cwd combinations are adapter-dependent; inspect build output on failure.")
-		extra["cwd"] = stringSchema("Debuggee working directory. Prefer an absolute path to the directory containing the target Go module go.mod when using Delve; relative cwd can build successfully but fail to launch.")
-		descriptor.Description += " A launch build error is not an adapter capability refusal: inspect adapter output and check program/cwd/module paths before retrying with a new idempotency key."
 	case "workspace_inspect":
 		extra["view"] = enumSchema("status", "overview", "map", "revision")
 		descriptor.Description += " view=revision refreshes known documents and returns only the current workspace revision, without loading provider or pipeline details."

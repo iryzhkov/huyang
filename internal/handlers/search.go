@@ -69,9 +69,8 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 		return mcpapi.Failure(requestID, workspace, "search_refinement_failed", err)
 	}
 	limit := argInt(arguments, "limit", 50)
-	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeRanges, includeHandles, literal)
+	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeHandles, literal)
 	data := map[string]any{
 		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": mcpapi.CompactResultSet(&result),
 	}
@@ -113,9 +112,8 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		return failure
 	}
 	limit := argInt(arguments, "limit", 50)
-	includeRanges, _ := arguments["include_ranges"].(bool)
 	includeHandles, _ := arguments["include_handles"].(bool)
-	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeRanges, includeHandles, literalEcho(arguments, query))
+	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeHandles, literalEcho(arguments, query))
 	contextWarning := attachRequestedContext(workspace, hits, arguments)
 	// A capped search stopped collecting; the matches it holds are the bound
 	// it stopped at, not the matches in the workspace. Saying "1000 matches"

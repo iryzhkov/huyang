@@ -236,14 +236,14 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 		t.Fatalf("open result = %#v", opened)
 	}
 
-	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal", "include_ranges": true})
+	searched := callModern(t, session, "search", map[string]any{"workspace_id": workspaceID, "query": "beta", "mode": "literal", "include_handles": true})
 	searchData := searched["data"].(map[string]any)
 	hits := searchData["hits"].([]any)
 	if len(hits) != 1 {
 		t.Fatalf("search result = %#v", searched)
 	}
 	hit := hits[0].(map[string]any)
-	target := map[string]any{"file_range": hit["range"]}
+	target := map[string]any{"handle": hit["handle"]}
 	preview := callModern(t, session, "edit_apply", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "preview-1", "preview_only": true,
 		"operation": map[string]any{"kind": "replace_range", "target": target, "content": "gamma"},
@@ -296,7 +296,7 @@ func TestOfficialClientExercisesNativeDirectWorkspace(t *testing.T) {
 
 	read := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID,
-		"target":       map[string]any{"file_range": map[string]any{"path": file, "revision_id": "display-only", "byte_start": 0, "byte_end": 0, "expected_sha256": "", "before_sha256": "", "after_sha256": "", "anchor_bytes": 0}},
+		"target":       map[string]any{"path": file},
 	})
 	if content := read["data"].(map[string]any)["content"]; content != "alpha gamma\n" {
 		t.Fatalf("read content = %#v", content)
@@ -378,14 +378,14 @@ func TestOfficialClientPersistsIdempotentPlanPreviewAcrossRestart(t *testing.T) 
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	createArguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "plan-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "delta",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "delta",
 		}},
 	}
 	created := callModern(t, session, "change_plan", createArguments)
@@ -469,7 +469,7 @@ func TestOfficialClientUsesOpaqueHandlesAndRefinesFrozenSearchSets(t *testing.T)
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	searchData := searched["data"].(map[string]any)
 	resultSet := searchData["result_set"].(map[string]any)
@@ -546,10 +546,7 @@ func TestOfficialClientReadsBoundedGitProvenance(t *testing.T) {
 	}
 	history := callModern(t, session, "read", map[string]any{
 		"workspace_id": workspaceID, "view": "history", "limit": 10,
-		"target": map[string]any{"file_range": map[string]any{
-			"path": "note.txt", "revision_id": "display-only", "byte_start": 0, "byte_end": 0,
-			"expected_sha256": "", "before_sha256": "", "after_sha256": "", "anchor_bytes": 0,
-		}},
+		"target": map[string]any{"path": "note.txt"},
 	})
 	if history["outcome"] != "ok" || len(history["data"].(map[string]any)["spans"].([]any)) == 0 {
 		t.Fatalf("history = %#v", history)

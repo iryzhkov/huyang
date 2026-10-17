@@ -94,7 +94,7 @@ func TestDescribeShapeMarksOptionalPropertiesAndAlternatives(t *testing.T) {
 	if !strings.HasPrefix(shape, "{evidence_id, ") || !strings.Contains(shape, "cursor?") {
 		t.Fatalf("evidence_get shape = %s", shape)
 	}
-	if got := DescribeShape(targetSchema()); got != "{handle} | {file_range: {after_sha256, anchor_bytes, before_sha256, byte_end, byte_start, expected_sha256, path, revision_id}} | {symbol_locator: {name_path, path}}" {
+	if got := DescribeShape(targetSchema()); got != "{handle} | {symbol_locator: {name_path, path}}" {
 		t.Fatalf("target shape = %s", got)
 	}
 }

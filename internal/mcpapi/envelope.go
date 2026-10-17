@@ -122,23 +122,19 @@ func evidenceEmpty(evidence map[string]any) bool {
 // sometimes sends them as JSON text; NormalizeArguments decodes those.
 var structuredArguments = map[string]bool{
 	"target": true, "targets": true, "operation": true, "operations": true, "files": true, "stages": true,
-	"paths": true, "refine": true, "git_history": true, "edit": true, "initial_breakpoints": true,
-	"args": true, "env": true, "track": true,
+	"paths": true, "refine": true, "git_history": true, "edit": true,
 }
 
 // booleanArguments and integerArguments are the top-level scalar arguments
 // a stale client sends as text ("true", "12"); keys not listed here keep
 // their string value, so a query of "true" is still a query.
 var booleanArguments = map[string]bool{
-	"numbered": true, "verbose": true, "preview_only": true, "format": true, "include_ranges": true,
-	"include_source": true, "full": true, "accept_provisional": true, "parser": true, "force": true,
-	"stop_on_entry": true, "all_frames": true,
+	"numbered": true, "verbose": true, "preview_only": true, "format": true,
+	"include_source": true, "full": true, "accept_provisional": true, "parser": true,
 }
 
 var integerArguments = map[string]bool{
 	"start_line": true, "end_line": true, "limit": true, "context_lines": true, "plan_revision": true,
-	"depth": true, "max": true, "count": true, "line_offset": true, "frame": true, "thread": true,
-	"wait_ms": true, "port": true, "pid": true,
 }
 
 // NormalizeArguments decodes arguments that arrived as text where the

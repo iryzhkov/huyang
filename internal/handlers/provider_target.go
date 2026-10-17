@@ -61,7 +61,7 @@ func modernProviderTarget(workspace *workspacecore.Workspace, target map[string]
 		}
 		handle = decoded
 	} else {
-		return nil, fmt.Errorf("target must contain handle, file_range, or symbol_locator")
+		return nil, fmt.Errorf("target must contain handle or symbol_locator")
 	}
 	read, err := workspace.Read(handle.Path)
 	if err != nil {

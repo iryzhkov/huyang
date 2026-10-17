@@ -54,13 +54,5 @@
     "evidence": {"ids": ["ev_diag"], "truncated": false},
     "warnings": [],
     "next": [{"tool": "diagnostics", "arguments": {"workspace_id": "ws_fixture", "since": "diagcur_fixture"}}]
-  },
-  "debug_stop": {
-    "outcome": "ok",
-    "summary": "Stopped at main.go:11:5: breakpoint",
-    "data": {"session_id": "dbg_fixture", "reason": "breakpoint", "top_location": {"handle": "rng_debug", "display": "main.go:11 accumulate"}, "top_frame_locals": [{"name": "items", "value": "[1,2,3]"}], "changes_since_previous_stop": []},
-    "evidence": {"ids": [], "truncated": false},
-    "warnings": [],
-    "next": [{"tool": "debug_control", "arguments": {"workspace_id": "ws_fixture", "action": "continue"}}]
   }
 }

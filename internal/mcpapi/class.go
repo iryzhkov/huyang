@@ -38,20 +38,6 @@ func ToolClass(name string) SchedulerClass {
 func ClassForCall(name string, arguments map[string]any) SchedulerClass {
 	class := ToolClass(name)
 	switch name {
-	case "debug_session":
-		if arguments["trace_policy"] != nil {
-			class = ClassExternalJob
-		}
-	case "debug_breakpoints":
-		if arguments["action"] == "watch" {
-			class = ClassExternalJob
-		}
-	case "debug_control":
-		class = ClassExternalJob
-	case "debug_inspect":
-		if arguments["action"] == "trace" || arguments["action"] == "value_origin" || arguments["action"] == "compare_traces" {
-			class = ClassPureRead
-		}
 	case "change_plan":
 		if action, _ := arguments["action"].(string); action != "prepare" {
 			class = ClassCanonicalWrite

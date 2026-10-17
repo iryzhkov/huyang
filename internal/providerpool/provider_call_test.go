@@ -58,8 +58,8 @@ func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Call(context.Background(), workspace, backend, CallSpec{
-		RequestID: "req_debug", TransactionID: "tx_debug", Timeout: DefaultCallTimeout,
-	}, "debug_threads", map[string]any{"transaction_id": "tx_debug"}); err != nil {
+		RequestID: "req_transaction", TransactionID: "tx_explicit", Timeout: DefaultCallTimeout,
+	}, "workspace_support", map[string]any{"transaction_id": "tx_explicit"}); err != nil {
 		t.Fatal(err)
 	}
 	stager := &providerPlanStager{workspace: workspace, provider: backend, epoch: 3}
@@ -78,8 +78,8 @@ func TestProviderCallsCarryOneRequestContextShape(t *testing.T) {
 	if backend.requests[0].Context.RequestID != "req_canonical" || backend.requests[0].Context.TransactionID != "" {
 		t.Fatalf("canonical context = %#v", backend.requests[0].Context)
 	}
-	if backend.requests[1].Context.TransactionID != "tx_debug" {
-		t.Fatalf("debug context = %#v", backend.requests[1].Context)
+	if backend.requests[1].Context.TransactionID != "tx_explicit" {
+		t.Fatalf("transaction context = %#v", backend.requests[1].Context)
 	}
 	if backend.requests[2].Context.TransactionID != "plan_1" {
 		t.Fatalf("plan context = %#v", backend.requests[2].Context)

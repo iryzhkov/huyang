@@ -29,7 +29,6 @@ const (
 	MaxExecutionRetainedValueBytes = 64 << 10
 	MaxExecutionRecursion          = 2
 	MaxExecutionCycleVisits        = 1
-	MaxExecutionTraces             = 16
 )
 
 // GraphBudget participates in snapshot identity. A smaller search and a

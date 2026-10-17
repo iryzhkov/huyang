@@ -12,7 +12,7 @@ import (
 )
 
 func TestOwnedProviderAdvertisesDiagnosticPublicationVersions(t *testing.T) {
-	backend, _, _ := testBackend(t, false)
+	backend, _, _ := testBackend(t)
 	execLua(t, backend, `assert(vim.lsp.config["*"].capabilities.textDocument.publishDiagnostics.versionSupport == true)`)
 }
 
@@ -34,7 +34,7 @@ func TestLangprobeVersionNegotiationAndBaselineLatency(t *testing.T) {
 		}
 	}
 	path := filepath.Join(root, "main.go")
-	backend, _, _ := testBackend(t, false, func(c *Config) { c.Root = root; c.InitFile = "" })
+	backend, _, _ := testBackend(t, func(c *Config) { c.Root = root; c.InitFile = "" })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	call := func(op string, args map[string]any) provider.Result {

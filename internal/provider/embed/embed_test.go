@@ -40,7 +40,7 @@ func (l *traceLog) snapshot() [][]string {
 
 const sampleSource = "local answer = 42\nreturn answer\n"
 
-func testBackend(t *testing.T, debug bool, options ...func(*Config)) (*Backend, string, *traceLog) {
+func testBackend(t *testing.T, options ...func(*Config)) (*Backend, string, *traceLog) {
 	t.Helper()
 	repo, err := filepath.Abs("../../..")
 	if err != nil {
@@ -57,7 +57,7 @@ func testBackend(t *testing.T, debug bool, options ...func(*Config)) (*Backend, 
 	trace := &traceLog{}
 	config := Config{
 		Root: root, InitFile: filepath.Join(repo, "tests", "minimal_init.lua"),
-		RuntimePath: repo, Debug: debug, Trace: trace.add,
+		RuntimePath: repo, Trace: trace.add,
 	}
 	for _, option := range options {
 		option(&config)
@@ -127,7 +127,7 @@ func prepareFile(path string, before, after []byte) map[string]any {
 }
 
 func TestEmbeddedBootstrapCompletionHealthAndTrace(t *testing.T) {
-	backend, _, trace := testBackend(t, true)
+	backend, _, trace := testBackend(t)
 	descriptor := backend.Descriptor()
 	if descriptor.Backend != "embed" || descriptor.Epoch != 1 || descriptor.ProcessID <= 0 ||
 		descriptor.Cancellation != provider.CancellationCooperative {
@@ -170,7 +170,7 @@ func TestEmbeddedBootstrapCompletionHealthAndTrace(t *testing.T) {
 }
 
 func TestCompletionNotificationsDispatchByRequestID(t *testing.T) {
-	backend, _, _ := testBackend(t, false)
+	backend, _, _ := testBackend(t)
 	execLua(t, backend, `
 local lsp = require("huyang.lsp")
 lsp.dispatch = function(_, args)
@@ -228,7 +228,7 @@ return true
 }
 
 func TestCooperativeCancelLeavesOtherCallsRunning(t *testing.T) {
-	backend, _, trace := testBackend(t, false)
+	backend, _, trace := testBackend(t)
 	first := backend.Descriptor()
 	yieldingDispatch(t, backend)
 
@@ -314,7 +314,7 @@ func TestCancelFallbackReplacesUnresponsiveGeneration(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			backend, _, trace := testBackend(t, false, shortCancelGrace)
+			backend, _, trace := testBackend(t, shortCancelGrace)
 			first := backend.Descriptor()
 			blockDispatch(t, backend)
 			ctx, cancel := tc.context()
@@ -345,7 +345,7 @@ func TestCancelFallbackReplacesUnresponsiveGeneration(t *testing.T) {
 }
 
 func TestProviderDeathFailsConcurrentCallsAndRestartsLazily(t *testing.T) {
-	backend, _, _ := testBackend(t, false)
+	backend, _, _ := testBackend(t)
 	first := backend.Descriptor()
 	blockDispatch(t, backend)
 	results := make(chan error, 2)
@@ -382,7 +382,7 @@ func TestProviderDeathFailsConcurrentCallsAndRestartsLazily(t *testing.T) {
 }
 
 func TestStderrTailIsBoundedAndIncludedInDeath(t *testing.T) {
-	backend, _, _ := testBackend(t, false)
+	backend, _, _ := testBackend(t)
 	backend.mu.Lock()
 	g := backend.generation
 	backend.mu.Unlock()
@@ -504,7 +504,7 @@ func TestAPILevelCheckExplainsOldNeovim(t *testing.T) {
 }
 
 func TestOperationErrorCarriesKernelCode(t *testing.T) {
-	backend, file, _ := testBackend(t, false)
+	backend, file, _ := testBackend(t)
 	_, err := backend.Call(context.Background(), provider.Request{
 		Context:   provider.RequestContext{RequestID: "lease"},
 		Operation: "huyang_prepare", Arguments: map[string]any{
@@ -537,7 +537,7 @@ func TestOperationErrorCarriesKernelCode(t *testing.T) {
 }
 
 func TestTransactionPrepareReportsTouchedSnapshots(t *testing.T) {
-	backend, file, _ := testBackend(t, false)
+	backend, file, _ := testBackend(t)
 	after := []byte("return 1\n")
 	result, err := backend.Call(context.Background(), provider.Request{
 		Context:   provider.RequestContext{RequestID: "prepare-touched", TransactionID: "plan_touch"},
@@ -573,7 +573,7 @@ func TestTransactionPrepareReportsTouchedSnapshots(t *testing.T) {
 }
 
 func TestDiagnosticEvidenceIsCarriedStructurally(t *testing.T) {
-	backend, file, _ := testBackend(t, false)
+	backend, file, _ := testBackend(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := backend.Call(ctx, provider.Request{
@@ -594,7 +594,7 @@ func TestDiagnosticEvidenceIsCarriedStructurally(t *testing.T) {
 }
 
 func TestTransactionPrepareAcceptsMissingFileWithEmptyPreimage(t *testing.T) {
-	backend, first, _ := testBackend(t, false)
+	backend, first, _ := testBackend(t)
 	created := filepath.Join(filepath.Dir(first), "created.lua")
 	_, err := backend.Call(context.Background(), provider.Request{
 		Context:   provider.RequestContext{RequestID: "transaction-create"},
@@ -620,7 +620,7 @@ func TestTransactionPrepareAcceptsMissingFileWithEmptyPreimage(t *testing.T) {
 
 func TestTransactionBatchFailureRestoresEveryUnsavedBuffer(t *testing.T) {
 	t.Setenv("HUYANG_TEST_FAULTS", "1")
-	backend, first, _ := testBackend(t, false)
+	backend, first, _ := testBackend(t)
 	second := filepath.Join(filepath.Dir(first), "second.lua")
 	firstBytes := []byte(sampleSource)
 	secondBytes := []byte("return 'second'\n")
@@ -653,7 +653,7 @@ func TestTransactionBatchFailureRestoresEveryUnsavedBuffer(t *testing.T) {
 }
 
 func TestFaultInjectionIsIgnoredWithoutTestFaults(t *testing.T) {
-	backend, file, _ := testBackend(t, false)
+	backend, file, _ := testBackend(t)
 	_, err := backend.Call(context.Background(), provider.Request{
 		Context:   provider.RequestContext{RequestID: "no-fault"},
 		Operation: "huyang_prepare", Arguments: map[string]any{
@@ -674,7 +674,7 @@ func TestFaultInjectionIsIgnoredWithoutTestFaults(t *testing.T) {
 
 func TestTransactionProviderDeathDropsStagedViewAndRestartsClean(t *testing.T) {
 	t.Setenv("HUYANG_TEST_FAULTS", "1")
-	backend, file, _ := testBackend(t, false)
+	backend, file, _ := testBackend(t)
 	original := []byte(sampleSource)
 	_, err := backend.Call(context.Background(), provider.Request{
 		Context:   provider.RequestContext{RequestID: "transaction-death"},
@@ -702,7 +702,7 @@ func TestTransactionProviderDeathDropsStagedViewAndRestartsClean(t *testing.T) {
 }
 
 func TestRootLockRejectsSecondProviderAndReleasesOnClose(t *testing.T) {
-	first, _, _ := testBackend(t, false)
+	first, _, _ := testBackend(t)
 	_, err := Open(Config{Root: first.config.Root, Executable: "nvim"})
 	var failure *provider.Failure
 	if !errors.As(err, &failure) || failure.Code != provider.FailureLaunch ||
@@ -729,7 +729,7 @@ func TestRootLockRejectsSecondProviderAndReleasesOnClose(t *testing.T) {
 }
 
 func TestWorkspaceResyncOperationNameMatchesBridge(t *testing.T) {
-	backend, _, _ := testBackend(t, false)
+	backend, _, _ := testBackend(t)
 	for _, operation := range []string{"workspace_resync", "huyang_workspace_resync"} {
 		result, err := backend.Call(context.Background(), provider.Request{
 			Context:   provider.RequestContext{RequestID: "resync-" + operation},

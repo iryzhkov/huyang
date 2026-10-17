@@ -9,8 +9,8 @@ full tables, the Python fixture and the pre-change numbers are in
 [bench/agent-efficiency/RESULTS.md](../bench/agent-efficiency/RESULTS.md).
 
 Every tool that names a workspace accepts `root` (the repository root) in place of
-`workspace_id`, including `change_plan`, `revision_diff`, `diagnostics`, `code_actions`,
-`language_server_*` and the four debugger tools: the workspace is opened on the first call
+`workspace_id`, including `change_plan`, `revision_diff`, `diagnostics`, `code_actions`
+and, on the `full` profile, `language_server_*`: the workspace is opened on the first call
 and reused afterwards, so a task in a known repository needs no `workspace_open` at all. Call `workspace_open {kind: project, root}`
 only when you want its answer: the top-level overview, the verification commands and
 whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
@@ -28,7 +28,7 @@ root it chose:
   subdirectory, outside any repository (Codex starts its servers in the home directory),
   or over HTTP, nothing is inferred and the call is refused with `resend_with_root`.
 
-An edit, a plan, `verify_run` or the debugger is never given a default workspace: name it
+An edit, a plan or `verify_run` is never given a default workspace: name it
 with `root` or `workspace_id`. An explicit `root` or `workspace_id` always wins over the
 default.
 
@@ -349,9 +349,10 @@ Keep both transport representations for compatible consumers and deduplicate for
   this edit), or none attached within the wait. Servers for the project's main languages
   start in the background when it is opened, so this is rare after the first call. A
   language that is incidental to the project (not its largest source language, under a
-  fifth of its source files and under a hundred files) is reported `on_demand` by `language_server_status`: its server
-  starts on the first call that touches one of its files, which may then answer
-  `lsp_starting` once, or at once when the status call names it in `languages`.
+  fifth of its source files and under a hundred files) is reported `on_demand` by
+  `language_server_status` (a `full`-profile tool; the default `edit` profile does not
+  carry it): its server starts on the first call that touches one of its files, which may
+  then answer `lsp_starting` once, or at once when the status call names it in `languages`.
 - `verbose: true` on `edit_apply` restores the full change record and handle resolution;
   nothing else needs it.
 - A whole-file rewrite through `edit_apply` is bounded (the patch in the response is cut at

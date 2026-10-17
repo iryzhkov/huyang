@@ -150,7 +150,7 @@ PROVIDER_RSS="$(children_rss_kb "$SERVE_PID")"
 
 # --- tool descriptor sizes per profile ------------------------------------------
 TOOLS_JSON='{}'
-for profile in full orient edit debug; do
+for profile in full orient edit; do
   session_start "$profile"
   size="$(rpc tools/list '{}' | jq -c '.tools' | wc -c)"
   session_stop
@@ -219,7 +219,7 @@ check largest_go_file 10
 for key in provider_rss_kb registry_bytes receipts_bytes plans_bytes journals_bytes diag_bytes go_lines go_test_lines lua_lines; do
   printf '%-20s %12s %12s\n' "$key" "$(jq -r ".$key" "$OUT")" -
 done
-for profile in full orient edit debug; do
+for profile in full orient edit; do
   printf '%-20s %12s %12s\n' "tools_${profile}_bytes" "$(jq -r ".tools_bytes.$profile" "$OUT")" -
 done
 echo "budget: wrote $OUT (provider=$PROVIDER, diagnostics=$DIAG_OUTCOME)"

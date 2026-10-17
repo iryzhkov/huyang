@@ -2,18 +2,66 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/iryzhkov/huyang/internal/mcpapi"
+	"github.com/iryzhkov/huyang/internal/provider"
 	"github.com/iryzhkov/huyang/internal/providerpool"
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
+// providerCall is one operation a recorded provider answered.
+type providerCall struct {
+	root      string
+	operation string
+	err       error
+}
+
+// recordingFactory opens the real providers of another factory and records,
+// per provider root, every operation they answer, so a test can tell the
+// canonical provider from a sandbox stager's and see that a call reached it.
+type recordingFactory struct {
+	inner providerpool.Factory
+	mu    sync.Mutex
+	calls []providerCall
+}
+
+func (f *recordingFactory) Open(config providerpool.OpenConfig) (provider.Provider, error) {
+	backend, err := f.inner.Open(config)
+	if err != nil {
+		return nil, err
+	}
+	return &recordedProvider{Provider: backend, root: config.Root, factory: f}, nil
+}
+
+func (f *recordingFactory) snapshot() []providerCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]providerCall(nil), f.calls...)
+}
+
+type recordedProvider struct {
+	provider.Provider
+	root    string
+	factory *recordingFactory
+}
+
+func (p *recordedProvider) Call(ctx context.Context, request provider.Request) (provider.Result, error) {
+	result, err := p.Provider.Call(ctx, request)
+	p.factory.mu.Lock()
+	p.factory.calls = append(p.factory.calls, providerCall{root: p.root, operation: request.Operation, err: err})
+	p.factory.mu.Unlock()
+	return result, err
+}
+
 func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *testing.T) {
 	previousFactory := providerpool.DefaultFactory
-	providerpool.DefaultFactory = providerpool.ConfiguredFactory{Backend: "embed"}
+	recorder := &recordingFactory{inner: providerpool.ConfiguredFactory{Backend: "embed"}}
+	providerpool.DefaultFactory = recorder
 	defer func() { providerpool.DefaultFactory = previousFactory }()
 	runtimeRoot, err := filepath.Abs("../..")
 	if err != nil {
@@ -32,20 +80,24 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	defer direct.closeProviders()
 	session, cleanup := connectOfficialClient(t, mcpapi.ProfileFull, direct)
 	defer cleanup()
+	// A project workspace: only a project has a canonical provider, which
+	// is what the probe below must reach while the plan is staged.
 	opened := callModern(t, session, "workspace_open", map[string]any{
-		"kind": "documents", "files": []string{file},
+		"kind": "project", "root": root,
 	})
-	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
+	workspace := opened["workspace"].(map[string]any)
+	workspaceID := workspace["id"].(string)
+	canonicalRoot := workspace["root"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "prepare-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "DELTA",
 		}},
 	})
 	plan := created["data"].(map[string]any)["plan"].(map[string]any)
@@ -61,14 +113,54 @@ func TestOfficialClientPreparesExclusiveUnsavedProviderBuffersAndDiscards(t *tes
 	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, original) {
 		t.Fatalf("prepare changed canonical disk: %q, %v", current, err)
 	}
-	unblocked := callModern(t, session, "debug_session", map[string]any{
-		"workspace_id": workspaceID, "idempotency_key": "non-owner-provider-call", "action": "start",
-	})
-	if unblocked["outcome"] == "conflict" && unblocked["code"] == "workspace_busy" {
-		t.Fatalf("canonical provider was blocked by isolated staging: %#v", unblocked)
-	}
 	sandboxStager := direct.handlers.ProviderPool().Stager(workspaceIDValue(workspaceID), planID)
-	sandboxFile := filepath.Join(sandboxStager.Sandbox().Tree, "note.txt")
+	if sandboxStager == nil || sandboxStager.Sandbox() == nil {
+		t.Fatal("prepare holds no sandbox stager")
+	}
+	sandboxTree := sandboxStager.Sandbox().Tree
+	stagedOnSandbox := false
+	for _, call := range recorder.snapshot() {
+		if call.root == sandboxTree {
+			stagedOnSandbox = true
+		}
+	}
+	if !stagedOnSandbox || sandboxTree == canonicalRoot {
+		t.Fatalf("prepare did not stage through its own sandbox provider (tree %s)", sandboxTree)
+	}
+	// While the preparation is held, a canonical provider call must run on
+	// the canonical root and succeed: isolated staging owns the sandbox
+	// provider's unsaved buffers, not the workspace's own provider.
+	beforeProbe := len(recorder.snapshot())
+	probe := callModern(t, session, "language_server_status", map[string]any{"workspace_id": workspaceID})
+	if probe["outcome"] == "failed" || probe["outcome"] == "conflict" {
+		t.Fatalf("canonical provider was not reachable during isolated staging: %#v", probe)
+	}
+	if status, _ := probe["data"].(map[string]any)["provider"].(map[string]any); status["state"] != "healthy" {
+		t.Fatalf("canonical provider status during staging = %#v", probe["data"])
+	}
+	reachedCanonical := false
+	for _, call := range recorder.snapshot()[beforeProbe:] {
+		if call.operation != "workspace_support" {
+			continue
+		}
+		if call.root != canonicalRoot {
+			t.Fatalf("probe ran on %s, not the canonical root %s", call.root, canonicalRoot)
+		}
+		if call.err != nil {
+			t.Fatalf("canonical workspace_support failed during staging: %v", call.err)
+		}
+		reachedCanonical = true
+	}
+	if !reachedCanonical {
+		t.Fatal("probe never reached the canonical provider")
+	}
+	if _, held := sandboxStager.Prepared(); !held {
+		t.Fatal("the canonical call released the held preparation")
+	}
+	if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, original) {
+		t.Fatalf("canonical call during staging changed canonical disk: %q, %v", current, err)
+	}
+	sandboxFile := filepath.Join(sandboxTree, "note.txt")
 	staged, err := os.ReadFile(sandboxFile)
 	if err != nil || !bytes.Equal(staged, []byte("alpha DELTA gamma\n")) {
 		t.Fatalf("sandbox does not contain prepared bytes: %q, %v", staged, err)
@@ -121,14 +213,14 @@ func TestOfficialClientAppliesJournaledPlanAndResyncsProvider(t *testing.T) {
 	workspaceID := opened["workspace"].(map[string]any)["id"].(string)
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	created := callModern(t, session, "change_plan", map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "apply-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "replace-beta", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": "DELTA",
+			"target": map[string]any{"handle": hit["handle"]}, "content": "DELTA",
 		}},
 	})
 	plan := created["data"].(map[string]any)["plan"].(map[string]any)

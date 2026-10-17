@@ -92,14 +92,14 @@ func TestSharedServiceSurvivesAdapterReconnectAndRestart(t *testing.T) {
 	}
 	searched := callModern(t, firstSession, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	applyArguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "service-apply-1",
 		"operation": map[string]any{
 			"kind":    "replace_range",
-			"target":  map[string]any{"file_range": hit["range"]},
+			"target":  map[string]any{"handle": hit["handle"]},
 			"content": "gamma",
 		},
 	}
@@ -203,28 +203,33 @@ func TestEditReceiptIsDurableBeforePostMutationDiagnostics(t *testing.T) {
 	workspaceID := string(opened["workspace"].(workspacecore.Identity).ID)
 	searched := direct.call(context.Background(), "search", map[string]any{
 		"workspace_id": workspaceID, "query": "beta", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]map[string]any)[0]
-	encodedRange, err := json.Marshal(hit["range"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fileRange map[string]any
-	if err := json.Unmarshal(encodedRange, &fileRange); err != nil {
-		t.Fatal(err)
+	// An in-process reply carries the handle as its Go type; an MCP client
+	// receives and sends it back as a JSON string, which is what edit_apply
+	// decodes. Send the wire form.
+	handle := fmt.Sprint(hit["handle"])
+	if hit["handle"] == nil || handle == "" {
+		t.Fatalf("search hit carries no handle: %#v", hit)
 	}
 	arguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "restart-during-diagnostics",
 		"operation": map[string]any{
-			"kind": "replace_range", "target": map[string]any{"file_range": fileRange}, "content": "gamma",
+			"kind": "replace_range", "target": map[string]any{"handle": handle}, "content": "gamma",
 		},
 	}
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()
 	done := make(chan map[string]any, 1)
 	go func() { done <- direct.call(requestContext, "edit_apply", arguments) }()
-	<-backend.reached
+	select {
+	case <-backend.reached:
+	case early := <-done:
+		t.Fatalf("edit returned before its post-mutation resync: %#v", early)
+	case <-time.After(30 * time.Second):
+		t.Fatal("edit did not reach its post-mutation resync within 30s")
+	}
 
 	restarted := newDirectWorkspaces(stateDir)
 	replayed := restarted.call(context.Background(), "edit_apply", arguments)
@@ -268,10 +273,7 @@ func (p *resyncBlockingProvider) Close(context.Context) error { return nil }
 func (p *resyncBlockingProvider) Done() <-chan struct{}       { return make(chan struct{}) }
 
 func displayRangeTarget(path string) map[string]any {
-	return map[string]any{"file_range": map[string]any{
-		"path": path, "revision_id": "display-only", "byte_start": 0, "byte_end": 0,
-		"expected_sha256": "", "before_sha256": "", "after_sha256": "", "anchor_bytes": 0,
-	}}
+	return map[string]any{"path": path}
 }
 
 func workspaceIDFromString(value string) workspacecore.ID {
@@ -291,7 +293,7 @@ func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error
 }
 
 // The adapter defaults to the edit profile: a coding session pays for the
-// debugger only when it asks for it.
+// language-server administration tools only when it asks for full.
 func TestHuyangMCPAdapterDefaultsToEditAndProxiesService(t *testing.T) {
 	base := t.TempDir()
 	socketPath := filepath.Join(base, "control.sock")
@@ -401,7 +403,7 @@ func TestLoopbackHTTPUsesFixedProfilesAndBearerCredential(t *testing.T) {
 		t.Fatalf("unauthorized status = %d", response.StatusCode)
 	}
 
-	for route, expected := range map[string]int{"/mcp": 19, "/mcp/orient": 8, "/mcp/edit": 13, "/mcp/debug": 12} {
+	for route, expected := range map[string]int{"/mcp": 15, "/mcp/orient": 8, "/mcp/edit": 13} {
 		httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 		client := mcp.NewClient(&mcp.Implementation{Name: "huyang-http-test", Version: "1"}, nil)
 		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{

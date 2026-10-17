@@ -479,18 +479,6 @@ local function workspace_support(args)
 			end
 			local attach_wait_ms = support_attach_wait(ft, requested_attach_wait, restored_servers)
             local configs = enabled_lsp_configs_for(ft)
-            -- What could run this language under a debugger, so a client
-            -- learns the option exists even when the debug tools are off.
-            -- Probed before the server starts: for Java the probe also adds
-            -- the java-debug bundle to the jdtls config, which only counts
-            -- for a client that has not started yet.
-            local debugger
-            if not DATA_FILETYPES[ft] then
-                local okd, dbg = pcall(function()
-                    return require("huyang.dap").debugger_for(ft, root)
-                end)
-                if okd then debugger = dbg end
-            end
             local clients, on_demand = {}, false
             -- A server that cannot start is probed the old way even for an
             -- incidental language: nothing is spawned, and the report says
@@ -523,7 +511,6 @@ local function workspace_support(args)
                 files = by_ft[ft],
                 treesitter_parser = parser,
                 lsp = #clients > 0 and table.concat(clients, ",") or "none",
-                debugger = debugger,
                 install_options = install_options,
                 prerequisite = prerequisite,
                 interpreter = interpreter,

@@ -10,8 +10,8 @@ import (
 	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 )
 
-// Pool owns every provider the service spawns: the canonical (or
-// debug) provider of each workspace and the sandbox stagers that prepare
+// Pool owns every provider the service spawns: the canonical provider of
+// each workspace and the sandbox stagers that prepare
 // plans in isolation. It is the single place a provider is opened, so the
 // runtime path and init file cannot drift between call sites.
 type Pool struct {
@@ -90,14 +90,14 @@ func (p *Pool) slotFor(id workspacecore.ID) *providerSlot {
 
 // open starts one owned Neovim provider rooted at root with the shipped
 // runtime and the configured headless init file. Every provider the pool
-// spawns, canonical, debug, sandbox or verification, goes through this
+// spawns, canonical, sandbox or verification, goes through this
 // constructor.
-func (p *Pool) Open(root string, debug bool) (provider.Provider, error) {
-	return p.openOwned(root, debug, 0, true)
+func (p *Pool) Open(root string) (provider.Provider, error) {
+	return p.openOwned(root, 0, true)
 }
 
-func (p *Pool) openAfter(root string, debug bool, epoch uint64) (provider.Provider, error) {
-	return p.openOwned(root, debug, epoch, false)
+func (p *Pool) openAfter(root string, epoch uint64) (provider.Provider, error) {
+	return p.openOwned(root, epoch, false)
 }
 
 // Canonical leases the owned Neovim provider for a project workspace.
@@ -107,17 +107,6 @@ func (p *Pool) openAfter(root string, debug bool, epoch uint64) (provider.Provid
 // provider is started lazily and recreated after a daemon or provider
 // restart without changing the workspace ID.
 func (p *Pool) Canonical(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, func(), error) {
-	return p.workspaceProvider(ctx, workspace, false)
-}
-
-// Debug leases the workspace provider for a debugger operation. Acquiring it
-// does not claim session ownership: idle eviction queries the running debugger.
-// A healthy canonical provider is reused.
-func (p *Pool) Debug(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, func(), error) {
-	return p.workspaceProvider(ctx, workspace, true)
-}
-
-func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.Workspace, debug bool) (provider.Provider, func(), error) {
 	identity := workspace.Identity()
 	if identity.Kind != workspacecore.KindProject {
 		return nil, func() {}, fmt.Errorf("semantic provider requires a project workspace")
@@ -144,7 +133,7 @@ func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.W
 			return nil, func() {}, err
 		}
 	}
-	backend, err := p.openAfter(identity.Root, debug, slot.epoch)
+	backend, err := p.openAfter(identity.Root, slot.epoch)
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -178,10 +167,6 @@ func (p *Pool) Restart(ctx context.Context, workspace *workspacecore.Workspace) 
 	if slot.users != 0 {
 		slot.mu.Unlock()
 		return nil, func() {}, ErrProviderBusy
-	}
-	if p.debugActiveLocked(ctx, slot) {
-		slot.mu.Unlock()
-		return nil, func() {}, fmt.Errorf("%w: active debug session or trace targets", ErrProviderBusy)
 	}
 	err := p.closeSlotLocked(slot)
 	slot.mu.Unlock()
@@ -246,7 +231,7 @@ func (p *Pool) Close() {
 }
 
 // Holds reports whether the pool keeps anything alive for the workspace: a
-// running canonical or debug provider, a caller still leasing its slot, or a
+// running canonical provider, a caller still leasing its slot, or a
 // sandbox stager of one of its plans. The workspace registry never forgets a
 // workspace the pool still holds. A slot whose lock is taken is in use, so it
 // counts as held rather than being waited on.

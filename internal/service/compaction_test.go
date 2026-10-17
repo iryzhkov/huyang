@@ -183,7 +183,7 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 	}
 	// The default hit is path and line; the matched text is omitted when it
 	// is the literal query the caller sent, and the editable handle and the
-	// column come with include_handles or include_ranges.
+	// column come with include_handles.
 	if hit["path"] != "main.go" || hit["line"] != 2 || hit["match"] != nil || hit["handle"] != nil || hit["column"] != nil {
 		t.Fatalf("compact hit = %#v", hit)
 	}
@@ -191,10 +191,15 @@ func TestSearchHitsCarryAnchorsOnlyOnRequest(t *testing.T) {
 	if matched := pattern["data"].(map[string]any)["hits"].([]map[string]any)[0]["match"]; matched != "needle" {
 		t.Fatalf("a regular expression hit must carry the text it matched: %#v", matched)
 	}
-	anchored := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "needle", "include_ranges": true})
+	anchored := direct.call(context.Background(), "search", map[string]any{"workspace_id": workspaceID, "query": "needle", "include_handles": true})
 	hit = anchored["data"].(map[string]any)["hits"].([]map[string]any)[0]
-	if _, ok := hit["range"].(workspacecore.RangeHandle); !ok {
-		t.Fatalf("anchored hit lacks range: %#v", hit)
+	if hit["handle"] == nil || hit["column"] == nil {
+		t.Fatalf("handle hit lacks handle or column: %#v", hit)
+	}
+	for _, key := range []string{"range", "byte_start", "byte_end"} {
+		if _, present := hit[key]; present {
+			t.Fatalf("handle hit carries byte anchors (%s): %#v", key, hit)
+		}
 	}
 	set := anchored["data"].(map[string]any)["result_set"].(map[string]any)
 	refined := direct.call(context.Background(), "search", map[string]any{
@@ -443,7 +448,7 @@ func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
 
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "seed", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	large := strings.Repeat("x", 128<<10)
@@ -451,7 +456,7 @@ func TestStructuredResponsesBoundLargePlansAndWorkspaceMaps(t *testing.T) {
 		"workspace_id": workspaceID, "idempotency_key": "large-plan-create", "action": "create",
 		"operations": []any{map[string]any{
 			"op_id": "large-replace", "kind": "replace_range",
-			"target": map[string]any{"file_range": hit["range"]}, "content": large,
+			"target": map[string]any{"handle": hit["handle"]}, "content": large,
 		}},
 	})
 	if created["outcome"] != "ok" {

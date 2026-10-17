@@ -15,13 +15,8 @@ import (
 type reapProvider struct {
 	stubProvider
 	closes       atomic.Int32
-	debugActive  atomic.Bool
 	closeStarted chan struct{}
 	closeAllowed chan struct{}
-}
-
-func (p *reapProvider) DebugActive(context.Context) (bool, error) {
-	return p.debugActive.Load(), nil
 }
 
 func (p *reapProvider) Close(context.Context) error {
@@ -162,52 +157,24 @@ func TestReapExistingRefreshesIdleTime(t *testing.T) {
 		t.Fatal("Existing spawned a provider")
 	}
 }
-func TestReapDebugAndBusySlots(t *testing.T) {
-	for _, reuse := range []bool{false, true} {
-		t.Run(map[bool]string{false: "fresh_debug", true: "canonical_reused_for_debug"}[reuse], func(t *testing.T) {
-			p, w, f, advance := reapFixture(t)
-			if reuse {
-				_, release, err := p.Canonical(context.Background(), w)
-				release()
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			_, release, err := p.Debug(context.Background(), w)
-			release()
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.opened[0].debugActive.Store(true)
-			advance(2 * DefaultProviderIdleTimeout)
-			if p.ReapIdle() != 0 {
-				t.Fatal("active debug provider reaped")
-			}
-			f.opened[0].debugActive.Store(false)
-			if p.ReapIdle() != 1 {
-				t.Fatal("ended debug ownership prevented idle reaping")
-			}
-		})
+func TestReapSkipsBusySlots(t *testing.T) {
+	p, w, _, advance := reapFixture(t)
+	_, release, err := p.Canonical(context.Background(), w)
+	release()
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Run("slot_lock", func(t *testing.T) {
-		p, w, _, advance := reapFixture(t)
-		_, release, err := p.Canonical(context.Background(), w)
-		release()
-		if err != nil {
-			t.Fatal(err)
-		}
-		advance(DefaultProviderIdleTimeout)
-		slot := p.slotFor(w.Identity().ID)
-		slot.mu.Lock()
-		n := p.ReapIdle()
-		slot.mu.Unlock()
-		if n != 0 {
-			t.Fatal("busy slot reaped")
-		}
-		if p.ReapIdle() != 1 {
-			t.Fatal("unlocked idle slot retained")
-		}
-	})
+	advance(DefaultProviderIdleTimeout)
+	slot := p.slotFor(w.Identity().ID)
+	slot.mu.Lock()
+	n := p.ReapIdle()
+	slot.mu.Unlock()
+	if n != 0 {
+		t.Fatal("busy slot reaped")
+	}
+	if p.ReapIdle() != 1 {
+		t.Fatal("unlocked idle slot retained")
+	}
 }
 func TestReaperLifecycleJoinsAndDoesNotRestartAfterClose(t *testing.T) {
 	p, w, f, advance := reapFixture(t)

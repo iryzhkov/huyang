@@ -15,7 +15,6 @@ func TestSearchSummarisesSingleHitAndRecoversInvalidRegex(t *testing.T) {
 
 	singular := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "once", "mode": "literal",
-		"include_ranges": true,
 	})
 	if singular["summary"] != "1 match" {
 		t.Fatalf("singular search summary = %#v", singular)

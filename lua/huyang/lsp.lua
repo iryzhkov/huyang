@@ -607,12 +607,6 @@ function M.dispatch(tool, args)
     require("huyang.client").enter(args and args.client)
     local fn = dispatch_table[tool]
     if not fn then
-        -- The debugger tools live in their own module; they share the
-        -- transport, the position addressing and the relativized replies.
-        local okd, dap_tools = pcall(require, "huyang.dap")
-        if okd and dap_tools.handles(tool) then
-            return relativize(dap_tools.dispatch(tool, args))
-        end
         err("unknown tool: %s", tostring(tool))
     end
     local result = fn(args or {})
@@ -634,23 +628,10 @@ function M.dispatch(tool, args)
     return result
 end
 
--- Internals shared with huyang.dap, exported rather than moved so the
--- debugger module can reuse the coroutine helpers, buffer loading and the
--- symbol index without this file growing further.
+-- Unit-checked: the location cap has to name the files it dropped, and
+-- driving 201 real references through a language server to see that is not
+-- a check anyone would run.
 M._internal = {
-    await = core.await,
-    sleep = core.sleep,
-    err = core.err,
-    load_buf = core.load_buf,
-    resolve_symbol = index.resolve_symbol,
-    rel_path = core.rel_path,
-    disk_fingerprint = core.disk_fingerprint,
-    symbol_index = index.symbol_index,
-    innermost_entry = index.innermost_entry,
-    decl_line = core.decl_line,
-    -- Unit-checked: the location cap has to name the files it dropped, and
-    -- driving 201 real references through a language server to see that is
-    -- not a check anyone would run.
     format_locations = format_locations,
 }
 return M

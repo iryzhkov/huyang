@@ -16,13 +16,13 @@ func TestIdempotentReplayIsExplicitAndKeyReuseIsAConflict(t *testing.T) {
 
 	searched := callModern(t, session, "search", map[string]any{
 		"workspace_id": workspaceID, "query": "once", "mode": "literal",
-		"include_ranges": true,
+		"include_handles": true,
 	})
 	hit := searched["data"].(map[string]any)["hits"].([]any)[0].(map[string]any)
 	arguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "replay-key",
 		"operation": map[string]any{
-			"kind": "replace_range", "target": map[string]any{"file_range": hit["range"]}, "content": "twice",
+			"kind": "replace_range", "target": map[string]any{"handle": hit["handle"]}, "content": "twice",
 		},
 	}
 	first := callModern(t, session, "edit_apply", arguments)
@@ -36,7 +36,7 @@ func TestIdempotentReplayIsExplicitAndKeyReuseIsAConflict(t *testing.T) {
 	conflictArguments := map[string]any{
 		"workspace_id": workspaceID, "idempotency_key": "replay-key",
 		"operation": map[string]any{
-			"kind": "replace_range", "target": map[string]any{"file_range": hit["range"]}, "content": "different",
+			"kind": "replace_range", "target": map[string]any{"handle": hit["handle"]}, "content": "different",
 		},
 	}
 	conflict := callModern(t, session, "edit_apply", conflictArguments)
