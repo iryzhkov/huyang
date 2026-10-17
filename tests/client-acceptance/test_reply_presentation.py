@@ -275,7 +275,7 @@ class PresentationTests(unittest.TestCase):
             (REFUSAL, REFUSAL[:-2]),
             (REFUSAL + "\n", REFUSAL[:-1]),
             (REFUSAL + "\n", REFUSAL),
-            (REFUSAL[:-1] + "\r\n", REFUSAL[:-1]),
+            (REFUSAL[:-1] + "\r\n", REFUSAL[:-1] + "\r"),
             (REFUSAL, REFUSAL[:-1].replace("workspace revision", "workspace  revision")),
             (REFUSAL, REFUSAL[:-1].replace(GUARD, CURRENT)),
             (REFUSAL, REFUSAL[:-1].replace("next:", "")),
@@ -363,7 +363,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_opencode_envelope_rejects_whitespace_and_error_gate_changes(self):
         for label, text, message, step, error in (
-            ("crlf", REFUSAL[:-1] + "\r\n", REFUSAL[:-1], "stale", True),
+            ("crlf", REFUSAL[:-1] + "\r\n", REFUSAL[:-1] + "\r", "stale", True),
             ("double-terminal-lf", REFUSAL + "\n", REFUSAL, "stale", True),
             ("two-lfs-removed", REFUSAL + "\n", REFUSAL[:-1], "stale", True),
             ("two-bytes-removed", REFUSAL, REFUSAL[:-2], "stale", True),
