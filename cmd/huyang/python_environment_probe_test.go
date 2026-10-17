@@ -1104,6 +1104,7 @@ func (p *m9Probe) collectPostFix() {
 		p.postFixCoverage["reached_gate"] = "transport_and_postimage_observation"
 		p.postFixCoverage["selected_provider"] = state.Provider
 		p.postFixCoverage["producer_proof_observed"] = state.ProducerProof
+		p.postFixCoverage["unversioned_push_observed"] = state.UnversionedPush
 		p.postFixCoverage["observed_progress_begins"] = state.ProgressBegins
 		p.postFixCoverage["known_work_pending"] = state.Pending
 		p.postFixCoverage["last_observation_reason"] = state.Reason
@@ -1112,7 +1113,7 @@ func (p *m9Probe) collectPostFix() {
 		if p.ctx.Err() != nil {
 			break
 		}
-		if !state.ProducerProof && state.UnversionedPush {
+		if state.UnversionedPush {
 			p.t.Fatal("unversioned/mixed push transport is outside the strict pure-pull fallback")
 		}
 		// Receipt-bound transaction IDs come only from recovered producer evidence.
