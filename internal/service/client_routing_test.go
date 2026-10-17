@@ -43,6 +43,20 @@ func routingRepository(t *testing.T, root string, files map[string]string) strin
 	return root
 }
 
+// shortSocketPath is a control socket path that stays under the 108-byte
+// Unix socket bound. t.TempDir embeds the test's name, which for these tests
+// is long enough to exceed it under any TMPDIR longer than a few characters,
+// so the socket gets a short directory of its own under os.TempDir.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "hs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "control.sock")
+}
+
 // connectUnixClientWith connects to the service socket with the hello an
 // adapter started in some directory would send.
 func connectUnixClientWith(t *testing.T, socketPath string, hello controlHello) (*mcp.ClientSession, func()) {
@@ -111,7 +125,7 @@ func TestAdapterAnnouncesTheSameDirectoryAndSessionOnReconnect(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	client := t.TempDir()
 	useAdapterDirectory(t, client)
-	socketPath := filepath.Join(t.TempDir(), "control.sock")
+	socketPath := shortSocketPath(t)
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +181,7 @@ func TestClientDirectoryDefaultsOnlyReadsAndExplicitNamesWin(t *testing.T) {
 	base := t.TempDir()
 	repository := routingRepository(t, filepath.Join(base, "repo"), map[string]string{"notes.txt": "needle here\n"})
 	other := routingRepository(t, filepath.Join(base, "other"), map[string]string{"notes.txt": "needle there\n"})
-	socketPath := filepath.Join(base, "control.sock")
+	socketPath := shortSocketPath(t)
 	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
 	defer stop()
 	session, closeSession := connectUnixClientWith(t, socketPath, controlHello{Profile: string(mcpapi.ProfileEdit), Session: "routing", Cwd: repository})
@@ -218,7 +232,7 @@ func TestRelativeRootRetriesReplayWhicheverWayTheWorkspaceIsNamed(t *testing.T) 
 	useStubProvider(t, newStubProvider())
 	base := t.TempDir()
 	repository := routingRepository(t, filepath.Join(base, "repo"), map[string]string{"notes.txt": "needle here\n"})
-	socketPath := filepath.Join(base, "control.sock")
+	socketPath := shortSocketPath(t)
 	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
 	defer stop()
 	session, closeSession := connectUnixClientWith(t, socketPath, controlHello{Profile: string(mcpapi.ProfileEdit), Session: "replay", Cwd: repository})
@@ -277,7 +291,7 @@ func TestClientDirectoryInALinkedWorktreeDefaultsToTheWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, "a.txt"), []byte("worktree copy\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	socketPath := filepath.Join(base, "control.sock")
+	socketPath := shortSocketPath(t)
 	_, stop := startTestHuyangService(t, filepath.Join(base, "state"), socketPath, "")
 	defer stop()
 
@@ -303,7 +317,7 @@ func TestClientDirectorySurvivesAServiceRestartThroughTheAdapter(t *testing.T) {
 	base := t.TempDir()
 	repository := routingRepository(t, filepath.Join(base, "repo"), map[string]string{"notes.txt": "needle here\n"})
 	useAdapterDirectory(t, repository)
-	stateDir, socketPath := filepath.Join(base, "state"), filepath.Join(base, "control.sock")
+	stateDir, socketPath := filepath.Join(base, "state"), shortSocketPath(t)
 	_, stopFirst := startTestHuyangService(t, stateDir, socketPath, "")
 
 	toAdapterReader, toAdapterWriter := io.Pipe()
@@ -352,7 +366,7 @@ func TestClientDirectorySurvivesAServiceRestartThroughTheAdapter(t *testing.T) {
 func TestHTTPClientsGetNoDefaultWorkspace(t *testing.T) {
 	useStubProvider(t, newStubProvider())
 	base := t.TempDir()
-	service, stop := startTestHuyangService(t, filepath.Join(base, "state"), filepath.Join(base, "control.sock"), "127.0.0.1:0")
+	service, stop := startTestHuyangService(t, filepath.Join(base, "state"), shortSocketPath(t), "127.0.0.1:0")
 	defer stop()
 	httpClient := &http.Client{Transport: bearerTransport{token: service.httpToken, base: http.DefaultTransport}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "huyang-routing-http", Version: "1"}, nil)
