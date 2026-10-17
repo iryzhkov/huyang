@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,14 +173,15 @@ func TestBaselineMultiDocumentRepeatedStorageAndPersistenceBounded(t *testing.T)
 	initial, _ := json.Marshal(w.diagnostics.state)
 	// Measure storage over 10,000 observations without 500 disk fsyncs. The
 	// write seam still counts each persistence and checks its complete payload.
+	expectedItems := 20
 	w.diagnostics.writeFile = func(_ string, data []byte, _ os.FileMode) error {
 		writes++
 		var persisted diagnosticState
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			return err
 		}
-		if len(persisted.Items) != 20 {
-			return errors.New("partial bulk ledger published")
+		if len(persisted.Items) != expectedItems {
+			return fmt.Errorf("partial bulk ledger published: got %d items, want %d", len(persisted.Items), expectedItems)
 		}
 		return nil
 	}
@@ -202,6 +204,7 @@ func TestBaselineMultiDocumentRepeatedStorageAndPersistenceBounded(t *testing.T)
 	assertDiagnosticReferenceBounds(t, state)
 	// A semantic change must still generate the preexisting notice and body.
 	batches[0].Findings = append(batches[0].Findings, finding("new cross-file error"))
+	expectedItems = 21 // The semantic-update phase adds one finding to the full ledger.
 	before := fmt.Sprintf("diagcur_%d", state.Sequence)
 	updated, err := w.RecordDiagnosticEvidenceBatches(batches[:1])
 	if err != nil || len(updated[0].New) != 0 {
@@ -432,8 +435,21 @@ func TestBaselineRetainedPreparationProofSurvivesChurnAndLedgerReopen(t *testing
 		t.Fatal(err)
 	}
 	persisted, err := reopened.evidenceByID(id)
-	if err != nil || string(persisted.Payload) != string(original.Payload) {
+	if err != nil {
 		t.Fatalf("prepared proof not persisted: %v", err)
+	}
+	if persisted.ID != id {
+		t.Fatalf("prepared proof ID changed: got %q, want %q", persisted.ID, id)
+	}
+	// recordStagedLocked marshals a compact payload; save uses MarshalIndent,
+	// and reopening RawMessage preserves that added whitespace. Remove only
+	// insignificant whitespace, retaining exact JSON tokens and field contents.
+	var compactPayload bytes.Buffer
+	if err := json.Compact(&compactPayload, persisted.Payload); err != nil {
+		t.Fatalf("persisted prepared proof is invalid JSON: %v", err)
+	}
+	if !bytes.Equal(compactPayload.Bytes(), original.Payload) {
+		t.Fatalf("prepared proof content changed: got %s, want %s", compactPayload.Bytes(), original.Payload)
 	}
 	// Once the plan owner is gone, its old ID expires and retrieval fails.
 	w.plansMu.Lock()
