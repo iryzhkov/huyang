@@ -17,13 +17,16 @@ case "$prefix/" in /tmp/*) echo "prefix must be an on-disk job-local directory" 
 [ "$(uname -m)" = x86_64 ] && [ "$(uname -s)" = Linux ] || { echo "Linux x86_64 required" >&2; exit 1; }
 # HOME is never reassigned. Explicit config/cache paths isolate every writer.
 mkdir -p "$prefix"/{bin,downloads,config,data,cache,state,tmp,npm,go}
+# npm rejects loading one path as both user and global config; use distinct empty files.
+: > "$prefix/config/npm-user.npmrc"
+: > "$prefix/config/npm-global.npmrc"
 export XDG_CONFIG_HOME=$prefix/config XDG_DATA_HOME=$prefix/data XDG_CACHE_HOME=$prefix/cache XDG_STATE_HOME=$prefix/state TMPDIR=$prefix/tmp
 export UV_CACHE_DIR=$prefix/cache/uv UV_PYTHON_INSTALL_DIR=$prefix/python UV_TOOL_DIR=$prefix/uv-tools
 export UV_PYTHON_BIN_DIR=$prefix/bin UV_PYTHON_INSTALL_BIN=0 UV_CREDENTIALS_DIR=$prefix/data/uv-credentials
 export POETRY_CONFIG_DIR=$prefix/config/poetry POETRY_DATA_DIR=$prefix/data/poetry POETRY_CACHE_DIR=$prefix/cache/poetry
 export POETRY_KEYRING_ENABLED=false NETRC=/dev/null
 export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1
-export NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null NPM_CONFIG_CACHE=$prefix/cache/npm
+export NPM_CONFIG_USERCONFIG=$prefix/config/npm-user.npmrc NPM_CONFIG_GLOBALCONFIG=$prefix/config/npm-global.npmrc NPM_CONFIG_CACHE=$prefix/cache/npm
 export GOPATH=$prefix/go GOMODCACHE=$prefix/go/pkg/mod GOCACHE=$prefix/cache/go HUYANG_FRICTION=0
 export GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
