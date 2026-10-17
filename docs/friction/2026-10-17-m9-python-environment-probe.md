@@ -97,7 +97,8 @@ vetoed pulls cannot be authoritative; a separate valid batch may supersede an ol
 veto. Progress counters count actual observed batches, including complete vetoed pulls.
 `unproven_pull_batches_observed` and `pull_veto_dimension_checks` distinguish raw
 veto observations from dimensions where the non-authority assertion was exercised.
-A superseding proof must be at least as recent and name the same document/revision.
+A superseding proof must be at least as recent and name the same document and
+provider; a later proven revision can supersede an older vetoed revision.
 Grouped evidence remains incomplete. Pure regressions for manager trace spellings
 and pull proof are included in the documented job test selection. For actual complete empty
 pushes, the recorded server publication and Go observation timestamps must establish
@@ -222,7 +223,7 @@ clean go build -o "$scratch/bin/huyang" ./cmd/huyang
 set +e
 clean env HUYANG_M9_PYTHON_PROBE=1 HUYANG_M9_TOOLS="$tools" \
   HUYANG_M9_RUN="$run" HUYANG_M9_BINARY="$scratch/bin/huyang" \
-  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof) -count=1 -v -timeout 40m \
+  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof)$' -count=1 -v -timeout 40m \
   >"$scratch/python-probe-go-test.log" 2>&1
 test_exit=$?
 set -e
@@ -269,66 +270,6 @@ chmod alone is not treated as proof. Hashing streams bounded owned trees (100000
 entries, 512 MiB/file, 4 GiB/tree); it records symlinks without following them
 while walking trees. Only the explicitly named executable files are additionally
 resolved and read, never host directories or unrelated HOME contents. Scratch HOME outside the one allowed mutable run parent receives a
-bounded metadata-only inventory (20000 entries), and any change fails. TMPDIR is
-case-local, including a separate preflight directory. The run parent deliberately
-contains mutable caches/configs/temporary and service state; these are not claimed
-immutable. This verifies fixture/environment/tool immutability and detects HOME
-fallback writes while preserving the intended job-local runtime writers.
-
-General lifecycle entrypoints remain unchanged:
-
-- `TestLangprobeABCD/(go|python)$` in `cmd/huyang/langprobe_test.go`, using
-  `HUYANG_LANGPROBE=1`, a private prebuilt binary and language subset (not strict
-  nine-language acceptance).
-- `TestLangprobeVersionNegotiationAndBaselineLatency` in
-  `internal/provider/embed/diagnostic_version_test.go`.
-- `TestRealLanguageDiagnosticBarriersNeverPromoteIncompleteEvidence/(gopls|pyright)$`
-  in `internal/providerpool/evidence_test.go`.
- -count=1 -v -timeout 40m \
-  >"$scratch/python-probe-go-test.log" 2>&1
-test_exit=$?
-set -e
-# Collect on failure too. A collector error is a failed/incomplete evidence run.
-clean python3 -I -B tests/m9-language-probe/collect.py \
-  "$run" "$scratch/m9-python-probe.tar.gz" \
-  --go-log "$scratch/python-probe-go-test.log" --test-exit "$test_exit"
-exit "$test_exit"
-```
-
-Every Go test has `HUYANG_FRICTION=0`. Provisioning, build, test and collection use
-an explicit empty environment plus job-local configs/caches; no real auth, proxy
-credentials, GOENV, inherited GOFLAGS or user Git configuration is forwarded.
-A missing prerequisite fails; it is never a passing skip. Use a new empty run and
-new archive name for a rerun.
-
-Root should request only `/home/job/.cache/huyang-friction/m9/m9-python-probe.tar.gz`
-as the job artifact, never scratch or the entire run. `collect.py` walks only the
-run top level and two-digit case directories, and accepts these regular owned files:
-
-- Top: `versions.json`, `binary.json`, `preflight-commands.log`, the three named
-  `tool-*` manifest/lock files, before/after tool hashes and HOME metadata.
-- Case: `lsp.jsonl`, `wire-*.jsonl`, numbered tool-reply JSON, `exec.<pid>`,
-  `coverage.json`, `*hashes*.json`, `fixture-commands.log`, `service.log`,
-  `plain-*.txt`, and `raw-publication-summary.json`.
-- The explicitly named Go-test log and a generated `collection.json` with every
-  collected file's size/SHA-256, missing top evidence, coverage presence and test exit.
-
-It never recurses into tools, bin/huyang, tmp, caches, venvs, .git, state, sockets,
-config, data, xdg-state or run directories. Private service state/correlation keys
-are never inspected or exported. All actual trace/reply/telemetry/report evidence
-matching the allowlist is retained, including failed-run evidence. The collector
-rejects symlinks, changing files, more than 20000 evidence files, or payload/archive
-size reaching **63 MiB**. The archive writer enforces the cap while writing. It
-removes a partial archive and fails clearly instead of dropping required evidence.
-`complete_collection` means all allowlisted existing evidence was collected, not
-that all cases completed or passed; test exit and coverage remain essential.
-
-Canonical fixture bytes (excluding Git database), selected environments, and the
-whole private tool tree are compared before/after, including modes and symlink
-targets. Shared managed Python is made read-only by setup and also hash-checked;
-chmod alone is not treated as proof. Hashing streams bounded owned trees (100000
-entries, 512 MiB/file, 4 GiB/tree), never follows symlinks or reads unrelated HOME
-contents. Scratch HOME outside the one allowed mutable run parent receives a
 bounded metadata-only inventory (20000 entries), and any change fails. TMPDIR is
 case-local, including a separate preflight directory. The run parent deliberately
 contains mutable caches/configs/temporary and service state; these are not claimed

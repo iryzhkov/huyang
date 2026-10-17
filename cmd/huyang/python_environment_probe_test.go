@@ -1225,6 +1225,27 @@ func TestM9EffectivePullProof(t *testing.T) {
 			t.Errorf("unproven raw pull accepted: %+v", batch)
 		}
 	}
+	// Coverage retains R1's veto after a proven R2 arrives from the same provider.
+	veto := map[string]any{"document": "main.py", "provider_id": "pyright", "document_revision": "R1", "observed_at": "2026-10-17T00:00:00Z"}
+	candidate := maps.Clone(valid)
+	maps.Copy(candidate, map[string]any{"document": "main.py", "provider_id": "pyright", "document_revision": "R2", "observed_at": "2026-10-17T00:00:01Z"})
+	if !m9SupersedesPullVeto(candidate, veto) {
+		t.Fatal("later proven R2 did not supersede vetoed R1")
+	}
+	candidate["observed_at"] = veto["observed_at"]
+	if !m9SupersedesPullVeto(candidate, veto) {
+		t.Fatal("equal observation timestamp should permit supersession")
+	}
+	for _, change := range []map[string]any{
+		{"document": "other.py"}, {"provider_id": "other-provider"},
+		{"observed_at": "2026-10-16T23:59:59Z"}, {"progress_pending": true},
+	} {
+		other := maps.Clone(candidate)
+		maps.Copy(other, change)
+		if m9SupersedesPullVeto(other, veto) {
+			t.Errorf("unrelated, older or unproven batch superseded veto: %+v", other)
+		}
+	}
 }
 
 func m9EffectiveProof(batch map[string]any) bool {
@@ -1233,6 +1254,14 @@ func m9EffectiveProof(batch map[string]any) bool {
 	return batch["complete"] == true && vok && eok && version >= expected &&
 		batch["selected"] == true && batch["progress_pending"] != true &&
 		batch["timed_out"] != true && batch["reason"] != "python_environment_unresolved"
+}
+
+func m9SupersedesPullVeto(candidate, veto map[string]any) bool {
+	candidateAt, candidateErr := time.Parse(time.RFC3339Nano, m9Text(candidate["observed_at"]))
+	vetoAt, vetoErr := time.Parse(time.RFC3339Nano, m9Text(veto["observed_at"]))
+	return m9EffectiveProof(candidate) && candidateErr == nil && vetoErr == nil &&
+		!candidateAt.Before(vetoAt) && candidate["document"] == veto["document"] &&
+		candidate["provider_id"] == veto["provider_id"]
 }
 
 func (p *m9Probe) assertPullVeto(reply map[string]any, vetoID string) {
@@ -1245,11 +1274,7 @@ func (p *m9Probe) assertPullVeto(reply map[string]any, vetoID string) {
 		for _, rawID := range probeSlice(dimension["evidence_ids"]) {
 			id := m9Text(rawID)
 			citesVeto = citesVeto || id == vetoID
-			candidate, veto := p.evidenceBatches[id], p.evidenceBatches[vetoID]
-			candidateAt, candidateErr := time.Parse(time.RFC3339Nano, m9Text(candidate["observed_at"]))
-			vetoAt, vetoErr := time.Parse(time.RFC3339Nano, m9Text(veto["observed_at"]))
-			proven = proven || (m9EffectiveProof(candidate) && candidateErr == nil && vetoErr == nil &&
-				!candidateAt.Before(vetoAt) && candidate["document_revision"] == veto["document_revision"] && candidate["document"] == veto["document"])
+			proven = proven || m9SupersedesPullVeto(p.evidenceBatches[id], p.evidenceBatches[vetoID])
 		}
 		if citesVeto && !proven {
 			p.pullVetoChecks++
