@@ -13,11 +13,12 @@ import sys
 
 sys.dont_write_bytecode = True
 from bootstrap import namespace_required
-from common import (HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_home_preflight,
+from common import (GO_CLI, HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_home_preflight,
                     guard_scratch_job, canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
 from model_server import Controller
 import opencode
 import nss_control
+import telemetry_control
 from workflow import CODEX_SCHEMA_PROVENANCE, Workflow
 
 async def capture(command, env, cwd, path, timeout=20):
@@ -301,7 +302,7 @@ async def cli(client, args, case, env, owner, binary, wrapper):
 
 async def run_case(client, args, manifest, candidate, runtime):
     case = args.job / "c" / client
-    case.mkdir(parents=True)
+    case.mkdir(parents=True, mode=0o700)
     (case / "fixture").mkdir()
     tool_path = str(args.job / "bin") + ":" + str(args.nvim.parent) + ":" + args.tool_path
     home_preflight = clean_home_preflight(case / "home-preflight.json", namespace_required)
@@ -310,6 +311,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"
     if client == "codex":
         env["RUST_LOG"] = "codex_core=debug,codex_mcp=debug"
+    telemetry = await telemetry_control.prepare(case, env, manifest["go_cli"], namespace_required)
     model_catalog = codex_direct_catalog(case) if client == "codex" else None
     owner = await Controller(case, json.loads((HERE / "lean-schemas.json").read_text())).start()
     env.update(ACCEPTANCE_CONTROL=str(owner.control_path),
@@ -325,7 +327,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         "plugin_sha256": args.plugin_sha256 if client == "opencode" else None,
         "home_preflight": home_preflight, "codex_model_catalog": model_catalog,
         "codex_schema_conversion": CODEX_SCHEMA_PROVENANCE if client == "codex" else None,
-        "nss_control": manifest.get("nss_control"),
+        "nss_control": manifest.get("nss_control"), "telemetry_preparation": telemetry,
         "recorder_sha256": file_hash(wrapper), "runtime_files": manifest["candidate_runtime_files"]})
     stdout = (case / "service.stdout").open("wb")
     stderr = (case / "service.stderr").open("wb")
@@ -389,6 +391,11 @@ async def run_case(client, args, manifest, candidate, runtime):
             except Exception as error:
                 owner.acp_ipc_proof = {"allowed_connect_records": [], "violations": [repr(error)]}
             write_json(case / "acp-ipc-proof.json", owner.acp_ipc_proof)
+        try:
+            telemetry_control.recheck(case, env, telemetry, manifest["go_cli"], namespace_required)
+        except Exception as error:
+            owner.fail(error)
+            success = False
         if args.nvim_nss_control:
             try:
                 nss_control.finish_case(case, args.job, args.nvim)
@@ -415,6 +422,7 @@ async def main(args):
         setattr(args, name, getattr(args, name).resolve())
     manifest = json.loads((args.job / "bootstrap-report.json").read_text())
     require(manifest["status"] == "bootstrapped-not-accepted", "bootstrap did not complete")
+    telemetry_control.pin(manifest.get("go_cli"))
     require(manifest.get("nss_control") == nss, "NSS bootstrap/runtime opt-ins or manifests differ")
     manifest["runtime_home_preflight"] = clean_home_preflight(args.job / "home-runtime-preflight.json", namespace_required)
     require(file_hash(args.job / "tools/package-lock.json") == manifest["package_lock_sha256"],
@@ -443,6 +451,7 @@ async def main(args):
     manifest["source_commit"] = args.source_commit
     manifest["candidate_sha256"] = file_hash(candidate)
     env = environment(args.job / "preflight", args.tool_path)
+    preflight_telemetry = await telemetry_control.prepare(args.job / "preflight", env, manifest["go_cli"], namespace_required)
     nvim_version = await capture([args.nvim, "--version"], env, args.job, args.job / "nvim-version.txt")
     match = re.search(r"NVIM v(\d+)\.(\d+)", nvim_version)
     require(match and tuple(map(int, match.groups())) >= (0, 11), "Neovim >=0.11 required")
@@ -454,8 +463,10 @@ async def main(args):
     nvim_launcher.write_text(launcher)
     nvim_launcher.chmod(0o755)
     manifest["nvim_launcher_sha256"] = file_hash(nvim_launcher)
-    manifest["candidate_go_build"] = await capture(["go", "version", "-m", candidate], env, args.job,
+    manifest["candidate_go_build"] = await capture([GO_CLI, "version", "-m", candidate], env, args.job,
                                                   args.job / "candidate-build.txt")
+    telemetry_control.recheck(args.job / "preflight", env, preflight_telemetry, manifest["go_cli"], namespace_required)
+    manifest["preflight_telemetry"] = preflight_telemetry
     manifest["harness_files"] = {str(p.relative_to(HERE)): file_hash(p) for p in sorted(HERE.rglob("*"))
                                  if p.is_file() and "__pycache__" not in p.parts}
     write_json(args.job / "runtime-manifest.json", manifest)

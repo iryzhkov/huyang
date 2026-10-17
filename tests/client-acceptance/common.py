@@ -13,6 +13,8 @@ PLUGIN_COMMIT = "ebec80bca66d684d6fe47c5c57c7cf212b6558b2"
 PLUGIN_BLOB = "88ea20a15450e52fd94194a1f91ff69e7277da30"
 PLUGIN_SHA256 = "e46883992727741758115492030f75bb26dbea14dccd3a4b4c3459cc5547f6c4"
 HERE = Path(__file__).resolve().parent
+GO_CLI = Path("/opt/chaldea-tools/go/1.27.0/bin/go")
+GO_SHA256 = "1db869c560a193573a71be466a34e0d4abb7792d78165c6102cdda069276a3a8"
 FULL = {"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate",
         "read", "diagnostics", "edit_apply", "change_plan", "revision_diff",
         "evidence_get", "language_server_status", "language_server_setup"}
@@ -84,9 +86,15 @@ def clean_home_preflight(report_path, namespace_guard):
     require(report["status"] == "clean", "unclean or unverifiable HOME; see " + str(report_path))
     return report
 
+def require_no_telemetry_overrides(env):
+    require(not any(k in {"TEST_TELEMETRY_DIR", "GOTELEMETRYDIR"} or k.startswith("GO_TELEMETRY_")
+                    for k in env), "telemetry override/child environment refused")
+
 def environment(case, tool_path):
+    require_no_telemetry_overrides(os.environ)
     case = Path(case)
-    env = {"PATH": tool_path, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+    case.mkdir(parents=True, exist_ok=True, mode=0o700)
+    env = {"PATH": str(GO_CLI.parent) + ":" + tool_path, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
            "TERM": "dumb", "CI": "1", "NO_COLOR": "1",
            "PYTHONDONTWRITEBYTECODE": "1",
            "DO_NOT_TRACK": "1", "GOTOOLCHAIN": "local", "GOPROXY": "off",
@@ -107,7 +115,7 @@ def environment(case, tool_path):
         "XDG_RUNTIME_DIR": "run", "CODEX_HOME": "codex",
         "CLAUDE_CONFIG_DIR": "claude", "OPENCODE_CONFIG_DIR": "oc-config",
         "GOPATH": "go", "GOMODCACHE": "go/pkg/mod", "GOCACHE": "go-build",
-        "GOTELEMETRYDIR": "go-telemetry", "npm_config_cache": "npm-cache",
+        "npm_config_cache": "npm-cache",
     }.items():
         path = case / sub
         path.mkdir(parents=True, exist_ok=True, mode=0o700)

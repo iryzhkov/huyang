@@ -575,6 +575,58 @@ All syntax checks, tests, builds, linters, generators, provisioning, downloads,
 clients, Chaldea, SSH and services are NOT RUN in this implementation session.
 No push, independent review or fleet update is claimed.
 
+## Supported private Go telemetry preparation
+
+Every fresh bootstrap, runner preflight and actual case profile now runs exactly
+`/opt/chaldea-tools/go/1.27.0/bin/go telemetry off` before its first Go or gopls
+startup. Each case prepares after its private environment and HOME/namespace
+checks, before the controller, service or native client starts. The helper uses
+the existing process-group spawn/stop functions, a 20-second command timeout,
+separate retained stdout/stderr and a 64 KiB output inspection ceiling. Natural
+exit 0 and empty stdout/stderr are required. Job resource/file limits still
+apply; oversized or abnormal outputs stay on disk and fail preparation.
+
+The bootstrap manifest adds `go_cli` with that exact absolute path and SHA-256
+`1db869c560a193573a71be466a34e0d4abb7792d78165c6102cdda069276a3a8`.
+The existing `go` version string stays unchanged. Old manifests without the seal
+are refused and require a fresh bootstrap. There is no new CLI option.
+Bootstrap and preflight Go commands use the sealed absolute path; child PATH
+starts with its directory, so actual Go lookup cannot silently use another
+PATH installation. The pin is checked before preparation and after the case.
+
+Ambient `GOTELEMETRY=off` remains in the allowlist but supplies no effective-mode
+proof. The obsolete `GOTELEMETRYDIR` assignment is removed.
+`TEST_TELEMETRY_DIR`, `GOTELEMETRYDIR` and every `GO_TELEMETRY_*` key,
+including empty values, are refused in ambient and passed environments.
+HOME stays the namespace's real `/home/job`. Each effective mode lives under
+that profile's exact XDG config root at `CASE/config/go/telemetry/mode`,
+with `XDG_CONFIG_HOME=CASE/config`.
+No mode file, token or child environment is synthesized. Only the supported
+command creates the Go configuration, under umask 0077.
+
+Preparation requires absent Go configuration, canonical containment, real
+UID-owned ancestors, private 0700 case/config/Go/telemetry directories and a
+regular UID-owned 0600 mode file with link count 1. Its exact 14 dated off bytes
+must match a UTC date in the actual command window. Case teardown rechecks the
+mode hash/bytes, file metadata and telemetry subtree, excluding atime.
+Unrelated XDG config entries may be created by native clients. They do not
+change the telemetry invariant. A failed preparation aborts before native
+startup; a failed teardown check fails the case.
+
+Retain each profile's `telemetry-control/{stdout,stderr,preparation.json,mode.before,recheck.json}`.
+Preparation records exact argv/environment, Go hash, UID/GID/maps/namespaces,
+UTC command window, return code and profile metadata. These are control proofs,
+not a tracer or native-client qualification. Actual tracer v2 job `833df6f2`
+has been submitted but is not runtime-proven here; NSS v2 round 2 remains pending.
+Every existing model, formal13/schema/raw-reply, producer, IPC, destination,
+parser and unknown-record gate remains required.
+
+Pure tests are in `test_telemetry_control.py`. Parent should run
+`python3 -B -m unittest discover -s tests/client-acceptance -p test_telemetry_control.py`
+on agent-a with guarded scratch HOME. No tests, imports, syntax checks, runtime,
+formatter, generator, Go, client, Chaldea job, download, SSH, service, install,
+push or review agent was run for this source-only implementation.
+
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,
@@ -599,8 +651,9 @@ J/c/{claude,codex,opencode} case directory. Case directories include:
   job-local codex/log diagnostics (only the synthetic acceptance session).
 
 Native packages/caches under J/tools, J/bin, J/node_modules, J/bootstrap-env and
-J/preflight need not be returned if the parent archives the manifests, lockfiles
-and complete case directories separately. Do not delete failed evidence.
+J/preflight need not be returned in full if the parent archives the manifests,
+lockfiles, complete case directories and both bootstrap-env/telemetry-control
+and preflight/telemetry-control evidence directories separately. Do not delete failed evidence.
 All process/request waits are bounded, process groups are job-owned, cases have
 a default 300-second deadline and model traffic has a 500-request ceiling.
 

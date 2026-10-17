@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit job-only bootstrap. Never invoked by repository unit tests."""
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -12,8 +13,9 @@ import subprocess
 import sys
 
 sys.dont_write_bytecode = True
-from common import HERE, clean_home_preflight, guard_scratch_job, environment, file_hash, require, write_json
+from common import GO_CLI, HERE, clean_home_preflight, guard_scratch_job, environment, file_hash, require, write_json
 import nss_control
+import telemetry_control
 
 PINS = {
     "claude": ("2.1.301", "node_modules/@anthropic-ai/claude-code-linux-x64/claude"),
@@ -66,6 +68,8 @@ def main():
     try:
         home_preflight = clean_home_preflight(job / "home-bootstrap-preflight.json", namespace_required)
         env = environment(job / "bootstrap-env", args.tool_path)
+        go_cli = telemetry_control.pin()
+        telemetry = asyncio.run(telemetry_control.prepare(job / "bootstrap-env", env, go_cli, namespace_required))
         nss = nss_control.provision(job, env, command) if args.nvim_nss_control else None
         for name in ("package.json", "package-lock.json"):
             shutil.copyfile(HERE / name, tools / name)
@@ -95,7 +99,7 @@ def main():
             binaries[name] = {"path": str(path), "sha256": file_hash(path), "version": output.strip()}
         bindir = job / "bin"
         bindir.mkdir()
-        go_version = command(["go", "version"], env, job, logs / "go-version.txt", 15)
+        go_version = command([GO_CLI, "version"], env, job, logs / "go-version.txt", 15)
         if args.gopls_artifact:
             require(args.gopls_sha256 and file_hash(args.gopls_artifact) == args.gopls_sha256,
                     "staged gopls requires matching explicit --gopls-sha256")
@@ -103,13 +107,15 @@ def main():
             (bindir / "gopls").chmod(0o755)
         else:
             env.update(GOBIN=str(bindir), GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org")
-            command(["go", "install", "golang.org/x/tools/gopls@" + GOPLS], env, job, logs / "gopls-install.txt")
+            command([GO_CLI, "install", "golang.org/x/tools/gopls@" + GOPLS], env, job, logs / "gopls-install.txt")
         version = command([bindir / "gopls", "version"], env, job, logs / "gopls-version.txt", 15)
         require("golang.org/x/tools/gopls " + GOPLS in version, "real gopls pin mismatch: " + version)
-        build = command(["go", "version", "-m", bindir / "gopls"], env, job, logs / "gopls-build.txt", 15)
+        build = command([GO_CLI, "version", "-m", bindir / "gopls"], env, job, logs / "gopls-build.txt", 15)
         # SDK imports from the actual discovered plugin resolve only to this job's locked dependencies.
         (job / "node_modules").symlink_to(tools / "node_modules", target_is_directory=True)
+        telemetry_control.recheck(job / "bootstrap-env", env, telemetry, go_cli, namespace_required)
         write_json(job / "bootstrap-report.json", {
+            "go_cli": go_cli, "telemetry_preparation": telemetry,
             "status": "bootstrapped-not-accepted", "uid": os.getuid(), "node": node.strip(),
             "npm": npm.strip(), "go": go_version.strip(), "package_lock_sha256": before,
             "binaries": binaries, "gopls": {"path": str(bindir / "gopls"),
