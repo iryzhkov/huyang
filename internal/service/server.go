@@ -15,20 +15,21 @@ import (
 
 // newSDKServer serves one client connection. client is what that
 // connection announced: the agent session every call it makes is spooled
-// under, and the directory its relative roots are resolved against.
-func newSDKServer(profile mcpapi.Profile, direct *directWorkspaces, client clientConnection) *mcp.Server {
+// under, and the directory its relative roots are resolved against; style
+// is how its replies are presented.
+func newSDKServer(profile mcpapi.Profile, style mcpapi.ReplyStyle, direct *directWorkspaces, client clientConnection) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name: "huyang", Title: "Huyang", Version: mcpapi.ServerVersion,
 		Description: "Transactional semantic workspace for coding agents.",
 	}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{}})
 	server.AddReceivingMiddleware(frictionCapabilitiesMiddleware(client.session))
 	for _, descriptor := range mcpapi.Catalog(profile) {
-		registerModernTool(server, descriptor, direct, client)
+		registerModernTool(server, descriptor, style, direct, client)
 	}
 	return server
 }
 
-func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, direct *directWorkspaces, connection clientConnection) {
+func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, style mcpapi.ReplyStyle, direct *directWorkspaces, connection clientConnection) {
 	session := connection.session
 	server.AddTool(&mcp.Tool{
 		Name: descriptor.Name, Description: descriptor.Description,
@@ -53,7 +54,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			logModernValidationFriction(session, descriptor.Name, root, arguments, err, client, started, correlation)
 			requestID := fmt.Sprintf("req_%d", direct.requests.Add(1))
 			envelope := mcpapi.FinalizeEnvelope(descriptor.Name, mcpapi.InvalidArguments(requestID, descriptor.Name, err))
-			return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), true)
+			return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), true, style)
 		}
 		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
 			return refuse("", map[string]any{}, err)
@@ -73,7 +74,16 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
 		}
 		aliased = append(aliased, resolveClientPaths(descriptor.Name, arguments, connection.cwd)...)
-		envelope := direct.call(handlers.WithClientIdentity(ctx, sessionIdentity(request)), descriptor.Name, arguments)
+		// Refused before the call runs: a mutation must not apply and then
+		// answer that its requested presentation is unavailable.
+		if err := mcpapi.ReplyStyleConflict(style, arguments); err != nil {
+			return refuse(modernFrictionRoot(direct, descriptor.Name, arguments), arguments, err)
+		}
+		callContext := handlers.WithClientIdentity(ctx, sessionIdentity(request))
+		if style == mcpapi.ReplyStylePlain {
+			callContext = handlers.WithPlainReplies(callContext)
+		}
+		envelope := direct.call(callContext, descriptor.Name, arguments)
 		isError := envelope["outcome"] == "failed" || envelope["outcome"] == "conflict"
 		logFriction(session, descriptor.Name, modernFrictionRoot(direct, descriptor.Name, arguments), arguments,
 			map[string]any{
@@ -86,11 +96,41 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 			}, started, correlation)
 		// An alias that was rewritten explains the rest of the reply, so its
 		// warning goes ahead of the ones the call produced.
-		return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), isError)
+		return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), isError, style)
 	})
 }
 
-func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
+// renderToolResponse presents a finalized envelope at the transport
+// boundary. The envelope was already persisted as the receipt where the call
+// has one, so neither style changes what replay or evidence read back.
+func renderToolResponse(tool string, arguments, envelope map[string]any, isError bool, style mcpapi.ReplyStyle) (*mcp.CallToolResult, error) {
+	if style == mcpapi.ReplyStylePlain {
+		return renderPlainResponse(tool, arguments, envelope, isError)
+	}
+	return renderJSONResponse(tool, arguments, envelope, isError)
+}
+
+// renderPlainResponse sends one text block and no structuredContent. It
+// renders the full envelope: response_mode=compact never removes findings
+// from a plain reply. An envelope the renderer cannot normalize is sent as
+// the JSON text instead, still without the structured copy, rather than
+// failing a call that may already have changed the workspace.
+func renderPlainResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
+	text, err := mcpapi.RenderPlain(tool, arguments, envelope)
+	if err != nil {
+		encoded, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(mcpapi.TrimWireDiffs(tool, envelope)))
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		text = string(encoded)
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}, IsError: isError}, nil
+}
+
+// renderJSONResponse is the JSON style: the compact envelope as text and the
+// structured copy, shaped by the experimental response_format and
+// response_mode arguments.
+func renderJSONResponse(tool string, arguments, envelope map[string]any, isError bool) (*mcp.CallToolResult, error) {
 	envelope = mcpapi.CompactReceipt(tool, arguments, envelope)
 	envelope = mcpapi.TrimWireDiffs(tool, envelope)
 	pretty, renderErr := mcpapi.RenderJSON(mcpapi.CompactTextEnvelope(envelope))

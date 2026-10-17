@@ -8,6 +8,16 @@ M1 diagnostics work and lived in the experimental execution contract until that 
 was removed with `execution_graph` and `path_explain`; the guarantees themselves are
 unchanged. [The agent guide](agent-guide.md) summarises what they mean for a caller.
 
+The reply style changes how this evidence is presented, never what it is. A plain reply
+(the default since amendment 8 of the [v1alpha1 contract](plans/huyang-tools-v1alpha1.md))
+prints every new finding of `diagnostic_delta` and every `diagnostic_updates` entry, merged
+by finding ID, on whichever tool carries them, with any incomplete or unavailable verdict
+and its reasons, truncation of the notices, and late attribution as recorded. The
+`diagnostics` tool's report, including `current` bodies recovered after acknowledgement, is
+printed in full as JSON data in a plain reply; with `--reply-style json` the envelope is
+sent as before. Nothing is removed from the ledger, the receipts or the evidence store to
+render a reply.
+
 ## Completeness and late evidence
 
 Immediate and late push evidence follow the same completeness rule: the

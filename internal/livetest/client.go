@@ -21,10 +21,28 @@ import (
 
 // connect speaks to the daemon the way a client does: through the adapter
 // subprocess, over its stdio, with the official SDK. Nothing in the test
-// reaches into the service's memory.
+// reaches into the service's memory. These tests assert the envelope, so the
+// adapter is started with the JSON reply style; connectPlain starts one with
+// the default plain style.
 func (l *live) connect(profile string) *mcp.ClientSession {
 	l.t.Helper()
-	command := exec.Command(l.binary, "mcp", "--socket", l.socketPath, "--profile", profile)
+	return l.connectStyled(profile, "json")
+}
+
+// connectPlain starts an adapter with the default reply style, the one
+// harness registrations use.
+func (l *live) connectPlain(profile string) *mcp.ClientSession {
+	l.t.Helper()
+	return l.connectStyled(profile, "")
+}
+
+func (l *live) connectStyled(profile, style string) *mcp.ClientSession {
+	l.t.Helper()
+	arguments := []string{"mcp", "--socket", l.socketPath, "--profile", profile}
+	if style != "" {
+		arguments = append(arguments, "--reply-style", style)
+	}
+	command := exec.Command(l.binary, arguments...)
 	command.Env = l.environment
 	command.Stderr = os.Stderr
 	client := mcp.NewClient(&mcp.Implementation{Name: "huyang-livetest", Version: "1"}, nil)

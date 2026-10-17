@@ -26,9 +26,10 @@ import (
 
 func startTestHuyangService(t *testing.T, stateDir, socketPath, httpAddress string) (*huyangService, func()) {
 	t.Helper()
+	// The HTTP routes answer in the JSON style these suites parse.
 	service, err := newHuyangService(serviceConfig{
 		SocketPath: socketPath, StateDir: stateDir, HTTPAddress: httpAddress,
-		ProviderQuota: 2,
+		ProviderQuota: 2, ReplyStyle: mcpapi.ReplyStyleJSON,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -48,11 +49,18 @@ func startTestHuyangService(t *testing.T, stateDir, socketPath, httpAddress stri
 
 func connectUnixOfficialClient(t *testing.T, socketPath string, profile mcpapi.Profile) (*mcp.ClientSession, func()) {
 	t.Helper()
+	return connectUnixStyledClient(t, socketPath, profile, string(mcpapi.ReplyStyleJSON))
+}
+
+// connectUnixStyledClient sends the hello an adapter sends, with the given
+// reply style; an empty style is what an adapter older than the option sends.
+func connectUnixStyledClient(t *testing.T, socketPath string, profile mcpapi.Profile, style string) (*mcp.ClientSession, func()) {
+	t.Helper()
 	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile), Session: clientSessionID()}); err != nil {
+	if err := json.NewEncoder(connection).Encode(controlHello{Profile: string(profile), ReplyStyle: style, Session: clientSessionID()}); err != nil {
 		connection.Close()
 		t.Fatal(err)
 	}

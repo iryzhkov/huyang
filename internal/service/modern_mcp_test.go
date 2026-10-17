@@ -27,11 +27,20 @@ func connectOfficialClient(t *testing.T, profile mcpapi.Profile, direct *directW
 }
 
 // connectOfficialClientAs connects a client that announces the named agent
-// session, the way an adapter does in its hello.
+// session, the way an adapter does in its hello. These suites assert the
+// envelope, so they select the JSON reply style; plain replies have their
+// own tests in plain_reply_test.go.
 func connectOfficialClientAs(t *testing.T, profile mcpapi.Profile, direct *directWorkspaces, session string) (*mcp.ClientSession, func()) {
 	t.Helper()
+	return connectStyledClient(t, profile, mcpapi.ReplyStyleJSON, direct, session)
+}
+
+// connectStyledClient connects an in-memory client to a server with the
+// given reply style.
+func connectStyledClient(t *testing.T, profile mcpapi.Profile, style mcpapi.ReplyStyle, direct *directWorkspaces, session string) (*mcp.ClientSession, func()) {
+	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	server := newSDKServer(profile, direct, clientConnection{session: session})
+	server := newSDKServer(profile, style, direct, clientConnection{session: session})
 	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)

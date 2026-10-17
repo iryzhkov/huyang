@@ -58,9 +58,13 @@ func shortSocketPath(t *testing.T) string {
 }
 
 // connectUnixClientWith connects to the service socket with the hello an
-// adapter started in some directory would send.
+// adapter started in some directory would send. These tests read the
+// envelope, so a hello that names no reply style asks for JSON.
 func connectUnixClientWith(t *testing.T, socketPath string, hello controlHello) (*mcp.ClientSession, func()) {
 	t.Helper()
+	if hello.ReplyStyle == "" {
+		hello.ReplyStyle = string(mcpapi.ReplyStyleJSON)
+	}
 	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +138,7 @@ func TestAdapterAnnouncesTheSameDirectoryAndSessionOnReconnect(t *testing.T) {
 	toAdapterReader, toAdapterWriter := io.Pipe()
 	adapterDone := make(chan error, 1)
 	go func() {
-		adapterDone <- runHuyang([]string{"mcp", "--socket", socketPath}, toAdapterReader, io.Discard, io.Discard)
+		adapterDone <- runHuyang([]string{"mcp", "--socket", socketPath, "--reply-style", "json"}, toAdapterReader, io.Discard, io.Discard)
 	}()
 	accept := func() (controlHello, *net.UnixConn) {
 		t.Helper()
@@ -165,6 +169,9 @@ func TestAdapterAnnouncesTheSameDirectoryAndSessionOnReconnect(t *testing.T) {
 	}
 	if first.Cwd != client || second.Cwd != client {
 		t.Fatalf("directories = %q then %q, want %q both times", first.Cwd, second.Cwd, client)
+	}
+	if first.ReplyStyle != "json" || second.ReplyStyle != "json" {
+		t.Fatalf("reply styles = %q then %q, want json both times", first.ReplyStyle, second.ReplyStyle)
 	}
 	_ = toAdapterWriter.Close()
 	if err := <-adapterDone; err != nil && !errors.Is(err, io.ErrClosedPipe) {
@@ -324,7 +331,7 @@ func TestClientDirectorySurvivesAServiceRestartThroughTheAdapter(t *testing.T) {
 	fromAdapterReader, fromAdapterWriter := io.Pipe()
 	adapterDone := make(chan error, 1)
 	go func() {
-		adapterDone <- runHuyang([]string{"mcp", "--socket", socketPath}, toAdapterReader, fromAdapterWriter, io.Discard)
+		adapterDone <- runHuyang([]string{"mcp", "--socket", socketPath, "--reply-style", "json"}, toAdapterReader, fromAdapterWriter, io.Discard)
 	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "huyang-routing-restart", Version: "1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.IOTransport{Reader: fromAdapterReader, Writer: toAdapterWriter}, nil)

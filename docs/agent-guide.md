@@ -111,7 +111,8 @@ application. Existing-path creation refuses and returns a copyable overwrite gua
 No root is inferred for a relative mutation from a preceding read. Absolute document paths
 still use the exact-document workspace path. Lean has no batches, handles as inputs,
 semantic search, plans, formatter flags or response-mode switches; use `full` for these.
-JSON envelopes and diagnostic evidence remain intact; the plain-reply change is separate.
+Lean replies use the session's reply style like every other profile; plain is the
+default, and `revision_id`, truncation and findings stay in the text.
 Some shared `next` hints may name full-only tools; reconnect with `full` to use those.
 
 The budget harness measures actual SDK tools/list, including annotations, with cl100k_base;
@@ -158,11 +159,42 @@ named files, as a single target does.
   is reduced to it. A string that should have been an object but is not valid JSON is refused
   with the byte offset of the syntax error.
 
+## Reading plain replies
+
+`huyang mcp` answers in plain text by default (`--reply-style plain`): one text block and
+no `structuredContent`. The guards a follow-up needs are in the text, written as
+`key=value`:
+
+- A read starts with `path (revision_id=docrev_...; lines=START-END/TOTAL)` and then the
+  exact delivered source. `truncated=max_lines` or `truncated=max_bytes` in the header
+  means the delivery was cut; the `next:` line names the call that continues it. A
+  prepared read says `prepared_revision=prep_...` and its plan, never `revision_id`.
+- A search prints `path:line:text` rows (context lines as `path-line-text`, `--` between
+  windows) and a footer such as `2 of 240 matches in 12 files; complete;
+  result_set=set_...`. The set handle is printed whenever a refinement or an all-match
+  edit needs it, or `include_handles` asked for handles. `incomplete` and
+  `all_matches_eligible=false` mean the set cannot back an all-match edit.
+- An edit receipt is `Edited a.go (revision=wsrev_12; revision_id=docrev_...)`, one line
+  per path when several changed, followed by each finding as `path:line: severity:
+  message [code] (producer)`. A finding from the notice stream says `late finding` and its
+  attribution, or that it is not attributed to this call. `diagnostics provisional` or
+  `diagnostics unavailable` lines are printed on every edit that has them. `Preview:`
+  receipts changed nothing; `Replayed original receipt` made no new mutation and its
+  revisions are historical.
+- A refusal is `code: message`, then the data needed to repair it (candidates, the actual
+  text of a whitespace mismatch, which batch operations stay applied), then
+  `next: tool key=value (action)`.
+- A field the renderer does not know is printed as a `detail: {...}` JSON line rather than
+  dropped.
+
+Start `huyang mcp --reply-style json` when a program, not a model, consumes the replies.
+
 ## Forward MCP results once
 
-Huyang returns a structured envelope in `structuredContent` and a readable JSON text
-representation in `content`. When an orchestration wrapper forwards a result to the
-model, forward the structured envelope once:
+With `--reply-style json`, Huyang returns a structured envelope in `structuredContent`
+and a readable JSON text representation in `content`. When an orchestration wrapper
+forwards such a result to the model, forward the structured envelope once (a plain reply
+has no structured copy, so the fallback forwards its text):
 
 ```javascript
 const result = await tools.mcp__huyang__read(arguments);

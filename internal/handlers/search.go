@@ -22,9 +22,9 @@ func (h *Handlers) search(ctx context.Context, requestID string, workspace *work
 		return h.semanticSearch(ctx, requestID, workspace, mode, arguments)
 	}
 	if parent, _ := arguments["result_set_handle"].(string); parent != "" {
-		return refineSearch(requestID, workspace, parent, arguments)
+		return refineSearch(requestID, workspace, parent, arguments, plainReplies(ctx))
 	}
-	return searchSource(requestID, workspace, arguments)
+	return searchSource(requestID, workspace, arguments, plainReplies(ctx))
 }
 
 func searchHistory(requestID string, workspace *workspacecore.Workspace, source map[string]any) map[string]any {
@@ -52,7 +52,7 @@ func searchHistory(requestID string, workspace *workspacecore.Workspace, source 
 	return mcpapi.Envelope(requestID, workspace, "ok", "", summary, result)
 }
 
-func refineSearch(requestID string, workspace *workspacecore.Workspace, parent string, arguments map[string]any) map[string]any {
+func refineSearch(requestID string, workspace *workspacecore.Workspace, parent string, arguments map[string]any, plain bool) map[string]any {
 	refine, _ := arguments["refine"].(map[string]any)
 	matched, _ := refine["matched_text"].(map[string]any)
 	path, _ := refine["path"].(string)
@@ -71,6 +71,11 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 	limit := argInt(arguments, "limit", 50)
 	includeHandles, _ := arguments["include_handles"].(bool)
 	hits, truncated := mcpapi.CompactSearchHits(result.Matches, limit, includeHandles, literal)
+	if plain {
+		// RefineResultSet confirmed every source document still carries the
+		// frozen revision, which is the revision these lines are read at.
+		attachSourceLines(workspace, hits, result.Matches, result.DocumentRevisions)
+	}
 	data := map[string]any{
 		"hits": hits, "returned": len(hits), "total": result.Retained, "result_set": mcpapi.CompactResultSet(&result),
 	}
@@ -85,7 +90,7 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 	return envelope
 }
 
-func searchSource(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+func searchSource(requestID string, workspace *workspacecore.Workspace, arguments map[string]any, plain bool) map[string]any {
 	query, _ := arguments["query"].(string)
 	if query == "" {
 		return searchWithoutQuery(requestID, workspace, arguments)
@@ -114,7 +119,10 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	limit := argInt(arguments, "limit", 50)
 	includeHandles, _ := arguments["include_handles"].(bool)
 	hits, truncated := mcpapi.CompactSearchHits(result.Hits, limit, includeHandles, literalEcho(arguments, query))
-	contextWarning := attachRequestedContext(workspace, hits, arguments)
+	if plain {
+		attachSourceLines(workspace, hits, result.Hits, result.DocumentRevisions)
+	}
+	contextWarning := attachRequestedContext(workspace, hits, arguments, result.DocumentRevisions)
 	// A capped search stopped collecting; the matches it holds are the bound
 	// it stopped at, not the matches in the workspace. Saying "1000 matches"
 	// for a hundred thousand is the one number an agent uses to decide
@@ -218,17 +226,20 @@ func searchWithoutQuery(requestID string, workspace *workspacecore.Workspace, ar
 // refused, and the warning it returns says so and where the rest is: a
 // caller who wants a wider window around a hit wants read with a line
 // window, not a larger block repeated beside every hit.
-func attachRequestedContext(workspace *workspacecore.Workspace, hits []map[string]any, arguments map[string]any) string {
+func attachRequestedContext(workspace *workspacecore.Workspace, hits []map[string]any, arguments map[string]any, revisions map[string]workspacecore.RevisionID) string {
 	requested := argInt(arguments, "context_lines", 0)
 	if requested <= 0 {
 		return ""
 	}
-	attachSearchContext(workspace, hits, min(requested, mcpapi.MaxSearchContextLines))
-	if requested <= mcpapi.MaxSearchContextLines {
-		return ""
+	var warnings []string
+	if skipped := attachSearchContext(workspace, hits, min(requested, mcpapi.MaxSearchContextLines), revisions); skipped > 0 {
+		warnings = append(warnings, fmt.Sprintf("context omitted for %d hit(s): the document changed after the search read it; read the file for its current lines", skipped))
 	}
-	return fmt.Sprintf("context_lines %d was reduced to %d, the most search attaches to each hit; for a wider window read the file with start_line and end_line around the hit",
-		requested, mcpapi.MaxSearchContextLines)
+	if requested > mcpapi.MaxSearchContextLines {
+		warnings = append(warnings, fmt.Sprintf("context_lines %d was reduced to %d, the most search attaches to each hit; for a wider window read the file with start_line and end_line around the hit",
+			requested, mcpapi.MaxSearchContextLines))
+	}
+	return strings.Join(warnings, "; ")
 }
 
 // semanticRelations are the search modes answered by the language server
@@ -249,7 +260,7 @@ func (h *Handlers) semanticSearch(ctx context.Context, requestID string, workspa
 	switch result["code"] {
 	case "language_server_unavailable", "semantic_provider_start_failed", "semantic_provider_unavailable":
 		delete(arguments, "mode")
-		fallback := searchSource(requestID, workspace, arguments)
+		fallback := searchSource(requestID, workspace, arguments, plainReplies(ctx))
 		fallback["warnings"] = append(fallback["warnings"].([]string), fmt.Sprintf("no language server answered %s for %q; these are literal matches", relation, query))
 		return fallback
 	}
@@ -331,23 +342,30 @@ func argStrings(value any) []string {
 }
 
 // attachSearchContext adds the numbered lines around each hit, the way
-// grep -C does, so the agent sees what it found without a read call.
-func attachSearchContext(workspace *workspacecore.Workspace, hits []map[string]any, around int) {
+// grep -C does, so the agent sees what it found without a read call. The
+// lines come from the revision the search read; a document that changed
+// since gets no context rather than newer lines beside an older hit, and
+// the count of those hits is returned.
+func attachSearchContext(workspace *workspacecore.Workspace, hits []map[string]any, around int, revisions map[string]workspacecore.RevisionID) int {
 	cache := map[string][][]byte{}
+	skipped := 0
 	for _, hit := range hits {
 		path, _ := hit["path"].(string)
 		line, _ := hit["line"].(int)
 		lines, known := cache[path]
 		if !known {
-			read, err := workspace.Read(path)
-			if err != nil {
-				continue
-			}
-			lines = bytes.Split(read.Content, []byte("\n"))
-			if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-				lines = lines[:len(lines)-1]
+			content := searchedContent(workspace, path, revisions)
+			if content != nil {
+				lines = bytes.Split(content, []byte("\n"))
+				if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+					lines = lines[:len(lines)-1]
+				}
 			}
 			cache[path] = lines
+		}
+		if lines == nil {
+			skipped++
+			continue
 		}
 		start, end := max(line-around, 1), min(line+around, len(lines))
 		if start > end {
@@ -358,6 +376,68 @@ func attachSearchContext(workspace *workspacecore.Workspace, hits []map[string]a
 			fmt.Fprintf(&out, "%d\t%s\n", number, lines[number-1])
 		}
 		hit["context"] = out.String()
+	}
+	return skipped
+}
+
+// searchedContent reads a document only if it still carries the revision a
+// search read it at; otherwise it returns nil.
+func searchedContent(workspace *workspacecore.Workspace, path string, revisions map[string]workspacecore.RevisionID) []byte {
+	expected, known := revisions[path]
+	if !known {
+		return nil
+	}
+	read, err := workspace.Read(path)
+	if err != nil || read.Snapshot.Revision != expected {
+		return nil
+	}
+	if read.Content == nil {
+		return []byte{}
+	}
+	return read.Content
+}
+
+// plainRepliesKey marks a call whose reply is rendered as plain text.
+type plainRepliesKey struct{}
+
+// WithPlainReplies marks a call whose reply the service renders as plain
+// text, so a handler can attach what that text needs (a search hit's source
+// line) without adding it to a JSON reply.
+func WithPlainReplies(ctx context.Context) context.Context {
+	return context.WithValue(ctx, plainRepliesKey{}, true)
+}
+
+func plainReplies(ctx context.Context) bool {
+	plain, _ := ctx.Value(plainRepliesKey{}).(bool)
+	return plain
+}
+
+// attachSourceLines gives each returned hit the whole source line(s) its
+// match touches, read at the revision the search itself read. A plain reply
+// prints them grep style; a literal hit otherwise carries only its location,
+// because its matched text is the query. A document whose revision moved
+// since gets no line, and the reply says the text is unavailable.
+func attachSourceLines(workspace *workspacecore.Workspace, hits []map[string]any, matches []workspacecore.SearchHit, revisions map[string]workspacecore.RevisionID) {
+	cache := map[string][]byte{}
+	for index, hit := range hits {
+		if index >= len(matches) {
+			break
+		}
+		match := matches[index]
+		content, known := cache[match.Path]
+		if !known {
+			content = searchedContent(workspace, match.Path, revisions)
+			cache[match.Path] = content
+		}
+		if content == nil {
+			continue
+		}
+		if text, cut, ok := mcpapi.PlainSourceLine(content, match.ByteStart, match.ByteEnd); ok {
+			hit["source_line"] = text
+			if cut {
+				hit["source_line_cut"] = true
+			}
+		}
 	}
 }
 

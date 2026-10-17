@@ -153,7 +153,7 @@ func TestFrictionCapabilitiesOncePerConnection(t *testing.T) {
 	t.Setenv("HUYANG_FRICTION", "1")
 	// Reuse both the server and announced adapter session: each new connection
 	// still needs its own record, independent of tool, profile, or process.
-	server := newSDKServer(mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()), clientConnection{session: "same-adapter"})
+	server := newSDKServer(mcpapi.ProfileOrient, mcpapi.ReplyStyleJSON, newDirectWorkspaces(t.TempDir()), clientConnection{session: "same-adapter"})
 	capabilities := &mcp.ClientCapabilities{
 		RootsV2:      &mcp.RootCapabilities{},
 		Sampling:     &mcp.SamplingCapabilities{},
@@ -224,7 +224,7 @@ func TestFrictionLegacyCapabilitiesOncePerConnection(t *testing.T) {
 	spool := t.TempDir()
 	t.Setenv("HUYANG_FRICTION_DIR", spool)
 	t.Setenv("HUYANG_FRICTION", "1")
-	server := newSDKServer(mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()), clientConnection{})
+	server := newSDKServer(mcpapi.ProfileOrient, mcpapi.ReplyStyleJSON, newDirectWorkspaces(t.TempDir()), clientConnection{})
 	// Exercise the SDK's supported fallback to the legacy initialize handshake.
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
@@ -263,7 +263,7 @@ func TestFrictionCapabilitiesAcrossStatelessHTTPConnections(t *testing.T) {
 	spool := t.TempDir()
 	t.Setenv("HUYANG_FRICTION_DIR", spool)
 	t.Setenv("HUYANG_FRICTION", "1")
-	server := newSDKServer(mcpapi.ProfileOrient, newDirectWorkspaces(t.TempDir()), clientConnection{})
+	server := newSDKServer(mcpapi.ProfileOrient, mcpapi.ReplyStyleJSON, newDirectWorkspaces(t.TempDir()), clientConnection{})
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return server },
 		&mcp.StreamableHTTPOptions{Stateless: true},

@@ -366,7 +366,8 @@ type probeMCP struct {
 func startProbeMCP(t *testing.T, binary, socket, logPath string) *probeMCP {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binary, "mcp", "--socket", socket, "--profile", "edit")
+	// The probe reads findings out of the envelope, so it pins the JSON style.
+	cmd := exec.CommandContext(ctx, binary, "mcp", "--socket", socket, "--profile", "edit", "--reply-style", "json")
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
