@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run only inside the parent's disposable job after explicit bootstrap and candidate build."""
 import argparse
+import ast
 import asyncio
 import ctypes
 import json
@@ -11,7 +12,8 @@ import shutil
 import sys
 
 from bootstrap import namespace_required
-from common import HERE, KEY, canonical, digest, environment, file_hash, record, require, spawn, stop, write_json
+from common import (HERE, KEY, PLUGIN_BLOB, PLUGIN_COMMIT, PLUGIN_SHA256, clean_home_preflight,
+                    canonical, digest, environment, file_hash, record, require, spawn, stop, write_json)
 from model_server import Controller
 import opencode
 from workflow import Workflow
@@ -60,11 +62,13 @@ def fixture(case, nonce):
     (root / "main.go").write_text("package fixture\n\n// alpha one\n// alpha two\nvar Marker = 1\n")
     return root
 
-def recorder(case, candidate):
+def recorder(case, candidate, control_path):
     bindir = case / "bin"
     bindir.mkdir()
     path = bindir / "huyang"
     source = ("#!" + sys.executable + "\nimport os, sys\n"
+              + "os.environ['ACCEPTANCE_CONTROL'] = " + repr(str(control_path)) + "\n"
+              + "os.environ['ACCEPTANCE_FIXTURE'] = " + repr(str(case / "fixture")) + "\n"
               + "args = sys.argv[1:]\n"
               + "assert args and args[0] == 'mcp', 'acceptance recorder accepts only mcp'\n"
               + "profile = 'full'\n"
@@ -100,21 +104,42 @@ def traced(args, case, label, command):
     return [str(args.strace), "-ff", "-qq", "-s", "4096", "-e",
             "trace=connect,sendto,sendmsg,execve", "-o", str(case / ("audit-" + label)), *map(str, command)]
 
-def network_audit(case, port):
-    files = sorted(case.glob("audit-*"))
-    require(files, "missing destination/exec audit")
-    calls = []
+def network_audit(case, port, job):
+    files = sorted(path for path in case.glob("audit-*") if path.is_file())
+    report = {"ip_destinations": [], "unix_destinations": [], "execve_recorded": [],
+              "execve_policy": "recorded only; no executable allowlist asserted",
+              "unix_allowed_root": str(job.resolve()), "violations": []}
+    if not files:
+        report["violations"].append("missing destination trace")
     for path in files:
-        if not path.is_file():
-            continue
         for line in path.read_text(errors="replace").splitlines():
+            entry = {"path": path.name, "line": line}
+            if "execve(" in line:
+                report["execve_recorded"].append(entry)
+                continue
             if "AF_INET" in line:
-                calls.append({"path": path.name, "line": line})
-                require("AF_INET6" not in line and 'inet_addr("127.0.0.1")' in line
-                        and "htons(" + str(port) + ")" in line,
-                        "unexpected network destination: " + line)
-    require(calls, "no real loopback model connect captured")
-    return calls
+                report["ip_destinations"].append(entry)
+                if not ("AF_INET6" not in line and 'inet_addr("127.0.0.1")' in line
+                        and "htons(" + str(port) + ")" in line):
+                    report["violations"].append("unexpected IP destination: " + line)
+            if "AF_UNIX" in line:
+                report["unix_destinations"].append(entry)
+                # Abstract/unnamed/truncated addresses are not an ambient-socket exception.
+                match = re.search(r'\bsun_path=("(?:[^"\\]|\\.)*")', line)
+                try:
+                    require(match is not None, "unknown or abstract AF_UNIX address")
+                    assert match is not None
+                    address = ast.literal_eval(match[1])
+                    require(isinstance(address, str) and Path(address).is_absolute(),
+                            "AF_UNIX destination is not an absolute job path")
+                    require(Path(address).resolve().is_relative_to(job.resolve()),
+                            "AF_UNIX destination escaped the job allowlist")
+                    entry["resolved_destination"] = str(Path(address).resolve())
+                except (AssertionError, ValueError, SyntaxError, OSError, RuntimeError) as error:
+                    report["violations"].append(str(error) + ": " + line)
+    if not report["ip_destinations"]:
+        report["violations"].append("no real loopback model connect captured")
+    return report
 
 async def cli(client, args, case, env, owner, binary, wrapper):
     root = fixture(case, client + "-full")
@@ -176,6 +201,7 @@ async def run_case(client, args, manifest, candidate, runtime):
     case.mkdir(parents=True)
     (case / "fixture").mkdir()
     tool_path = str(args.job / "bin") + ":" + str(args.nvim.parent) + ":" + args.tool_path
+    home_preflight = clean_home_preflight(case / "home-preflight.json")
     env = environment(case, tool_path)
     owner = await Controller(case, json.loads((HERE / "lean-schemas.json").read_text())).start()
     env.update(ACCEPTANCE_CONTROL=str(owner.control_path),
@@ -183,12 +209,13 @@ async def run_case(client, args, manifest, candidate, runtime):
                ACCEPTANCE_WITNESS=str(case / "plugin-witness.jsonl"),
                HUYANG_RUNTIME_PATH=str(runtime), HUYANG_HEADLESS_INIT=str(headless_init(case, args.job / "bin/gopls")),
                HUYANG_FRICTION="0", HUYANG_SOCKET=str(case / "h.sock"))
-    wrapper = recorder(case, candidate)
+    wrapper = recorder(case, candidate, owner.control_path)
     write_json(case / "case-manifest.json", {
         "client": client, "cwd": str(case / "fixture"), "uid": os.getuid(),
         "environment_keys": sorted(env), "model_port": owner.port, "service_socket": str(case / "h.sock"),
         "binary": manifest["binaries"][client], "candidate_sha256": file_hash(candidate),
-        "plugin_sha256": file_hash(args.plugin) if client == "opencode" else None,
+        "plugin_sha256": args.plugin_sha256 if client == "opencode" else None,
+        "home_preflight": home_preflight,
         "recorder_sha256": file_hash(wrapper), "runtime_files": manifest["candidate_runtime_files"]})
     stdout = (case / "service.stdout").open("wb")
     stderr = (case / "service.stderr").open("wb")
@@ -202,7 +229,7 @@ async def run_case(client, args, manifest, candidate, runtime):
         binary = Path(manifest["binaries"][client]["path"])
         async with asyncio.timeout(args.case_deadline):
             if client == "opencode":
-                opencode.configure(case, args.plugin, wrapper, owner.port)
+                opencode.configure(case, args.plugin, wrapper, owner.port, args.plugin_sha256)
                 # ACP owns its process; this launcher records its real native process tree.
                 launcher = case / "bin" / "opencode-traced"
                 launcher.write_text("#!" + sys.executable + "\nimport os\nos.execv(" + repr(str(args.strace))
@@ -210,6 +237,8 @@ async def run_case(client, args, manifest, candidate, runtime):
                     + " + __import__('sys').argv[1:])\n")
                 launcher.chmod(0o755)
                 await opencode.exercise(launcher, env, owner, lambda nonce: fixture(case, nonce))
+                require(file_hash(case / "oc-config/plugins/huyang-profiles.js") == args.plugin_sha256,
+                        "discovered plugin changed during the actual client run")
             else:
                 await cli(client, args, case, env, owner, binary, wrapper)
         require(not owner.failures, str(owner.failures))
@@ -233,8 +262,9 @@ async def run_case(client, args, manifest, candidate, runtime):
         stdout.close()
         stderr.close()
         try:
-            audit = network_audit(case, owner.port)
+            audit = network_audit(case, owner.port, args.job)
             write_json(case / "destination-audit.json", audit)
+            require(not audit["violations"], canonical(audit["violations"]))
         except Exception as error:
             owner.fail(error)
             success = False
@@ -250,6 +280,7 @@ async def main(args):
         setattr(args, name, getattr(args, name).resolve())
     manifest = json.loads((args.job / "bootstrap-report.json").read_text())
     require(manifest["status"] == "bootstrapped-not-accepted", "bootstrap did not complete")
+    manifest["runtime_home_preflight"] = clean_home_preflight(args.job / "home-runtime-preflight.json")
     require(file_hash(args.job / "tools/package-lock.json") == manifest["package_lock_sha256"],
             "bootstrap lock changed")
     for value in manifest["binaries"].values():
@@ -257,6 +288,13 @@ async def main(args):
     require(file_hash(args.job / "bin/gopls") == manifest["gopls"]["sha256"], "gopls artifact changed")
     require(not (args.job / "c").exists(), "case artifacts already exist; retain failed run and bootstrap a new --job")
     require(args.plugin.name == "huyang-profiles.js", "stage the exact candidate V2 module")
+    plugin_preflight = {"path": str(args.plugin), "source_commit": PLUGIN_COMMIT, "git_blob": PLUGIN_BLOB,
+                        "expected_sha256": PLUGIN_SHA256, "provided_sha256": args.plugin_sha256,
+                        "actual_sha256": file_hash(args.plugin)}
+    write_json(args.job / "plugin-preflight.json", plugin_preflight)
+    require(args.plugin_sha256 == PLUGIN_SHA256, "plugin pin must identify the approved merged Omarchy blob")
+    require(plugin_preflight["actual_sha256"] == args.plugin_sha256, "staged plugin failed its immutable SHA-256 pin")
+    manifest["plugin"] = plugin_preflight
     require((args.runtime / "lua/huyang/rpc.lua").is_file(), "matching candidate Lua runtime missing")
     require(re.fullmatch(r"[0-9a-f]{40}", args.source_commit), "exact candidate --source-commit required")
     candidate = args.job / "bin/huyang-candidate"
@@ -298,6 +336,7 @@ if __name__ == "__main__":
     p.add_argument("--runtime", required=True, type=Path)
     p.add_argument("--source-commit", required=True)
     p.add_argument("--plugin", required=True, type=Path)
+    p.add_argument("--plugin-sha256", required=True)
     p.add_argument("--nvim", required=True, type=Path)
     p.add_argument("--strace", required=True, type=Path)
     p.add_argument("--tool-path", default=os.defpath)

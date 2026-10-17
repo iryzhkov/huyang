@@ -10,7 +10,7 @@ import signal
 import re
 import subprocess
 
-from common import HERE, environment, file_hash, require, write_json
+from common import HERE, clean_home_preflight, environment, file_hash, require, write_json
 
 PINS = {
     "claude": ("2.1.301", "node_modules/@anthropic-ai/claude-code-linux-x64/claude"),
@@ -54,12 +54,13 @@ def main():
     job = args.job.resolve()
     require(not job.exists(), "bootstrap --job must be new (retain prior artifacts on failure)")
     job.mkdir(parents=True, mode=0o700)
-    env = environment(job / "bootstrap-env", args.tool_path)
     tools, logs = job / "tools", job / "bootstrap"
     tools.mkdir()
     logs.mkdir()
     write_json(job / "bootstrap-report.json", {"status": "running"})
     try:
+        home_preflight = clean_home_preflight(job / "home-bootstrap-preflight.json")
+        env = environment(job / "bootstrap-env", args.tool_path)
         for name in ("package.json", "package-lock.json"):
             shutil.copyfile(HERE / name, tools / name)
         lock = json.loads((tools / "package-lock.json").read_text())
@@ -107,9 +108,11 @@ def main():
             "npm": npm.strip(), "go": go_version.strip(), "package_lock_sha256": before,
             "binaries": binaries, "gopls": {"path": str(bindir / "gopls"),
                 "version": version.strip(), "sha256": file_hash(bindir / "gopls"), "build": build},
+            "home_preflight": home_preflight,
             "synthetic_credentials_only": True, "scripts": "ignored"})
     except BaseException as error:
-        write_json(job / "bootstrap-report.json", {"status": "failed", "error": repr(error)})
+        write_json(job / "bootstrap-report.json", {"status": "failed", "error": repr(error),
+            "home_preflight_report": str(job / "home-bootstrap-preflight.json")})
         raise
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # Private actual-client acceptance (M7/M8)
 
 Implementation base: `1469c92c5aea7a67a06048593ba87c57caed8c97`.
+Round 1 fixes are based directly on `6e7ee7ab865498870d042f508dff35dbb0637281`.
 This directory is an opt-in job program, outside the Go test suite. No runtime
 acceptance is claimed by its implementation commit. It changes no production
 renderer, service, client installation, Ollama installation or fleet configuration.
@@ -17,8 +18,14 @@ a successful bootstrap.
 
 Run inside a new disposable **Chaldea agent-a job**, Linux x86_64 glibc, UID0 in a
 user namespace with a clean ordinary home and no credentials. Both entry points
-refuse the initial host user namespace. HOME is preserved when present; every
-client has supported config overrides and all XDG/temp/cache paths are job-owned.
+refuse the initial host user namespace. HOME must identify the namespace’s normal
+absolute home and is never rewritten. Before bootstrap and each client, a name-only
+preflight refuses `.codex`, `.agents`, `.opencode`, `.claude*`, `.npmrc` and the
+corresponding OpenCode/Codex/Claude discovery paths under `.config` and
+`.local`/`.cache`, including dangling links. It records checked/existing paths,
+never their contents. This checks client discovery paths, not every possible
+credential location. Every client has supported config overrides; XDG/temp/cache
+paths are job-owned.
 Keep the job path short enough that `J/c/opencode/control.sock` is under 100 bytes.
 
 The job image/input must provide:
@@ -30,18 +37,19 @@ The job image/input must provide:
   Lua runtime (`lua/huyang/rpc.lua` must exist). No test-only candidate is accepted
   as a substitute. Record the integrated source SHA used for that build.
 - The unchanged candidate V2 module staged as
-  `acceptance-input/huyang-profiles.js`. Parent stages it with guarded Huyang
-  copy/read from
-  `/home/igor/.t3/worktrees/omarchy-setup/huyang-friction-m7-opencode-20261017/config/opencode/plugins/huyang-profiles.js`.
-  This path was verified with Huyang at
-  `docrev_cfc663f43510093a1d2f6d8178139f49eec47645d40b343dce6d49405c25fcee`.
-  The asset is now merged in Omarchy at
-  `ebec80bca66d684d6fe47c5c57c7cf212b6558b2`; fleet role merge
+  `acceptance-input/huyang-profiles.js` from Omarchy merge
+  `ebec80bca66d684d6fe47c5c57c7cf212b6558b2`, path
+  `config/opencode/plugins/huyang-profiles.js`. Parent verified its Git blob as
+  `88ea20a15450e52fd94194a1f91ff69e7277da30` and exact content SHA-256 as
+  `e46883992727741758115492030f75bb26dbea14dccd3a4b4c3459cc5547f6c4`.
+  The runner requires this fixed SHA and an explicit matching --plugin-sha256;
+  it checks both input and discovered-copy bytes. A document revision is not a
+  content hash. Root stages and verifies the immutable merged asset inside the
+  job; this branch vendors no duplicate. Fleet merge
   `da2642f5cd4ccd86708459939b2a2a3fe21fe1bf` carries the same plugin blob
-  (parent-supplied provenance). The Omarchy fleet module is not vendored or
-  rewritten here. Stage non-ignored
-  job inputs before the parent submits the job; Chaldea does not transfer ignored
-  build files, symlinks, installed clients or the host's configuration.
+  (parent-supplied provenance). Stage non-ignored job inputs before submission;
+  Chaldea does not transfer ignored builds, symlinks, installed clients or host
+  configuration.
 
 With those inputs already present in the job, the complete invocation is:
 
@@ -55,6 +63,7 @@ python3 tests/client-acceptance/run.py \
   --runtime "$PWD" \
   --source-commit "$ACCEPTANCE_SOURCE_COMMIT" \
   --plugin "$PWD/acceptance-input/huyang-profiles.js" \
+  --plugin-sha256 e46883992727741758115492030f75bb26dbea14dccd3a4b4c3459cc5547f6c4 \
   --nvim "$ACCEPTANCE_NVIM" --strace "$ACCEPTANCE_STRACE"
 ```
 
@@ -63,6 +72,17 @@ Set `ACCEPTANCE_SOURCE_COMMIT` to the actual integrated 40-hex source SHA;
 These are harness inputs, never model credentials. The parent may put the two
 commands in its one existing Chaldea job after its build/provisioning steps.
 Neither entry point launches Chaldea or consumes another job slot.
+
+Parent's job-only tracing provision pins (not downloaded or executed by this
+fix session): Debian `strace_6.13+ds-1_amd64.deb`, SHA-256
+`cae290b67cf835350a2cde58ca332256fba475784b3e02a9a8677d73eaf47511`,
+from [Debian's strace pool](https://deb.debian.org/debian/pool/main/s/strace/strace_6.13+ds-1_amd64.deb),
+plus `libunwind8_1.8.1-0.1`, SHA-256
+`db21a86dd05c93413f0ef36282a9c64d32410d240f332273a53be1408bec1f62`.
+Parent confirmed a private ptrace/exec/loopback probe. Pass its absolute
+job-private launcher as --strace when needed; the child allowlist does not
+inherit LD_LIBRARY_PATH, so that launcher must supply its own private loader
+configuration. No host installation is part of this workflow.
 
 Bootstrap requires a new J. A failed run is retained; use a new J for a retry.
 Bootstrap executes `npm ci --ignore-scripts --legacy-peer-deps --no-audit
@@ -106,15 +126,21 @@ at distinct routes on the same numeric-loopback mock; neither uses an Ollama API
 
 strace records connect/sendto/sendmsg/execve for the actual client and service
 process trees. The destination audit rejects every observed AF_INET/AF_INET6
-destination except the case's selected 127.0.0.1 model port. This is an observed
-destination gate, not a claim that config variables implement a network firewall.
+destination except the case's selected 127.0.0.1 model port. Every observed AF_UNIX
+destination must be an absolute path resolving inside J; external, abstract,
+unnamed and undecodable addresses fail. This includes failed ambient socket
+lookups. The complete destination report, including violations, is retained.
+Execve lines are recorded for inspection, not checked against an executable
+allowlist. These are observed destination gates, not a network firewall claim.
 Public downloads belong to bootstrap; client/LSP execution uses an offline Go
 environment. Unknown endpoints, encodings, catalogs, auxiliary requests or client
 protocols fail with raw artifacts. There is no upstream model forwarding path.
 
 The job-local executable named `huyang` is a transparent recorder launcher.
 It accepts the real `mcp` arguments, including plugin-selected --profile, and
-executes the real candidate adapter. The candidate adapter connects to the
+executes the real candidate adapter. The generated wrapper embeds explicit
+ACCEPTANCE_CONTROL and ACCEPTANCE_FIXTURE assignments before exec, independent
+of whether a client clears its MCP child environment. The candidate adapter connects to the
 explicit private production socket. Both directions of MCP are byte-forwarded
 with backpressure; observers parse copies. Protocol stdout contains only the
 candidate stream. Initialize/initialized/list and every result are checked:
@@ -161,8 +187,15 @@ visible evidence IDs. The diagnostics full report must match that transaction,
 the exact committed revision_id and the real held document version, name gopls
 as producer, and retain the complete late attribution/candidate list. The raw
 diagnostic item is saved, including baseline_missing when supplied by Huyang.
-A quiet read must not redeliver the notice. Diagnostic collection retries are
-bounded by count and time; there are no arbitrary sleeps.
+Immediately after release, the workflow awaits the byte-preserving delivered
+event before issuing another tool call. It scans every subsequent newly returned
+tool reply, including evidence_get/search/refinement, diagnostics, replay and
+refusals, and records the first notice’s exact line, attribution, model call ID
+and MCP connection/request ID. A full workflow must observe that notice exactly
+once and name the original transaction; any later duplicate fails. Diagnostics
+collects the ledger once and verifies the item without requiring the one-shot
+notice label in that particular reply. There is no diagnostic polling loop or
+arbitrary sleep.
 
 OpenCode's actual loader discovers the unchanged candidate module in its private
 plugins directory. No direct setup/filterRequest call or fake hook registry is
@@ -176,7 +209,12 @@ One ACP process creates two simultaneous sessions in the same Location. First A
 runs lean while B runs full; then A full while B lean. Both run independent
 fixtures and markers concurrently. A same-provider model named ollama must
 remain full; ollama/mock2 must remain lean. B switches back to full. ACP selection
-notifications must name only the selected session and exact provider/model.
+responses with configOptions prove the exact selected model through the request’s
+JSON-RPC/session binding; an optional sessionId must agree. A notification is not
+required when the response supplies that proof. Any selection notification that
+does arrive must name only the selected session and exact provider/model. If the
+response omits configOptions, only an already-received matching notification can
+supply proof; there is no unconditional notification wait.
 An unavailable provider/model must error without inference. Lean runs
 read/search/guarded edit/stale refusal/reread. Refinement, diagnostics and replay
 are never sent to lean because their inputs/tools are absent by design.
@@ -184,10 +222,11 @@ are never sent to lean because their inputs/tools are absent by design.
 ## Artifacts and remaining limitations
 
 Retain J/report.json, J/failure.json when present, J/runtime-manifest.json,
-J/bootstrap-report.json, J/bootstrap/*, J/tools/package*.json, and every
+J/bootstrap-report.json, J/home-*-preflight.json, J/plugin-preflight.json,
+J/bootstrap/*, J/tools/package*.json, and every
 J/c/{claude,codex,opencode} case directory. Case directories include:
 
-- case-manifest.json, generated nonsecret client configs, init.lua, synthetic
+- case-manifest.json, home-preflight.json, generated nonsecret client configs, init.lua, synthetic
   fixture bytes and private durable Huyang state;
 - client stdout/stderr or duplex ACP client.jsonl, service stdout/stderr,
   model-http.jsonl with raw requests and emitted SSE/auxiliary JSON;
@@ -207,8 +246,13 @@ a default 300-second deadline and model traffic has a 500-request ceiling.
 No bootstrap/client/producer/ACP execution, build, test, push, installation or
 service restart was performed in the implementation session. Runtime must still
 establish the native package paths/loader behavior, Claude's bare MCP behavior
-under UID0, Codex's exact namespace and SSE parser contract, ACP notification
-shape, gopls's versioned push and Huyang late ingestion. Unsupported shapes fail;
+under UID0, Codex's exact namespace and SSE parser contract, ACP response/optional-notification
+shape and ordering, gopls's versioned empty baseline/push and Huyang late ingestion.
+The OpenCode provider/config keys, witness ctx.session.hook API, any runtime
+package-resolution attempt, Claude --permission-prompts none, and strict Codex
+feature keys remain runtime compatibility questions. HOME discovery and ambient
+Unix-socket refusals may expose additional client behavior; those failures remain
+explicit artifacts, not reasons to use installed configuration or broaden access. Unsupported shapes fail;
 no SDK/stub success is substituted. The harness covers these specified protocols,
 not every client extension, compression encoding or auxiliary model operation.
 Binary-to-source provenance is the parent's build responsibility; hashes and the

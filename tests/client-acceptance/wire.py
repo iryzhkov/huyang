@@ -16,7 +16,7 @@ async def mcp(args):
         command = command[1:]
     require(command, "missing candidate command")
     # OpenCode's real plugin requires basename(command[0]) == huyang and argv[1] == mcp.
-    # The job-local launcher supplies the candidate in an explicit environment variable.
+    # The job-local launcher embeds control/fixture paths and passes the absolute candidate.
     if args.candidate:
         command = [args.candidate, "mcp", *command]
     child = await asyncio.create_subprocess_exec(*command, stdin=asyncio.subprocess.PIPE,

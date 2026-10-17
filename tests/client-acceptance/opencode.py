@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from common import canonical, record, require, spawn, stop, write_json
+from common import canonical, digest, record, require, spawn, stop, write_json
 from workflow import Workflow
 
 WITNESS = """import * as sdk from "@opencode/plugin";
@@ -22,12 +22,14 @@ export default {
 };
 """
 
-def configure(case, plugin, recorder, port):
+def configure(case, plugin, recorder, port, plugin_sha256):
     configdir = case / "oc-config"
     plugins = configdir / "plugins"
     plugins.mkdir(parents=True)
     # Copy the exact candidate module; discovery (no config plugins array) is part of the gate.
-    (plugins / "huyang-profiles.js").write_bytes(Path(plugin).read_bytes())
+    plugin_bytes = Path(plugin).read_bytes()
+    require(digest(plugin_bytes) == plugin_sha256, "plugin changed after its runner preflight pin")
+    (plugins / "huyang-profiles.js").write_bytes(plugin_bytes)
     (plugins / "zz-acceptance-witness.js").write_text(WITNESS)
     (configdir / "package.json").write_text('{"private":true,"type":"module","dependencies":{"@opencode/plugin":"2.0.30"}}\n')
     providers = {}
@@ -61,7 +63,8 @@ class ACP:
         self.notifications = []
         self.failures = []
         self.lock = asyncio.Lock()
-        self.changed = asyncio.Event()
+        self.selection_expectation = None
+        self.selections = []
 
     async def start(self, binary, env):
         self.err = (self.case / "client.stderr").open("wb")
@@ -90,7 +93,7 @@ class ACP:
                     self.futures.pop(message["id"]).set_result(message)
                 else:
                     self.notifications.append(message)
-                    self.changed.set()
+                    self.check_selection_notice(message)
         except Exception as error:
             self.failures.append(repr(error))
         finally:
@@ -118,26 +121,49 @@ class ACP:
             return response["result"]
         return response
 
+    @staticmethod
+    def selected_model(options):
+        require(isinstance(options, list), "ACP selection lacks configOptions array")
+        models = [option for option in options if option.get("id") == "model"]
+        require(len(models) == 1, "ACP configOptions must identify exactly one model selector")
+        return models[0].get("currentValue")
+
+    def check_selection_notice(self, message):
+        if message.get("method") != "session/update":
+            return
+        params = message.get("params", {})
+        update = params.get("update", {})
+        if update.get("sessionUpdate") != "config_option_update" or self.selection_expectation is None:
+            return
+        expected = self.selection_expectation
+        require(params.get("sessionId") == expected["sessionId"],
+                "ACP selection notification leaked into another session")
+        require(self.selected_model(update.get("configOptions")) == expected["model"],
+                "ACP notification did not select exact provider/model")
+
     async def select(self, session, model):
         start = len(self.notifications)
+        # The JSON-RPC request ID binds this result to this selected session.
+        self.selection_expectation = {"sessionId": session, "model": model}
         result = await self.rpc("session/set_config_option",
                                 {"sessionId": session, "configId": "model", "value": model})
-        async with asyncio.timeout(20):
-            while True:
-                self.changed.clear()
-                notices = [n for n in self.notifications[start:] if n.get("method") == "session/update"
-                           and n.get("params", {}).get("update", {}).get("sessionUpdate") == "config_option_update"]
-                if notices:
-                    break
-                await self.changed.wait()
-        record(self.case / "selections.jsonl", sessionId=session, model=model, result=result,
-               notifications=self.notifications[start:])
-        require(all(n["params"]["sessionId"] == session for n in notices),
-                "ACP selection notification leaked into another session")
-        require(any(
-            option.get("id") == "model" and option.get("currentValue") == model
-            for notice in notices for option in notice["params"]["update"].get("configOptions", [])
-        ), "ACP notification did not select exact provider/model")
+        require(result.get("sessionId", session) == session, "ACP selection result names another session")
+        notices = [n for n in self.notifications[start:] if n.get("method") == "session/update"
+                   and n.get("params", {}).get("update", {}).get("sessionUpdate") == "config_option_update"]
+        for notice in notices:
+            self.check_selection_notice(notice)
+        if "configOptions" in result:
+            require(self.selected_model(result["configOptions"]) == model,
+                    "ACP response did not select exact provider/model")
+            proof = "response.configOptions"
+        else:
+            require(notices, "ACP selection has neither response configOptions nor a matching notice")
+            proof = "matching notification before response"
+        selection = {"sessionId": session, "model": model, "result": result, "proof": proof,
+                     "rpc_response_id": self.counter, "notifications": self.notifications[start:]}
+        self.selections.append(selection)
+        record(self.case / "selections.jsonl", **selection)
+        # No notification wait: the response itself is authoritative selection proof.
         return result
 
     async def close(self):
@@ -148,6 +174,7 @@ class ACP:
 async def exercise(binary, env, owner, make_fixture):
     acp = await ACP(owner.case).start(binary, env)
     sessions = []
+    witness = []
     try:
         await acp.rpc("initialize", {"protocolVersion": 1, "clientCapabilities": {},
                                     "clientInfo": {"name": "huyang-acceptance", "version": "1"}})
@@ -201,7 +228,9 @@ async def exercise(binary, env, owner, make_fixture):
                     >= {"acceptance", "ollama"}, "actual context witness missing both providers for a session")
         # Both selected catalogs came from distinct real MCP registrations.
         require(set(owner.catalogs) == {"full", "lean"}, "plugin did not discover both actual profiles")
-        write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
-                                                  "failures": acp.failures, "witness": witness})
     finally:
         await acp.close()
+        write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
+                                                  "selections": acp.selections,
+                                                  "failures": acp.failures, "witness": witness})
+        require(not acp.failures, str(acp.failures))

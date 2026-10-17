@@ -120,7 +120,8 @@ class Workflow:
         self.calls, self.replies, self.catalogs = [], [], []
         self.pending = None
         self.done = False
-        self.diagnostic_tries = 0
+        self.late_gate_delivered = False
+        self.notice_occurrences = []
         self.edit_args = None
         self.guard = self.current = self.wsrev = self.set_handle = self.workspace = ""
         self.transaction = self.finding_id = ""
@@ -164,9 +165,14 @@ class Workflow:
             wire = self.owner.match_reply(self.pending, text)
             self.replies.append({"call_id": call_id, "text": text, "mcp": wire})
             record(self.log, nonce=self.nonce, step=self.step, call_id=call_id, plain=text, mcp=wire)
+            self.observe_notice(text, wire)
             await self.consume(text, wire)
+            self.validate_notice()
             self.pending = None
         if self.step == "finish":
+            if self.profile == "full" and not self.probe:
+                require(len(self.notice_occurrences) == 1, "expected exactly one actual late notice")
+                self.validate_notice()
             self.done = True
             require(self.probe or self.after is not None, "missing committed mutation snapshot")
             self.final = ("HUYANG_ACCEPTANCE_COMPLETE " + self.nonce + " revision=" + self.current
@@ -182,6 +188,34 @@ class Workflow:
         self.pending = call
         record(self.log, nonce=self.nonce, emit=call)
         return call
+
+    def observe_notice(self, text, wire):
+        if not self.late_gate_delivered:
+            return
+        # Scan the newly returned reply only, not repeated tool history in HTTP input.
+        for line in text.splitlines():
+            if "missingAcceptanceSymbol" not in line or "(late finding;" not in line:
+                continue
+            attribution = re.search(r"\(late finding; attribution: ([^)]*)\)", line)
+            require(attribution is not None and "not attributed to this call" not in line,
+                    "late notice lacks explicit transaction attribution")
+            assert attribution is not None and self.pending is not None
+            fields = dict(part.split("=", 1) for part in attribution[1].split() if "=" in part)
+            candidates = fields.get("candidates", "").split(",")
+            require(any(candidates), "late notice has no transaction candidates")
+            occurrence = {"call_id": self.pending["call_id"], "step": self.pending["step"],
+                          "mcp_connection": wire["connection"], "mcp_request_id": wire["request_id"],
+                          "line": line, "attribution": attribution[1], "candidates": candidates}
+            self.notice_occurrences.append(occurrence)
+            record(self.log, nonce=self.nonce, late_notice=occurrence)
+            require(len(self.notice_occurrences) == 1, "same late finding delivered more than once")
+            self.late = line
+
+    def validate_notice(self):
+        # The first notice may precede the evidence_get reply that names the transaction.
+        if self.transaction and self.notice_occurrences:
+            require(self.transaction in self.notice_occurrences[0]["candidates"],
+                    "late notice attributed to a different edit transaction")
 
     def next_call(self):
         root = {"root": str(self.root)}
@@ -267,6 +301,8 @@ class Workflow:
                 require(re.search(r"provisional|incomplete|pending|unavailable", text, re.I),
                         "delayed edit incorrectly lacks provisional/incomplete evidence")
                 await self.owner.release(self.root, text)
+                await asyncio.wait_for(self.owner.delivered(self.root), 30)
+                self.late_gate_delivered = True
                 evidence_lines = [line for line in text.splitlines() if line.startswith("evidence: ")]
                 require(evidence_lines, "delayed receipt lacks actual diagnostic evidence IDs")
                 self.edit_evidence_ids = re.findall(r"ev_[0-9a-f]+", evidence_lines[0])
@@ -299,18 +335,10 @@ class Workflow:
         elif self.step == "refine":
             require("refined from " + self.set_handle in text, "refinement lost returned set handle")
             require("main.go:4:// alpha two" in text, "refinement did not reveal the second real frozen hit")
-            await asyncio.wait_for(self.owner.delivered(self.root), 30)
             self.step = "diagnostics"
         elif self.step == "diagnostics":
-            self.diagnostic_tries += 1
-            if "missingAcceptanceSymbol" not in text or "late finding" not in text:
-                require(self.diagnostic_tries < 20, "real late diagnostic not collected within 20 calls")
-                return
-            require("attribution:" in text and "not attributed" not in text,
-                    "late finding lacks transaction attribution")
-            # Keep the complete rendered attribution, including opaque IDs, unchanged.
-            self.late = next(line for line in text.splitlines()
-                             if "missingAcceptanceSymbol" in line and "late finding" in line)
+            # Delivery was event-gated before the intervening calls. Collect once;
+            # the one-shot notice may already have ridden on any of those replies.
             items = [item for item in dictionaries(plain_data(text))
                      if isinstance(item.get("finding"), dict)
                      and "missingAcceptanceSymbol" in item["finding"].get("message", "")]
@@ -329,8 +357,6 @@ class Workflow:
             self.diagnostic_item = item
             self.step = "quiet"
         elif self.step == "quiet":
-            require("late finding" not in text and "missingAcceptanceSymbol (" not in text,
-                    "late notice delivered twice")
             require(token(REV, text) == self.current, "revision changed during late collection")
             self.step = "replay"
         elif self.step == "replay":
@@ -361,7 +387,8 @@ class Workflow:
                 "sessionId": self.session, "providerID": self.provider, "probe": self.probe,
                 "guard": self.guard, "committed_revision_id": self.current,
                 "committed_workspace_revision": self.wsrev, "result_set_handle": self.set_handle,
-                "late_plain_attribution": self.late, "transaction_id": self.transaction,
+                "late_plain_attribution": self.late, "notice_occurrences": self.notice_occurrences,
+                "late_gate_delivered": self.late_gate_delivered, "transaction_id": self.transaction,
                 "finding_id": self.finding_id, "diagnostic_item": self.diagnostic_item,
                 "edit_evidence": self.edit_evidence, "before": self.before, "after": self.after,
                 "calls": self.calls, "replies": self.replies, "catalogs": self.catalogs,

@@ -9,6 +9,9 @@ import signal
 import time
 
 KEY = "sk-huyang-acceptance-not-a-secret"
+PLUGIN_COMMIT = "ebec80bca66d684d6fe47c5c57c7cf212b6558b2"
+PLUGIN_BLOB = "88ea20a15450e52fd94194a1f91ff69e7277da30"
+PLUGIN_SHA256 = "e46883992727741758115492030f75bb26dbea14dccd3a4b4c3459cc5547f6c4"
 HERE = Path(__file__).resolve().parent
 FULL = {"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate",
         "read", "diagnostics", "edit_apply", "change_plan", "revision_diff",
@@ -46,6 +49,30 @@ def snapshot(path):
     s = Path(path).stat()
     return {"sha256": file_hash(path), "size": s.st_size, "mtime_ns": s.st_mtime_ns,
             "inode": s.st_ino}
+
+def clean_home_preflight(report_path):
+    """Check discovery-path names only; never read auth/config contents or alter HOME."""
+    raw_home = os.environ.get("HOME")
+    report = {"home": raw_home, "checked_paths": [], "existing_paths": [],
+              "patterns": [".claude*"], "contents_read": False}
+    try:
+        require(raw_home and Path(raw_home).is_absolute(), "HOME must name the namespace's absolute ordinary home")
+        home = Path(raw_home)
+        require(home.is_dir(), "namespace HOME is not an accessible directory")
+        names = {".codex", ".agents", ".opencode", ".claude", ".npmrc",
+                 ".config/codex", ".config/opencode", ".config/claude",
+                 ".local/share/opencode", ".local/state/opencode", ".cache/opencode"}
+        names.update(path.name for path in home.iterdir() if path.name.startswith(".claude"))
+        report["checked_paths"] = sorted(names)
+        # lexists also rejects dangling links instead of silently treating them as clean.
+        report["existing_paths"] = [name for name in sorted(names) if os.path.lexists(home / name)]
+        report["resolved_home"] = str(home.resolve())
+    except (OSError, AssertionError) as error:
+        report["error"] = repr(error)
+    report["status"] = "clean" if not report.get("error") and not report["existing_paths"] else "refused"
+    write_json(report_path, report)
+    require(report["status"] == "clean", "unclean or unverifiable HOME; see " + str(report_path))
+    return report
 
 def environment(case, tool_path):
     case = Path(case)
