@@ -84,16 +84,7 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 	// the strongest observation before recording, so an intermediate empty
 	// batch cannot resolve findings that a current pull still reports.
 	batches := selectDiagnosticBatches(payload.Batches)
-	covered := map[string]bool{}
-	for _, batch := range batches {
-		covered[filepath.Clean(batch.Document)] = true
-	}
-	for _, path := range paths {
-		if !covered[filepath.Clean(path)] {
-			batches = append(batches, workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePush,
-				ProviderID: string(descriptor.ID), Producer: descriptor.Backend, Document: path, Selected: true, Dimension: "edited_documents"})
-		}
-	}
+	batches = appendUncoveredDiagnosticBatches(batches, paths, string(descriptor.ID), descriptor.Backend)
 	preEdit := map[string]string{}
 	for _, file := range files {
 		if revision, err := workspace.DiagnosticPreEditRevision(file); err == nil {
@@ -122,6 +113,20 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		mergeDiagnosticReport(&report, observed, staged)
 	}
 	return report, nil
+}
+
+func appendUncoveredDiagnosticBatches(batches []workspacecore.DiagnosticBatch, paths []string, providerID, producer string) []workspacecore.DiagnosticBatch {
+	covered := map[string]bool{}
+	for _, batch := range batches {
+		covered[filepath.Clean(batch.Document)] = true
+	}
+	for _, path := range paths {
+		if !covered[filepath.Clean(path)] {
+			batches = append(batches, workspacecore.DiagnosticBatch{Kind: workspacecore.EvidencePush,
+				ProviderID: providerID, Producer: producer, Document: path, Selected: true, Dimension: "edited_documents"})
+		}
+	}
+	return batches
 }
 
 func publicationProven(batch workspacecore.DiagnosticBatch) bool {

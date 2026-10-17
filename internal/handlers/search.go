@@ -150,20 +150,7 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 	}
 	envelope := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
 	if truncated {
-		of := fmt.Sprintf("%d", len(result.Hits))
-		if stoppedAtBound {
-			of = "at least " + of
-		}
-		envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %s matches", len(hits), of)}
-		envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.ResultSet.Handle}}
-		if stoppedAtBound {
-			// Refining a frozen set that is itself a truncation of the
-			// workspace narrows the wrong thing; a narrower query or a
-			// scoped path searches the files this one never reached.
-			envelope["next"] = append(envelope["next"].([]any), map[string]any{
-				"tool": "search", "action": "narrow_the_query_or_scope_it_with_paths", "query": result.Query,
-			})
-		}
+		searchTruncationNext(envelope, result, len(hits), stoppedAtBound)
 	} else if !result.Coverage.Complete {
 		envelope["next"] = []any{map[string]any{"tool": "read", "action": "read_known_path"}}
 	}
@@ -173,6 +160,23 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		envelope = mcpapi.AddWarnings(envelope, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
 	}
 	return mcpapi.AddWarnings(envelope, contextWarning)
+}
+
+func searchTruncationNext(envelope map[string]any, result workspacecore.SearchResult, returned int, stoppedAtBound bool) {
+	of := fmt.Sprintf("%d", len(result.Hits))
+	if stoppedAtBound {
+		of = "at least " + of
+	}
+	envelope["warnings"] = []string{fmt.Sprintf("response limited to %d of %s matches", returned, of)}
+	envelope["next"] = []any{map[string]any{"tool": "search", "action": "refine", "result_set_handle": result.ResultSet.Handle}}
+	if stoppedAtBound {
+		// Refining a frozen set that is itself a truncation of the
+		// workspace narrows the wrong thing; a narrower query or a
+		// scoped path searches the files this one never reached.
+		envelope["next"] = append(envelope["next"].([]any), map[string]any{
+			"tool": "search", "action": "narrow_the_query_or_scope_it_with_paths", "query": result.Query,
+		})
+	}
 }
 
 // searchWithoutQuery answers a search that names paths but no query with
