@@ -37,8 +37,7 @@ type clientConnection struct {
 // guards check content, not intent - create_file needs no prior revision
 // and replace_literal succeeds wherever the old text also occurs - so an
 // edit meant for another repository could land here, and the warning that
-// names the root would arrive after it had. verify_run runs commands, so it
-// is absent for the same reason.
+// names the root would arrive after it had.
 var defaultWorkspaceTools = map[string]bool{
 	"workspace_open": true, "workspace_inspect": true, "search": true, "symbol_find": true,
 	"navigate": true, "read": true, "diagnostics": true, "evidence_get": true, "code_actions": true,
@@ -50,7 +49,7 @@ var defaultWorkspaceTools = map[string]bool{
 // "." is the caller's own statement of intent, resolved against the
 // directory the caller's client was started in.
 var relativeRootTools = map[string]bool{
-	"edit_apply": true, "change_plan": true, "verify_run": true,
+	"edit_apply": true, "change_plan": true,
 }
 
 // resolveClientPaths rewrites a relative root against the client's working

@@ -12,13 +12,13 @@ func TestServiceExposesPprofBehindBearerOnLoopback(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "control.sock")
 	if _, err := newHuyangService(serviceConfig{
 		SocketPath: socketPath, StateDir: stateDir, PprofAddress: "0.0.0.0:0",
-		ProviderQuota: 1, ExternalJobQuota: 1,
+		ProviderQuota: 1,
 	}); err == nil {
 		t.Fatal("non-loopback pprof address was accepted")
 	}
 	service, err := newHuyangService(serviceConfig{
 		SocketPath: socketPath, StateDir: stateDir, PprofAddress: "127.0.0.1:0",
-		ProviderQuota: 1, ExternalJobQuota: 1,
+		ProviderQuota: 1,
 	})
 	if err != nil {
 		t.Fatal(err)

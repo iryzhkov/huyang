@@ -603,30 +603,6 @@ func (s *Sandbox) StageFileForToolDelta(delta ToolDelta) (PlanStageFile, error) 
 	}, nil
 }
 
-func (s *Sandbox) BaseStageFiles() ([]PlanStageFile, error) {
-	var files []PlanStageFile
-	for _, entry := range s.baseManifest {
-		if entry.Kind != ObjectRegularText || entry.Path == ".git" || strings.HasPrefix(entry.Path, ".git/") {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(s.Tree, filepath.FromSlash(entry.Path)))
-		if err != nil {
-			return nil, err
-		}
-		before := DiskSnapshot{
-			Kind: entry.Kind, Device: entry.Device, Inode: entry.Inode, Size: entry.Size,
-			MTimeNS: entry.MTimeNS, Mode: uint32(entry.Mode.Perm()),
-		}
-		after := before
-		after.Device, after.Inode, after.MTimeNS = 0, 0, 0
-		files = append(files, PlanStageFile{
-			Path: entry.Path, Before: append([]byte(nil), content...), After: append([]byte(nil), content...),
-			BeforeExists: true, AfterExists: true, BeforeDisk: before, AfterDisk: after,
-		})
-	}
-	return files, nil
-}
-
 func (s *Sandbox) PreparedChanges(ctx context.Context) ([]PlanStageFile, error) {
 	current, _, err := inventorySandboxTree(ctx, s.Tree, SandboxLimits{MaxEntries: DefaultSandboxLimits().MaxEntries, MaxLogicalBytes: 1<<63 - 1})
 	if err != nil {

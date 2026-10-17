@@ -70,7 +70,6 @@ type SemanticTestSummary struct {
 	Status   string   `json:"status"`
 	Scope    string   `json:"scope,omitempty"`
 	Verdict  string   `json:"verdict,omitempty"`
-	Selected []string `json:"selected,omitempty"`
 	Executed []string `json:"executed,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 }
@@ -311,9 +310,6 @@ func summariseTests(stages []VerificationStage) SemanticTestSummary {
 			Status: string(stage.Status), Scope: stage.TestScope, Verdict: stage.TestVerdict,
 			Executed: append([]string(nil), stage.ExecutedTests...),
 		}
-		for _, selected := range stage.SelectedTests {
-			summary.Selected = append(summary.Selected, selected.Name)
-		}
 		if stage.Status != VerificationPassed && stage.Status != VerificationFailed {
 			summary.Detail = "the tests stage did not run: " + strings.Join(stage.Coverage.Skipped, ", ")
 		}
@@ -373,7 +369,7 @@ func recommendations(summary SemanticChangeSummary, input SemanticSummaryInput) 
 		}
 	}
 	if summary.Tests.Status == "not_run" || summary.Tests.Status == string(VerificationSkipped) {
-		advice = append(advice, "run verify_run with test_scope affected: nothing here says the behaviour still works")
+		advice = append(advice, "run the project's tests in the shell, or trust the root so change_plan prepare runs them: nothing here says the behaviour still works")
 	}
 	return advice
 }

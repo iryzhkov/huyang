@@ -643,8 +643,8 @@ local function dialect_note(bufnr)
         return "this is QML JavaScript (a .pragma/.import header), which no JavaScript "
             .. "or TypeScript server can parse; the one that attached was detached and "
             .. "its errors on this file discarded. Nothing checked this edit - qmllint "
-            .. "over the .qml files that import this one is the gate (verify_run "
-            .. "runs it as the project's check stage)."
+            .. "over the .qml files that import this one is the gate (change_plan "
+            .. "prepare runs it as the project's check stage in a trusted root)."
     end
     return nil
 end

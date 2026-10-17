@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -78,11 +77,6 @@ func TestImpactGraphFollowsTypeScriptBarrelWithJavaScriptSpecifiers(t *testing.T
 			t.Fatalf("affected %v does not include %s", graph.Affected, path)
 		}
 	}
-
-	selected := SelectAffectedTests(graph, []CommandPolicy{{Name: "unit", Command: []string{"npm", "test"}}}, nil)
-	if len(selected) != 1 || !containsString(selected[0].Reasons, "colocated_test") {
-		t.Fatalf("selected = %+v", selected)
-	}
 }
 
 func TestImpactGraphCapsAreExplicit(t *testing.T) {
@@ -98,7 +92,9 @@ func TestImpactGraphCapsAreExplicit(t *testing.T) {
 	}
 }
 
-func TestAffectedTestsAreAdvisoryRevisionKeyedAndNeverSetFullGate(t *testing.T) {
+// The tests stage always runs the whole configured suite, however narrow the
+// change: a failing suite the change does not touch still fails the gate.
+func TestTestsStageRunsTheFullSuiteAndAFailureFailsTheGate(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-specific")
 	}
@@ -109,131 +105,22 @@ func TestAffectedTestsAreAdvisoryRevisionKeyedAndNeverSetFullGate(t *testing.T) 
 	})
 	policy := trustedPolicy(t, sandbox.Tree)
 	policy.Tests = []CommandPolicy{
-		{Name: "unit", Command: []string{"sh", "-c", "test -f src/use.test.ts"}, Covers: []string{"src/**"}, Variants: []string{"node20"}},
+		{Name: "unit", Command: []string{"sh", "-c", "test -f src/use.test.ts"}, Covers: []string{"src/**"}},
 		{Name: "release", Command: []string{"sh", "-c", "exit 9"}, Covers: []string{"release/**"}},
 	}
-	policy.Variants = []VariantPolicy{{Name: "node20", Files: []string{"src/**"}, Required: true}}
-	history := filepath.Join(t.TempDir(), "history.json")
-	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
-		Revision: "prep_targeted", Stages: []string{"tests"}, TestScope: "affected", TestHistoryPath: history,
-	}, []PlanStageFile{preparedFile(t, prepared, "src/value.ts")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Targeted == nil || result.Targeted.Status != "affected_tests_passed" {
-		t.Fatalf("targeted = %+v", result.Targeted)
-	}
-	if result.FullTestGate != "" {
-		t.Fatalf("targeted run changed full gate: %q", result.FullTestGate)
-	}
-	if len(result.Stages) != 1 || result.Stages[0].TestVerdict != "affected_tests_passed" || len(result.Stages[0].ExecutedTests) != 1 || result.Stages[0].ExecutedTests[0] != "unit" {
-		t.Fatalf("stages = %+v", result.Stages)
-	}
-	content, err := os.ReadFile(history)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var state testHistoryState
-	if err := json.Unmarshal(content, &state); err != nil {
-		t.Fatal(err)
-	}
-	if len(state.Entries) != 1 || state.Entries[0].Revision != "prep_targeted" || state.Entries[0].Scope != "affected" {
-		t.Fatalf("history = %+v", state)
-	}
-
 	full, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
-		Revision: "prep_full", Stages: []string{"tests"}, TestScope: "full", TestHistoryPath: history,
-	}, prepared)
+		Revision: "prep_full", Stages: []string{"tests"},
+	}, []PlanStageFile{preparedFile(t, prepared, "src/value.ts")})
 	if err == nil {
 		t.Fatal("full suite unexpectedly passed")
 	}
-	if full.FullTestGate != "full_tests_failed" || full.Targeted != nil {
+	if full.FullTestGate != "full_tests_failed" {
 		t.Fatalf("full result = %+v", full)
 	}
-}
-
-func TestAffectedSelectionWithoutAssociationIsUnavailableNotClean(t *testing.T) {
-	sandbox, prepared := pipelineSandbox(t, map[string]string{"main.go": "package main\n"})
-	policy := trustedPolicy(t, sandbox.Tree)
-	policy.Tests = []CommandPolicy{{Name: "unrelated", Command: []string{"false"}, Covers: []string{"web/**"}}}
-	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
-		Revision: "prep_none", Stages: []string{"tests"}, TestScope: "affected",
-	}, prepared)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Targeted == nil || result.Targeted.Status != "unavailable" || len(result.Stages) != 1 || result.Stages[0].Status != VerificationSkipped {
-		t.Fatalf("result = %+v", result)
-	}
-}
-
-// A deleted file is no prepared file, but it is a change: the tests that
-// cover where it was are selected even when nothing else changed.
-func TestAffectedSelectionCountsRemovedPaths(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is POSIX-specific")
-	}
-	sandbox, _ := pipelineSandbox(t, map[string]string{"src/kept.go": "package src\n"})
-	policy := trustedPolicy(t, sandbox.Tree)
-	policy.Tests = []CommandPolicy{{Name: "unit", Command: []string{"true"}, Covers: []string{"src/**"}}}
-	result, err := RunVerificationPipeline(context.Background(), sandbox, policy, VerificationRequest{
-		Revision: "prep_removed", Stages: []string{"tests"}, TestScope: "affected", RemovedPaths: []string{"src/gone.go"},
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Stages) != 1 || len(result.Stages[0].ExecutedTests) != 1 || result.Stages[0].ExecutedTests[0] != "unit" {
-		t.Fatalf("a deletion selected no covering test: %+v", result.Stages)
-	}
-}
-
-func TestAffectedSelectionIncludesRevisionKeyedPriorFailure(t *testing.T) {
-	graph := ImpactGraph{Affected: []string{"src/value.go"}}
-	tests := []CommandPolicy{{Name: "integration", Command: []string{"go", "test", "./integration"}, Covers: []string{"integration/**"}}}
-	selected := SelectAffectedTests(graph, tests, []TestHistoryEntry{{Revision: "rev_previous", Test: "integration", Status: string(VerificationFailed)}})
-	if len(selected) != 1 || !containsString(selected[0].Reasons, "prior_failure") {
-		t.Fatalf("selected = %+v", selected)
-	}
-}
-
-func TestUnnamedSuitesBeyondTenKeepDistinctGeneratedNames(t *testing.T) {
-	graph := ImpactGraph{Affected: []string{"src/value.go"}}
-	var tests []CommandPolicy
-	for index := 0; index < 12; index++ {
-		tests = append(tests, CommandPolicy{Command: []string{"true"}, Required: true})
-	}
-	selected := SelectAffectedTests(graph, tests, nil)
-	if len(selected) != 12 {
-		t.Fatalf("selected %d suites, want 12", len(selected))
-	}
-	names := map[string]bool{}
-	for _, test := range selected {
-		names[test.Name] = true
-	}
-	if len(names) != 12 || !names["test_10"] || !names["test_12"] {
-		t.Fatalf("generated suite names collide: %v", names)
-	}
-}
-
-func TestRecordTestHistoryReplacesFileWithoutLeavingTemporaries(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "history", "tests.json")
-	entries := []TestHistoryEntry{{Revision: "rev_1", Scope: "full", Test: "unit", Status: string(VerificationPassed)}}
-	if err := recordTestHistory(path, entries); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordTestHistory(path, entries); err != nil {
-		t.Fatal(err)
-	}
-	history, err := readTestHistory(path)
-	if err != nil || len(history) != 2 {
-		t.Fatalf("history = %+v, %v", history, err)
-	}
-	listing, err := os.ReadDir(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listing) != 1 || listing[0].Name() != "tests.json" {
-		t.Fatalf("history directory holds leftovers: %v", listing)
+	for _, stage := range full.Stages {
+		if stage.Stage == "tests" && stage.TestScope != "full" {
+			t.Fatalf("tests stage scope = %q, want full: %+v", stage.TestScope, full.Stages)
+		}
 	}
 }
 

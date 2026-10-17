@@ -101,7 +101,7 @@ func TestResolveClientPathsFollowsSymlinksBeforeParentSteps(t *testing.T) {
 
 func TestResolveClientPathsNeverDefaultsAMutation(t *testing.T) {
 	repository, _, _ := clientPathTree(t)
-	for _, tool := range []string{"edit_apply", "change_plan", "verify_run"} {
+	for _, tool := range []string{"edit_apply", "change_plan"} {
 		arguments := map[string]any{"operation": map[string]any{"kind": "create_file", "path": "a.go"}}
 		if warnings := resolveClientPaths(tool, arguments, repository); len(warnings) != 0 || arguments["root"] != nil {
 			t.Fatalf("%s was given a default root: %v", tool, arguments)

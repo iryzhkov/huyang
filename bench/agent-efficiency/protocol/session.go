@@ -27,9 +27,8 @@ type session struct {
 	notes      []string
 	features   map[string]bool
 	workspaces map[string]string
-	pipelines  map[string]bool
 	// revisions holds the latest workspace revision each language's calls
-	// reported, which verify_run has to name exactly.
+	// reported.
 	revisions map[string]string
 	version   string
 	// modelFamily selects which pristine copy the modelled calls mutate.
@@ -50,7 +49,7 @@ func startSession(root string, encoder *tiktoken.Tiktoken) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &session{root: root, work: work, encoder: encoder, features: map[string]bool{}, workspaces: map[string]string{}, pipelines: map[string]bool{}, revisions: map[string]string{}}
+	s := &session{root: root, work: work, encoder: encoder, features: map[string]bool{}, workspaces: map[string]string{}, revisions: map[string]string{}}
 	for _, language := range []string{"go", "python"} {
 		source := filepath.Join(root, "bench", "agent-efficiency", "fixtures", language)
 		for _, target := range []string{s.fixtureDir(language), filepath.Join(s.work, "model", language, "builtin"), filepath.Join(s.work, "model", language, "bash")} {

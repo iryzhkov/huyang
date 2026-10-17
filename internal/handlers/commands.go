@@ -7,8 +7,8 @@ import (
 )
 
 // describeCommands summarises the verification commands a workspace has,
-// where they came from, whether verify_run may execute them, and how to
-// change that. It is part of the workspace_open response so an agent never
+// where they came from, whether change_plan prepare may execute them in its
+// sandbox, and how to change that. It is part of the workspace_open response so an agent never
 // has to discover the pipeline by trial.
 func describeCommands(policy workspacecore.PipelinePolicy) map[string]any {
 	source := "none"
@@ -37,9 +37,9 @@ func describeCommands(policy workspacecore.PipelinePolicy) map[string]any {
 	case source == "none":
 		commands["hint"] = reason
 	case !policy.Trusted:
-		commands["enable"] = "verify_run can run these once this root is listed under [trust] roots in " + policy.UserConfig
+		commands["enable"] = "change_plan prepare runs these in its sandbox once this root is listed under [trust] roots in " + policy.UserConfig + "; run them in the shell meanwhile"
 	default:
-		commands["run"] = "verify_run with stages check and/or tests; test_scope=affected covers only edited files"
+		commands["run"] = "change_plan prepare runs these against the staged sandbox; run them in the shell to check the canonical tree"
 	}
 	if source == "detected" {
 		commands["override"] = "write .huyang.toml at the workspace root to declare your own commands"

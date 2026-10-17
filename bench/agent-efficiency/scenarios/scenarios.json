@@ -1,6 +1,6 @@
 {
   "families": {
-    "huyang": "Use only the huyang MCP tools (workspace_open, search, read, edit_apply, change_plan, verify_run, navigate, symbol_find, diagnostics, code_actions) for reading, searching and editing files. Do not use the built-in read, edit, write, grep, glob or list tools and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task, and only if verify_run cannot run it.",
+    "huyang": "Use only the huyang MCP tools (workspace_open, search, read, edit_apply, change_plan, navigate, symbol_find, diagnostics, code_actions) for reading, searching and editing files. Do not use the built-in read, edit, write, grep, glob or list tools and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task.",
     "builtin": "Use only the built-in file tools of this harness (read, edit, write, grep, glob, list). Do not call any huyang tool and do not read or edit files through bash. Bash is allowed only to run the build or test command named in the task.",
     "bash": "Use only the bash tool (cat, sed, grep, python3, go, dlv, pdb and similar). Do not call any huyang tool and do not use the built-in read, edit, write, grep or glob tools."
   },

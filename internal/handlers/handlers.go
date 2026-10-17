@@ -23,12 +23,10 @@ type WorkspaceLookup interface {
 	PersistIdentity(id workspacecore.ID) error
 }
 
-// RevisionProvenance answers the two receipt-backed questions the handlers
-// ask: which native edits produced the revisions in a range, and which
-// paths changed at one revision.
+// RevisionProvenance answers the receipt-backed question the handlers ask:
+// which native edits produced the revisions in a range.
 type RevisionProvenance interface {
 	RecordedRevisionDiffs(workspaceID string, fromSeq, toSeq uint64) []RecordedRevisionDiff
-	CanonicalChangedPaths(workspaceID workspacecore.ID, target uint64) ([]string, error)
 }
 
 // RecordedRevisionDiff is one native edit receipt in revision order.
@@ -62,13 +60,12 @@ func checkpointStatefulReceipt(ctx context.Context, result map[string]any) error
 // provider pool. It holds no replay or scheduling state: the service
 // decides when a handler runs, the handlers decide what it does.
 type Handlers struct {
-	registry     WorkspaceLookup
-	provenance   RevisionProvenance
-	pool         *providerpool.Pool
-	verification *verificationCache
-	notices      *noticeDelivery
-	stateDir     string
-	toolTimeout  time.Duration
+	registry    WorkspaceLookup
+	provenance  RevisionProvenance
+	pool        *providerpool.Pool
+	notices     *noticeDelivery
+	stateDir    string
+	toolTimeout time.Duration
 	// schedulerInfo describes the scheduler classes and quotas for
 	// workspace_inspect; the scheduler itself belongs to the service.
 	schedulerInfo func() map[string]any
@@ -94,7 +91,6 @@ func New(config Config) *Handlers {
 		registry:      config.Registry,
 		provenance:    config.Provenance,
 		pool:          config.Pool,
-		verification:  newVerificationCache(),
 		notices:       newNoticeDelivery(),
 		stateDir:      config.StateDir,
 		toolTimeout:   config.ToolTimeout,
@@ -204,8 +200,6 @@ func (h *Handlers) route(ctx context.Context, requestID, name, workspaceID strin
 		return h.edit(ctx, requestID, workspace, arguments)
 	case "change_plan":
 		return h.changePlan(ctx, requestID, workspace, arguments)
-	case "verify_run":
-		return h.verify(ctx, requestID, workspace, arguments)
 	case "revision_diff":
 		return h.revisionDiff(ctx, requestID, workspace, arguments)
 	case "language_server_status":

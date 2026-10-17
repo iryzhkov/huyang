@@ -10,7 +10,7 @@ import (
 )
 
 func TestSchedulerSerializesOneWorkspaceAndSeparatesOthers(t *testing.T) {
-	scheduler := newWorkspaceScheduler(2, 1)
+	scheduler := newWorkspaceScheduler(2)
 	releaseFirst, err := scheduler.acquire(context.Background(), "ws_a", mcpapi.ClassCanonicalWrite)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestSchedulerSerializesOneWorkspaceAndSeparatesOthers(t *testing.T) {
 }
 
 func TestSchedulerProviderQuotaAndCancellation(t *testing.T) {
-	scheduler := newWorkspaceScheduler(1, 1)
+	scheduler := newWorkspaceScheduler(1)
 	releaseFirst, err := scheduler.acquire(context.Background(), "ws_a", mcpapi.ClassProviderRead)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestSchedulerProviderQuotaAndCancellation(t *testing.T) {
 }
 
 func TestSchedulerAllowsTwoSameWorkspaceSandboxesAndQueuesTheThird(t *testing.T) {
-	scheduler := newWorkspaceScheduler(4, 1)
+	scheduler := newWorkspaceScheduler(4)
 	releaseFirst, err := scheduler.acquire(context.Background(), "ws_a", mcpapi.ClassSandboxWrite)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestSchedulerAllowsTwoSameWorkspaceSandboxesAndQueuesTheThird(t *testing.T)
 }
 
 func TestSchedulerPureReadsDoNotQueueBehindWrites(t *testing.T) {
-	scheduler := newWorkspaceScheduler(1, 1)
+	scheduler := newWorkspaceScheduler(1)
 	releaseWrite, err := scheduler.acquire(context.Background(), "ws_a", mcpapi.ClassCanonicalWrite)
 	if err != nil {
 		t.Fatal(err)

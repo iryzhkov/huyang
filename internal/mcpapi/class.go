@@ -7,12 +7,11 @@ const (
 	ClassProviderRead   SchedulerClass = "provider_read"
 	ClassCanonicalWrite SchedulerClass = "canonical_write"
 	ClassSandboxWrite   SchedulerClass = "sandbox_write"
-	ClassExternalJob    SchedulerClass = "external_job"
 )
 
 func KnownClass(class SchedulerClass) bool {
 	switch class {
-	case ClassPureRead, ClassProviderRead, ClassCanonicalWrite, ClassSandboxWrite, ClassExternalJob:
+	case ClassPureRead, ClassProviderRead, ClassCanonicalWrite, ClassSandboxWrite:
 		return true
 	default:
 		return false

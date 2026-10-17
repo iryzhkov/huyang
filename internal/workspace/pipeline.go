@@ -40,10 +40,13 @@ type CommandPolicy struct {
 	Name           string   `toml:"name" json:"name,omitempty"`
 	Command        []string `toml:"command" json:"command"`
 	DeclaredWrites []string `toml:"declared_writes" json:"declared_writes,omitempty"`
-	Covers         []string `toml:"covers" json:"covers,omitempty"`
-	Variants       []string `toml:"variants" json:"variants,omitempty"`
-	Required       bool     `toml:"required" json:"required,omitempty"`
-	Parallel       bool     `toml:"parallel" json:"parallel,omitempty"`
+	// Covers is still read so existing .huyang.toml files stay valid, but
+	// nothing selects tests by it since affected-test selection was removed:
+	// the tests stage always runs every configured command.
+	Covers   []string `toml:"covers" json:"covers,omitempty"`
+	Variants []string `toml:"variants" json:"variants,omitempty"`
+	Required bool     `toml:"required" json:"required,omitempty"`
+	Parallel bool     `toml:"parallel" json:"parallel,omitempty"`
 }
 
 type FormatPolicy struct {
@@ -92,23 +95,8 @@ type VerificationRequest struct {
 	Stages                   []string
 	Revision                 string
 	Transform                bool
-	TestScope                string
-	TestHistoryPath          string
 	ApplyConfiguredTransform bool
-	// WorkspaceID and ProviderEpoch identify the analysis snapshot the
-	// affected-test selection reads, so two workspaces or two provider
-	// generations can never be served each other's analysis.
-	WorkspaceID   ID
-	ProviderEpoch uint64
-	// Contributors are the analysis contributors the caller can supply
-	// beyond the native import reader; the workspace core does not speak to
-	// providers itself.
-	Contributors       []AnalysisContributor                                                     `json:"-"`
-	DiagnosticVerifier func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
-	// RemovedPaths are changed paths that no longer exist. No stage can read
-	// them, but the affected-test selection counts them as changed, so a
-	// deletion still selects the tests that cover where the file was.
-	RemovedPaths []string
+	DiagnosticVerifier       func(context.Context, string, []PlanStageFile) (VerificationStage, error) `json:"-"`
 }
 
 type VerificationStage struct {
@@ -126,7 +114,6 @@ type VerificationStage struct {
 	EvidenceIDs     []string           `json:"evidence_ids,omitempty"`
 	TestScope       string             `json:"test_scope,omitempty"`
 	TestVerdict     string             `json:"test_verdict,omitempty"`
-	SelectedTests   []SelectedTest     `json:"selected_tests,omitempty"`
 	ExecutedTests   []string           `json:"executed_tests,omitempty"`
 	// Confidence qualifies an unavailable stage whose dimension another
 	// stage corroborated, for example a parser stage without a native parser
@@ -203,8 +190,6 @@ type VerificationResult struct {
 	Stages        []VerificationStage `json:"stages"`
 	ToolDelta     []ToolDelta         `json:"tool_delta,omitempty"`
 	PreparedFiles []PlanStageFile     `json:"-"`
-	Impact        *ImpactGraph        `json:"impact,omitempty"`
-	Targeted      *TargetedTestResult `json:"targeted_tests,omitempty"`
 	FullTestGate  string              `json:"full_test_gate,omitempty"`
 	Formatting    FormattingClaims    `json:"formatting"`
 }
@@ -1328,27 +1313,9 @@ func (run *pipelineRun) check() error {
 	return err
 }
 
+// tests runs every configured test command and records the full-suite gate; a
+// failing command fails the gate after every command has been recorded.
 func (run *pipelineRun) tests() error {
-	if run.request.TestScope == "affected" {
-		return run.affectedTests()
-	}
-	return run.fullTests()
-}
-
-func (run *pipelineRun) affectedTests() error {
-	changed := append(append([]string(nil), run.affected...), run.request.RemovedPaths...)
-	stages, targeted, err := runAffectedTests(run.ctx, run.sandbox, run.policy, run.request, changed)
-	run.result.Stages = append(run.result.Stages, stages...)
-	run.result.Targeted = targeted
-	if targeted != nil {
-		run.result.Impact = &targeted.Graph
-	}
-	return err
-}
-
-// fullTests runs every configured test command and records the full-suite gate and the
-// test history; a failing command fails the gate after every command has been recorded.
-func (run *pipelineRun) fullTests() error {
 	result, policy, revision := &run.result, run.policy, run.request.Revision
 	result.FullTestGate = "not_configured"
 	if len(policy.Tests) == 0 {
@@ -1357,19 +1324,17 @@ func (run *pipelineRun) fullTests() error {
 		result.Stages = append(result.Stages, stage)
 		return nil
 	}
-	var history []TestHistoryEntry
 	result.FullTestGate = "full_tests_passed"
 	stageStart := len(result.Stages)
 	runs, runErr := runCommandPolicies(run.ctx, run.sandbox.Tree, revision, "tests", "check", policy.Tests, policy)
 	failedIndex := -1
 	for index, item := range runs {
 		command := policy.Tests[index]
-		stage, testName := labelFullTest(index, command, item.stage)
+		stage := labelFullTest(index, command, item.stage)
 		if stage.Status != VerificationPassed {
 			result.FullTestGate = "full_tests_unavailable"
 		}
 		run.record(stage, item.delta)
-		history = append(history, historyEntry(revision, "full", testName, command.Variants, stage))
 		if failedIndex < 0 && item.err != nil {
 			failedIndex = index
 		}
@@ -1379,14 +1344,13 @@ func (run *pipelineRun) fullTests() error {
 		if failedIndex >= 0 {
 			result.Stages[stageStart+failedIndex].TestVerdict = result.FullTestGate
 		}
-		_ = recordTestHistory(run.request.TestHistoryPath, history)
 		return runErr
 	}
-	return recordTestHistory(run.request.TestHistoryPath, history)
+	return nil
 }
 
 // labelFullTest marks one full-suite command run with its scope, verdict and test name.
-func labelFullTest(index int, command CommandPolicy, stage VerificationStage) (VerificationStage, string) {
+func labelFullTest(index int, command CommandPolicy, stage VerificationStage) VerificationStage {
 	testName := command.Name
 	if testName == "" {
 		testName = fmt.Sprintf("test_%d", index+1)
@@ -1397,7 +1361,7 @@ func labelFullTest(index int, command CommandPolicy, stage VerificationStage) (V
 		stage.TestVerdict = "full_tests_unavailable"
 	}
 	stage.ExecutedTests = []string{testName}
-	return stage, testName
+	return stage
 }
 
 // collectPreparedFiles reads the final sandbox bytes back into the prepared files so the

@@ -34,7 +34,6 @@ type serviceConfig struct {
 	HTTPAddress        string
 	PprofAddress       string
 	ProviderQuota      int
-	ExternalJobQuota   int
 	MaxProviders       int
 	MaxLanguageServers int
 }
@@ -92,7 +91,7 @@ func runHuyang(arguments []string, stdin io.Reader, stdout, stderr io.Writer) er
 			return err
 		}
 		if flags.NArg() != 0 {
-			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N] [--external-job-quota N]; HTTP requests may set X-Huyang-Client to receive diagnostic_updates as a per-client delta")
+			return errors.New("usage: huyang serve [--socket PATH] [--state-dir PATH] [--http LOOPBACK:PORT] [--pprof LOOPBACK:PORT] [--provider-quota N]; HTTP requests may set X-Huyang-Client to receive diagnostic_updates as a per-client delta")
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 		defer stop()
@@ -128,7 +127,6 @@ func newServeFlags(config *serviceConfig, stderr io.Writer) *flag.FlagSet {
 	flags.IntVar(&config.MaxProviders, "max-providers", providerpool.DefaultMaxProviders, "maximum live providers, including sandbox providers; zero selects the default")
 	flags.IntVar(&config.MaxLanguageServers, "max-language-servers", providerpool.DefaultMaxLanguageServers, "maximum language-server clients per provider; zero selects the default")
 	flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
-	flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
 	return flags
 }
 
@@ -209,8 +207,8 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	if config.MaxProviders < 0 || config.MaxLanguageServers < 0 {
 		return nil, errors.New("provider and language-server limits must not be negative")
 	}
-	if config.ProviderQuota < 1 || config.ExternalJobQuota < 1 {
-		return nil, errors.New("provider and external-job quotas must be positive")
+	if config.ProviderQuota < 1 {
+		return nil, errors.New("provider quota must be positive")
 	}
 	if err := mcpapi.ValidateRegistry(); err != nil {
 		return nil, err
@@ -228,7 +226,7 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	direct := newDirectWorkspacesWithLimits(stateDir, config.ProviderQuota, config.ExternalJobQuota, providerpool.Limits{MaxProviders: config.MaxProviders, MaxLanguageServers: config.MaxLanguageServers})
+	direct := newDirectWorkspacesWithLimits(stateDir, config.ProviderQuota, providerpool.Limits{MaxProviders: config.MaxProviders, MaxLanguageServers: config.MaxLanguageServers})
 	if direct.loadErr != nil {
 		return nil, direct.loadErr
 	}

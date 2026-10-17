@@ -13,7 +13,7 @@ Every tool that names a workspace accepts `root` (the repository root) in place 
 and, on the `full` profile, `language_server_*`: the workspace is opened on the first call
 and reused afterwards, so a task in a known repository needs no `workspace_open` at all. Call `workspace_open {kind: project, root}`
 only when you want its answer: the top-level overview, the verification commands and
-whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
+whether `change_plan` prepare may execute them (about 500 tokens). `idempotency_key` is optional on
 every mutating call; pass one only when you intend to retry the same call.
 
 Send `root` as an absolute path. Two things are inferred from the directory your client
@@ -28,7 +28,7 @@ root it chose:
   subdirectory, outside any repository (Codex starts its servers in the home directory),
   or over HTTP, nothing is inferred and the call is refused with `resend_with_root`.
 
-An edit, a plan or `verify_run` is never given a default workspace: name it
+An edit or a plan is never given a default workspace: name it
 with `root` or `workspace_id`. An explicit `root` or `workspace_id` always wins over the
 default.
 
@@ -54,17 +54,20 @@ is one call, not three or five.
 | Replace a block located only by content | `edit_apply replace_literal` with the block as `old` | 1 | 296 | 260 | Edit: 1 call, 255 / 292 |
 | Rename a local identifier (5 occurrences) | `edit_apply replace_literal {path, old, new, expected_count: 5}` | 1 | 69 | 266 | Edit replace_all: 1 call, 28 / 127 |
 | Add a new file (40 lines) | `edit_apply {operation:{kind: create_file, path, content}}` | 1 | 320 | 210 | Write: 1 call, 279 / 7 |
-| Coordinated edits in three files, then build and test | 5 x `replace_literal` + `verify_run {stages:[check, tests], revision_or_transaction: current}` | 6 | 697 | 1454 | Edit x5 + Bash: 6 calls, 454 / 970 |
-| Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, `verify_run check` | 12 | 1059 | 2760 | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
-| Run the test suite | `verify_run {stages:[tests], revision_or_transaction: current}` | 1 | 62 | 280 | Bash: 1 call, 14 / 55 (one failing test) |
-| Copy a file, then build (E7) | `edit_apply {operation:{kind: copy_file, from, to}}` + `verify_run check` | 2 | 122 | 437 | Read + Write + Bash: 3 calls, 435 / 486 (the content crosses the context twice); Bash `cp`: 2 calls, 43 / 0 |
-| Move a file, then test (E8) | `edit_apply {operation:{kind: move_file, from, to}}` + `verify_run tests`; the reply names the `git add` | 2 | 121 | 563 | Read + Write + Bash `rm` + Bash: 4 calls, 649 / 741; Bash `git mv`: 2 calls, 30 / 13 |
+| Coordinated edits in three files, then build and test | 5 x `replace_literal`, then the build and tests in the shell | 6 | not re-measured | not re-measured | Edit x5 + Bash: 6 calls, 454 / 970 |
+| Edit that breaks the build, then recover | `replace_literal` (diagnostics arrive in the response), `search` for callers, `replace_literal` per caller, the build in the shell | 12 | not re-measured | not re-measured | Edit + Bash + Grep + Edit x9 + Bash: 14 calls, 658 / 2577 |
+| Run the test suite | the shell | 1 | as Bash | as Bash | Bash: 1 call, 14 / 55 (one failing test) |
+| Copy a file, then build (E7) | `edit_apply {operation:{kind: copy_file, from, to}}`, then the build in the shell | 2 | not re-measured | not re-measured | Read + Write + Bash: 3 calls, 435 / 486 (the content crosses the context twice); Bash `cp`: 2 calls, 43 / 0 |
+| Move a file, then test (E8) | `edit_apply {operation:{kind: move_file, from, to}}`, then the tests in the shell; the reply names the `git add` | 2 | not re-measured | not re-measured | Read + Write + Bash `rm` + Bash: 4 calls, 649 / 741; Bash `git mv`: 2 calls, 30 / 13 |
 | Delete a file you have read | `edit_apply {operation:{kind: delete_file, path, revision_id}}` | 1 | about 50 | about 300 | Bash `rm`: 1 call |
 | Overwrite a file you have read | `edit_apply {operation:{kind: create_file, path, content, replace: true, revision_id}}` | 1 | content + 40 | about 350 | Write: 1 call |
 | Read a big file without a blind dump | `read {target:{path}, max_lines: 200}` then `view: outline` or a window | 1 or 2 | 40 | capped | Read: 1 call, whole file |
 
 E7 and E8 are measured (`runs/protocol-s20c.json`, 2026-09-12); the delete and overwrite
-rows are estimates from the same reply shapes, which carry no content.
+rows are estimates from the same reply shapes, which carry no content. The rows that build
+or test ended in `verify_run` when they were measured; it was removed on 2026-10-17, so
+their Huyang totals are not re-measured yet and the build or test step costs what Bash
+costs in the built-in column.
 
 What the table says:
 
@@ -76,13 +79,13 @@ What the table says:
   and nothing you sent: no patch unless `verbose`. The diagnostics are the reason to
   prefer Huyang: a compile error shows up in the edit response, before any build. Before
   these changes the same edits cost 2 to 23 calls and 10 to 100 times the tokens.
-- Reads and searches never carry diagnostic notices; only edits, `verify_run` and
+- Reads and searches never carry diagnostic notices; only edits, plans and
   `workspace_inspect` do, collapsed to one line per finding and capped at five. An edit to
   a file that no language server covers (Markdown, config, prose) is plainly `ok`.
-- `verify_run` replaces the shell for builds and tests when the workspace has commands
-  (declared in `.huyang.toml` or detected from `go.mod`, `pyproject.toml`, `package.json`)
-  and the root is trusted. Its response is bigger than raw command output because it is
-  structured per stage; when the tests fail the output is the same text a shell shows.
+- Builds and tests run in the shell. `change_plan` prepare is the one place Huyang runs
+  the workspace's commands (declared in `.huyang.toml` or detected from `go.mod`,
+  `pyproject.toml`, `package.json`): against the staged sandbox, only when the root is
+  trusted, and a failing check or test fails the preparation.
 
 ## Files outside a repository
 
@@ -304,16 +307,15 @@ Keep both transport representations for compatible consumers and deduplicate for
   so one retry is enough.
 - Go files are gofmt-formatted after every edit; the response says so under `format`.
   Pass `format: false` to keep bytes exactly.
-- Build and test: `verify_run` with `revision_or_transaction: current`. `test_scope:
-  affected` runs only the tests whose `covers` patterns match the edited files. The reply
-  is one line per stage (verdict, exit, duration, the files covered, counts) plus the
-  output of any stage that did not pass; a stage that passed carries the last few lines
-  of its output under `output_tail`, which is where a command says what it did, so there
-  is never a reason to run it again in a shell. `verbose: true` restores the full record.
-  Without a `.huyang.toml` the commands come from the project: a Makefile's `test`,
-  `lint` and `check` targets, `go.mod`, or a Python project's own pytest and ruff run
-  through its `.venv`, `uv run` or `poetry run`. An untrusted root runs nothing and the
-  reply says so; `huyang trust <root>` on the machine grants it.
+- Build and test in the shell. When the root is trusted, `change_plan` prepare runs the
+  workspace's format gate, check and whole test suite against the staged sandbox, and a
+  failure fails the preparation. Its stage records are one line per stage (verdict, exit,
+  duration, the files covered) plus the output of any stage that did not pass; a stage
+  that passed carries the last few lines of its output under `output_tail`. Without a
+  `.huyang.toml` the commands come from the project: a Makefile's `test`, `lint` and
+  `check` targets, `go.mod`, or a Python project's own pytest and ruff run through its
+  `.venv`, `uv run` or `poetry run`. An untrusted root runs nothing and the reply says
+  so; `huyang trust <root>` on the machine grants it.
 - Diagnostic evidence requires the document version, completeness, a 150 ms quiet
   period for empty pushes, and no work-done progress for that edit. Late pushes
   and pulls recheck the buffer, version and disk at collection; any currently open

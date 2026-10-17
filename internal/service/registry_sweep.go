@@ -45,6 +45,9 @@ const (
 
 // workspaceStateStores are the state directory's per-workspace stores. Each
 // holds, for one workspace, a file or directory named after its ID.
+// test-history is no longer written - it fed the affected-test selection of
+// the removed verify_run - but state directories from earlier builds still
+// hold it, and a forgotten workspace's copy is removed with the rest.
 var workspaceStateStores = []string{"receipts", "diagnostics", "plans", "commit-journals", "test-history"}
 
 // workspaceStatePaths lists every path under the state directory that

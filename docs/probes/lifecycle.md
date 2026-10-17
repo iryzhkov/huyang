@@ -31,7 +31,7 @@ with `canonical_changed: false` and no new canonical revision. `true` plus
 an empty path list is self-contradictory: the flag and the list disagree
 about the same commit.
 
-**Why it matters.** An agent that gates `verify_run`, rebuilds, or history
+**Why it matters.** An agent that gates a build, a test run, or history
 polling on `canonical_changed` will do work for a change that does not
 exist, and the canonical revision counter advances (`wsrev_1` → `wsrev_2`),
 so revision-range reasoning (`revision_diff`, history) gains a phantom step.

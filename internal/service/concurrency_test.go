@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -144,15 +143,6 @@ func TestSlowStagerInOneWorkspaceDoesNotStallOtherWorkspaces(t *testing.T) {
 			t.Error("epoch unavailable during staging")
 		}
 	})
-	promptly("verify_run(B)", func() {
-		result := direct.call(context.Background(), "verify_run", map[string]any{
-			"workspace_id": workspaceB, "idempotency_key": "verify-b", "stages": []any{"parser"},
-			"revision_or_transaction": "wsrev_1",
-		})
-		if result["code"] == "request_timeout" || result["code"] == "scheduler_wait_cancelled" {
-			t.Errorf("verify_run(B) = %#v", result)
-		}
-	})
 	result := finish()
 	if result["outcome"] == "failed" {
 		t.Fatalf("blocked prepare = %#v", result)
@@ -167,26 +157,11 @@ func TestPreparedRevisionIsScopedToItsWorkspace(t *testing.T) {
 	if transaction == nil || plan.Preparation == nil || plan.Preparation.PreparedRevision == "" {
 		t.Fatalf("prepare = %#v", prepared)
 	}
-	revision := plan.Preparation.PreparedRevision
-
-	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceA)), revision); stager == nil {
-		t.Fatal("workspace A cannot find its own prepared revision")
+	if stager := direct.handlers.ProviderPool().Stager(workspacecore.ID(workspaceA), plan.PlanID); stager == nil {
+		t.Fatal("workspace A cannot find its own prepared plan")
 	}
-	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), revision); stager != nil {
-		t.Fatal("workspace B resolved a prepared revision that belongs to workspace A")
-	}
-	if stager := direct.handlers.ProviderPool().PreparedStager(direct.get(workspacecore.ID(workspaceB)), plan.PlanID); stager != nil {
+	if stager := direct.handlers.ProviderPool().Stager(workspacecore.ID(workspaceB), plan.PlanID); stager != nil {
 		t.Fatal("workspace B resolved a plan ID that belongs to workspace A")
-	}
-	result := direct.call(context.Background(), "verify_run", map[string]any{
-		"workspace_id": workspaceB, "idempotency_key": "cross-verify", "stages": []any{"parser"},
-		"revision_or_transaction": revision,
-	})
-	if result["code"] != "revision_changed" {
-		t.Fatalf("cross-workspace verify = %#v", result)
-	}
-	if labelled, _ := result["workspace"].(map[string]any); fmt.Sprint(labelled["id"]) != workspaceB {
-		t.Fatalf("verify was labelled with %v, want %q", result["workspace"], workspaceB)
 	}
 }
 

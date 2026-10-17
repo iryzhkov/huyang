@@ -61,7 +61,7 @@ var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit}
 var modernProfileNames = map[Profile][]string{
 	ProfileFull: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics",
-		"code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff", "evidence_get",
+		"code_actions", "edit_apply", "change_plan", "revision_diff", "evidence_get",
 		"language_server_status", "language_server_setup",
 	},
 	ProfileOrient: {
@@ -69,7 +69,7 @@ var modernProfileNames = map[Profile][]string{
 	},
 	ProfileEdit: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
-		"code_actions", "edit_apply", "change_plan", "verify_run", "revision_diff",
+		"code_actions", "edit_apply", "change_plan", "revision_diff",
 	},
 }
 
@@ -340,7 +340,7 @@ func workspaceKindSchema() map[string]any {
 // language_server_status, which only full carries.
 func orientationTools() []ToolDescriptor {
 	return []ToolDescriptor{
-		{Class: ClassProviderRead, Name: "workspace_open", Description: "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files, verify_run for checks and tests.", ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassProviderRead, Name: "workspace_open", Description: "Get a project's top-level overview, its verification commands (declared in .huyang.toml or detected from go.mod, pyproject.toml, package.json), its capabilities and its recent commits. A task in a known repository does not need this call: every tool takes root instead of workspace_id and opens the workspace itself, so call this one when you want the overview. Cheapest calls: read (path, line window, symbol_locator or several targets in one call), edit_apply kind=replace_literal for any change to text you know, create_file for new files; run builds and tests in the shell.", ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"kind":     workspaceKindSchema(),
 			"root":     stringSchema("Project root; required for kind=project."),
 			"files":    map[string]any{"type": "array", "items": stringSchema("Allowlisted document."), "minItems": 1},
@@ -410,13 +410,6 @@ func editTools() []ToolDescriptor {
 			"view":       enumSchema("plan", "impact", "semantic"),
 			"invariants": invariantsSchema(),
 		}},
-		{Class: ClassExternalJob, Name: "verify_run", Description: "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.", Destructive: true, InputSchema: schemaObject(map[string]any{
-			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
-			"verbose":                 map[string]any{"type": "boolean", "description": "Full per-stage record (mode, revision, coverage, scopes, test lists). Default: verdict, output of stages that did not pass, skip reasons and counts."},
-			"stages":                  map[string]any{"type": "array", "items": enumSchema("format_gate", "parser", "diagnostics", "check", "tests"), "minItems": 1},
-			"revision_or_transaction": stringSchema("Canonical revision (wsrev_N), prepared revision, transaction ID, or \"current\" for whatever the workspace is at now."),
-			"test_scope":              enumSchema("affected", "full"),
-		}, "stages", "revision_or_transaction")},
 		{Class: ClassCanonicalWrite, Name: "revision_diff", Description: "Explain changes between two workspace revisions (wsrev_N, as edit replies return them) or a stale mutation refusal. Either end may be current; a reversed range is read in order. Changes made outside Huyang are listed by path and marked inferred; for a Git ref use git diff.", ReadOnly: true, Idempotent: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "from_revision": stringSchema("Earlier revision: wsrev_N or current."), "to_revision_or_current": stringSchema("Later revision: wsrev_N or current."),
 		}, "from_revision", "to_revision_or_current"), ExperimentalProperties: map[string]any{
@@ -554,7 +547,7 @@ func ValidateRegistry() error {
 			return fmt.Errorf("tool %s declares no scheduler class", descriptor.Name)
 		}
 	}
-	expected := map[Profile]int{ProfileFull: 15, ProfileOrient: 8, ProfileEdit: 13}
+	expected := map[Profile]int{ProfileFull: 14, ProfileOrient: 8, ProfileEdit: 12}
 	for _, profile := range ProfileOrder {
 		if len(Catalog(profile)) != expected[profile] {
 			return fmt.Errorf("profile %s has %d tools, want %d", profile, len(Catalog(profile)), expected[profile])

@@ -41,7 +41,7 @@ func readByteProperties() map[string]any {
 // ordinary edit reply, and no caller acts on them: what changed is in
 // locations, and the guard for the next call is the document revision beside
 // it. The receipt this envelope was also recorded as keeps them, so
-// revision_diff and the affected-test coverage still read them back, and a
+// revision_diff still reads them back, and a
 // diff record that carries its patch (a preview, or verbose) is left alone
 // because that patch is what the caller asked for.
 func TrimWireDiffs(tool string, envelope map[string]any) map[string]any {

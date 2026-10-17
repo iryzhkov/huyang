@@ -2478,7 +2478,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
             .. "this file when the wait ended and none of them has been timed in this "
             .. "workspace yet, so this verdict is provisional: what arrives later comes with "
             .. "a later reply under late_diagnostics. A structural change is worth confirming "
-            .. "with verify_run or diagnostics before it is treated as finished"):format(covers)
+            .. "with diagnostics or the project's own build before it is treated as finished"):format(covers)
     elseif #new_here == 0 and silent then
         -- The servers on this file answered the barrier and then said nothing,
         -- and none of them has ever published anything about this file. That
@@ -2489,7 +2489,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- this one, which is what the old per-server gate treated it as.
         report.diagnostics_after = ("no new errors or warnings%s, but %s has published no "
             .. "diagnostics %s, so its silence is not yet evidence that "
-            .. "this file is clean; verify_run runs the project's own build or check")
+            .. "this file is clean; run the project's own build or check in the shell")
             :format(covers, silent, silent_scope)
     elseif #new_here == 0 and #hints > 0 and not strong_here then
         -- The server has hints for these files and has never had anything
@@ -2500,7 +2500,7 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         report.diagnostics_after = ("no new errors or warnings - but the server reports "
             .. "nothing above hint severity for %s, so that is an empty category here and "
             .. "this line checks nothing. The hints below are the whole of what it has to "
-            .. "say about these files; verify_run runs the project's own build or check")
+            .. "say about these files; run the project's own build or check in the shell")
             :format(scope)
     elseif #new_here == 0 and basis == "version" and structural then
         -- Worth one clause on a structural change, because the alternative
@@ -2516,8 +2516,8 @@ function post_edit_report(bufnr, before, root, headless, opts, full, ctx)
         -- A server analyzes one build configuration and can lag a change it
         -- has only just been told about, so a surprising error here is worth
         -- confirming rather than chasing.
-        report.if_unexpected = "these come from the language server; verify_run "
-            .. "runs the project's own build or check for ground truth"
+        report.if_unexpected = "these come from the language server; run the "
+            .. "project's own build or check in the shell for ground truth"
     end
     -- The closure, listed whatever the verdict says: a reply that does report
     -- new errors still has to say what it looked at, or the reader cannot

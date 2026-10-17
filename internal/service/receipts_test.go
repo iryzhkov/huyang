@@ -150,10 +150,6 @@ func TestTrimmedReceiptsKeepRevisionProvenance(t *testing.T) {
 	if len(diffs) != 1 || diffs[0].Path != "main.go" || diffs[0].AfterSHA != "bb" {
 		t.Fatalf("provenance after trim = %#v", diffs)
 	}
-	paths, err := direct.receipts.CanonicalChangedPaths(workspacecore.ID(workspaceID), 2)
-	if err != nil || len(paths) != 1 || paths[0] != "main.go" {
-		t.Fatalf("changed paths after trim = %#v, %v", paths, err)
-	}
 	direct.receipts.mu.Lock()
 	direct.receipts.replays[first].argumentsHash = argumentsHashOf(t, map[string]any{"workspace_id": workspaceID, "idempotency_key": "first"})
 	direct.receipts.mu.Unlock()
