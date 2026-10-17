@@ -68,33 +68,66 @@ local function snapshot(client, bufnr, params)
     local doc = type(params) == "table" and params.textDocument
     local uri = type(doc) == "table" and doc.uri
         or (type(params) == "table" and params.uri)
-    if (not bufnr or bufnr == 0) and uri then bufnr = vim.fn.bufnr(vim.uri_to_fname(uri)) end
-    local out = { uri = uri, bufnr = bufnr, local_observation = true,
+    local out = { uri = uri, local_observation = true,
         client_current = vim.lsp.get_client_by_id(client.id) == client }
-    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return out end
+    local function unavailable(reason)
+        out.snapshot_unavailable_reason = reason
+        return out
+    end
+    if uri and not uri:match("^file://") then return unavailable("non_file_uri") end
+    if (not bufnr or bufnr == 0) and uri then
+        local ok, name = pcall(vim.uri_to_fname, uri)
+        if not ok then return unavailable("invalid_file_uri") end
+        bufnr = vim.fn.bufnr(name)
+    end
+    out.bufnr = bufnr
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return unavailable("buffer_unavailable") end
     out.path = vim.api.nvim_buf_get_name(bufnr)
     out.loaded = vim.api.nvim_buf_is_loaded(bufnr)
     out.attached = not not client.attached_buffers[bufnr]
     out.changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
     out.local_version = vim.lsp.util.buf_versions[bufnr]
-    if out.loaded then
-        local size = vim.api.nvim_buf_get_offset(bufnr, vim.api.nvim_buf_line_count(bufnr))
-        if size < 0 or size > MAX_DOCUMENT then error("snapshot buffer exceeds 64 KiB or size unavailable") end
-        local body = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-        if vim.bo[bufnr].endofline then body = body .. "\n" end
-        if #body > MAX_DOCUMENT then error("snapshot postimage exceeds 64 KiB") end
-        out.postimage_sha256 = vim.fn.sha256(body)
+    if out.path == "" then return unavailable("unnamed_buffer") end
+    if out.path:match("^[%a][%w+.-]*://") then return unavailable("non_file_uri") end
+
+    -- Servers may publish for directories or unloaded buffers. Classify before
+    -- reading either image; unavailable correlation data is not capture failure.
+    local stat, _, code = vim.uv.fs_stat(out.path)
+    if not stat then
+        return unavailable(code == "ENOENT" and "disk_missing"
+            or ((code == "EACCES" or code == "EPERM") and "disk_unreadable" or "disk_stat_failed"))
     end
-    if out.path ~= "" then
-        local f, err = io.open(out.path, "rb")
-        if not f then error("snapshot disk open failed: " .. tostring(err)) end
-        local body = f:read(MAX_DOCUMENT + 1)
-        local closed, close_error = f:close()
-        if not closed then error(close_error) end
-        if not body then error("snapshot disk read failed") end
-        if #body > MAX_DOCUMENT then error("snapshot disk exceeds 64 KiB") end
-        out.disk_sha256 = vim.fn.sha256(body)
+    if stat.type ~= "file" then return unavailable("disk_not_regular_file") end
+    if not out.loaded then return unavailable("buffer_unloaded") end
+    if vim.bo[bufnr].buftype ~= "" then return unavailable("non_file_buffer") end
+    if stat.size > MAX_DOCUMENT then error("snapshot disk exceeds 64 KiB") end
+    local size = vim.api.nvim_buf_get_offset(bufnr, vim.api.nvim_buf_line_count(bufnr))
+    if size < 0 then return unavailable("buffer_size_unavailable") end
+    if size > MAX_DOCUMENT then error("snapshot buffer exceeds 64 KiB") end
+
+    -- Reclassify the opened descriptor too: the path may change after stat.
+    -- uv reads return "" at EOF, so a zero-byte file has the empty-byte hash.
+    local disk, _, open_code = vim.uv.fs_open(out.path, "r", 0)
+    if not disk then
+        return unavailable(open_code == "ENOENT" and "disk_missing"
+            or ((open_code == "EACCES" or open_code == "EPERM") and "disk_unreadable" or "disk_open_failed"))
     end
+    local opened = vim.uv.fs_fstat(disk)
+    local body, read_error
+    if opened and opened.type == "file" then
+        body, read_error = vim.uv.fs_read(disk, MAX_DOCUMENT + 1, 0)
+    end
+    local closed = vim.uv.fs_close(disk)
+    if not opened then return unavailable("disk_fstat_failed") end
+    if opened.type ~= "file" then return unavailable("disk_not_regular_file") end
+    if not closed then return unavailable("disk_close_failed") end
+    if read_error or body == nil then return unavailable("disk_read_failed") end
+    if #body > MAX_DOCUMENT then error("snapshot disk exceeds 64 KiB") end
+    out.disk_sha256 = vim.fn.sha256(body)
+    local postimage = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+    if vim.bo[bufnr].endofline then postimage = postimage .. "\n" end
+    if #postimage > MAX_DOCUMENT then error("snapshot postimage exceeds 64 KiB") end
+    out.postimage_sha256 = vim.fn.sha256(postimage)
     return out
 end
 local function snapshots(client, bufnr, params)
@@ -269,10 +302,16 @@ for _, event in ipairs({ "LspAttach", "LspDetach", "LspProgress" }) do
 end
 
 vim.api.nvim_create_autocmd("DiagnosticChanged", { callback = function(ev)
-    observe(function() return { kind = "diagnostic_cache", bufnr = ev.buf,
-        changedtick = vim.api.nvim_buf_get_changedtick(ev.buf),
-        event_diagnostics = ev.data and ev.data.diagnostics,
-        diagnostics = vim.diagnostic.get(ev.buf) } end)
+    observe(function()
+        if vim.in_fast_event() then
+            return { kind = "diagnostic_cache", bufnr = ev.buf,
+                fast_event = true, snapshot_skipped = "fast_event" }
+        end
+        return { kind = "diagnostic_cache", bufnr = ev.buf,
+            changedtick = vim.api.nvim_buf_get_changedtick(ev.buf),
+            event_diagnostics = ev.data and ev.data.diagnostics,
+            diagnostics = vim.diagnostic.get(ev.buf) }
+    end)
 end })
 
 -- Observe the existing RPC envelope at its actual send boundary, including
