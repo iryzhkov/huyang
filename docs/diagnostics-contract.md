@@ -62,8 +62,13 @@ replacement. Closing a watcher also wakes its caller. Proven push mode survives
 edits while each edit discards the old publication. A current authoritative push
 received during a pull wait is included in the immediate response.
 Push and pull observations retain separate coalescing slots, so an unstamped
-empty push cannot discard an undelivered positive pull. Repeated pull payloads do
-not reannounce findings.
+empty push cannot discard an undelivered positive pull. Each late collection sends
+at most one observation per producer/document: an undelivered pull goes first,
+then the retained push on a later collection. Only a sent observation is marked
+delivered; a deferred current push stays queued even when complete. This preserves
+provisional positive facts through Go's
+per-collection coalescing and delivers current push proof last, without replaying
+older provisional slots afterward. Repeated pull payloads do not reannounce findings.
 
 Unversioned push positives are provisional and unattributed; unversioned emptiness
 cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof

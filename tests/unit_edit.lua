@@ -564,7 +564,7 @@ end
 
 -- Full pull bodies can change their opaque ID before analysis begins.
 -- Producer events fetch new facts, but only a stamped push can prove absence.
-do
+for _, final_positive in ipairs({false,true}) do
     local path = vim.fn.tempname() .. ".py"
     vim.fn.writefile({ "value = 1" }, path)
     local buf = core.load_buf(path)
@@ -651,15 +651,53 @@ do
         native=="native refresh" and refreshes==1 and #refreshed==1
             and not refreshed[1].complete and refreshed[1].document_version==nil
             and refreshed[1].findings[1].message=="another delayed error",refreshed)
+    -- Queue the push first to make delivery independent of arrival/hash order.
+    local pushed={range=diagnostic.range,severity=1,message="unstamped push finding"}
     fake.handlers["textDocument/publishDiagnostics"](nil,
-        {uri=vim.uri_from_bufnr(buf),version=9,diagnostics={}}, {})
-    local transient=edit.late_evidence().batches[1]
-    check("a versioned empty push still needs quiet after provisional pulls",
-        transient and transient.kind=="lsp_push" and not transient.complete,transient)
+        {uri=vim.uri_from_bufnr(buf),diagnostics={pushed}}, {})
+    response={kind="full",resultId="simultaneous-provisional",items={{
+        range=diagnostic.range,severity=1,message="simultaneous pull finding",
+    }}}
+    expected_requests=requests+1
+    fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
+    vim.wait(100,function() return requests==expected_requests end,1)
+    local pending_pull=edit.late_evidence().batches
+    check("simultaneous provisional slots send only the pull first",
+        #pending_pull==1 and pending_pull[1].kind=="lsp_pull" and not pending_pull[1].complete
+            and pending_pull[1].findings[1].message=="simultaneous pull finding",pending_pull)
+    local pending_push=edit.late_evidence().batches
+    check("deferred unstamped positive push is delivered on the next collection",
+        #pending_push==1 and pending_push[1].kind=="lsp_push" and not pending_push[1].complete
+            and pending_push[1].document_version==nil and pending_push[1].transaction_id==nil
+            and pending_push[1].findings[1].message==pushed.message,pending_push)
+    check("both provisional slots are delivered exactly once",#edit.late_evidence().batches==0)
+
+    -- Now queue the pull first and let the stamped push become complete before
+    -- either is collected. Neither the facts nor the deferred proof may vanish.
+    response={kind="full",resultId="simultaneous-authority",items={{
+        range=diagnostic.range,severity=1,message="pull before authoritative push",
+    }}}
+    expected_requests=requests+1
+    fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
+    vim.wait(100,function() return requests==expected_requests end,1)
+    local final_items=final_positive and {diagnostic} or {}
+    fake.handlers["textDocument/publishDiagnostics"](nil,
+        {uri=vim.uri_from_bufnr(buf),version=9,diagnostics=final_items}, {})
     vim.wait(170)
-    local clean=edit.late_evidence().batches[1]
-    check("a quiet current empty push remains authoritative after provisional pulls",
-        clean and clean.kind=="lsp_push" and clean.complete and clean.document_version==9,clean)
+    local before_proof=edit.late_evidence().batches
+    check("complete push cannot swallow a simultaneous provisional pull",
+        #before_proof==1 and before_proof[1].kind=="lsp_pull" and not before_proof[1].complete
+            and before_proof[1].document_version==nil
+            and before_proof[1].findings[1].message=="pull before authoritative push",before_proof)
+    local proof=edit.late_evidence().batches
+    check("deferred current push retains its exact authoritative body",
+        #proof==1 and proof[1].kind=="lsp_push" and proof[1].complete
+            and proof[1].document_version==9 and proof[1].expected_version==9
+            and proof[1].transaction_id=="edit_causal_pull"
+            and #proof[1].findings==#final_items
+            and (not final_positive or proof[1].findings[1].message==diagnostic.message),proof)
+    check("delivered provisional slots cannot downgrade the authoritative push",
+        #edit.late_evidence().batches==0)
     local stopped=requests
     vim.wait(10)
     edit.late_evidence()

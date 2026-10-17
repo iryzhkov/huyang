@@ -915,8 +915,14 @@ end
 -- Any currently open progress vetoes completion; empty pushes also need quiet.
 function M.late_evidence()
     pull_watch.wake()
-    local out = {}
-    for key, observation in pairs(late_observations) do
+    local out, sent = {}, {}
+    local keys = vim.tbl_keys(late_observations)
+    -- The stream suffix orders pulls before pushes. Send their positive facts
+    -- first, then the push proof: Go coalesces each RPC by producer/document,
+    -- and a provisional batch after a complete push would weaken ledger proof.
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local observation = late_observations[key]
         local batch, pending = observation.batch, observation.pending
         local current = pending_current(batch.document, pending)
             and (not observation.client or pull_watch.client_current(observation.client, pending.bufnr))
@@ -926,11 +932,14 @@ function M.late_evidence()
             batch.progress_pending = progress_since({ batch.producer }, 0)
             batch.complete = batch.kind ~= "lsp_pull" and publication_complete(batch.document_version, pending.expected,
                 batch.findings, observation.at, batch.producer, 0)
-            if observation.delivered ~= batch.complete then
+            local producer_document = batch.provider_id .. "\0" .. batch.document
+            if not sent[producer_document] and observation.delivered ~= batch.complete then
                 out[#out + 1] = require("huyang.python_environment").normalize_batch(vim.deepcopy(batch))
                 observation.delivered = batch.complete
+                sent[producer_document] = true
+                -- A deferred push remains pending, even if already complete.
+                if batch.complete then late_observations[key] = nil end
             end
-            if batch.complete then late_observations[key] = nil end
         end
     end
     return { batches = out }
