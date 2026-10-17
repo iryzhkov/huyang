@@ -115,18 +115,7 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		batch.Staged = staged
 		batch.TransactionID = transactionID
 		batch.DocumentRevision = revision
-		if documentRevisions != nil {
-			batch.DocumentRevision = documentRevisions[filepath.Clean(batch.Document)]
-		}
-		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
-			batch.Document = filepath.Join(workspace.Identity().Root, relative)
-		}
-		batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
-		if !staged && documentRevisions == nil {
-			if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
-				batch.DocumentRevision = string(snapshot.Revision)
-			}
-		}
+		bindDiagnosticBatchDocument(workspace, &batch, descriptor.Root, documentRevisions, preEdit, staged)
 		observed, recordErr := workspace.RecordDiagnosticEvidence(batch)
 		if recordErr != nil {
 			return workspacecore.DiagnosticReport{}, recordErr
@@ -134,6 +123,22 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		mergeDiagnosticReport(&report, observed, staged)
 	}
 	return report, nil
+}
+
+// bindDiagnosticBatchDocument binds provider paths to exact workspace revisions.
+func bindDiagnosticBatchDocument(workspace *workspacecore.Workspace, batch *workspacecore.DiagnosticBatch, providerRoot string, documentRevisions, preEdit map[string]string, staged bool) {
+	if documentRevisions != nil {
+		batch.DocumentRevision = documentRevisions[filepath.Clean(batch.Document)]
+	}
+	if relative, relErr := filepath.Rel(providerRoot, batch.Document); relErr == nil {
+		batch.Document = filepath.Join(workspace.Identity().Root, relative)
+	}
+	batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
+	if !staged && documentRevisions == nil {
+		if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
+			batch.DocumentRevision = string(snapshot.Revision)
+		}
+	}
 }
 
 func appendUncoveredDiagnosticBatches(batches []workspacecore.DiagnosticBatch, paths []string, providerID, producer string) []workspacecore.DiagnosticBatch {
