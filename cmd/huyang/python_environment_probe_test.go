@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,6 +180,9 @@ type m9Probe struct {
 	before                                   map[string]string
 	beforeEnvironment                        map[string]string
 	intentionalSource                        map[string]bool
+	postFix                                  *m9PostFix
+	postFixReplies                           []map[string]any
+	postFixCoverage                          map[string]any
 }
 
 func m9RequiredDir(t *testing.T, name string) string {
@@ -415,7 +419,10 @@ const m9NeovimInit = `
 vim.opt.runtimepath:prepend(vim.env.M9_LSPCONFIG)
 vim.opt.swapfile = false
 vim.opt.undofile = false
+local trace_sequence = 0
 local function trace(event)
+    trace_sequence = trace_sequence + 1
+    event.trace_seq, event.process_id = trace_sequence, vim.fn.getpid()
     local sec, usec = vim.uv.gettimeofday()
     if type(sec) == "table" then usec = sec.usec; sec = sec.sec end
     event.unix_us = sec * 1000000 + usec
@@ -428,21 +435,54 @@ local function observe_publish(err, params, ctx, config)
     trace({kind="publish", params=params, client_id=ctx.client_id, err=err})
     return publish(err, params, ctx, config)
 end
+-- These are LOCAL observations, never producer document-version proof.
+local function snapshot(client, bufnr, params)
+    local uri = params and params.textDocument and params.textDocument.uri
+    if not bufnr and uri then bufnr = vim.fn.bufnr(vim.uri_to_fname(uri)) end
+    if not bufnr or not vim.api.nvim_buf_is_loaded(bufnr) then return {} end
+    local path = vim.uv.fs_realpath(vim.api.nvim_buf_get_name(bufnr))
+    local body = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+    if vim.bo[bufnr].endofline then body = body .. "\n" end
+    local f = path and io.open(path, "rb")
+    local disk = f and f:read("*a")
+    if f then f:close() end
+    return {path=path, uri=uri, bufnr=bufnr, changedtick=vim.api.nvim_buf_get_changedtick(bufnr),
+        local_version=vim.lsp.util.buf_versions[bufnr], sha256=vim.fn.sha256(body),
+        disk_sha256=disk and vim.fn.sha256(disk),
+        client_current=vim.lsp.get_client_by_id(client.id) == client,
+        attached=client.attached_buffers[bufnr] == true}
+end
 local function observe_client(client)
-    -- Observe actual pull responses too. Keep capabilities, requests, errors,
-    -- response bodies and callback results unchanged.
-    local request = client.request
+    -- Preserve every request, callback, error, result and cancellation unchanged.
+    local request, cancel = client.request, client.cancel_request
+    local sequence, ids = 0, {}
     client.request = function(self, method, params, handler, bufnr)
-        if method == "textDocument/diagnostic" then
-            local inner = handler or self.handlers[method] or vim.lsp.handlers[method]
-            if inner then
-                handler = function(err, result, ctx, config)
-                    trace({kind="pull", params=result, request_params=params, client_id=self.id, err=err})
-                    return inner(err, result, ctx, config)
-                end
+        if method ~= "textDocument/diagnostic" then
+            return request(self, method, params, handler, bufnr)
+        end
+        sequence = sequence + 1
+        local id = tostring(vim.fn.getpid()) .. ":" .. self.id .. ":" .. sequence
+        local dispatch = snapshot(self, bufnr, params)
+        trace({kind="pull_request", request_id=id, request_params=params, client_id=self.id, snapshot=dispatch})
+        local inner = handler or self.handlers[method] or vim.lsp.handlers[method]
+        if inner then
+            handler = function(err, result, ctx, config)
+                trace({kind="pull", request_id=id, params=result, request_params=params,
+                    client_id=self.id, callback_client_id=ctx and ctx.client_id, err=err,
+                    snapshot=snapshot(self, bufnr, params)})
+                return inner(err, result, ctx, config)
             end
         end
-        return request(self, method, params, handler, bufnr)
+        local sent, rpc_id = request(self, method, params, handler, bufnr)
+        if sent and rpc_id then ids[rpc_id] = id end
+        trace({kind="pull_dispatch", request_id=id, client_id=self.id, sent=sent, rpc_id=rpc_id})
+        return sent, rpc_id
+    end
+    client.cancel_request = function(self, rpc_id)
+        if ids[rpc_id] then
+            trace({kind="pull_cancel", request_id=ids[rpc_id], client_id=self.id, rpc_id=rpc_id})
+        end
+        return cancel(self, rpc_id)
     end
 end
 local settings = { python = { analysis = { typeCheckingMode = "basic", diagnosticMode = "openFilesOnly" } } }
@@ -598,6 +638,12 @@ func (p *m9Probe) call(name string, args map[string]any) map[string]any {
 	if name == "diagnostics" && len(probeSlice(reply["diagnostic_updates"])) > 0 {
 		p.updatesSeen = true
 	}
+	if name == "diagnostics" && p.postFix == nil && len(probeSlice(m9Object(reply["evidence"])["ids"])) > 0 {
+		p.inspectEvidence(reply)
+	}
+	if p.postFix != nil {
+		p.postFixReplies = append(p.postFixReplies, reply)
+	}
 	return reply
 }
 
@@ -656,20 +702,512 @@ func (p *m9Probe) collect() map[string]any {
 	return nil
 }
 
-// A real clean publication must prove its version, quiet period and absence
-// of stale findings. Until then, a provisional reply is never called clean.
-func (p *m9Probe) collectClean() map[string]any {
+type m9PostFix struct {
+	Path, Hash, Revision, Transaction string
+	StartedUS                        float64
+	IDs                              []string
+}
+
+func (f *m9PostFix) uri() string { return (&url.URL{Scheme: "file", Path: f.Path}).String() }
+
+type m9PullObservation struct {
+	Request, Response map[string]any
+}
+
+type m9TraceState struct {
+	Candidate                          *m9PullObservation
+	Pushes                             []map[string]any
+	Provider                           string
+	ProducerProof, UnversionedPush      bool
+	Pending                            bool
+	ProgressBegins, Epoch               int
+	LastSeq                            float64
+	ProofBarrier                       float64
+	Reason                             string
+}
+
+// Local identity binds an observation to bytes we requested, never to the
+// producer's analyzed version. Both snapshots must agree with the receipt hash.
+func m9CorrelatedEmpty(request, response map[string]any, fixed *m9PostFix) error {
+	if request == nil || m9Text(request["request_id"]) == "" || request["request_id"] != response["request_id"] ||
+		request["client_id"] != response["client_id"] || request["process_id"] != response["process_id"] ||
+		response["callback_client_id"] != request["client_id"] {
+		return fmt.Errorf("request/callback client identity is uncorrelated")
+	}
+	start, sok := request["unix_us"].(float64)
+	finish, fok := response["unix_us"].(float64)
+	if !sok || !fok || start < fixed.StartedUS || finish < start {
+		return fmt.Errorf("request predates the fix or lacks dispatch/completion time")
+	}
+	if response["err"] != nil {
+		return fmt.Errorf("pull callback returned an error/cancellation")
+	}
+	result := m9Object(response["params"])
+	items, array := result["items"].([]any)
+	if result["kind"] != "full" || !array || len(items) != 0 {
+		return fmt.Errorf("pull is not an explicit successful full items=[] response")
+	}
+	a, b := m9Object(request["snapshot"]), m9Object(response["snapshot"])
+	for _, event := range []map[string]any{request, response} {
+		uri := m9Text(m9Object(m9Object(event["request_params"])["textDocument"])["uri"])
+		if uri != fixed.uri() {
+			return fmt.Errorf("request URI is not the exact canonical fixed document")
+		}
+	}
+	for _, snapshot := range []map[string]any{a, b} {
+		version, vok := snapshot["local_version"].(float64)
+		tick, tok := snapshot["changedtick"].(float64)
+		buffer, bok := snapshot["bufnr"].(float64)
+		if snapshot["path"] != fixed.Path || snapshot["uri"] != fixed.uri() ||
+			snapshot["sha256"] != fixed.Hash || snapshot["disk_sha256"] != fixed.Hash ||
+			snapshot["client_current"] != true || snapshot["attached"] != true ||
+			!vok || version < 0 || !tok || tick < 1 || !bok || buffer < 1 {
+			return fmt.Errorf("local postimage/client is not synchronized at dispatch and completion")
+		}
+	}
+	for _, key := range []string{"bufnr", "local_version", "changedtick", "sha256", "disk_sha256", "path", "uri"} {
+		if a[key] == nil || a[key] != b[key] {
+			return fmt.Errorf("local identity changed during request: %s", key)
+		}
+	}
+	return nil
+}
+
+// Replay the complete trace, tracking real progress tokens for the selected
+// client, including work begun before the fix. No count or quiet duration proves
+// analysis completion. Epoch changes force another event-driven observation.
+func m9PostFixTrace(events []map[string]any, fixed *m9PostFix) (m9TraceState, error) {
+	state := m9TraceState{Reason: "no qualifying post-fix request/callback"}
+	var client, process any
+	for _, event := range events {
+		if event["kind"] != "attach" || event["path"] != fixed.Path {
+			continue
+		}
+		if event["name"] != "pyright" || event["client_id"] == nil || event["process_id"] == nil {
+			return state, fmt.Errorf("canonical attachment has no unambiguous Pyright identity")
+		}
+		if client != nil && (client != event["client_id"] || process != event["process_id"]) {
+			return state, fmt.Errorf("multiple canonical clients/processes: unsupported mixed transport")
+		}
+		client, process = event["client_id"], event["process_id"]
+	}
+	if client == nil {
+		return state, fmt.Errorf("canonical client attachment not observed")
+	}
+	state.Provider = fmt.Sprintf("pyright#%v", client)
+	requests, sent, cancelled := map[string]map[string]any{}, map[string]bool{}, map[string]bool{}
+	for _, event := range events {
+		if event["process_id"] != process || event["client_id"] != client {
+			continue
+		}
+		id := m9Text(event["request_id"])
+		switch event["kind"] {
+		case "pull_request":
+			requests[id] = event
+		case "pull_dispatch":
+			rpcID, valid := event["rpc_id"].(float64)
+			sent[id] = event["sent"] == true && valid && rpcID >= 1
+		case "pull_cancel":
+			cancelled[id] = true
+		}
+	}
+	pending, inflight := map[string]bool{}, map[string]bool{}
+	var barrier float64
+	invalidate := func(reason string) {
+		state.Candidate, state.Reason = nil, reason
+		state.Epoch++
+	}
+	for _, event := range events {
+		eventURI := m9Object(event["params"])["uri"]
+		if event["kind"] == "pull" || event["kind"] == "pull_request" {
+			eventURI = m9Object(m9Object(event["request_params"])["textDocument"])["uri"]
+		}
+		if eventURI == fixed.uri() && (event["process_id"] != process || event["client_id"] != client) {
+			return state, fmt.Errorf("canonical transport came from another client/process")
+		}
+		if event["process_id"] != process {
+			continue
+		}
+		seq, seqOK := event["trace_seq"].(float64)
+		if !seqOK || seq <= state.LastSeq {
+			return state, fmt.Errorf("trace sequence is missing or unordered")
+		}
+		state.LastSeq = seq
+		if event["kind"] == "progress" {
+			data := m9Object(event["data"])
+			if data["client_id"] == nil {
+				return state, fmt.Errorf("progress lacks client identity")
+			}
+			if data["client_id"] != client {
+				continue
+			}
+			params := m9Object(data["params"])
+			switch params["token"].(type) {
+			case string, float64:
+			default:
+				return state, fmt.Errorf("selected-client progress lacks a valid token")
+			}
+			state.ProofBarrier = seq
+			token, _ := json.Marshal(params["token"])
+			switch m9Object(params["value"])["kind"] {
+			case "begin", "report":
+				pending[string(token)] = true
+				if m9Object(params["value"])["kind"] == "begin" {
+					state.ProgressBegins++
+				}
+				invalidate("known client progress began or continued after candidate")
+			case "end":
+				delete(pending, string(token))
+				barrier = seq
+				invalidate("require a fresh request after known work ends")
+			default:
+				return state, fmt.Errorf("malformed selected-client progress")
+			}
+			continue
+		}
+		if event["client_id"] != client {
+			continue
+		}
+		params := m9Object(event["params"])
+		if event["kind"] == "publish" && params["uri"] == fixed.uri() {
+			state.Pushes = append(state.Pushes, event)
+			state.ProofBarrier = seq
+			if _, stamped := params["version"].(float64); stamped {
+				state.ProducerProof = true
+			} else {
+				state.UnversionedPush = true
+			}
+			invalidate("push observed: pure-pull fallback unavailable")
+			continue
+		}
+		id := m9Text(event["request_id"])
+		request := requests[id]
+		uri := m9Object(m9Object(event["request_params"])["textDocument"])["uri"]
+		if event["kind"] == "pull_cancel" {
+			delete(inflight, id)
+			if state.Candidate != nil && state.Candidate.Request["request_id"] == id {
+				invalidate("candidate request was cancelled")
+			}
+			continue
+		}
+		requestURI := m9Object(m9Object(request["request_params"])["textDocument"])["uri"]
+		if uri != fixed.uri() && requestURI != fixed.uri() {
+			continue
+		}
+		if event["kind"] == "pull_request" && sent[id] && !cancelled[id] {
+			inflight[id] = true
+		}
+		if event["kind"] != "pull" {
+			continue
+		}
+		delete(inflight, id)
+		// Every newer selected-document callback can contradict a candidate,
+		// even a stale in-flight nonempty response or an unchanged/error body.
+		if err := m9CorrelatedEmpty(request, event, fixed); err != nil || !sent[id] || cancelled[id] {
+			invalidate(fmt.Sprintf("nonqualifying callback %s: %v (sent=%v cancelled=%v)", id, err, sent[id], cancelled[id]))
+			barrier, state.ProofBarrier = seq, seq
+			continue
+		}
+		dispatchSeq, _ := request["trace_seq"].(float64)
+		if len(pending) != 0 || dispatchSeq <= barrier {
+			invalidate("empty pull dispatched before known work/contradiction ended")
+			continue
+		}
+		if state.Candidate == nil {
+			state.Candidate = &m9PullObservation{Request: request, Response: event}
+		}
+		state.Reason = "post-fix empty pull observed; clean unproven"
+	}
+	state.Pending = len(pending) != 0 || len(inflight) != 0
+	return state, nil
+}
+
+func (p *m9Probe) postFixTrace() (m9TraceState, string) {
+	body, err := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSuffix(string(body), "\n"), "\n") {
+		var event map[string]any
+		if json.Unmarshal([]byte(line), &event) != nil {
+			p.t.Fatal("malformed/incomplete raw LSP telemetry; cannot assert post-fix observation")
+		}
+		events = append(events, event)
+	}
+	state, err := m9PostFixTrace(events, p.postFix)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	digest := sha256.Sum256(body)
+	return state, hex.EncodeToString(digest[:])
+}
+
+func m9CitedBatches(reply map[string]any) map[string]bool {
+	ids := map[string]bool{}
+	for _, raw := range m9Object(m9Report(reply)["coverage"]) {
+		for _, id := range probeSlice(m9Object(raw)["evidence_ids"]) {
+			ids[m9Text(id)] = true
+		}
+	}
+	return ids
+}
+
+// Match the selected ledger evidence to the receipt AND the observed request.
+// resultId is only an additional correlation field, never version proof.
+func m9PostFixBatch(batch map[string]any, fixed *m9PostFix, state m9TraceState, push bool) bool {
+	document := m9Text(batch["document"])
+	if document != fixed.Path && document != "main.py" {
+		return false
+	}
+	if batch["selected"] != true || batch["provider_id"] != state.Provider ||
+		batch["document_revision"] != fixed.Revision || batch["transaction_id"] != fixed.Transaction ||
+		fixed.Transaction == "" || batch["staged"] == true || batch["timed_out"] == true ||
+		batch["progress_pending"] == true || batch["dimension"] != "edited_documents" {
+		return false
+	}
+	if push {
+		if batch["kind"] != "lsp_push" || !m9EffectiveProof(batch) {
+			return false
+		}
+		observed, err := time.Parse(time.RFC3339Nano, m9Text(batch["observed_at"]))
+		for _, event := range state.Pushes {
+			params := m9Object(event["params"])
+			at, _ := event["unix_us"].(float64)
+			seq, _ := event["trace_seq"].(float64)
+			items, array := params["diagnostics"].([]any)
+			if err == nil && seq >= state.ProofBarrier && event["err"] == nil && array && len(items) == len(probeSlice(batch["findings"])) &&
+				params["version"] == batch["document_version"] && at >= fixed.StartedUS &&
+				at <= float64(observed.UnixMicro()) {
+				return true
+			}
+		}
+		return false
+	}
+	if state.Candidate == nil || len(probeSlice(batch["findings"])) != 0 || batch["kind"] != "lsp_pull" || batch["complete"] != false || batch["document_version"] != nil {
+		return false
+	}
+	response := state.Candidate.Response
+	snapshot := m9Object(state.Candidate.Request["snapshot"])
+	observed, err := time.Parse(time.RFC3339Nano, m9Text(batch["observed_at"]))
+	callbackUS, _ := response["unix_us"].(float64)
+	// nil/error/timeout/non-full conversions have no result_id. Without a
+	// real response identity we cannot distinguish those batches honestly.
+	resultID := m9Text(m9Object(response["params"])["resultId"])
+	return resultID != "" && err == nil && float64(observed.UnixMicro()) >= callbackUS &&
+		batch["expected_version"] == snapshot["local_version"] &&
+		m9Text(batch["result_id"]) == resultID
+}
+
+// Check all surfaces, including compact edit deltas and once-only updates. A
+// later provisional full report cannot excuse an earlier resolved notice.
+func m9PostFixLedger(reply map[string]any, fixed *m9PostFix, pure bool) (map[string]bool, error) {
+	resolved := map[string]bool{}
+	var walk func(any) error
+	walk = func(value any) error {
+		switch value := value.(type) {
+		case []any:
+			for _, item := range value {
+				if err := walk(item); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			if value["notices_truncated"] == true || value["diagnostic_updates_truncated"] == true {
+				return fmt.Errorf("diagnostic transitions were truncated")
+			}
+			if pure && value["confidence"] != nil && value["confidence"] != "provisional" {
+				return fmt.Errorf("pure-pull intermediate/final report is not provisional")
+			}
+			if value["kind"] == "resolved" || value["status"] == "resolved" {
+				resolved[m9Text(value["id"])] = true
+				if pure {
+					return fmt.Errorf("pure-pull omission emitted a resolved transition")
+				}
+			}
+			for key, child := range value {
+				if key == "resolved" || key == "resolved_ids" {
+					for _, raw := range probeSlice(child) {
+						id := m9Text(raw)
+						if id == "" {
+							id = m9Text(m9Object(raw)["id"])
+						}
+						resolved[id] = true
+						if pure {
+							return fmt.Errorf("pure-pull omission emitted resolved bodies/IDs")
+						}
+					}
+				}
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	data := m9Object(reply["data"])
+	for _, value := range []any{data["diagnostics"], data["diagnostic_delta"], reply["diagnostic_updates"]} {
+		if err := walk(value); err != nil {
+			return resolved, err
+		}
+	}
+	if reply["diagnostic_updates_truncated"] == true {
+		return resolved, fmt.Errorf("diagnostic updates truncated")
+	}
+	report := m9Report(reply)
+	if pure && report != nil {
+		retained := map[string]bool{}
+		for _, group := range []string{"current", "stale"} {
+			for _, raw := range probeSlice(report[group]) {
+				item := m9Object(raw)
+				if item["status"] == group {
+					retained[m9Text(item["id"])] = true
+				}
+			}
+		}
+		for _, id := range fixed.IDs {
+			if !retained[id] {
+				return resolved, fmt.Errorf("pure-pull omitted original current/stale finding %s", id)
+			}
+		}
+	}
+	return resolved, nil
+}
+
+func (p *m9Probe) collectPostFix() {
 	p.t.Helper()
+	armedEpoch, armed := 0, false
+	inspected := 0
 	for p.ctx.Err() == nil {
 		reply := p.call("diagnostics", map[string]any{"full": true})
-		report := m9Report(reply)
-		if report["confidence"] == "authoritative" && len(probeFindings(reply, "main.py", "current", "stale")) == 0 {
-			return reply
+		if m9Report(reply) == nil {
+			p.t.Fatal("post-fix full diagnostics omitted the report")
+		}
+		// Recover every iteration, including the fixing edit and intermediate
+		// replies: authority/veto checks must not inspect only the terminal call.
+		for inspected < len(p.postFixReplies) {
+			item := p.postFixReplies[inspected]
+			inspected++
+			if len(probeSlice(m9Object(item["evidence"])["ids"])) > 0 && item["data"] != nil &&
+				(m9Report(item) != nil || m9Object(m9Object(item["data"])["evidence"]) == nil) {
+				p.inspectEvidence(item)
+			}
+		}
+		state, traceHash := p.postFixTrace()
+		// A diagnostics call wakes the existing pull watch. Let that actual
+		// request/progress settle through trace events before issuing another
+		// call; otherwise each poll could keep its replacement in flight.
+		for state.Pending && p.ctx.Err() == nil {
+			p.event()
+			state, traceHash = p.postFixTrace()
+		}
+		p.postFixCoverage["reached_gate"] = "transport_and_postimage_observation"
+		p.postFixCoverage["selected_provider"] = state.Provider
+		p.postFixCoverage["producer_proof_observed"] = state.ProducerProof
+		p.postFixCoverage["observed_progress_begins"] = state.ProgressBegins
+		p.postFixCoverage["known_work_pending"] = state.Pending
+		p.postFixCoverage["last_observation_reason"] = state.Reason
+		p.postFixCoverage["final_trace_sequence"] = state.LastSeq
+		p.postFixCoverage["final_trace_sha256"] = traceHash
+		if p.ctx.Err() != nil {
+			break
+		}
+		if !state.ProducerProof && state.UnversionedPush {
+			p.t.Fatal("unversioned/mixed push transport is outside the strict pure-pull fallback")
+		}
+		// Receipt-bound transaction IDs come only from recovered producer evidence.
+		for _, batch := range p.evidenceBatches {
+			if batch["provider_id"] != state.Provider || batch["document_revision"] != p.postFix.Revision ||
+				(batch["document"] != p.postFix.Path && batch["document"] != "main.py") || batch["selected"] != true {
+				continue
+			}
+			tx := m9Text(batch["transaction_id"])
+			if tx != "" {
+				if p.postFix.Transaction != "" && tx != p.postFix.Transaction {
+					p.t.Fatal("ambiguous fixed-document transaction identity")
+				}
+				p.postFix.Transaction = tx
+			}
+		}
+		p.postFixCoverage["fixed_transaction"] = p.postFix.Transaction
+		resolved := map[string]bool{}
+		authorized := false
+		proofAtReply := state
+		proofAtReply.ProofBarrier = 0 // Later work cannot invalidate a legitimate earlier transition.
+		for _, item := range p.postFixReplies {
+			// A later stamped push cannot excuse an earlier false authority or
+			// resolved notice. Proof must have been cited by this or a prior reply.
+			for _, raw := range probeSlice(m9Object(item["evidence"])["ids"]) {
+				if state.ProducerProof && m9PostFixBatch(p.evidenceBatches[m9Text(raw)], p.postFix, proofAtReply, true) {
+					authorized = true
+				}
+			}
+			ids, err := m9PostFixLedger(item, p.postFix, !authorized)
+			if err != nil {
+				p.t.Fatal(err)
+			}
+			maps.Copy(resolved, ids)
+		}
+		provenResolution := true
+		for _, id := range p.postFix.IDs {
+			provenResolution = provenResolution && resolved[id]
+		}
+		var qualifying []string
+		for id := range m9CitedBatches(reply) {
+			if len(probeSlice(p.evidenceBatches[id]["findings"])) == 0 && m9PostFixBatch(p.evidenceBatches[id], p.postFix, state, state.ProducerProof) {
+				qualifying = append(qualifying, id)
+			}
+		}
+		if state.Pending || len(qualifying) == 0 {
+			p.postFixCoverage["evidence_gate_limitation"] = "No current selected receipt/transaction-bound batch matches a real identified raw response; nil/error/timeout/non-full conversions cannot qualify."
+			armed = false
+			p.event()
+			continue
+		}
+		delete(p.postFixCoverage, "evidence_gate_limitation")
+		p.postFixCoverage["qualifying_evidence_ids"] = qualifying
+		if state.ProducerProof {
+			if m9Report(reply)["confidence"] == "authoritative" &&
+				len(probeSlice(m9Report(reply)["current"])) == 0 && len(probeSlice(m9Report(reply)["stale"])) == 0 && provenResolution {
+				p.postFixCoverage["outcome"] = "authoritative_clean"
+				p.postFixCoverage["clean_resolution_proven"] = true
+				p.postFixCoverage["no_resolution"] = false
+				var pushSequences []any
+				for _, event := range state.Pushes {
+					params := m9Object(event["params"])
+					at, _ := event["unix_us"].(float64)
+					for _, id := range qualifying {
+						if at >= p.postFix.StartedUS && params["version"] == p.evidenceBatches[id]["document_version"] {
+							pushSequences = append(pushSequences, event["trace_seq"])
+						}
+					}
+				}
+				p.postFixCoverage["qualifying_push_trace_sequences"] = pushSequences
+				p.postFixCoverage["resolved_finding_ids"] = p.postFix.IDs
+				p.postFixCoverage["reached_gate"] = "authoritative_clean"
+				return
+			}
+			armed = false
+		} else if state.Candidate != nil {
+			p.postFixCoverage["qualifying_request_id"] = state.Candidate.Request["request_id"]
+			p.postFixCoverage["qualifying_request_trace_sequence"] = state.Candidate.Request["trace_seq"]
+			p.postFixCoverage["qualifying_response_trace_sequence"] = state.Candidate.Response["trace_seq"]
+			p.postFixCoverage["request_local_identity"] = state.Candidate.Request["snapshot"]
+			p.postFixCoverage["callback_local_identity"] = state.Candidate.Response["snapshot"]
+			if armed && armedEpoch == state.Epoch {
+				// This final report follows an event observation and replays the
+				// final trace. Silence/repetition is never promoted to clean proof.
+				p.postFixCoverage["outcome"] = "clean_unproven"
+				p.postFixCoverage["reached_gate"] = "post_fix_empty_pull_observed"
+				p.postFixCoverage["retained_finding_ids"] = p.postFix.IDs
+				p.postFixCoverage["no_resolution"] = true
+				return
+			}
+			armedEpoch, armed = state.Epoch, true
 		}
 		p.event()
 	}
-	p.t.Fatal("no proven current clean publication after fixing the real type error")
-	return nil
+	p.t.Fatalf("post-fix observation deadline (never success): %+v", p.postFixCoverage)
 }
 
 func (p *m9Probe) edit(old, new string) map[string]any {
@@ -698,6 +1236,11 @@ func (p *m9Probe) run() {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	p.ctx = ctx
 	defer cancel()
+	p.postFixCoverage = map[string]any{"outcome": "unreached", "reached_gate": "positive_environment_gates", "producer_proof_observed": false, "no_resolution": nil, "clean_resolution_proven": false,
+		"progress_limitation": "Known client progress and contradictory responses are guarded; future progress cannot be excluded by finite observation."}
+	if !p.spec.known {
+		p.postFixCoverage["outcome"] = "not_applicable"
+	}
 	p.evidenceSeen = map[string]bool{}
 	p.evidenceBatches = map[string]map[string]any{}
 	if err := os.MkdirAll(p.dir, 0700); err != nil {
@@ -729,7 +1272,10 @@ func (p *m9Probe) run() {
 				p.t.Error("selected environment changed during discovery/provider execution")
 			}
 		}
-		m9JSON(p.t, filepath.Join(p.dir, "coverage.json"), map[string]any{"case": p.spec.name, "known_expected": p.spec.known, "unknown_expected": p.spec.unknown, "selected_expected": p.selected, "natural_late_publication_observed": p.lateSeen, "later_call_updates_observed": p.updatesSeen, "complete_empty_push_quiet_checks": p.quietChecks, "progress_pending_batches_observed": p.progressVetoes, "unproven_pull_batches_observed": p.pullVetoes, "pull_veto_dimension_checks": p.pullVetoChecks, "passed": !p.t.Failed(),
+		if p.spec.known && p.t.Failed() {
+			p.postFixCoverage["outcome"] = "failed"
+		}
+		m9JSON(p.t, filepath.Join(p.dir, "coverage.json"), map[string]any{"case": p.spec.name, "known_expected": p.spec.known, "unknown_expected": p.spec.unknown, "selected_expected": p.selected, "natural_late_publication_observed": p.lateSeen, "later_call_updates_observed": p.updatesSeen, "complete_empty_push_quiet_checks": p.quietChecks, "progress_pending_batches_observed": p.progressVetoes, "unproven_pull_batches_observed": p.pullVetoes, "pull_veto_dimension_checks": p.pullVetoChecks, "passed": !p.t.Failed(), "post_fix": p.postFixCoverage,
 			"limits": []string{"No forced producer delay or synthetic progress: timing-path coverage is reported, not assumed.", "Pyright may execute the chosen interpreter. Explicit project config is selection ownership, not dependency verification."}})
 	})
 	p.fixture()
@@ -807,11 +1353,47 @@ func (p *m9Probe) run() {
 	if p.spec.sandbox {
 		p.sandbox()
 	}
-	if p.spec.known {
-		p.edit("value: int = \"bad\"", "value: int = 1")
-		p.inspectEvidence(p.collectClean())
-	}
 	p.interpreterSelection()
+	if p.spec.known {
+		path, err := filepath.EvalSymlinks(filepath.Join(p.root, "main.py"))
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		fixed := strings.Replace(string(body), "value: int = \"bad\"", "value: int = 1", 1)
+		digest := sha256.Sum256([]byte(fixed))
+		p.postFix = &m9PostFix{Path: path, Hash: hex.EncodeToString(digest[:]), StartedUS: float64(time.Now().UnixMicro())}
+		for _, item := range probeFindings(again, "main.py", "current", "stale") {
+			if m9TypeCount([]map[string]any{item}) > 0 {
+				id := m9Text(item["id"])
+				if id == "" {
+					p.t.Fatal("pre-fix type finding has no stable identity")
+				}
+				p.postFix.IDs = append(p.postFix.IDs, id)
+			}
+		}
+		if len(p.postFix.IDs) == 0 {
+			p.t.Fatal("post-fix gate cannot bypass the natural type-finding gate")
+		}
+		p.postFixCoverage["reached_gate"] = "fix_dispatch"
+		p.postFixCoverage["original_finding_ids"] = p.postFix.IDs
+		fix := p.edit("value: int = \"bad\"", "value: int = 1")
+		data := m9Object(fix["data"])
+		p.postFix.Revision = m9Text(data["document_revision"])
+		if p.postFix.Revision == "" {
+			p.postFix.Revision = m9Text(m9Object(data["document_revisions"])["main.py"])
+		}
+		if !strings.HasPrefix(p.postFix.Revision, "docrev_") {
+			p.t.Fatal("fixed postimage omitted exact receipt document revision")
+		}
+		p.postFixCoverage["fixed_document_revision"] = p.postFix.Revision
+		p.postFixCoverage["fixed_canonical_path"] = p.postFix.Path
+		p.postFixCoverage["fixed_sha256"] = p.postFix.Hash
+		p.collectPostFix()
+	}
 }
 
 func (p *m9Probe) plain() {
@@ -1325,6 +1907,248 @@ func TestM9EffectivePullProof(t *testing.T) {
 		maps.Copy(other, change)
 		if m9SupersedesPullVeto(other, veto) {
 			t.Errorf("unrelated, older or unproven batch superseded veto: %+v", other)
+		}
+	}
+}
+
+// A protocol-shaped trace fixture: dispatch, transport acceptance and callback
+// are separate observations. No service/client runs in these policy regressions.
+func m9PolicyFixture(t *testing.T) (*m9PostFix, []map[string]any) {
+	t.Helper()
+	const trace = `
+{"kind":"attach","trace_seq":1,"process_id":91,"client_id":7,"name":"pyright","path":"/project/main.py"}
+{"kind":"pull_request","trace_seq":2,"process_id":91,"client_id":7,"request_id":"91:7:1","unix_us":20,"request_params":{"textDocument":{"uri":"file:///project/main.py"}},"snapshot":{"path":"/project/main.py","uri":"file:///project/main.py","bufnr":1,"changedtick":8,"local_version":4,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","disk_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","attached":true,"client_current":true}}
+{"kind":"pull_dispatch","trace_seq":3,"process_id":91,"client_id":7,"request_id":"91:7:1","sent":true,"rpc_id":13}
+{"kind":"pull","trace_seq":4,"process_id":91,"client_id":7,"callback_client_id":7,"request_id":"91:7:1","unix_us":30,"request_params":{"textDocument":{"uri":"file:///project/main.py"}},"params":{"kind":"full","items":[],"resultId":"opaque-5"},"snapshot":{"path":"/project/main.py","uri":"file:///project/main.py","bufnr":1,"changedtick":8,"local_version":4,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","disk_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","attached":true,"client_current":true}}
+`
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(trace), "\n") {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	return &m9PostFix{Path: "/project/main.py", Hash: strings.Repeat("a", 64),
+		Revision: "docrev_fixed", Transaction: "edit_fix", StartedUS: 10, IDs: []string{"type-original"}}, events
+}
+
+func TestM9PostFixCorrelation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(request, response map[string]any)
+	}{
+		{"pre-fix-inflight-empty", func(a, b map[string]any) { a["unix_us"] = float64(5) }},
+		{"wrong-callback-client", func(a, b map[string]any) { b["callback_client_id"] = float64(8) }},
+		{"other-provider-process", func(a, b map[string]any) { b["process_id"] = float64(92) }},
+		{"uncorrelated-response", func(a, b map[string]any) { b["request_id"] = "91:7:old" }},
+		{"error", func(a, b map[string]any) { b["err"] = map[string]any{"code": -32603} }},
+		{"cancelled", func(a, b map[string]any) { b["err"] = map[string]any{"code": -32800} }},
+		{"timed-out", func(a, b map[string]any) { b["err"] = map[string]any{"message": "timeout"} }},
+		{"nil-result", func(a, b map[string]any) { b["params"] = nil }},
+		{"unchanged", func(a, b map[string]any) { b["params"] = map[string]any{"kind": "unchanged", "resultId": "opaque-6"} }},
+		{"missing-items", func(a, b map[string]any) { delete(m9Object(b["params"]), "items") }},
+		{"object-is-not-array", func(a, b map[string]any) { m9Object(b["params"])["items"] = map[string]any{} }},
+		{"null-is-not-array", func(a, b map[string]any) { m9Object(b["params"])["items"] = nil }},
+		{"nonempty", func(a, b map[string]any) { m9Object(b["params"])["items"] = []any{map[string]any{"message": "still analyzing"}} }},
+		{"sandbox-request", func(a, b map[string]any) { m9Object(m9Object(a["request_params"])["textDocument"])["uri"] = "file:///sandbox/main.py" }},
+		{"pre-fix-bytes", func(a, b map[string]any) { m9Object(a["snapshot"])["sha256"] = "old" }},
+		{"unsynchronized-disk", func(a, b map[string]any) { m9Object(a["snapshot"])["disk_sha256"] = "old" }},
+		{"changed-during-request", func(a, b map[string]any) { m9Object(b["snapshot"])["changedtick"] = float64(9) }},
+		{"advanced-version", func(a, b map[string]any) { m9Object(b["snapshot"])["local_version"] = float64(5) }},
+		{"missing-version", func(a, b map[string]any) { delete(m9Object(a["snapshot"]), "local_version") }},
+		{"detached-client", func(a, b map[string]any) { m9Object(b["snapshot"])["attached"] = false }},
+		{"replaced-client", func(a, b map[string]any) { m9Object(b["snapshot"])["client_current"] = false }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixed, events := m9PolicyFixture(t)
+			test.mutate(events[1], events[3])
+			if err := m9CorrelatedEmpty(events[1], events[3], fixed); err == nil {
+				t.Fatal("unsafe post-fix observation accepted")
+			}
+		})
+	}
+	fixed, events := m9PolicyFixture(t)
+	if err := m9CorrelatedEmpty(events[1], events[3], fixed); err != nil {
+		t.Fatal(err)
+	}
+	// Local request version and opaque resultId are not producer proof.
+	state, err := m9PostFixTrace(events, fixed)
+	if err != nil || state.Candidate == nil || state.ProducerProof {
+		t.Fatalf("honest pure-pull observation misclassified: %+v, %v", state, err)
+	}
+}
+
+func TestM9PostFixTransientProgress(t *testing.T) {
+	progress := func(seq float64, token string, kind string) map[string]any {
+		return map[string]any{"kind": "progress", "trace_seq": seq, "process_id": float64(91),
+			"data": map[string]any{"client_id": float64(7), "params": map[string]any{"token": token, "value": map[string]any{"kind": kind}}}}
+	}
+	fixed, events := m9PolicyFixture(t)
+	check := func(wantCandidate, wantPending bool) m9TraceState {
+		t.Helper()
+		state, err := m9PostFixTrace(events, fixed)
+		if err != nil || (state.Candidate != nil) != wantCandidate || state.Pending != wantPending {
+			t.Fatalf("candidate=%v pending=%v; got %+v, %v", wantCandidate, wantPending, state, err)
+		}
+		return state
+	}
+	first := check(true, false)
+	events = append(events, progress(5, "analysis", "begin"))
+	check(false, true) // Empty before a real progress begin must be discarded.
+	events = append(events, progress(6, "index", "begin"), progress(7, "analysis", "end"))
+	check(false, true) // One end cannot clear another token's pending work.
+	events = append(events, progress(8, "index", "end"))
+	check(false, false) // End alone cannot restore the superseded empty.
+
+	// A fresh native request after known work ends can qualify, without
+	// inventing another progress cycle or claiming the producer analyzed it.
+	_, fresh := m9PolicyFixture(t)
+	for i, event := range fresh[1:] {
+		event["trace_seq"] = float64(9 + i)
+		event["request_id"] = "91:7:2"
+		events = append(events, event)
+	}
+	last := check(true, false)
+	if last.Epoch == first.Epoch || last.Candidate.Request["request_id"] != "91:7:2" {
+		t.Fatal("old candidate survived known work")
+	}
+	contradiction := maps.Clone(fresh[3])
+	contradiction["trace_seq"] = float64(12)
+	contradiction["params"] = map[string]any{"kind": "full", "items": []any{map[string]any{"code": "reportAssignmentType"}}}
+	events = append(events, contradiction)
+	check(false, false)
+
+	// Progress on another client is tracked independently, not as selected work.
+	_, events = m9PolicyFixture(t)
+	other := progress(5, "other", "begin")
+	m9Object(other["data"])["client_id"] = float64(8)
+	events = append(events, other)
+	check(true, false)
+
+	// Dispatch during work, completion after its end: an empty body still
+	// cannot substitute for a request made after that known work ended.
+	_, events = m9PolicyFixture(t)
+	events = append(events, progress(5, "analysis", "begin"))
+	_, during := m9PolicyFixture(t)
+	during[1]["trace_seq"], during[2]["trace_seq"], during[3]["trace_seq"] = float64(6), float64(7), float64(9)
+	for _, event := range during[1:] {
+		event["request_id"] = "91:7:during"
+	}
+	events = append(events, during[1], during[2], progress(8, "analysis", "end"), during[3])
+	check(false, false)
+}
+
+func TestM9PostFixTransportAndEvidence(t *testing.T) {
+	fixed, events := m9PolicyFixture(t)
+	state, err := m9PostFixTrace(events, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := map[string]any{"kind": "lsp_pull", "selected": true, "complete": false,
+		"provider_id": "pyright#7", "document": "/project/main.py", "document_revision": "docrev_fixed",
+		"transaction_id": "edit_fix", "expected_version": float64(4), "dimension": "edited_documents",
+		"result_id": "opaque-5", "observed_at": "1970-01-01T00:00:00.000031Z"}
+	if !m9PostFixBatch(batch, fixed, state, false) || m9PostFixBatch(batch, fixed, state, true) {
+		t.Fatal("receipt-correlated incomplete pull must remain unproven")
+	}
+	for _, change := range []map[string]any{
+		{"document_revision": "docrev_before"}, {"transaction_id": "edit_old"}, {"provider_id": "pyright#8"},
+		{"document": "/sandbox/main.py"}, {"selected": false}, {"staged": true}, {"timed_out": true},
+		{"progress_pending": true}, {"complete": true}, {"document_version": float64(4)},
+		{"expected_version": float64(3)}, {"observed_at": "1970-01-01T00:00:00.000029Z"},
+		{"result_id": "different-opaque-result"},
+	} {
+		bad := maps.Clone(batch)
+		maps.Copy(bad, change)
+		if m9PostFixBatch(bad, fixed, state, false) {
+			t.Errorf("uncorrelated/invented evidence accepted: %+v", change)
+		}
+	}
+	// An anonymous full response is locally observable, but cannot correlate
+	// selected evidence against an adjacent timeout/non-full empty conversion.
+	delete(m9Object(state.Candidate.Response["params"]), "resultId")
+	anonymous := maps.Clone(batch)
+	delete(anonymous, "result_id")
+	if m9PostFixBatch(anonymous, fixed, state, false) {
+		t.Fatal("anonymous response supplied false evidence correlation")
+	}
+	m9Object(state.Candidate.Response["params"])["resultId"] = "opaque-5"
+	// A current stamped producer path cannot be laundered through fallback.
+	events = append(events, map[string]any{"kind": "publish", "trace_seq": float64(5), "unix_us": float64(30),
+		"process_id": float64(91), "client_id": float64(7),
+		"params": map[string]any{"uri": fixed.uri(), "version": float64(4), "diagnostics": []any{}}})
+	state, err = m9PostFixTrace(events, fixed)
+	if err != nil || !state.ProducerProof {
+		t.Fatalf("stamped producer proof not observed: %+v, %v", state, err)
+	}
+	push := maps.Clone(batch)
+	maps.Copy(push, map[string]any{"kind": "lsp_push", "complete": true, "document_version": float64(4)})
+	if !m9PostFixBatch(push, fixed, state, true) {
+		t.Fatal("real selected stamped push was not eligible for the existing authority/quiet gates")
+	}
+	state.ProofBarrier = 6 // Newer observed work cannot reuse an older clean push.
+	if m9PostFixBatch(push, fixed, state, true) {
+		t.Fatal("old stamped push survived newer known work")
+	}
+	// Unversioned publications are explicitly mixed/unsupported, not pure pull.
+	delete(m9Object(events[4]["params"]), "version")
+	state, err = m9PostFixTrace(events, fixed)
+	if err != nil || state.ProducerProof || !state.UnversionedPush {
+		t.Fatalf("unversioned push was hidden: %+v, %v", state, err)
+	}
+	_, events = m9PolicyFixture(t)
+	events = append(events, map[string]any{"kind": "pull_cancel", "trace_seq": float64(5), "process_id": float64(91), "client_id": float64(7), "request_id": "91:7:1"})
+	state, err = m9PostFixTrace(events, fixed)
+	if err != nil || state.Candidate != nil {
+		t.Fatal("cancelled request accepted")
+	}
+	for _, transport := range []map[string]any{
+		{"sent": false}, {"rpc_id": nil},
+	} {
+		_, events = m9PolicyFixture(t)
+		maps.Copy(events[2], transport)
+		state, err = m9PostFixTrace(events, fixed)
+		if err != nil || state.Candidate != nil {
+			t.Fatalf("unaccepted transport qualified: %+v, %v", state, err)
+		}
+	}
+	_, events = m9PolicyFixture(t)
+	state, err = m9PostFixTrace(events[:3], fixed)
+	if err != nil || state.Candidate != nil || !state.Pending {
+		t.Fatalf("outstanding request treated as completed: %+v, %v", state, err)
+	}
+}
+
+func TestM9PostFixFindingRetention(t *testing.T) {
+	fixed, _ := m9PolicyFixture(t)
+	for _, body := range []string{
+		`{"data":{"diagnostics":{"confidence":"provisional","current":[{"id":"type-original","status":"current"}]}}}`,
+		`{"data":{"diagnostics":{"confidence":"provisional","stale":[{"id":"type-original","status":"stale"}]}}}`,
+	} {
+		var reply map[string]any
+		if err := json.Unmarshal([]byte(body), &reply); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m9PostFixLedger(reply, fixed, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, body := range []string{
+		`{"data":{"diagnostics":{"confidence":"authoritative","stale":[{"id":"type-original","status":"stale"}]}}}`,
+		`{"data":{"diagnostics":{"confidence":"provisional","current":[],"stale":[]}}}`,
+		`{"data":{"diagnostic_delta":{"resolved":["type-original"]}}}`,
+		`{"data":{"diagnostics":{"notices":[{"id":"type-original","kind":"resolved"}]}}}`,
+		`{"diagnostic_updates":[{"id":"type-original","kind":"resolved","path":"main.py"}]}`,
+		`{"data":{"diagnostic_delta":{"resolved_ids":["type-original"]}}}`,
+		`{"diagnostic_updates_truncated":true}`,
+	} {
+		var reply map[string]any
+		if err := json.Unmarshal([]byte(body), &reply); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m9PostFixLedger(reply, fixed, true); err == nil {
+			t.Errorf("false authority, lost identity or hidden resolution accepted: %s", body)
 		}
 	}
 }

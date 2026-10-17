@@ -100,8 +100,54 @@ in both ordinary and isolated Python mode. These preflight results and failures 
 recorded in `fixture-commands.log`. Poetry also receives the resolved base executable;
 the selected venv path itself stays unresolved for the symlinked-interpreter case.
 
-Known-environment cases fix the type error and require current authoritative clean
-evidence with no stale bodies. Raw-complete push evidence must prove the document
+Known-environment cases fix the type error after the positive/environment gates.
+Post-fix acceptance now has two distinct outcomes under the ACCEPT_DESIGN memo
+`/home/igor/.cache/huyang-friction/m9-pull-acceptance-policy-review.md`:
+
+- `authoritative_clean` requires an observed producer-stamped push, complete selected
+  current receipt-bound evidence, the existing progress/150 ms empty-push quiet
+  guards, an authoritative full report with no current/stale bodies, and observed
+  legitimate resolution of every saved pre-fix type-finding ID.
+- `clean_unproven` means only a successful full empty pull was observed for a request
+  made against the fixed local document. It requires strictly pure pull transport
+  for that canonical document/client; an unversioned push or ambiguous transport
+  fails explicitly, and any stamped push requires the authoritative path. Every
+  intermediate/final report remains provisional, original type-finding IDs remain
+  current/stale, and no resolved body, notice, delta or diagnostic update is allowed.
+  This outcome validates environment selection, natural finding delivery and honest
+  pending behavior. It does not establish clean resolution or finished analysis.
+
+Observation-only telemetry correlates dispatch, accepted transport request and
+callback by request ID, actual client/process, exact canonical URI/path, local LSP
+version, changedtick, buffer hash and synchronized disk hash. Dispatch and callback
+must both match the successful fix postimage. Selected incomplete Huyang evidence
+must match the fix receipt document revision/transaction and request version; it
+must have no producer document_version. Local metadata and opaque resultId never
+supply producer authority. Errors, cancellation, timeout, unchanged/non-full,
+nil/malformed results, missing/non-array items, sandbox/other-client responses and
+pre-fix in-flight responses cannot qualify. A real nonempty resultId must also match
+selected pull evidence, solely as response identity alongside the receipt/version
+and callback observation. An anonymous full response cannot distinguish that evidence
+from nil/error/timeout/non-full conversions and fails the evidence gate explicitly;
+it never acquires authority. No response or producer field is rewritten.
+
+The trace replays real progress tokens independently by client, including existing
+work before the fix. Later progress or a contradictory/nonempty callback invalidates
+an empty candidate; known work end requires a fresh request after that end. A
+candidate is rechecked after another bounded event observation and full report.
+Pending work or an outstanding request prevents termination. There is no warmup
+sleep, first-empty pass, invented progress cycle, or deadline-to-success conversion.
+Finite observation cannot exclude future progress, and the outcome remains unproven.
+
+`coverage.json.post_fix` records outcome separately from passed, reached gate,
+fixed document revision/transaction, raw request/callback or push trace identifiers,
+qualifying selected evidence IDs, observed producer proof, local snapshots, retained
+or resolved IDs, no-resolution result, final trace hash/sequence and known-progress
+limits. Failed/unreached gates and unknown/configured-missing cases remain distinct.
+The 15-case matrix, native startup capabilities, fixtures, environment/offline/frozen
+input and restoration/cleanup guards are unchanged.
+
+Raw-complete push evidence must prove the document
 version and absence of pending progress. A raw-complete pull is allowed to lack that
 proof: effective proof requires complete, selected, current document version,
 no progress/timeout, and no environment downgrade. A coverage dimension citing only
@@ -142,8 +188,9 @@ arrived after the edit reply returned; it does not prove Huyang's late-capture p
 a provisional reply, or late finding delivery. The configured push telemetry handler
 runs inside Huyang's per-client wrapper, after Huyang records the publication. Its
 microsecond timestamp skew makes the empty-push quiet check stricter. Pull telemetry
-records the request URI, untouched response and error before delegating to the
-original callback; it does not assert a push occurred.
+records separate dispatch, transport acceptance, callback and cancellation events,
+with local postimage snapshots and the untouched response/error before delegating
+to the original callback; it does not assert a push occurred.
 No real publication is deliberately delayed and no work-done progress is synthesized.
 A successful matrix therefore does **not** imply that every producer timing permutation
 occurred. Review `natural_late_publication_observed`,
@@ -243,7 +290,7 @@ clean go build -o "$scratch/bin/huyang" ./cmd/huyang
 set +e
 clean env HUYANG_M9_PYTHON_PROBE=1 HUYANG_M9_TOOLS="$tools" \
   HUYANG_M9_RUN="$run" HUYANG_M9_BINARY="$scratch/bin/huyang" \
-  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof)$' -count=1 -v -timeout 40m \
+  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof|TestM9PostFixCorrelation|TestM9PostFixTransientProgress|TestM9PostFixTransportAndEvidence|TestM9PostFixFindingRetention)$' -count=1 -v -timeout 40m \
   >"$scratch/python-probe-go-test.log" 2>&1
 test_exit=$?
 set -e
