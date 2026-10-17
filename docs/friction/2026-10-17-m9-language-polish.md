@@ -1,4 +1,28 @@
-# M9 language polish: source preparation
+# M9 language polish
+
+## Acceptance recorded on 2026-10-17
+
+Agent-a job `7d0c1e76-fd54-442d-9eba-d35950b9bfca` passed all fifteen
+native Python environment cases and fourteen pure tests on source
+`586e027c0df2cfb26c90e218abfaee954cc67e94`. Root independently verified
+all 6,371 retained files, unchanged HOME/tool metadata and the seven known
+environments' complete trace, cut and report hashes.
+
+Those seven cases qualify `historical_post_fix_observation_pending`.
+Analysis completion, clean resolution and the old terminal gate remain
+explicitly unqualified. Later progress supersedes the observed empty response;
+the ledger retains its findings provisionally. Earlier failed runs stay failed.
+
+The Go investigation below establishes 152 Codex plus 41 Claude replies in the
+gaming-pc transcript corpus. Per-call service-host, PATH and init attribution is
+unavailable in the retained aggregates. No concrete Go product defect was
+established, so no speculative Go or host changes were made.
+
+Source reviews and validation belong to their recorded commits. Final stack
+integration and CI, merge, installation and host verification are separate steps.
+No installed service, local-model evaluation or Ollama state was changed.
+
+## Original source preparation record
 
 This change is prepared on local M7 `8ca0951c1f55dbd447b1dc3a08bcd6c004d48909`,
 with docs-only `78334a2e1208fc27f9bf189b09c6b5eaba1ed3be` cherry-picked as
