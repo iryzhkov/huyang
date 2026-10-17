@@ -367,6 +367,112 @@ func TestWorkspaceRevSkipsRelativeRoots(t *testing.T) {
 	}
 }
 
+func TestFrictionOriginalCallCorrelationOverSDK(t *testing.T) {
+	config, key := provisionCorrelationTestKey(t)
+	spool, root, state := correlationScratch(t), correlationScratch(t), correlationScratch(t)
+	t.Setenv("HUYANG_FRICTION_DIR", spool)
+	t.Setenv("HUYANG_FRICTION", "1")
+	const canary = "private-argument-canary"
+	if err := os.WriteFile(filepath.Join(root, "fixture.go"), []byte("package fixture // private-source-canary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session, cleanup := connectOfficialClientAs(t, mcpapi.ProfileFull, newDirectWorkspaces(state), "adapter-not-a-native-session")
+	defer cleanup()
+	opened := callModern(t, session, "workspace_open", map[string]any{"root": root})
+	id := opened["workspace"].(map[string]any)["id"].(string)
+	makeJSON := func(value any) json.RawMessage {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	alias := makeJSON(map[string]any{"workspace_id": id, "path": "fixture.go", "max_lines": "1"})
+	canonical := makeJSON(map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}, "max_lines": 1})
+	var aliasMAC string
+	for _, test := range []struct {
+		name                 string
+		raw                  json.RawMessage
+		refused, unsupported bool
+	}{
+		{"read", alias, false, false},
+		{"read", canonical, false, false},
+		{"search", makeJSON(map[string]any{"workspace_id": id, "query": canary}), false, false},
+		{"workspace_open", json.RawMessage("{\"private_arg\":{\"token\":\"" + canary + "\"}}"), true, false},
+		{"workspace_open", json.RawMessage("[\"" + canary + "\"]"), true, false},
+		{"workspace_open", json.RawMessage("{\"root\":\".\"}"), true, false},
+		{"workspace_open", json.RawMessage("{\"private_arg\":\"" + canary + "\",\"private_arg\":true}"), true, true},
+	} {
+		original := append([]byte(nil), test.raw...)
+		expected := correlateMCPCall(test.name, test.raw)
+		before := time.Now()
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: test.name, Arguments: test.raw})
+		after := time.Now()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.IsError != test.refused {
+			t.Fatalf("%s refusal = %t, want %t", test.name, result.IsError, test.refused)
+		}
+		events := readFrictionEvents(t, spool)
+		event := events[len(events)-1]
+		if event.Tool != test.name {
+			t.Fatalf("last event tool = %q", event.Tool)
+		}
+		if test.unsupported {
+			if event.Correlation != nil {
+				t.Fatal("unsupported original JSON was correlated")
+			}
+		} else if expected.V == "" || event.Correlation == nil || *event.Correlation != expected {
+			t.Fatalf("original call correlation missing or changed: %+v", event.Correlation)
+		}
+		if test.name == "read" {
+			if aliasMAC == "" {
+				aliasMAC = expected.MAC
+			} else if aliasMAC == expected.MAC {
+				t.Fatal("aliased/string arguments collapsed into normalized inputs")
+			}
+		}
+		started, err := time.Parse(time.RFC3339Nano, event.StartedAt)
+		if err != nil || started.Before(before.Add(-time.Millisecond)) || started.After(after) {
+			t.Fatalf("started_at did not come from the original handler entry: %q", event.StartedAt)
+		}
+		if !bytes.Equal(original, test.raw) {
+			t.Fatal("original request bytes mutated")
+		}
+	}
+	// Missing keys omit metadata without changing ordinary tool behavior.
+	baseline := callModern(t, session, "read", map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}, "max_lines": 1})
+	if err := os.Remove(filepath.Join(config, "toolfeedback", "correlation", "keys", key.id+".key")); err != nil {
+		t.Fatal(err)
+	}
+	withoutKey := callModern(t, session, "read", map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}, "max_lines": 1})
+	for _, field := range []string{"outcome", "code", "summary"} {
+		if baseline[field] != withoutKey[field] {
+			t.Fatalf("missing key changed reply %s", field)
+		}
+	}
+	events := readFrictionEvents(t, spool)
+	if events[len(events)-1].Correlation != nil {
+		t.Fatal("missing key was correlated")
+	}
+	data, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{canary, "private-source-canary", root, config} {
+		if bytes.Contains(data, []byte(private)) {
+			t.Fatalf("spool leaked private input %q", private)
+		}
+	}
+	t.Setenv("HUYANG_FRICTION", "0")
+	callModern(t, session, "read", map[string]any{"workspace_id": id, "target": map[string]any{"path": "fixture.go"}})
+	unchanged, err := json.Marshal(readFrictionEvents(t, spool))
+	if err != nil || !bytes.Equal(data, unchanged) {
+		t.Fatal("disabled capture changed spool")
+	}
+}
+
 func TestFrictionTestMainDisablesAmbientOptIn(t *testing.T) {
 	// Re-exec this test binary with an enabled developer-like spool and all
 	// ambient flags set. TestMain must override them before test helpers run.

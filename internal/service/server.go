@@ -45,11 +45,12 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 		started := time.Now()
 		client := modernClientName(request)
 		var aliased []string
+		var correlation frictionCorrelation
 		// A refused argument is answered with an envelope like any other
 		// refusal. Returning the Go error let the SDK turn it into bare text
 		// with no code, no next step and no request ID.
 		refuse := func(root string, arguments map[string]any, err error) (*mcp.CallToolResult, error) {
-			logModernValidationFriction(session, descriptor.Name, root, arguments, err, client, started)
+			logModernValidationFriction(session, descriptor.Name, root, arguments, err, client, started, correlation)
 			requestID := fmt.Sprintf("req_%d", direct.requests.Add(1))
 			envelope := mcpapi.FinalizeEnvelope(descriptor.Name, mcpapi.InvalidArguments(requestID, descriptor.Name, err))
 			return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), true)
@@ -57,6 +58,9 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 		if err := mcpapi.ValidateToolArgumentSize(request.Params.Arguments); err != nil {
 			return refuse("", map[string]any{}, err)
 		}
+		// Capture the original wire arguments, before decoding, aliases,
+		// normalization, workspace defaults or dispatch can change them.
+		correlation = correlateMCPCall(descriptor.Name, request.Params.Arguments)
 		arguments, err := mcpapi.DecodeArguments(request.Params.Arguments)
 		if err != nil {
 			return refuse("", map[string]any{}, err)
@@ -82,7 +86,7 @@ func registerModernTool(server *mcp.Server, descriptor mcpapi.ToolDescriptor, di
 				"client":  client,
 				"data":    envelope["data"],
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprint(envelope["summary"])}},
-			}, started)
+			}, started, correlation)
 		// An alias that was rewritten explains the rest of the reply, so its
 		// warning goes ahead of the ones the call produced.
 		return renderToolResponse(descriptor.Name, arguments, mcpapi.PrependWarnings(envelope, aliased...), isError)
@@ -153,11 +157,11 @@ func modernClientName(request *mcp.CallToolRequest) string {
 	return info.Name
 }
 
-func logModernValidationFriction(session, name, root string, arguments map[string]any, err error, client string, started time.Time) {
+func logModernValidationFriction(session, name, root string, arguments map[string]any, err error, client string, started time.Time, correlation frictionCorrelation) {
 	logFriction(session, name, root, arguments, map[string]any{
 		"isError": true, "outcome": "failed", "code": "invalid_arguments", "client": client,
 		"content": []map[string]any{{"type": "text", "text": err.Error()}},
-	}, started)
+	}, started, correlation)
 }
 
 func modernFrictionRoot(direct *directWorkspaces, tool string, arguments map[string]any) string {

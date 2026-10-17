@@ -16,6 +16,11 @@ package service
 // text" into a fingerprint that groups with every other occurrence of the
 // same failure.
 //
+// Optional tf-call-v1 HMACs correlate original inputs without writing them.
+// Equality is visible within a host key epoch, but no unkeyed digest or secret
+// leaves the host. Enabled capture has bounded parsing and private key reads;
+// explicit disablement skips canonicalization and all key/spool I/O.
+//
 // Writing to the spool must never affect a tool call, so every failure in
 // here is dropped in silence: losing an event is better than failing a call
 // because the disk is full.
@@ -45,18 +50,20 @@ const frictionSource = "huyang"
 
 // frictionEvent is one line of the spool.
 type frictionEvent struct {
-	TS      string   `json:"ts"`
-	Host    string   `json:"host"`
-	Session string   `json:"session"`
-	Proc    string   `json:"proc"`
-	Client  string   `json:"client,omitempty"`
-	Ver     string   `json:"ver,omitempty"`
-	Seq     int      `json:"seq"`
-	Tool    string   `json:"tool"`
-	Root    string   `json:"root,omitempty"`
-	Rev     string   `json:"rev,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	Outcome string   `json:"outcome,omitempty"`
+	TS          string               `json:"ts"`
+	StartedAt   string               `json:"started_at,omitempty"`
+	Correlation *frictionCorrelation `json:"correlation,omitempty"`
+	Host        string               `json:"host"`
+	Session     string               `json:"session"`
+	Proc        string               `json:"proc"`
+	Client      string               `json:"client,omitempty"`
+	Ver         string               `json:"ver,omitempty"`
+	Seq         int                  `json:"seq"`
+	Tool        string               `json:"tool"`
+	Root        string               `json:"root,omitempty"`
+	Rev         string               `json:"rev,omitempty"`
+	Args        []string             `json:"args,omitempty"`
+	Outcome     string               `json:"outcome,omitempty"`
 	// Code is the envelope's machine-readable reason for a reply that is
 	// not ok. A spool with outcomes and no codes says that a quarter of
 	// edits were provisional and cannot say why, which is the question a
@@ -351,7 +358,7 @@ func gitRev(root string) string {
 // logFriction appends one event for a finished call. session is the agent
 // session the connection announced, empty for a caller that announced none;
 // root is the workspace that answered, empty when the call never got that far.
-func logFriction(session, name, root string, args, res map[string]any, started time.Time) {
+func logFriction(session, name, root string, args, res map[string]any, started time.Time, correlations ...frictionCorrelation) {
 	if !frictionEnabled() {
 		return
 	}
@@ -379,6 +386,13 @@ func logFriction(session, name, root string, args, res map[string]any, started t
 		Ms:      time.Since(started).Milliseconds(),
 	}
 	frictionMu.Unlock()
+	if !started.IsZero() {
+		ev.StartedAt = started.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	if len(correlations) > 0 && correlations[0].V == frictionCorrelationVersion {
+		correlation := correlations[0] // copy immutable metadata, never raw inputs
+		ev.Correlation = &correlation
+	}
 	ev.ReasonCodes, ev.VerificationConfidence, ev.CanonicalChanged = frictionDiagnosticState(res["data"])
 	ev.SubCodes, ev.HasResults = frictionResultState(name, outcome, res["data"])
 	if capabilities, ok := res["client_capabilities"].([]string); ok {

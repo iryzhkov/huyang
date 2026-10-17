@@ -249,7 +249,7 @@ name is empty; they survive from the Agent99 lineage and are not documented anyw
 | `HUYANG_NVIM_DAP_PATH` | unset | nvim-dap checkout for the debugger tools; when set, the discovery in [Requirements](#requirements) searches nothing else. Read by the Lua kernel. | `AGENT99_NVIM_DAP_PATH` |
 | `HUYANG_CARGO_TARGET_MAX_AGE_DAYS` | 30 | For a Cargo project the provider points `CARGO_TARGET_DIR` (unless already set) at `$XDG_CACHE_HOME/huyang/cargo-target/<name>-<hash of root>`, else `~/.cache/...`, shared by every session on that root, so rust-analyzer's builds stay out of both the project's `target/` and `/tmp`. Directories no session has used for this many days, or whose project root no longer exists, are removed when a provider starts. Read by the Lua kernel. | no |
 | `CLAUDE_CODE_SESSION_ID` | random per process | Session identifier recorded in friction events when the client is Claude Code. | no |
-| `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | XDG defaults | Bases for the socket, state directory, friction spool, and `huyang/config.toml` trust policy. | no |
+| `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | XDG defaults | Bases for the socket, state directory, friction spool, `huyang/config.toml` trust policy, and private `toolfeedback/correlation` keys. | no |
 
 The kernel variables reach Neovim because the provider inherits the service's environment;
 set them on the service, not on an MCP adapter. Repository commands run under an isolated
@@ -398,7 +398,24 @@ long-lived user daemon, set `HUYANG_FRICTION` and `HUYANG_FRICTION_DIR` in
 not cross the adapter/service boundary and therefore cannot relocate the daemon's spool.
 
 Each line records the tool, the argument key names, the outcome, and the duration; never
-argument values or replies.
+argument values or replies. Partial replies include `has_results`, batch reads count
+target failure codes in `sub_codes`, and an `initialize` event records standard advertised
+capability names once per SDK connection, without their values.
+
+With an explicitly provisioned host-local key, tool calls also include precise
+`started_at` and a `tf-call-v1` HMAC of the original tool name and arguments, captured
+before argument normalization or workspace defaults. Repeated identical calls have equal
+MACs; downstream joins still require a unique native call within ±5 seconds. Producer
+session IDs remain producer identities.
+
+Keys live at `$XDG_CONFIG_HOME/toolfeedback/correlation`, default
+`~/.config/toolfeedback/correlation`, outside the spool and shipping inputs. Huyang reads
+private keys only; the separate `toolfeedback correlation init-key` administrative
+command provisions them during deployment. Missing/unsafe keys or unsupported JSON omit
+correlation without changing replies. Keys are reread per call, so rotation needs no
+producer restart. `HUYANG_FRICTION=0` skips canonicalization and all key/spool I/O.
+See the [producer contract](docs/toolfeedback-contract.md) for exact encoding, key file
+format, privacy, matching limits, and public interoperability vectors.
 
 The service keeps its own host's day files for `HUYANG_FRICTION_RETENTION_DAYS` (90 by
 default, the retention `toolfeedback prune` applies) and at most 256 MiB of them, and never
