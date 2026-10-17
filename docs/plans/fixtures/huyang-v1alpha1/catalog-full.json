@@ -76,7 +76,6 @@
           "type": "integer"
         },
         "git_history": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "fields": {
@@ -113,10 +112,6 @@
           "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
           "type": "boolean"
         },
-        "include_ranges": {
-          "description": "Add byte anchors to every hit.",
-          "type": "boolean"
-        },
         "limit": {
           "maximum": 200,
           "minimum": 1,
@@ -148,11 +143,9 @@
           "type": "string"
         },
         "refine": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "matched_text": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "literal": {
@@ -248,7 +241,6 @@
         "target": {
           "oneOf": [
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "handle": {
@@ -262,74 +254,13 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "file_range": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "after_sha256": {
-                      "description": "SHA-256 of the bounded following anchor.",
-                      "type": "string"
-                    },
-                    "anchor_bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "before_sha256": {
-                      "description": "SHA-256 of the bounded preceding anchor.",
-                      "type": "string"
-                    },
-                    "byte_end": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "byte_start": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "expected_sha256": {
-                      "description": "SHA-256 of the exact selected bytes.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "Workspace-relative or absolute file path.",
-                      "type": "string"
-                    },
-                    "revision_id": {
-                      "description": "Expected document revision.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "revision_id",
-                    "byte_start",
-                    "byte_end",
-                    "expected_sha256",
-                    "before_sha256",
-                    "after_sha256",
-                    "anchor_bytes"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "symbol_locator": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "name_path": {
-                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "description": "Declaration name path.",
                       "type": "string"
                     },
                     "path": {
@@ -399,7 +330,6 @@
         "target": {
           "oneOf": [
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "handle": {
@@ -413,74 +343,13 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "file_range": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "after_sha256": {
-                      "description": "SHA-256 of the bounded following anchor.",
-                      "type": "string"
-                    },
-                    "anchor_bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "before_sha256": {
-                      "description": "SHA-256 of the bounded preceding anchor.",
-                      "type": "string"
-                    },
-                    "byte_end": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "byte_start": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "expected_sha256": {
-                      "description": "SHA-256 of the exact selected bytes.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "Workspace-relative or absolute file path.",
-                      "type": "string"
-                    },
-                    "revision_id": {
-                      "description": "Expected document revision.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "revision_id",
-                    "byte_start",
-                    "byte_end",
-                    "expected_sha256",
-                    "before_sha256",
-                    "after_sha256",
-                    "anchor_bytes"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "symbol_locator": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "name_path": {
-                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "description": "Declaration name path.",
                       "type": "string"
                     },
                     "path": {
@@ -501,7 +370,6 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "path": {
@@ -520,7 +388,6 @@
         "targets": {
           "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.",
           "items": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
               "end_line": {
@@ -545,7 +412,6 @@
                 "type": "integer"
               },
               "symbol_locator": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "additionalProperties": false,
                 "properties": {
                   "name_path": {
@@ -635,7 +501,6 @@
         "target": {
           "oneOf": [
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "handle": {
@@ -649,74 +514,13 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "file_range": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "after_sha256": {
-                      "description": "SHA-256 of the bounded following anchor.",
-                      "type": "string"
-                    },
-                    "anchor_bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "before_sha256": {
-                      "description": "SHA-256 of the bounded preceding anchor.",
-                      "type": "string"
-                    },
-                    "byte_end": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "byte_start": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "expected_sha256": {
-                      "description": "SHA-256 of the exact selected bytes.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "Workspace-relative or absolute file path.",
-                      "type": "string"
-                    },
-                    "revision_id": {
-                      "description": "Expected document revision.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "revision_id",
-                    "byte_start",
-                    "byte_end",
-                    "expected_sha256",
-                    "before_sha256",
-                    "after_sha256",
-                    "anchor_bytes"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "symbol_locator": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "name_path": {
-                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "description": "Declaration name path.",
                       "type": "string"
                     },
                     "path": {
@@ -752,7 +556,7 @@
     "name": "code_actions"
   },
   {
-    "description": "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -\u003e new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces a handle or file_range returned by search. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.",
+    "description": "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -\u003e new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces the bytes of a handle returned by search or symbol_find. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -766,7 +570,6 @@
           "type": "string"
         },
         "operation": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "content": {
@@ -824,7 +627,6 @@
             "target": {
               "oneOf": [
                 {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "handle": {
@@ -834,65 +636,6 @@
                   },
                   "required": [
                     "handle"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "file_range": {
-                      "$schema": "https://json-schema.org/draft/2020-12/schema",
-                      "additionalProperties": false,
-                      "properties": {
-                        "after_sha256": {
-                          "description": "SHA-256 of the bounded following anchor.",
-                          "type": "string"
-                        },
-                        "anchor_bytes": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "before_sha256": {
-                          "description": "SHA-256 of the bounded preceding anchor.",
-                          "type": "string"
-                        },
-                        "byte_end": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "byte_start": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "expected_sha256": {
-                          "description": "SHA-256 of the exact selected bytes.",
-                          "type": "string"
-                        },
-                        "path": {
-                          "description": "Workspace-relative or absolute file path.",
-                          "type": "string"
-                        },
-                        "revision_id": {
-                          "description": "Expected document revision.",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "path",
-                        "revision_id",
-                        "byte_start",
-                        "byte_end",
-                        "expected_sha256",
-                        "before_sha256",
-                        "after_sha256",
-                        "anchor_bytes"
-                      ],
-                      "type": "object"
-                    }
-                  },
-                  "required": [
-                    "file_range"
                   ],
                   "type": "object"
                 }
@@ -912,7 +655,6 @@
         "operations": {
           "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many. Each item takes the fields of operation above, which describes them.",
           "items": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
               "content": {
@@ -1013,7 +755,6 @@
           "type": "string"
         },
         "edit": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "mode": {
@@ -1035,7 +776,6 @@
             },
             "operations": {
               "items": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "additionalProperties": false,
                 "properties": {
                   "content": {
@@ -1096,7 +836,6 @@
                   "target": {
                     "oneOf": [
                       {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
                         "additionalProperties": false,
                         "properties": {
                           "handle": {
@@ -1110,74 +849,13 @@
                         "type": "object"
                       },
                       {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
-                        "additionalProperties": false,
-                        "properties": {
-                          "file_range": {
-                            "$schema": "https://json-schema.org/draft/2020-12/schema",
-                            "additionalProperties": false,
-                            "properties": {
-                              "after_sha256": {
-                                "description": "SHA-256 of the bounded following anchor.",
-                                "type": "string"
-                              },
-                              "anchor_bytes": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "before_sha256": {
-                                "description": "SHA-256 of the bounded preceding anchor.",
-                                "type": "string"
-                              },
-                              "byte_end": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "byte_start": {
-                                "minimum": 0,
-                                "type": "integer"
-                              },
-                              "expected_sha256": {
-                                "description": "SHA-256 of the exact selected bytes.",
-                                "type": "string"
-                              },
-                              "path": {
-                                "description": "Workspace-relative or absolute file path.",
-                                "type": "string"
-                              },
-                              "revision_id": {
-                                "description": "Expected document revision.",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "path",
-                              "revision_id",
-                              "byte_start",
-                              "byte_end",
-                              "expected_sha256",
-                              "before_sha256",
-                              "after_sha256",
-                              "anchor_bytes"
-                            ],
-                            "type": "object"
-                          }
-                        },
-                        "required": [
-                          "file_range"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
                         "additionalProperties": false,
                         "properties": {
                           "symbol_locator": {
-                            "$schema": "https://json-schema.org/draft/2020-12/schema",
                             "additionalProperties": false,
                             "properties": {
                               "name_path": {
-                                "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                                "description": "Declaration name path.",
                                 "type": "string"
                               },
                               "path": {
@@ -1226,7 +904,6 @@
         "operations": {
           "description": "At most 32 operations per request, each of the shape described here; edit.operations takes the same items. Build larger plans incrementally with action=edit and edit.mode=add.",
           "items": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
               "content": {
@@ -1295,7 +972,6 @@
               "target": {
                 "oneOf": [
                   {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "additionalProperties": false,
                     "properties": {
                       "handle": {
@@ -1309,74 +985,13 @@
                     "type": "object"
                   },
                   {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "additionalProperties": false,
-                    "properties": {
-                      "file_range": {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
-                        "additionalProperties": false,
-                        "properties": {
-                          "after_sha256": {
-                            "description": "SHA-256 of the bounded following anchor.",
-                            "type": "string"
-                          },
-                          "anchor_bytes": {
-                            "minimum": 0,
-                            "type": "integer"
-                          },
-                          "before_sha256": {
-                            "description": "SHA-256 of the bounded preceding anchor.",
-                            "type": "string"
-                          },
-                          "byte_end": {
-                            "minimum": 0,
-                            "type": "integer"
-                          },
-                          "byte_start": {
-                            "minimum": 0,
-                            "type": "integer"
-                          },
-                          "expected_sha256": {
-                            "description": "SHA-256 of the exact selected bytes.",
-                            "type": "string"
-                          },
-                          "path": {
-                            "description": "Workspace-relative or absolute file path.",
-                            "type": "string"
-                          },
-                          "revision_id": {
-                            "description": "Expected document revision.",
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "path",
-                          "revision_id",
-                          "byte_start",
-                          "byte_end",
-                          "expected_sha256",
-                          "before_sha256",
-                          "after_sha256",
-                          "anchor_bytes"
-                        ],
-                        "type": "object"
-                      }
-                    },
-                    "required": [
-                      "file_range"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "additionalProperties": false,
                     "properties": {
                       "symbol_locator": {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
                         "additionalProperties": false,
                         "properties": {
                           "name_path": {
-                            "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                            "description": "Declaration name path.",
                             "type": "string"
                           },
                           "path": {
@@ -1443,7 +1058,7 @@
     "name": "change_plan"
   },
   {
-    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files. A failing test is usually explained by its output and the source; when it is not, this server also offers a debugger (breakpoints, stepping, variables, watchpoints) under its debugger profile, which a harness loads on request rather than in every session.",
+    "description": "Run the workspace's checks and tests in an isolated copy of the tree and report exact results. Stages: format_gate, parser, diagnostics, check (build/vet/lint) and tests. Commands come from .huyang.toml or are detected from the repository layout (see workspace_open commands); they run only for roots trusted in ~/.config/huyang/config.toml. Use revision_or_transaction=current to verify what is on disk now and test_scope=affected to run only the tests that cover edited files.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1629,603 +1244,5 @@
       "type": "object"
     },
     "name": "language_server_setup"
-  },
-  {
-    "description": "Start, attach, restart, or stop a debugger session; start and attach may set initial breakpoints.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "enum": [
-            "attach",
-            "restart",
-            "start",
-            "stop"
-          ],
-          "type": "string"
-        },
-        "adapter": {
-          "enum": [
-            "delve",
-            "debugpy",
-            "codelldb",
-            "lldb-dap",
-            "gdb",
-            "js-debug",
-            "java"
-          ],
-          "type": "string"
-        },
-        "args": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "config": {
-          "type": "string"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "env": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        },
-        "file": {
-          "type": "string"
-        },
-        "force": {
-          "type": "boolean"
-        },
-        "host": {
-          "type": "string"
-        },
-        "idempotency_key": {
-          "type": "string"
-        },
-        "initial_breakpoints": {
-          "items": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "additionalProperties": false,
-            "properties": {
-              "condition": {
-                "type": "string"
-              },
-              "hit_condition": {
-                "type": "string"
-              },
-              "line_offset": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "log_message": {
-                "type": "string"
-              },
-              "target": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "additionalProperties": false,
-                "oneOf": [
-                  {
-                    "additionalProperties": true,
-                    "required": [
-                      "handle"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": true,
-                    "required": [
-                      "file_range"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": true,
-                    "required": [
-                      "symbol_locator"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "properties": {
-                  "file_range": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "additionalProperties": false,
-                    "properties": {
-                      "after_sha256": {
-                        "type": "string"
-                      },
-                      "anchor_bytes": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "before_sha256": {
-                        "type": "string"
-                      },
-                      "byte_end": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "byte_start": {
-                        "minimum": 0,
-                        "type": "integer"
-                      },
-                      "expected_sha256": {
-                        "type": "string"
-                      },
-                      "path": {
-                        "type": "string"
-                      },
-                      "revision_id": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "path",
-                      "revision_id",
-                      "byte_start",
-                      "byte_end",
-                      "expected_sha256",
-                      "before_sha256",
-                      "after_sha256",
-                      "anchor_bytes"
-                    ],
-                    "type": "object"
-                  },
-                  "handle": {
-                    "type": "string"
-                  },
-                  "symbol_locator": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "additionalProperties": false,
-                    "properties": {
-                      "name_path": {
-                        "type": "string"
-                      },
-                      "path": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "path",
-                      "name_path"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "type": "object"
-              }
-            },
-            "required": [
-              "target"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "pid": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "program": {
-          "type": "string"
-        },
-        "root": {
-          "type": "string"
-        },
-        "stop_on_entry": {
-          "type": "boolean"
-        },
-        "track": {
-          "items": {
-            "description": "Expression tracked at each stop.",
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "transaction_id": {
-          "type": "string"
-        },
-        "variables": {
-          "enum": [
-            "summary",
-            "names",
-            "none"
-          ],
-          "type": "string"
-        },
-        "wait_ms": {
-          "maximum": 240000,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "workspace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
-    },
-    "name": "debug_session"
-  },
-  {
-    "description": "List, set, remove, or clear breakpoints using the shared revision-bound source target.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "enum": [
-            "clear",
-            "list",
-            "remove",
-            "set"
-          ],
-          "type": "string"
-        },
-        "condition": {
-          "type": "string"
-        },
-        "hit_condition": {
-          "type": "string"
-        },
-        "idempotency_key": {
-          "type": "string"
-        },
-        "line_offset": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "log_message": {
-          "type": "string"
-        },
-        "root": {
-          "type": "string"
-        },
-        "target": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "additionalProperties": false,
-          "oneOf": [
-            {
-              "additionalProperties": true,
-              "required": [
-                "handle"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": true,
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": true,
-              "required": [
-                "symbol_locator"
-              ],
-              "type": "object"
-            }
-          ],
-          "properties": {
-            "file_range": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "after_sha256": {
-                  "type": "string"
-                },
-                "anchor_bytes": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "before_sha256": {
-                  "type": "string"
-                },
-                "byte_end": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "byte_start": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_sha256": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                },
-                "revision_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "revision_id",
-                "byte_start",
-                "byte_end",
-                "expected_sha256",
-                "before_sha256",
-                "after_sha256",
-                "anchor_bytes"
-              ],
-              "type": "object"
-            },
-            "handle": {
-              "type": "string"
-            },
-            "symbol_locator": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "name_path": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "name_path"
-              ],
-              "type": "object"
-            }
-          },
-          "type": "object"
-        },
-        "transaction_id": {
-          "type": "string"
-        },
-        "workspace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
-    },
-    "name": "debug_breakpoints"
-  },
-  {
-    "description": "Continue, pause, step, or run to a revision-bound source target.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "enum": [
-            "continue",
-            "pause",
-            "run_to",
-            "step_into",
-            "step_out",
-            "step_over"
-          ],
-          "type": "string"
-        },
-        "count": {
-          "maximum": 50,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "idempotency_key": {
-          "type": "string"
-        },
-        "line_offset": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "root": {
-          "type": "string"
-        },
-        "target": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "additionalProperties": false,
-          "oneOf": [
-            {
-              "additionalProperties": true,
-              "required": [
-                "handle"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": true,
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": true,
-              "required": [
-                "symbol_locator"
-              ],
-              "type": "object"
-            }
-          ],
-          "properties": {
-            "file_range": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "after_sha256": {
-                  "type": "string"
-                },
-                "anchor_bytes": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "before_sha256": {
-                  "type": "string"
-                },
-                "byte_end": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "byte_start": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_sha256": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                },
-                "revision_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "revision_id",
-                "byte_start",
-                "byte_end",
-                "expected_sha256",
-                "before_sha256",
-                "after_sha256",
-                "anchor_bytes"
-              ],
-              "type": "object"
-            },
-            "handle": {
-              "type": "string"
-            },
-            "symbol_locator": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "name_path": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "name_path"
-              ],
-              "type": "object"
-            }
-          },
-          "type": "object"
-        },
-        "transaction_id": {
-          "type": "string"
-        },
-        "wait_ms": {
-          "maximum": 240000,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "workspace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
-    },
-    "name": "debug_control"
-  },
-  {
-    "description": "Inspect threads, stacks, scopes, variables, or explicitly governed evaluation.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "enum": [
-            "evaluate",
-            "scopes",
-            "stack",
-            "threads",
-            "variables"
-          ],
-          "type": "string"
-        },
-        "all_frames": {
-          "type": "boolean"
-        },
-        "context": {
-          "enum": [
-            "repl",
-            "watch",
-            "hover"
-          ],
-          "type": "string"
-        },
-        "depth": {
-          "maximum": 200,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "expand": {
-          "type": "string"
-        },
-        "expression": {
-          "type": "string"
-        },
-        "frame": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max": {
-          "maximum": 200,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "policy": {
-          "enum": [
-            "read_only",
-            "allow_side_effects"
-          ],
-          "type": "string"
-        },
-        "root": {
-          "type": "string"
-        },
-        "scope": {
-          "enum": [
-            "locals",
-            "globals",
-            "all"
-          ],
-          "type": "string"
-        },
-        "thread": {
-          "type": "integer"
-        },
-        "transaction_id": {
-          "type": "string"
-        },
-        "workspace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
-    },
-    "name": "debug_inspect"
   }
 ]

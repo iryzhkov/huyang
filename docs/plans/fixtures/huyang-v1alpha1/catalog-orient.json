@@ -76,7 +76,6 @@
           "type": "integer"
         },
         "git_history": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "fields": {
@@ -113,10 +112,6 @@
           "description": "Add an editable handle and the column to every hit, for edit_apply kind=replace_range.",
           "type": "boolean"
         },
-        "include_ranges": {
-          "description": "Add byte anchors to every hit.",
-          "type": "boolean"
-        },
         "limit": {
           "maximum": 200,
           "minimum": 1,
@@ -148,11 +143,9 @@
           "type": "string"
         },
         "refine": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "additionalProperties": false,
           "properties": {
             "matched_text": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "literal": {
@@ -248,7 +241,6 @@
         "target": {
           "oneOf": [
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "handle": {
@@ -262,74 +254,13 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "file_range": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "after_sha256": {
-                      "description": "SHA-256 of the bounded following anchor.",
-                      "type": "string"
-                    },
-                    "anchor_bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "before_sha256": {
-                      "description": "SHA-256 of the bounded preceding anchor.",
-                      "type": "string"
-                    },
-                    "byte_end": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "byte_start": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "expected_sha256": {
-                      "description": "SHA-256 of the exact selected bytes.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "Workspace-relative or absolute file path.",
-                      "type": "string"
-                    },
-                    "revision_id": {
-                      "description": "Expected document revision.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "revision_id",
-                    "byte_start",
-                    "byte_end",
-                    "expected_sha256",
-                    "before_sha256",
-                    "after_sha256",
-                    "anchor_bytes"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "symbol_locator": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "name_path": {
-                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "description": "Declaration name path.",
                       "type": "string"
                     },
                     "path": {
@@ -399,7 +330,6 @@
         "target": {
           "oneOf": [
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "handle": {
@@ -413,74 +343,13 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "file_range": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "additionalProperties": false,
-                  "properties": {
-                    "after_sha256": {
-                      "description": "SHA-256 of the bounded following anchor.",
-                      "type": "string"
-                    },
-                    "anchor_bytes": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "before_sha256": {
-                      "description": "SHA-256 of the bounded preceding anchor.",
-                      "type": "string"
-                    },
-                    "byte_end": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "byte_start": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "expected_sha256": {
-                      "description": "SHA-256 of the exact selected bytes.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "Workspace-relative or absolute file path.",
-                      "type": "string"
-                    },
-                    "revision_id": {
-                      "description": "Expected document revision.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "revision_id",
-                    "byte_start",
-                    "byte_end",
-                    "expected_sha256",
-                    "before_sha256",
-                    "after_sha256",
-                    "anchor_bytes"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "file_range"
-              ],
-              "type": "object"
-            },
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "symbol_locator": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "additionalProperties": false,
                   "properties": {
                     "name_path": {
-                      "description": "Declaration name path: Name, Parent/Name, Parent.Name, Parent::Name or, for Go methods, (*Parent).Name; all are normalised to Parent/Name.",
+                      "description": "Declaration name path.",
                       "type": "string"
                     },
                     "path": {
@@ -501,7 +370,6 @@
               "type": "object"
             },
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
               "additionalProperties": false,
               "properties": {
                 "path": {
@@ -520,7 +388,6 @@
         "targets": {
           "description": "Several reads in one call: each item names a path with optional view/start_line/end_line/max_lines/numbered, or a symbol_locator. Every option of a single-target read applies per target, so one call can outline one file and window another.",
           "items": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
             "properties": {
               "end_line": {
@@ -545,7 +412,6 @@
                 "type": "integer"
               },
               "symbol_locator": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "additionalProperties": false,
                 "properties": {
                   "name_path": {
