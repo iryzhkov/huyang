@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func pythonFixtureFile(t *testing.T, root, name string, mode os.FileMode) string {
@@ -81,9 +82,12 @@ func TestProjectPythonManagerQueries(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantArgs := []string{"--offline", "python", "find", "--no-python-downloads"}
+			wantTimeout := 2 * time.Second
 			if manager == "poetry" {
 				wantArgs = []string{"--no-plugins", "env", "info", "--executable"}
+				wantTimeout = 5 * time.Second
 			}
+			var queryStarted time.Time
 			queried := false
 			discovery := pythonDiscovery{
 				userConfig: pythonTrustFixture(t, root),
@@ -95,8 +99,13 @@ func TestProjectPythonManagerQueries(t *testing.T) {
 				},
 				run: func(ctx context.Context, cwd, executable string, args ...string) (string, error) {
 					queried = true
-					if _, ok := ctx.Deadline(); !ok {
+					deadline, ok := ctx.Deadline()
+					if !ok {
 						t.Fatal("unbounded discovery")
+					}
+					// Bracket context creation without sleeping or waiting for expiry.
+					if deadline.Before(queryStarted.Add(wantTimeout)) || deadline.After(time.Now().Add(wantTimeout)) {
+						t.Fatalf("%s query deadline = %v, want creation time + %v", manager, deadline, wantTimeout)
 					}
 					if cwd != root || executable != command || !reflect.DeepEqual(args, wantArgs) {
 						t.Fatalf("query = %s %s %v", cwd, executable, args)
@@ -104,9 +113,64 @@ func TestProjectPythonManagerQueries(t *testing.T) {
 					return python + "\n", nil
 				},
 			}
+			queryStarted = time.Now()
 			got := resolveProjectPython(context.Background(), root, discovery)
 			if !queried || got.Interpreter != python || got.Source != manager || got.Reason != "" {
 				t.Fatalf("resolved = %#v", got)
+			}
+		})
+	}
+}
+
+func TestProjectPythonManagerCallerContext(t *testing.T) {
+	for _, manager := range []string{"uv", "poetry"} {
+		t.Run(manager, func(t *testing.T) {
+			for _, state := range []string{"earlier_deadline", "canceled"} {
+				t.Run(state, func(t *testing.T) {
+					root, tools := t.TempDir(), t.TempDir()
+					pythonFixtureFile(t, root, manager+".lock", 0644)
+					command := pythonFixtureFile(t, tools, manager, 0755)
+					config := pythonTrustFixture(t, root)
+
+					var caller context.Context
+					var cancel context.CancelFunc
+					wantErr := context.DeadlineExceeded
+					if state == "earlier_deadline" {
+						caller, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+					} else {
+						caller, cancel = context.WithCancel(context.Background())
+						cancel()
+						wantErr = context.Canceled
+					}
+					defer cancel()
+					callerDeadline, hasCallerDeadline := caller.Deadline()
+					queried := false
+					discovery := pythonDiscovery{
+						userConfig: config,
+						lookPath: func(string) (string, error) {
+							return command, nil
+						},
+						run: func(ctx context.Context, _, _ string, _ ...string) (string, error) {
+							queried = true
+							deadline, ok := ctx.Deadline()
+							if !ok {
+								t.Fatal("unbounded discovery")
+							}
+							if hasCallerDeadline && !deadline.Equal(callerDeadline) {
+								t.Fatalf("query deadline = %v, want caller deadline %v", deadline, callerDeadline)
+							}
+							if state == "canceled" && !errors.Is(ctx.Err(), context.Canceled) {
+								t.Fatalf("query context error = %v, want caller cancellation", ctx.Err())
+							}
+							// Inject expiry instead of waiting for the earlier deadline.
+							return "", wantErr
+						},
+					}
+					got := resolveProjectPython(caller, root, discovery)
+					if !queried || got.Interpreter != "" || got.Source != manager || got.Reason != "environment_manager_query_failed" {
+						t.Fatalf("resolved = %#v, queried = %v", got, queried)
+					}
+				})
 			}
 		})
 	}

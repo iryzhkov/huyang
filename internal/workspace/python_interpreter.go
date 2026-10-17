@@ -23,6 +23,12 @@ type ProjectPython struct {
 	Configured  bool   `json:"configured,omitempty"`
 }
 
+const uvPythonQueryTimeout = 2 * time.Second
+
+// Poetry's interpreter discovery can legitimately take more than two seconds.
+// Keep its extra startup headroom bounded and subordinate to the caller context.
+const poetryPythonQueryTimeout = 5 * time.Second
+
 type pythonDiscovery struct {
 	lookPath   func(string) (string, error)
 	run        func(context.Context, string, string, ...string) (string, error)
@@ -82,10 +88,12 @@ func resolveProjectPython(ctx context.Context, root string, discovery pythonDisc
 		return ProjectPython{Source: manager, Reason: "environment_manager_unavailable"}
 	}
 	args := []string{"--offline", "python", "find", "--no-python-downloads"}
+	queryTimeout := uvPythonQueryTimeout
 	if manager == "poetry" {
 		args = []string{"--no-plugins", "env", "info", "--executable"}
+		queryTimeout = poetryPythonQueryTimeout
 	}
-	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	output, err := discovery.run(queryCtx, root, realCommand, args...)
 	if err != nil {
