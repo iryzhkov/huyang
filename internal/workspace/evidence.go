@@ -155,6 +155,8 @@ type DiagnosticDimension struct {
 	Reasons     []string             `json:"reasons,omitempty"`
 }
 
+// DiagnosticNotice records new, stale, persisting (stale refreshed as current),
+// and resolved transitions. Persistence does not imply a new finding.
 type DiagnosticNotice struct {
 	Cursor      string             `json:"cursor"`
 	Kind        string             `json:"kind"`
@@ -575,9 +577,10 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 				ProducerVersion: batch.ProducerVersion, Document: batch.Document,
 				Finding: finding, FirstSeen: batch.ObservedAt, Attribution: rankCulprit(batch.Candidates)}
 		}
-		// An item that was stale or resolved and is reported again is a new
-		// current finding for this content; announce it again.
-		announce := !existed || item.Status != DiagnosticStatusCurrent
+		// Stale means the document changed, not that the finding went away.
+		// Only a verified resolution followed by a return is a regression.
+		announce := !existed || item.Status == DiagnosticStatusResolved
+		persisting := existed && item.Status == DiagnosticStatusStale
 		item.Status = DiagnosticStatusCurrent
 		item.StaleReason, item.StaleRevision, item.ResolvedAt = "", "", time.Time{}
 		// The provenance follows the latest observation so a re-published
@@ -596,6 +599,10 @@ func (s *diagnosticStore) recordFindingsLocked(batch DiagnosticBatch, evID strin
 		if announce {
 			added = append(added, item)
 			s.addNotice("new", item)
+		} else if persisting {
+			// Preserve the freshness transition for cursor consumers without
+			// telling them the edit introduced an unchanged finding.
+			s.addNotice("persisting", item)
 		}
 		current = append(current, item)
 	}
@@ -878,8 +885,10 @@ func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
 			added = append(added, item)
 		case "stale":
 			stale = append(stale, item)
-		default:
+		case "resolved":
 			resolved = append(resolved, item)
+		case "persisting":
+			// Restores freshness; it is neither new nor resolved.
 		}
 	}
 	s.pruneLocked(time.Now().UTC())
@@ -887,12 +896,23 @@ func (s *diagnosticStore) query(since string) (DiagnosticReport, error) {
 		return DiagnosticReport{}, err
 	}
 	current, staleCount := s.countsLocked()
+	// Full diagnostics queries retain access to current finding bodies even
+	// after their original new notices have been acknowledged and pruned.
+	var currentItems []DiagnosticItem
+	for _, ids := range s.state.Active {
+		for _, id := range ids {
+			if item, ok := s.state.Items[id]; ok {
+				currentItems = append(currentItems, item)
+			}
+		}
+	}
+	sort.Slice(currentItems, func(i, j int) bool { return currentItems[i].ID < currentItems[j].ID })
 	preexisting := current - len(added)
 	if preexisting < 0 {
 		preexisting = 0
 	}
 	report := DiagnosticReport{Confidence: weakestConfidence(s.state.Dimensions), Coverage: cloneDimensions(s.state.Dimensions),
-		New: added, Resolved: resolved, Stale: stale, PreexistingCount: preexisting, CurrentCount: current, StaleCount: staleCount,
+		New: added, Current: currentItems, Resolved: resolved, Stale: stale, PreexistingCount: preexisting, CurrentCount: current, StaleCount: staleCount,
 		EvidenceIDs: evidenceIDsFromDimensions(s.state.Dimensions), Cursor: fmt.Sprintf("diagcur_%d", s.state.Sequence), Notices: notices,
 		NoticesTruncated: truncated}
 	if len(s.state.Dimensions) == 0 {

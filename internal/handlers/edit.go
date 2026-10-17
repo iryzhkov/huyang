@@ -464,7 +464,7 @@ func provisionalSummary(report workspacecore.DiagnosticReport, files []workspace
 func diagnosticSummary(report workspacecore.DiagnosticReport) string {
 	current := 0
 	for _, item := range report.New {
-		if item.Status != workspacecore.DiagnosticStatusStale {
+		if includeEditDiagnostic(item) {
 			current++
 		}
 	}
@@ -478,6 +478,14 @@ func diagnosticSummary(report workspacecore.DiagnosticReport) string {
 	}
 }
 
+// includeEditDiagnostic is shared by the delta and its summary. Information
+// and hints remain in the ledger and diagnostics tool, outside the edit's
+// new error/warning announcements. Severity zero preserves unspecified severity.
+func includeEditDiagnostic(item workspacecore.DiagnosticItem) bool {
+	return item.Status != workspacecore.DiagnosticStatusStale &&
+		item.Status != workspacecore.DiagnosticStatusResolved && item.Finding.Severity < 3
+}
+
 // compactDiagnosticDelta keeps what an agent acts on from each new finding:
 // where it is, how bad it is and what it says. Resolved findings collapse
 // to their IDs.
@@ -485,7 +493,7 @@ func compactDiagnosticDelta(workspace *workspacecore.Workspace, report workspace
 	root := workspace.Identity().Root + "/"
 	newItems := make([]map[string]any, 0, len(report.New))
 	for _, item := range report.New {
-		if item.Status == workspacecore.DiagnosticStatusStale {
+		if !includeEditDiagnostic(item) {
 			continue
 		}
 		compact := map[string]any{

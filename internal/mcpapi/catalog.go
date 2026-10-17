@@ -524,7 +524,7 @@ func OutputEnvelopeSchema() map[string]any {
 		"warnings": map[string]any{"type": "array", "items": stringSchema("Warning.")},
 		"next":     map[string]any{"type": "array", "maxItems": 2},
 		"diagnostic_updates": map[string]any{"type": "array", "items": schemaObject(map[string]any{
-			"id": stringSchema("Stable diagnostic ID."), "kind": enumSchema("new", "resolved"),
+			"id": stringSchema("Stable diagnostic ID."), "kind": enumSchema("new", "persisting", "resolved"),
 			"severity": map[string]any{"type": "integer"}, "path": stringSchema("Affected document, workspace-relative."),
 			"line": map[string]any{"type": "integer"}, "message": stringSchema("What the finding says, bounded."),
 			"attribution": map[string]any{"type": "object"},

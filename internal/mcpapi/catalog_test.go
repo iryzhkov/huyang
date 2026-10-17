@@ -197,6 +197,15 @@ func TestEveryRegisteredToolDeclaresASchedulerClass(t *testing.T) {
 	}
 }
 
+func TestDiagnosticUpdateSchemaAdvertisesPersistingTransition(t *testing.T) {
+	properties := OutputEnvelopeSchema()["properties"].(map[string]any)
+	updates := properties["diagnostic_updates"].(map[string]any)["items"].(map[string]any)
+	kind := updates["properties"].(map[string]any)["kind"].(map[string]any)
+	if !slices.Contains(kind["enum"].([]any), any("persisting")) {
+		t.Fatalf("persisting diagnostic_updates would violate the advertised schema: %+v", kind)
+	}
+}
+
 func TestTransactionStateEnumMatchesWorkspacePlanStates(t *testing.T) {
 	schema := OutputEnvelopeSchema()
 	transaction := schema["properties"].(map[string]any)["transaction"].(map[string]any)

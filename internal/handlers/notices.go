@@ -360,11 +360,12 @@ func describeNotices(workspace *workspacecore.Workspace, updates []DiagnosticUpd
 	}
 }
 
-// countNewNotices counts the findings a delta reports as new.
+// countNewNotices counts new errors and warnings, matching the edit summary.
+// Information and hints remain available in diagnostic_updates and diagnostics.
 func countNewNotices(updates []DiagnosticUpdate) int {
 	count := 0
 	for _, update := range updates {
-		if update.Kind == "new" {
+		if update.Kind == "new" && update.Severity < 3 {
 			count++
 		}
 	}
@@ -373,8 +374,9 @@ func countNewNotices(updates []DiagnosticUpdate) int {
 
 // collapseNotices keeps one entry per finding, newest first, its last kind
 // winning. A finding whose last word is stale is dropped: its content moved
-// and the next refresh reports it again as new or resolved. The second
-// result reports that more findings changed than the cap allows.
+// and the next refresh reports it as persisting or resolved. A finding that
+// returns after resolution is new. The second result reports that more findings
+// changed than the cap allows.
 func collapseNotices(root string, notices []workspacecore.DiagnosticNotice) ([]DiagnosticUpdate, bool) {
 	seen := make(map[string]bool, len(notices))
 	updates := make([]DiagnosticUpdate, 0, MaxDiagnosticUpdates)

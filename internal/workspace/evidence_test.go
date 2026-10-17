@@ -326,16 +326,16 @@ func TestDocumentContentChangeMarksFindingsStaleNotCurrentOrResolved(t *testing.
 	}
 
 	// The producer re-publishes the same finding for the new content: it is
-	// current again and announced as new.
+	// current again, persisting rather than new.
 	batch.ResultID, batch.DocumentRevision, batch.ObservedAt = "r2", "wsrev_240", now.Add(time.Second)
 	republished, err := workspace.RecordDiagnosticEvidence(batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(republished.New) != 1 || republished.CurrentCount != 1 || republished.StaleCount != 0 {
+	if len(republished.New) != 0 || republished.PreexistingCount != 1 || republished.CurrentCount != 1 || republished.StaleCount != 0 {
 		t.Fatalf("republished report = %+v", republished)
 	}
-	if item := republished.New[0]; item.DocumentRevision != "wsrev_240" || item.Status != DiagnosticStatusCurrent {
+	if item := republished.Current[0]; item.DocumentRevision != "wsrev_240" || item.Status != DiagnosticStatusCurrent {
 		t.Fatalf("republished item provenance = %+v", item)
 	}
 
