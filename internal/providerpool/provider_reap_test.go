@@ -264,7 +264,7 @@ func TestConcurrentLeaseAndReap(t *testing.T) {
 				}
 				advance(DefaultProviderIdleTimeout)
 				p.ReapIdle()
-				if backend.(*reapProvider).closes.Load() != 0 {
+				if backend.(*ownedProvider).Provider.(*reapProvider).closes.Load() != 0 {
 					t.Error("leased provider closed")
 				}
 				release()

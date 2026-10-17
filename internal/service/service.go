@@ -29,12 +29,14 @@ import (
 )
 
 type serviceConfig struct {
-	SocketPath       string
-	StateDir         string
-	HTTPAddress      string
-	PprofAddress     string
-	ProviderQuota    int
-	ExternalJobQuota int
+	SocketPath         string
+	StateDir           string
+	HTTPAddress        string
+	PprofAddress       string
+	ProviderQuota      int
+	ExternalJobQuota   int
+	MaxProviders       int
+	MaxLanguageServers int
 }
 
 // controlHello is what an adapter says when it connects. The session is the
@@ -119,6 +121,8 @@ func newServeFlags(config *serviceConfig, stderr io.Writer) *flag.FlagSet {
 	flags.StringVar(&config.StateDir, "state-dir", defaultHuyangStateDir(), "durable service state directory")
 	flags.StringVar(&config.HTTPAddress, "http", "", "optional loopback Streamable HTTP address; a request may carry an X-Huyang-Client header so diagnostic_updates is a per-client delta across its stateless requests")
 	flags.StringVar(&config.PprofAddress, "pprof", "", "optional loopback address serving net/http/pprof profiles behind the HTTP bearer token, for heap and goroutine investigation")
+	flags.IntVar(&config.MaxProviders, "max-providers", providerpool.DefaultMaxProviders, "maximum live providers, including debug and sandbox providers; zero selects the default")
+	flags.IntVar(&config.MaxLanguageServers, "max-language-servers", providerpool.DefaultMaxLanguageServers, "maximum language-server clients per provider; zero selects the default")
 	flags.IntVar(&config.ProviderQuota, "provider-quota", 4, "maximum concurrent provider-backed jobs")
 	flags.IntVar(&config.ExternalJobQuota, "external-job-quota", 2, "maximum concurrent external jobs")
 	return flags
@@ -201,6 +205,9 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	if config.SocketPath == "" || config.StateDir == "" {
 		return nil, errors.New("socket and state directory are required")
 	}
+	if config.MaxProviders < 0 || config.MaxLanguageServers < 0 {
+		return nil, errors.New("provider and language-server limits must not be negative")
+	}
 	if config.ProviderQuota < 1 || config.ExternalJobQuota < 1 {
 		return nil, errors.New("provider and external-job quotas must be positive")
 	}
@@ -220,7 +227,7 @@ func newHuyangService(config serviceConfig) (*huyangService, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, err
 	}
-	direct := newDirectWorkspacesWithQuotas(stateDir, config.ProviderQuota, config.ExternalJobQuota)
+	direct := newDirectWorkspacesWithLimits(stateDir, config.ProviderQuota, config.ExternalJobQuota, providerpool.Limits{MaxProviders: config.MaxProviders, MaxLanguageServers: config.MaxLanguageServers})
 	if direct.loadErr != nil {
 		return nil, direct.loadErr
 	}

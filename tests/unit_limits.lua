@@ -1,0 +1,196 @@
+-- Deterministic admission/lifecycle tests without installed language servers.
+local here = debug.getinfo(1, "S").source:sub(2)
+vim.opt.rtp:prepend(vim.fn.fnamemodify(here, ":h:h"))
+local live, next_id, peak = {}, 0, 0
+local callbacks = {}
+local stop_delay, fail_create, nested = 0, false, nil
+local function count()
+    local n = 0
+    for _ in pairs(live) do n = n + 1 end
+    return n
+end
+local function exit(client)
+    live[client.id] = nil
+    callbacks[client.id](0, 0, client.id)
+end
+local fake = {}
+fake.create = function(config)
+    if fail_create then error("launch failed") end
+    if nested then local fn = nested; nested = nil; fn() end
+    next_id = next_id + 1
+    local client = { id = next_id, name = config.name, initialized = true,
+        requests = {}, attached_buffers = {}, flags = {}, progress = { pending = {} } }
+    callbacks[client.id] = config.on_exit
+    function client:stop()
+        self.stopping = true
+        if stop_delay > 0 then vim.defer_fn(function() exit(self) end, stop_delay)
+        elseif stop_delay == 0 then exit(self) end
+    end
+    live[client.id] = client
+    peak = math.max(peak, count())
+    return client
+end
+package.loaded["vim.lsp.client"] = fake
+vim.lsp.get_clients = function(filter)
+    local out = {}
+    for _, client in pairs(live) do
+        if not filter or not filter.bufnr or client.attached_buffers[filter.bufnr] then out[#out + 1] = client end
+    end
+    table.sort(out, function(a,b) return a.id < b.id end)
+    return out
+end
+vim.lsp.get_client_by_id = function(id) return live[id] end
+vim.lsp.start = function(config)
+    for _, client in pairs(live) do
+        if client.name == config.name and not client.stopping then return client.id end
+    end
+    return fake.create(config).id
+end
+local limits = require("huyang.limits")
+local function start(name, opts)
+    return fake.create(vim.tbl_extend("force", { name = name }, opts or {}))
+end
+local function denied(fn, label)
+    local ok, why = pcall(fn)
+    assert(not ok and tostring(why):find("language_server_capacity", 1, true), tostring(label) .. ": " .. tostring(why))
+end
+local function reset(n, held)
+    local all = {}
+    for _, c in pairs(live) do all[#all + 1] = c end
+    for _, c in ipairs(all) do exit(c) end
+    stop_delay, fail_create, nested, peak = 0, false, nil, 0
+    package.loaded["huyang.transaction"] = nil
+    limits.setup(n or 2, held)
+end
+limits.setup(2, false)
+
+local a,b = start("a"), start("b")
+assert(vim.lsp.start({ name = "a" }) == a.id)
+local c = start("c")
+assert(live[a.id] and not live[b.id] and live[c.id] and peak == 2, "LRU reuse or cap failed")
+
+reset(1)
+a = start("a")
+local co = coroutine.create(function()
+    limits.begin_request()
+    vim.lsp.get_clients()
+    coroutine.yield()
+    limits.end_request()
+end)
+assert(coroutine.resume(co))
+denied(function() start("busy") end)
+assert(live[a.id], "active caller lost server")
+assert(coroutine.resume(co))
+assert(start("replacement") and not live[a.id], "release did not unpin server")
+
+-- A buffer awaited by a request protects asynchronously attached clients.
+reset(1)
+a = start("a")
+local buf = vim.api.nvim_create_buf(false, true)
+co = coroutine.create(function()
+    limits.begin_request()
+    limits.touch_buffer(buf)
+    coroutine.yield()
+    limits.end_request()
+end)
+assert(coroutine.resume(co))
+a.attached_buffers[buf] = true
+denied(function() start("busy") end)
+assert(coroutine.resume(co))
+assert(start("replacement") and not live[a.id])
+vim.api.nvim_buf_delete(buf, { force = true })
+
+for _, hold in ipairs({ "starting", "request", "progress", "transaction", "modified", "debug" }) do
+    reset(1, hold == "debug")
+    a = start("a")
+    if hold == "starting" then a.initialized = false
+    elseif hold == "request" then a.requests[1] = { type = "pending" }
+    elseif hold == "progress" then a.progress.pending.token = true
+    elseif hold == "transaction" then package.loaded["huyang.transaction"] = { status = function() return { active = true } end }
+    elseif hold == "modified" then
+        buf = vim.api.nvim_create_buf(false, false)
+        a.attached_buffers[buf] = true
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "unsaved" })
+        vim.bo[buf].modified = true
+    end
+    denied(function() start("busy") end, hold)
+    assert(live[a.id], hold .. " client evicted")
+    if hold == "modified" then vim.api.nvim_buf_delete(buf, { force = true }) end
+end
+
+-- Stopping counts until the process-exit callback, not is_stopped().
+reset(1)
+a = start("a")
+stop_delay = -1
+denied(function() start("new") end)
+denied(function() start("another") end)
+assert(count() == 1 and a.stopping)
+exit(a)
+assert(start("after-exit") and count() == 1)
+
+reset(1)
+a = start("a")
+stop_delay = 30
+b = start("b")
+assert(not live[a.id] and live[b.id] and peak == 1, "started before victim exited")
+
+-- The reservation includes reentrant starts during custom cmd setup.
+reset(1)
+nested = function() denied(function() start("nested") end) end
+a = start("outer")
+assert(count() == 1 and live[a.id] and peak == 1)
+reset(1)
+fail_create = true
+assert(not pcall(start, "fail"))
+fail_create = false
+assert(start("ok") and count() == 1, "failed launch leaked reservation")
+
+-- Revisiting a still-loaded buffer restarts its evicted server on demand.
+reset(1)
+buf = vim.api.nvim_create_buf(false, false)
+a = start("a")
+a.attached_buffers[buf] = true
+b = start("b")
+local reattached, restored = 0, nil
+local group = vim.api.nvim_create_augroup("huyang_limit_unit", {})
+vim.api.nvim_create_autocmd("FileType", { group = group, buffer = buf, callback = function()
+    reattached = reattached + 1
+    restored = start("a")
+    restored.attached_buffers[buf] = true
+    vim.api.nvim_exec_autocmds("LspAttach", { buffer = buf, data = { client_id = restored.id } })
+end })
+limits.reattach_buffer(buf)
+limits.reattach_buffer(buf)
+assert(reattached == 1 and restored and not live[b.id] and count() == 1)
+vim.api.nvim_del_augroup_by_id(group)
+vim.api.nvim_buf_delete(buf, { force = true })
+
+-- Refusal survives a Neovim auto-attach pcall and is visible to the RPC.
+reset(1, true)
+a = start("held")
+co = coroutine.create(function()
+    limits.begin_request()
+    denied(function() start("denied") end)
+    assert(limits.request_error():find("language_server_capacity", 1, true))
+    limits.end_request()
+    assert(limits.request_error() == nil)
+end)
+assert(coroutine.resume(co))
+reset(1, true)
+a = start("held")
+buf = vim.api.nvim_create_buf(false, false)
+vim.bo[buf].filetype = "lua"
+co = coroutine.create(function()
+    limits.begin_request()
+    limits.touch_buffer(buf)
+    coroutine.yield()
+    assert(limits.request_error():find("language_server_capacity", 1, true))
+    limits.end_request()
+end)
+assert(coroutine.resume(co))
+denied(function() start("async", { filetypes = { "lua" } }) end)
+assert(coroutine.resume(co))
+vim.api.nvim_buf_delete(buf, { force = true })
+reset()
+print("huyang language-server limits: OK")
+vim.cmd("qa!")

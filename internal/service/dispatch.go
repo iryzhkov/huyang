@@ -45,6 +45,10 @@ func newDirectWorkspaces(stateDir string) *directWorkspaces {
 }
 
 func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQuota int) *directWorkspaces {
+	return newDirectWorkspacesWithLimits(stateDir, providerQuota, externalJobQuota, providerpool.Limits{})
+}
+
+func newDirectWorkspacesWithLimits(stateDir string, providerQuota, externalJobQuota int, limits providerpool.Limits) *directWorkspaces {
 	// The caches every verification command shares follow this service's
 	// state directory rather than the ambient environment.
 	workspacecore.SetCommandCacheRoot(filepath.Join(stateDir, "command-cache"))
@@ -62,7 +66,7 @@ func newDirectWorkspacesWithQuotas(stateDir string, providerQuota, externalJobQu
 		handlers: handlers.New(handlers.Config{
 			Registry:      registry,
 			Provenance:    receipts,
-			Pool:          providerpool.New(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory),
+			Pool:          providerpool.NewWithLimits(filepath.Join(stateDir, "sandboxes"), providerpool.DefaultFactory, limits),
 			StateDir:      stateDir,
 			ToolTimeout:   providerpool.DefaultCallTimeout,
 			SchedulerInfo: scheduler.description,

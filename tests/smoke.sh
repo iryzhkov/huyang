@@ -28,6 +28,7 @@ if $run_lua; then
     for unit in unit_edit unit_check unit_index unit_dap; do
         nvim --clean --headless -u "$REPO/tests/minimal_init.lua" -l "$REPO/tests/$unit.lua"
     done
+    nvim --clean --headless -u NONE -l "$REPO/tests/unit_limits.lua"
 fi
 
 if $run_go; then

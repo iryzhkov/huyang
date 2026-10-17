@@ -539,6 +539,8 @@ local function load_buf(file)
             .. "(create_file makes a new one)", path, base, root)
     end
     local bufnr = vim.fn.bufadd(path)
+    local limits = require("huyang.limits")
+    limits.touch_buffer(bufnr)
     if not vim.api.nvim_buf_is_loaded(bufnr) then
         -- Seed before FileType can attach a server. Neovim otherwise sends
         -- didOpen(version=0), which some servers omit from publications.
@@ -549,6 +551,7 @@ local function load_buf(file)
     else
         sync_buf(bufnr, path)
     end
+    limits.reattach_buffer(bufnr)
     return bufnr, path
 end
 

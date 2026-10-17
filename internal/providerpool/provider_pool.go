@@ -15,8 +15,16 @@ import (
 // plans in isolation. It is the single place a provider is opened, so the
 // runtime path and init file cannot drift between call sites.
 type Pool struct {
-	factory     Factory
-	sandboxBase string
+	factory Factory
+	limits  Limits
+	// Admission serialises capacity eviction. capacityMu guards reservations
+	// (including starts in flight) and shutdown; it never guards provider I/O.
+	admitMu        sync.Mutex
+	capacityMu     sync.Mutex
+	capacityClosed bool
+	owned          map[*ownedProvider]struct{}
+	opening        sync.WaitGroup
+	sandboxBase    string
 
 	// mu guards only the two maps below; provider and stager operations run
 	// outside it (see providerSlot and SandboxStager).
@@ -43,6 +51,8 @@ type Pool struct {
 func New(sandboxBase string, factory Factory) *Pool {
 	return &Pool{
 		factory:     factory,
+		limits:      Limits{MaxProviders: DefaultMaxProviders, MaxLanguageServers: DefaultMaxLanguageServers},
+		owned:       make(map[*ownedProvider]struct{}),
 		idleTimeout: DefaultProviderIdleTimeout,
 		planIdleTTL: workspacecore.PlanIdleTTL(),
 		now:         time.Now,
@@ -84,14 +94,11 @@ func (p *Pool) slotFor(id workspacecore.ID) *providerSlot {
 // spawns, canonical, debug, sandbox or verification, goes through this
 // constructor.
 func (p *Pool) Open(root string, debug bool) (provider.Provider, error) {
-	return p.openAfter(root, debug, 0)
+	return p.openOwned(root, debug, 0, true)
 }
 
 func (p *Pool) openAfter(root string, debug bool, epoch uint64) (provider.Provider, error) {
-	return p.factory.Open(OpenConfig{
-		Root: root, InitFile: huyangHeadlessInit(),
-		RuntimePath: ShippedRuntimePath(), Debug: debug, AfterEpoch: epoch,
-	})
+	return p.openOwned(root, debug, epoch, false)
 }
 
 // Canonical leases the owned Neovim provider for a project workspace.
@@ -118,16 +125,36 @@ func (p *Pool) workspaceProvider(ctx context.Context, workspace *workspacecore.W
 	slot := p.slotFor(identity.ID)
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
+	if p.isClosed() {
+		return nil, func() {}, ErrPoolClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, func() {}, err
+	}
+	// Debug ownership survives explicit and health-driven replacement.
+	debug = debug || slot.debug
 	if existing := slot.backend; existing != nil {
 		health := existing.Health(ctx)
 		if health.State == provider.HealthHealthy || health.State == provider.HealthStarting {
+			if debug && !slot.debug {
+				if owned, ok := existing.(*ownedProvider); ok {
+					if holder, ok := owned.Provider.(interface{ HoldLanguageServers(context.Context) error }); ok {
+						if err := holder.HoldLanguageServers(ctx); err != nil {
+							return nil, func() {}, err
+						}
+					}
+				}
+			}
 			workspace.SyncProviderEpoch(existing.Descriptor().Epoch)
 			slot.debug = slot.debug || debug
 			return existing, p.leaseLocked(slot), nil
 		}
-		slot.epoch = existing.Descriptor().Epoch
-		_ = existing.Close(context.Background())
-		slot.backend = nil
+		if slot.users != 0 {
+			return nil, func() {}, ErrProviderBusy
+		}
+		if err := p.closeSlotLocked(slot); err != nil {
+			return nil, func() {}, err
+		}
 	}
 	backend, err := p.openAfter(identity.Root, debug, slot.epoch)
 	if err != nil {
@@ -151,7 +178,7 @@ func (p *Pool) Existing(workspace *workspacecore.Workspace) (provider.Provider, 
 	slot := p.slotFor(workspace.Identity().ID)
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
-	if slot.backend == nil {
+	if slot.backend == nil || p.isClosed() {
 		return nil, func() {}
 	}
 	return slot.backend, p.leaseLocked(slot)
@@ -161,12 +188,15 @@ func (p *Pool) Existing(workspace *workspacecore.Workspace) (provider.Provider, 
 func (p *Pool) Restart(ctx context.Context, workspace *workspacecore.Workspace) (provider.Provider, func(), error) {
 	slot := p.slotFor(workspace.Identity().ID)
 	slot.mu.Lock()
-	if existing := slot.backend; existing != nil {
-		slot.epoch = existing.Descriptor().Epoch
-		_ = existing.Close(context.Background())
-		slot.backend = nil
+	if slot.users != 0 {
+		slot.mu.Unlock()
+		return nil, func() {}, ErrProviderBusy
 	}
+	err := p.closeSlotLocked(slot)
 	slot.mu.Unlock()
+	if err != nil {
+		return nil, func() {}, err
+	}
 	return p.Canonical(ctx, workspace)
 }
 
@@ -188,6 +218,10 @@ func (p *Pool) Resync(ctx context.Context, workspace *workspacecore.Workspace) (
 // are detached under mu and the slow work happens outside it so a stager
 // still inside a long operation cannot stall the map.
 func (p *Pool) Close() {
+	p.capacityMu.Lock()
+	p.capacityClosed = true
+	p.capacityMu.Unlock()
+	p.opening.Wait()
 	p.reaperMu.Lock()
 	p.closed = true
 	p.stopReaperLocked()
@@ -208,6 +242,15 @@ func (p *Pool) Close() {
 	}
 	for key, stager := range stagers {
 		_ = stager.Rollback(context.Background(), key.planID)
+	}
+	p.capacityMu.Lock()
+	owned := make([]*ownedProvider, 0, len(p.owned))
+	for backend := range p.owned {
+		owned = append(owned, backend)
+	}
+	p.capacityMu.Unlock()
+	for _, backend := range owned {
+		_ = backend.Close(context.Background())
 	}
 }
 

@@ -78,7 +78,9 @@ type Config struct {
 	// default.
 	CancelGrace time.Duration
 	// AfterEpoch preserves generation ordering when the pool replaces a backend.
-	AfterEpoch uint64
+	AfterEpoch         uint64
+	MaxLanguageServers int
+	PinLanguageServers bool
 }
 
 // DapRuntime is the outcome of the nvim-dap discovery the kernel runs during
@@ -157,6 +159,9 @@ func Open(config Config) (*Backend, error) {
 	}
 	if config.Executable == "" {
 		config.Executable = "nvim"
+	}
+	if config.MaxLanguageServers <= 0 {
+		config.MaxLanguageServers = 4
 	}
 	if config.CancelGrace <= 0 {
 		config.CancelGrace = defaultCancelGrace
@@ -445,7 +450,11 @@ func (b *Backend) Close(context.Context) error {
 		}
 		close(b.done)
 		b.mu.Unlock()
-		if g == nil || !g.alive.Load() {
+		if g == nil {
+			return
+		}
+		if !g.alive.Load() {
+			<-g.done // the process tree must finish before its reservation is reusable
 			return
 		}
 		g.within(stopTimeout, func() {
@@ -496,8 +505,17 @@ func (b *Backend) ensureGeneration(ctx context.Context) (*generation, error) {
 			Code: provider.FailureDied, Epoch: b.descriptor.Epoch, Detail: "provider is closed",
 		}
 	}
-	if g := b.generation; g != nil && g.alive.Load() {
-		return g, nil
+	if g := b.generation; g != nil {
+		if g.alive.Load() {
+			return g, nil
+		}
+		// serve marks the generation dead before it joins its entire tree.
+		// Do not overlap replacement language servers with that retiring tree.
+		select {
+		case <-g.done:
+		case <-ctx.Done():
+			return nil, contextFailure(ctx.Err(), g.epoch)
+		}
 	}
 	return b.startGenerationLocked(ctx)
 }
@@ -510,6 +528,11 @@ func (b *Backend) startGenerationLocked(ctx context.Context) (*generation, error
 	}
 	epoch := b.descriptor.Epoch + 1
 	args := []string{"--embed", "--headless", "--cmd", "set noswapfile shadafile=NONE"}
+	// Install admission before init can start any language servers.
+	if b.config.RuntimePath != "" {
+		runtime := strings.NewReplacer("\\", "\\\\", "'", "\\'", "\n", "\\n", "\r", "\\r").Replace(b.config.RuntimePath)
+		args = append(args, "--cmd", fmt.Sprintf("lua vim.opt.runtimepath:prepend('%s'); require('huyang.limits').setup(%d, %t)", runtime, b.config.MaxLanguageServers, b.config.PinLanguageServers || b.config.Debug))
+	}
 	if b.config.InitFile != "" {
 		args = append(args, "--clean", "-u", b.config.InitFile)
 	}

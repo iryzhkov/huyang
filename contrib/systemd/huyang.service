@@ -6,6 +6,8 @@ Type=simple
 WorkingDirectory=%h/.local/share/huyang
 ExecStart=%h/.local/share/huyang/bin/huyang serve
 Restart=on-failure
+# Tune to the host's available memory and language mix. Throttles the whole tree.
+MemoryHigh=2G
 RestartSec=2
 
 [Install]
