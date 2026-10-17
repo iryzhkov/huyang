@@ -27,6 +27,8 @@ do
     local observer = require("huyang.diagnostic_observer")
     local result = {kind="full",items={{message="producer body"}}}
     observer.install(nil)
+    check("disabled transport returns no invocation identity",
+        observer.transport("late_evidence",{ok=true,result={batches={}}})==nil)
     local a,b,c = observer.receive({},result,function(value)
         check("disabled observer preserves exact result object",value==result)
         return "same",nil,17
@@ -82,7 +84,7 @@ do
     -- event or collection status can reveal this error; transport_end must.
     local transported = {}
     observer.install(function(event)
-        if event.stage=="transport_emission" and event.transport_index==2 then
+        if event.stage=="transport_emission" and event.transport_invocation==4 and event.transport_index==2 then
             error("intentional final transport tail failure")
         end
         transported[#transported+1]=event
@@ -94,7 +96,6 @@ do
         normalized[i]=vim.deepcopy(source)
         observer.emission("immediate_emission",source,normalized[i],nil,{request_id="final"})
     end
-    check("transport tail fixture has no earlier observer errors",#observer.status().errors==0)
     local completion={ok=true,result={batches=normalized}}
     local marker,args_seen
     local notify=function(...)
@@ -105,20 +106,43 @@ do
         if method=="huyang/result" then
             local args={...}
             if type(args[2])=="table" then
-                observer.transport(args[1],args[2])
-                marker={kind="transport_end",provider_rpc_id=args[1],observer_status=observer.status()}
+                local invocation=observer.transport(args[1],args[2])
+                marker={kind="transport_end",provider_rpc_id=args[1],transport_invocation=invocation,
+                    observer_status=observer.status()}
             end
         end
         return notify(channel,method,...)
     end
-    a,b,c=notify_with_marker(8,"huyang/result",91,completion,nil)
+    local empty={ok=true,result={batches={}}}
+    local before=#transported
+    notify_with_marker(8,"huyang/result","late_evidence",empty)
+    check("actual empty transport has its own returned invocation and healthy status",
+        marker.transport_invocation==1 and marker.provider_rpc_id=="late_evidence"
+            and #transported==before and #marker.observer_status.errors==0)
+    notify_with_marker(8,"huyang/result","late_evidence",completion)
+    local first,second=transported[before+1],transported[before+2]
+    check("reused wire RPC transports two actual table sidecars under one new invocation",
+        marker.transport_invocation==2 and marker.provider_rpc_id=="late_evidence"
+            and #transported==before+2 and #marker.observer_status.errors==0
+            and first.transport_invocation==marker.transport_invocation
+            and second.transport_invocation==marker.transport_invocation
+            and first.transport_index==1 and second.transport_index==2
+            and first.provider_rpc_id=="late_evidence" and second.provider_rpc_id=="late_evidence"
+            and first.identity.batch_id~=second.identity.batch_id)
+    notify_with_marker(8,"huyang/result","late_evidence",empty)
+    check("later empty reused RPC does not replace the preceding invocation",
+        marker.transport_invocation==3 and #transported==before+2 and #marker.observer_status.errors==0)
+    check("transport tail fixture has no earlier observer errors",#observer.status().errors==0)
+    a,b,c=notify_with_marker(8,"huyang/result","late_evidence",completion,nil)
     check("final transport marker exposes an otherwise silent observer error",
-        marker and marker.provider_rpc_id==91 and #marker.observer_status.errors==1
+        marker and marker.provider_rpc_id=="late_evidence" and marker.transport_invocation==4
+            and #marker.observer_status.errors==1
             and transported[#transported].stage=="transport_emission"
+            and transported[#transported].transport_invocation==marker.transport_invocation
             and transported[#transported].transport_index==1)
     check("tail failure preserves notify arguments return slots and source bodies",
         args_seen.n==5 and args_seen[1]==8 and args_seen[2]=="huyang/result"
-            and args_seen[3]==91 and args_seen[4]==completion and args_seen[5]==nil
+            and args_seen[3]=="late_evidence" and args_seen[4]==completion and args_seen[5]==nil
             and a=="same" and b==nil and c==17
             and normalized[2].findings[1].message=="body 2")
     notify=function() error(thrown) end

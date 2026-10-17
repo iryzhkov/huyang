@@ -95,7 +95,9 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 		Origins: map[string]map[string]any{}, Sequences: map[string]float64{}, TransportEnds: map[string]map[string]any{},
 		OpenTokens: map[string]any{}, Inflight: map[string]bool{}}
 	ready, collections := map[string]bool{}, map[string]bool{}
-	transportSequences := map[string]float64{}
+	transportSequences, transportIndices := map[string]float64{}, map[string]float64{}
+	transportRPCs := map[string]any{}
+	completedInvocations := map[string]float64{}
 	for _, event := range events {
 		process, pok := event["process_id"].(float64)
 		seq, sok := event["trace_seq"].(float64)
@@ -104,6 +106,14 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 			return nil, fmt.Errorf("missing/duplicate/out-of-order per-process trace sequence")
 		}
 		h.Sequences[pid] = seq
+		transportKey := ""
+		invocation, invocationOK := event["transport_invocation"].(float64)
+		if event["kind"] == "transport_end" || (event["kind"] == "diagnostic_observation" && event["stage"] == "transport_emission") {
+			if !invocationOK || invocation < 1 || invocation != float64(int64(invocation)) {
+				return nil, fmt.Errorf("transport boundary lacks actual invocation identity")
+			}
+			transportKey = m9Identity(process, invocation)
+		}
 		switch event["kind"] {
 		case "observer_ready":
 			if ready[pid] || seq != 1 {
@@ -125,17 +135,38 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 			delete(collections, key)
 		case "transport_end":
 			status := m9Object(event["observer_status"])
-			key := m9Identity(process, event["provider_rpc_id"])
-			if event["provider_rpc_id"] == nil || h.TransportEnds[key] != nil || !m9ObserverStatusOK(status) {
+			if event["provider_rpc_id"] == nil || h.TransportEnds[transportKey] != nil || !m9ObserverStatusOK(status) {
 				return nil, fmt.Errorf("missing/duplicate transport-end identity or observer error")
 			}
-			h.TransportEnds[key] = event
+			if invocation != completedInvocations[pid]+1 {
+				return nil, fmt.Errorf("transport invocation is missing or out of order")
+			}
+			if rpc := transportRPCs[transportKey]; rpc != nil && !reflect.DeepEqual(rpc, event["provider_rpc_id"]) {
+				return nil, fmt.Errorf("transport-end original RPC identity differs from invocation")
+			}
+			h.TransportEnds[transportKey] = event
+			completedInvocations[pid] = invocation
 		case "diagnostic_observation":
 			if event["stage"] == "transport_emission" {
 				if event["provider_rpc_id"] == nil {
 					return nil, fmt.Errorf("transport emission lacks actual RPC identity")
 				}
-				transportSequences[m9Identity(process, event["provider_rpc_id"])] = seq
+				if h.TransportEnds[transportKey] != nil {
+					return nil, fmt.Errorf("transport emission follows its transport-end marker")
+				}
+				if invocation != completedInvocations[pid]+1 {
+					return nil, fmt.Errorf("transport invocation is missing or out of order")
+				}
+				if rpc := transportRPCs[transportKey]; rpc != nil && !reflect.DeepEqual(rpc, event["provider_rpc_id"]) {
+					return nil, fmt.Errorf("transport invocation changed original RPC identity")
+				}
+				index, ok := event["transport_index"].(float64)
+				if !ok || index != transportIndices[transportKey]+1 {
+					return nil, fmt.Errorf("missing/duplicate/out-of-order transport batch index")
+				}
+				transportRPCs[transportKey] = event["provider_rpc_id"]
+				transportIndices[transportKey] = index
+				transportSequences[transportKey] = seq
 			}
 			switch event["stage"] {
 			case "accepted_receive", "constructed", "enqueued", "immediate_emission", "transport_emission":
@@ -167,7 +198,7 @@ func m9HistoricalTrace(events []map[string]any, fixed *m9PostFix) (*m9History, e
 	for key, seq := range transportSequences {
 		marker := h.TransportEnds[key]
 		if marker == nil || marker["trace_seq"].(float64) <= seq {
-			return nil, fmt.Errorf("transport emission lacks later same-RPC transport-end marker")
+			return nil, fmt.Errorf("transport emission lacks later same-invocation transport-end marker")
 		}
 	}
 	if h.Process == nil || len(collections) != 0 {
@@ -572,11 +603,11 @@ func m9HistoricalResult(events []map[string]any, fixed *m9PostFix, evidence map[
 		if b.Transport == nil || first == nil || end <= start || start < float64(first.Before) || end > float64(first.After) {
 			return nil, fmt.Errorf("selected evidence lacks unique actual transport inside its first citing call")
 		}
-		marker := h.TransportEnds[m9Identity(h.Process, b.Transport["provider_rpc_id"])]
+		marker := h.TransportEnds[m9Identity(h.Process, b.Transport["transport_invocation"])]
 		markerStart, _ := marker["cut_byte_start"].(float64)
 		markerEnd, _ := marker["cut_byte_end"].(float64)
 		if marker == nil || markerEnd <= markerStart || markerStart < float64(first.Before) || markerEnd > float64(first.After) {
-			return nil, fmt.Errorf("same-RPC transport-end marker lies outside first citing call")
+			return nil, fmt.Errorf("same-invocation transport-end marker lies outside first citing call")
 		}
 		b.CitingCall = map[string]any{"name": first.Name, "request_id": first.Reply["request_id"],
 			"trace_bytes_before": first.Before, "trace_bytes_after": first.After, "transport_end": marker}
@@ -808,7 +839,7 @@ func m9HistoricalFixture(t *testing.T) (*m9PostFix, []map[string]any, map[string
 		{"kind": "diagnostic_observation", "stage": "immediate_emission", "identity": identity, "batch": batch,
 			"context": map[string]any{"request_id": "diagnostics_edit_fix"}},
 		{"kind": "diagnostic_observation", "stage": "transport_emission", "identity": identity, "batch": batch,
-			"provider_rpc_id": float64(41), "transport_ok": true},
+			"provider_rpc_id": float64(41), "transport_invocation": float64(1), "transport_index": float64(1), "transport_ok": true},
 	} {
 		e["trace_seq"], e["process_id"], e["unix_us"], e["telemetry_errors"] =
 			float64(len(events)+1), float64(91), float64(len(events)+31), float64(0)
@@ -825,7 +856,23 @@ func m9HistoricalFixture(t *testing.T) (*m9PostFix, []map[string]any, map[string
 	return fixed, events, map[string]map[string]any{"ev_origin": selected}, []map[string]any{reply}
 }
 
+// Synthetic fixture construction only. Runtime replay never supplies missing IDs.
+func m9NextTestTransportInvocation(events []map[string]any) float64 {
+	last := float64(0)
+	for _, event := range events {
+		if event["kind"] == "transport_end" && event["process_id"] == float64(91) {
+			if invocation, _ := event["transport_invocation"].(float64); invocation > last {
+				last = invocation
+			}
+		}
+	}
+	return last + 1
+}
+
 func m9HistoryAppend(events []map[string]any, event map[string]any) []map[string]any {
+	if event["kind"] == "transport_end" && event["transport_invocation"] == nil {
+		event["transport_invocation"] = m9NextTestTransportInvocation(events)
+	}
 	event["process_id"], event["trace_seq"], event["unix_us"] = float64(91), float64(len(events)+1), float64(len(events)+101)
 	if event["kind"] == "diagnostic_observation" {
 		event["telemetry_errors"] = float64(0)
@@ -878,7 +925,8 @@ func m9AppendHistoricalPull(t *testing.T, fixed *m9PostFix, events []map[string]
 			"observer_status": map[string]any{"installed": true, "errors": []any{}}})
 	}
 	events = m9HistoryAppend(events, map[string]any{"kind": "diagnostic_observation", "stage": "transport_emission",
-		"identity": identity, "batch": batch, "provider_rpc_id": float64(42), "transport_ok": true})
+		"identity": identity, "batch": batch, "provider_rpc_id": float64(42),
+		"transport_invocation": m9NextTestTransportInvocation(events), "transport_index": float64(1), "transport_ok": true})
 	events = m9HistoryAppend(events, map[string]any{"kind": "transport_end", "provider_rpc_id": float64(42),
 		"observer_status": map[string]any{"installed": true, "errors": []any{}}})
 	selected := maps.Clone(batch)
@@ -1058,6 +1106,67 @@ func m9PositiveRetentionFixture(t *testing.T) (*m9PostFix, []map[string]any, map
 	return fixed, events, evidence, replies, calls
 }
 
+// Exercise the runtime counterexample with distinct actual invocations sharing
+// one original wire ID. Optionally deliver both pull batches in one invocation.
+func m9RepeatedRPCFixture(t *testing.T, together bool) (*m9PostFix, []map[string]any, map[string]map[string]any, []map[string]any, []m9HistoricalCall) {
+	t.Helper()
+	fixed, events, evidence, replies, calls := m9PositiveRetentionFixture(t)
+	for _, event := range events {
+		if event["kind"] == "transport_end" || event["stage"] == "transport_emission" {
+			event["provider_rpc_id"] = "late_evidence"
+		}
+	}
+	if !together {
+		return fixed, events, evidence, replies, calls
+	}
+	var joined []map[string]any
+	var firstTransport map[string]any
+	for _, event := range events {
+		invocation, _ := event["transport_invocation"].(float64)
+		if invocation == 1 {
+			if event["stage"] == "transport_emission" {
+				firstTransport = event
+			}
+			continue // The first batch travels with the second, with one end marker.
+		}
+		if event["stage"] == "transport_emission" && invocation == 2 {
+			firstTransport["unix_us"] = event["unix_us"]
+			joined = append(joined, firstTransport)
+			event["transport_index"] = float64(2)
+		}
+		if invocation > 1 {
+			event["transport_invocation"] = invocation - 1
+		}
+		joined = append(joined, event)
+	}
+	events, replies = joined, replies[1:]
+	// The combined first call records both original batches at its actual transport.
+	evidence["ev_origin"]["observed_at"] = "1970-01-01T00:00:00.001000Z"
+	callbacks := map[string]any{}
+	for n, event := range events {
+		event["trace_seq"] = float64(n + 1)
+		if event["kind"] == "pull" {
+			callbacks[m9Text(event["request_id"])] = event["trace_seq"]
+		}
+	}
+	for _, event := range events {
+		if event["stage"] == "accepted_receive" {
+			raw := m9Object(m9Object(event["origin"])["raw"])
+			raw["callback_seq"] = callbacks[m9Text(raw["request_id"])]
+		}
+	}
+	calls = nil
+	before := 0
+	for n, event := range events {
+		if event["kind"] == "transport_end" {
+			calls = append(calls, m9HistoricalCall{Name: "diagnostics", Reply: replies[len(calls)], Before: before, After: n + 1})
+			before = n + 1
+		}
+	}
+	m9TestHistoryCalls(events, nil)
+	return fixed, events, evidence, replies, calls
+}
+
 func TestM9HistoricalLaterPositiveRequiresActualDelivery(t *testing.T) {
 	fixed, events, evidence, replies := m9HistoricalFixture(t)
 	items := []any{map[string]any{"range": map[string]any{"start": map[string]any{"line": float64(1), "character": float64(0)},
@@ -1141,6 +1250,115 @@ func TestM9HistoricalEveryIntermediateAndMixedPush(t *testing.T) {
 }
 
 func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
+	for _, together := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reused-wire-rpc-multiple-batches-%t", together), func(t *testing.T) {
+			fixed, events, evidence, replies, calls := m9RepeatedRPCFixture(t, together)
+			result, err := m9HistoricalResult(events, fixed, evidence, replies, calls)
+			if err != nil {
+				t.Fatalf("distinct actual invocations with reused wire RPC ID rejected: %v", err)
+			}
+			original := result["original_observation"].(*m9HistoricalBatch)
+			first := m9Object(original.CitingCall["transport_end"])
+			final := m9Object(result["final_cut_marker"])
+			if first["transport_invocation"] != float64(1) || final["transport_invocation"] != float64(len(calls)) ||
+				first["provider_rpc_id"] != "late_evidence" || final["provider_rpc_id"] != "late_evidence" ||
+				original.EvidenceID != "ev_origin" || m9Object(result["original_evidence"])["observed_at"] != evidence["ev_origin"]["observed_at"] ||
+				result["classification"] != "historical_empty_later_positive_delivered" ||
+				result["analysis_completion_proven"] != false || result["clean_resolution_proven"] != false || result["old_terminal_gate_qualified"] != false {
+				t.Fatalf("reused RPC replaced original attribution or acquired authority: %+v", result)
+			}
+		})
+	}
+	for _, name := range []string{"missing-transport-invocation", "missing-end-invocation", "malformed-end-invocation",
+		"wrong-transport-invocation", "wrong-end-invocation", "duplicate-end-invocation", "duplicate-batch-index",
+		"skipped-batch-index", "changed-rpc-within-invocation", "wrong-invocation-end-rpc", "emission-after-end",
+		"missing-empty-invocation", "reused-rpc-marker-outside-first-call"} {
+		t.Run(name, func(t *testing.T) {
+			fixed, events, evidence, replies, calls := m9RepeatedRPCFixture(t, true)
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err != nil {
+				t.Fatalf("invocation negative baseline is not qualified: %v", err)
+			}
+			var transports, markers []map[string]any
+			for _, event := range events {
+				if event["stage"] == "transport_emission" {
+					transports = append(transports, event)
+				}
+				if event["kind"] == "transport_end" {
+					markers = append(markers, event)
+				}
+			}
+			want := ""
+			switch name {
+			case "missing-transport-invocation":
+				delete(transports[0], "transport_invocation")
+				want = "transport boundary lacks actual invocation identity"
+			case "missing-end-invocation":
+				delete(markers[0], "transport_invocation")
+				want = "transport boundary lacks actual invocation identity"
+			case "malformed-end-invocation":
+				markers[0]["transport_invocation"] = "1"
+				want = "transport boundary lacks actual invocation identity"
+			case "wrong-transport-invocation":
+				transports[1]["transport_invocation"] = float64(2)
+				want = "transport invocation is missing or out of order"
+			case "wrong-end-invocation":
+				markers[0]["transport_invocation"] = float64(99)
+				want = "transport invocation is missing or out of order"
+			case "duplicate-end-invocation":
+				markers[1]["transport_invocation"] = float64(1)
+				want = "missing/duplicate transport-end identity or observer error"
+			case "duplicate-batch-index":
+				transports[1]["transport_index"] = float64(1)
+				want = "missing/duplicate/out-of-order transport batch index"
+			case "skipped-batch-index":
+				transports[1]["transport_index"] = float64(3)
+				want = "missing/duplicate/out-of-order transport batch index"
+			case "changed-rpc-within-invocation":
+				transports[1]["provider_rpc_id"] = "other"
+				want = "transport invocation changed original RPC identity"
+			case "wrong-invocation-end-rpc":
+				markers[0]["provider_rpc_id"] = "other"
+				want = "transport-end original RPC identity differs from invocation"
+			case "emission-after-end":
+				start := int(transports[0]["cut_byte_start"].(float64))
+				events[start], events[start+1], events[start+2] = markers[0], transports[0], transports[1]
+				want = "transport emission follows its transport-end marker"
+			case "missing-empty-invocation":
+				index := int(markers[1]["cut_byte_start"].(float64))
+				events = append(events[:index], events[index+1:]...)
+				want = "transport invocation is missing or out of order"
+			case "reused-rpc-marker-outside-first-call":
+				calls[0].After = int(markers[0]["cut_byte_start"].(float64))
+				want = "same-invocation transport-end marker lies outside first citing call"
+			}
+			for n, event := range events {
+				event["trace_seq"] = float64(n + 1)
+			}
+			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("invocation negative missed exact guard %q: %v", want, err)
+			}
+		})
+	}
+	t.Run("same-invocation-and-rpc-in-other-process", func(t *testing.T) {
+		fixed, events, evidence, replies := m9HistoricalFixture(t)
+		for _, event := range events {
+			if event["kind"] == "transport_end" || event["stage"] == "transport_emission" {
+				event["provider_rpc_id"] = "late_evidence"
+			}
+		}
+		if _, err := m9HistoricalResult(events, fixed, evidence, replies, m9TestHistoryCalls(events, replies)); err != nil {
+			t.Fatalf("cross-process negative baseline is not qualified: %v", err)
+		}
+		marker := events[len(events)-1]
+		events[len(events)-1] = map[string]any{"kind": "observer_ready", "process_id": float64(92), "trace_seq": float64(1)}
+		marker["process_id"], marker["trace_seq"] = float64(92), float64(2)
+		events = append(events, marker)
+		if _, err := m9HistoricalResult(events, fixed, evidence, replies, m9TestHistoryCalls(events, replies)); err == nil ||
+			!strings.Contains(err.Error(), "transport emission lacks later same-invocation transport-end marker") {
+			t.Fatalf("another process supplied the missing actual invocation end: %v", err)
+		}
+	})
+
 	for _, name := range []string{"missing-transport", "failed-transport", "outside-first-call", "missing-call", "unknown-payload-field", "repeated-transport"} {
 		t.Run(name, func(t *testing.T) {
 			fixed, events, evidence, replies := m9HistoricalFixture(t)
@@ -1207,13 +1425,13 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 				want = "transport-end identity or observer error"
 			case "missing-same-rpc-marker":
 				events = events[:len(events)-1]
-				want = "transport emission lacks later same-RPC transport-end marker"
+				want = "transport emission lacks later same-invocation transport-end marker"
 			case "wrong-marker-rpc":
 				marker["provider_rpc_id"] = float64(99)
-				want = "transport emission lacks later same-RPC transport-end marker"
+				want = "transport-end original RPC identity differs from invocation"
 			case "marker-outside-first-call":
 				calls[0].After = len(events) - 1 // Includes transport, excludes only its end marker.
-				want = "same-RPC transport-end marker lies outside first citing call"
+				want = "same-invocation transport-end marker lies outside first citing call"
 			case "missing-final-call-marker":
 				final := m9CloneHistoricalReply(t, replies[0])
 				replies = append(replies, final)
@@ -1224,7 +1442,8 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 				events = append(events,
 					map[string]any{"kind": "observer_ready", "process_id": float64(92), "trace_seq": float64(1), "unix_us": float64(200)},
 					map[string]any{"kind": "transport_end", "process_id": float64(92), "trace_seq": float64(2), "unix_us": float64(201),
-						"provider_rpc_id": float64(41), "observer_status": map[string]any{"installed": true, "errors": []any{}}})
+						"provider_rpc_id": float64(41), "transport_invocation": float64(1),
+						"observer_status": map[string]any{"installed": true, "errors": []any{}}})
 				final := m9CloneHistoricalReply(t, replies[0])
 				replies = append(replies, final)
 				m9TestHistoryCalls(events, nil)

@@ -543,8 +543,9 @@ vim.rpcnotify = function(channel, method, ...)
     if method == "huyang/result" then
         local args = {...}
         if type(args[2]) == "table" then
-            observer.transport(args[1], args[2])
-            trace({kind="transport_end", provider_rpc_id=args[1], observer_status=observer.status()})
+            local invocation = observer.transport(args[1], args[2])
+            trace({kind="transport_end", provider_rpc_id=args[1], transport_invocation=invocation,
+                observer_status=observer.status()})
         end
     end
     return notify(channel, method, ...)

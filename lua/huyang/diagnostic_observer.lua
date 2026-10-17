@@ -5,7 +5,7 @@ local sink
 local main = {}
 local function key() return coroutine.running() or main end
 local raw_context, origin = {}, {}
-local sequence, errors = 0, {}
+local sequence, transport_sequence, errors = 0, 0, {}
 local batches = setmetatable({}, { __mode = "k" })
 local emissions = setmetatable({}, { __mode = "k" })
 local unpack_values = table.unpack or unpack
@@ -26,7 +26,7 @@ end
 -- Installing is an explicit test/debug action; normal sessions have no sink.
 function M.install(observer)
     sink, raw_context, origin = observer, {}, {}
-    sequence, errors = 0, {}
+    sequence, transport_sequence, errors = 0, 0, {}
     batches = setmetatable({}, { __mode = "k" })
     emissions = setmetatable({}, { __mode = "k" })
 end
@@ -105,8 +105,12 @@ end
 
 -- The test wrapper calls this at the actual provider notification boundary.
 -- Exact normalized table identity links emission to transport, out of band.
+-- Wire RPC IDs may repeat. Capture one identity per actual call, even empty or
+-- failed observations, and return that same identity to the completion wrapper.
 function M.transport(rpc_id, completion)
     if not sink then return end
+    transport_sequence = transport_sequence + 1
+    local invocation = transport_sequence
     local ok, detail = pcall(function()
         local list = completion.evidence
         if type(list) ~= "table" or #list == 0 then
@@ -115,10 +119,11 @@ function M.transport(rpc_id, completion)
         for index, batch in ipairs(list) do
             emit({ stage = "transport_emission", identity = emissions[batch],
                 batch = batch, provider_rpc_id = rpc_id, transport_ok = completion.ok == true,
-                transport_index = index })
+                transport_invocation = invocation, transport_index = index })
         end
     end)
     if not ok then failed(detail) end
+    return invocation
 end
 
 return M

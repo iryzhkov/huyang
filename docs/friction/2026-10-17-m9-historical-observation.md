@@ -45,17 +45,27 @@ Neither identity nor queue sequence is inserted into the diagnostic payload.
 
 A test-only wrapper around the real `vim.rpcnotify(..., "huyang/result", ...)`
 observes the actual completion's batches. Its weak normalized-table mapping links
-that exact transported table to the construction/emission sidecar and actual
-provider RPC ID. It follows the production decoder's preference for nonempty
+that exact transported table to the construction/emission sidecar. At each actual
+`observer.transport` call, the installed observer increments its own invocation
+sequence once, including empty completions. That captured `transport_invocation`
+is stamped on every transported batch sidecar and returned to the notify wrapper.
+The wrapper writes that same identity on the actual `transport_end`. The original
+`provider_rpc_id` remains unchanged on both. Neither sequence nor identity is
+inserted into wire payloads. It follows the production decoder's preference for nonempty
 `completion.evidence`, otherwise `completion.result.batches`. Callback snapshots
 are deep copies. Observer exceptions leave production delivery intact and cause
 qualification to fail through recorded errors or missing causal events. After
-`observer.transport` returns, the probe records `transport_end` with the actual
-provider RPC ID and a fresh observer.status snapshot, then delegates the unchanged
-notification arguments and return/error behavior. Every such marker must be
-installed/error-free. Every observed transport needs a later same-RPC marker,
-including the final transport whose failure has no subsequent observation to expose
-it. A prior collection_end status cannot substitute for this post-transport state.
+`observer.transport` returns, the probe records `transport_end` with its returned
+invocation identity, original provider RPC ID and a fresh observer.status snapshot,
+then delegates the unchanged notification arguments and return/error behavior.
+Every such marker must be installed/error-free. Replay keys markers by exact
+process plus actual invocation, checks the unchanged RPC ID within that invocation,
+and requires one later end marker. Invocation order is contiguous per process;
+batch indices are contiguous within one invocation and may span several batches.
+Duplicate ends, missing/wrong invocation IDs, changed original RPC IDs, unordered
+markers and observer errors reject qualification. Several distinct invocations
+may legitimately share one wire RPC string. A prior collection_end status cannot
+substitute for this post-transport state, including a final transport tail failure.
 
 No observer is installed in ordinary sessions. Absent-observer functions return
 without snapshots, logging, fetching or I/O. The optional observer is not authority
@@ -66,8 +76,9 @@ or a supported producer proof capability.
 An observed Lua emission alone is insufficient. The probe records raw-trace byte
 boundaries immediately before/after each real MCP call, outside the immutable MCP
 reply body. The first report/receipt citing a selected evidence ID must contain its
-unique successful actual provider transport and its same-RPC transport_end marker
-entirely inside that call's boundary.
+unique successful actual provider transport and its same-process, same-invocation
+transport_end marker entirely inside that call's boundary. A later invocation
+with the same RPC string cannot replace the first citing call's marker.
 
 The selected batch must match the entire typed emitted diagnostic payload:
 provider/producer, kind, canonical document, DocRev/transaction, expected and
@@ -129,9 +140,10 @@ telemetry errors or ambiguous identities reject qualification. The cut includes
 work triggered by final diagnostics/evidence recovery. The final full report citing
 the historical evidence must contain a canonical transport_end marker inside its
 actual MCP byte interval, even when that completion has no new batches. The result
-retains this in-stream final_cut_marker with its RPC identity and post-transport
-status. A missing marker, wrong process/RPC relation, marker outside the citing
-call or observer error in the last marker leaves the cut unqualified.
+retains this in-stream final_cut_marker with both its original RPC ID and actual
+invocation identity plus post-transport status. A missing marker, wrong
+process/invocation/RPC relation, marker outside the citing call or observer error
+in the last marker leaves the cut unqualified.
 
 All later relevant callbacks, progress, cancellations and pushes are replayed.
 Later progress records every superseding sequence and invalidates terminal-current
@@ -159,6 +171,48 @@ false authority or disappearance. An actual stamped push selects the existing
 authoritative lane with complete/current/quiet/progress and legitimate-resolution
 checks. Failed available proof, unversioned/mixed pushes and ambiguity cannot fall
 back to historical acceptance.
+
+## New runtime counterexample after final source ACCEPT
+
+The first fresh full fifteen-case run of accepted d13ccdc, agent-a job
+`8a607dba-c682-4801-8489-5c8d3c544e4c`, completed 8/15 with an overall FAIL.
+All fourteen pure tests passed. Cases 00/01/02/03/06/08/14 failed the replay's
+global process-plus-RPC marker uniqueness assumption. The first repeated
+`late_evidence` marker in case00 was sequence39 after collection2 ended, following
+sequence11 in the same process11367; both statuses were installed/error-free.
+
+`CollectLateEvidence`, `internal/providerpool/evidence.go:318`, legitimately uses
+`CallSpec{RequestID: "late_evidence"}` for each collection. That wire string does
+not identify a globally unique invocation. The source correction observes each
+actual transport occurrence as described above. It changes no caller IDs,
+diagnostic payloads, producer/collector behavior, acceptance policy or thresholds,
+and never drops duplicates or observer errors. Unique actual batch/emission/
+transport attribution and all existing history/non-resolution guards remain.
+
+The original archive and full verified inventory remain unchanged under
+`/home/igor/.cache/huyang-friction/executor/m9-full15-8a607-artifacts`.
+The 4,325,189-byte archive has SHA-256
+`62380c655af14405f1da15f65ca50cd916e03a63f099acd44ad3c95ba9032e3d`.
+Root verified all 6,344 files/31,043,511 bytes, the seven complete raw/cut hashes,
+and unchanged HOME metadata/tool hashes. This correction does not reclassify that
+run or any earlier FAIL.
+
+Regressions extend the existing pure-test names, preserving the fourteen-name
+inventory. They cover repeated original RPC strings across empty/nonempty actual
+invocations, two batches in one invocation, original marker retention and exact
+invocation/RPC/index/order/process/call-boundary rejection. Each new negative
+starts from a qualifying fixture and requires its intended guard's error.
+The Lua seam tests use real `observer.transport`, its returned identity and status,
+including reused RPC strings, empty completions, two actual normalized tables and
+the final second-batch observer failure. The cursor fixture uses the shared
+synthetic constructor's identities; its source needs no change. Runtime replay
+never fills in missing identities.
+
+This is a source-only candidate after final ACCEPT, pending root-owned format,
+Lua, fourteen pure, appropriate full Go/race/vet checks, a fresh main Opus review
+of the exact final source, and a fresh native known subset before full15 if
+warranted. No additional fix-loop authority or acceptance claim is implied.
+The carried missing-queue fixture note remains outside this correction.
 
 ## Artifacts and remaining validation
 
