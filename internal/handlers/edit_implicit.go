@@ -100,7 +100,7 @@ func prepareImplicitOperation(requestID string, operation map[string]any) ([]str
 		if !filepath.IsAbs(path) {
 			// The service's working directory is not the agent's, so a relative
 			// path without a workspace names nothing useful.
-			return nil, mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
+			return nil, relativePathRefusal(requestID, "edit_apply", path)
 		}
 		absolute := filepath.Clean(path)
 		if writesNewFile(kind, field, operation) {

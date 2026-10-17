@@ -535,7 +535,7 @@ func (w *Workspace) parentChainStaysInside(absolute, rel string) error {
 			return fmt.Errorf("document %s passes through unresolvable symlink %s: %w", absolute, current, err)
 		}
 		if !insidePath(w.identity.Root, resolved) {
-			return fmt.Errorf("document %s passes through symlink %s that leaves workspace root %s", absolute, current, w.identity.Root)
+			return &SymlinkEscapeError{Document: absolute, Link: current, Root: w.identity.Root}
 		}
 		// Continue from the real directory so later components are judged
 		// where they actually live.

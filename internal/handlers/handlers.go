@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -260,33 +261,131 @@ func adoptOpenedProject(requestID string, opened map[string]any, arguments map[s
 	return nil
 }
 
+// relativePathRefusal answers a relative path that names no workspace. The
+// next step is the repair - the same call with the repository named by
+// root - because a refusal with an empty next left callers resending the
+// path unchanged.
+func relativePathRefusal(requestID, tool, path string) map[string]any {
+	result := mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
+	result["next"] = []any{
+		map[string]any{"tool": tool, "action": "resend_with_root", "argument": "root", "expected": "absolute path of the repository that holds " + path},
+	}
+	return result
+}
+
 // readImplicitDocument serves a read that names a path but no workspace by
 // opening an exact one-document workspace first and reading through it.
 func (h *Handlers) readImplicitDocument(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
-	target, _ := arguments["target"].(map[string]any)
+	target, hasTarget := arguments["target"].(map[string]any)
 	path, _ := target["path"].(string)
+	if !hasTarget && len(mcpapi.AnySlice(arguments["targets"])) > 0 {
+		return h.readImplicitTargets(ctx, requestID, arguments)
+	}
 	if strings.TrimSpace(path) == "" {
 		return mcpapi.Envelope(requestID, nil, "failed", "workspace_required", "workspace_id is required for handle, range, symbol, history, and changes reads", map[string]any{})
 	}
 	if !filepath.IsAbs(path) {
 		// The service's working directory is not the agent's, so a relative
 		// path without a workspace names nothing useful.
-		return mcpapi.Envelope(requestID, nil, "failed", "invalid_target", "without workspace_id or root the path must be absolute; pass root for a repository file", map[string]any{"path": path})
+		return relativePathRefusal(requestID, "read", path)
+	}
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return h.readImplicitDirectory(ctx, requestID, arguments, path)
 	}
 	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": []any{path}}, false)
 	if opened["outcome"] != "ok" {
 		return opened
 	}
-	identity, _ := opened["workspace"].(workspacecore.Identity)
-	implicitID := strings.TrimSpace(string(identity.ID))
-	if implicitID == "" {
-		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
+	if failure := adoptOpenedDocuments(requestID, opened, arguments); failure != nil {
+		return failure
 	}
-	arguments["workspace_id"] = implicitID
 	result := h.Execute(ctx, requestID, "read", arguments)
 	result["warnings"] = append(result["warnings"].([]string), "Implicitly opened an exact one-document workspace; reuse the returned workspace_id and revision for guarded edits.")
 	if data, ok := result["data"].(map[string]any); ok {
 		data["implicit_workspace"] = true
 	}
 	return result
+}
+
+// readImplicitTargets serves a multi-target read that names no workspace
+// the way a single target is served: every target names its file by
+// absolute path, so one exact documents workspace is opened over all of
+// them and the batch is read through it. Nothing beyond the named files is
+// opened. A batch with a relative path, a handle, or a directory in it
+// names something no documents workspace can hold, and is refused whole
+// with the repair for that target.
+func (h *Handlers) readImplicitTargets(ctx context.Context, requestID string, arguments map[string]any) map[string]any {
+	var files []any
+	for index, raw := range mcpapi.AnySlice(arguments["targets"]) {
+		target, _ := raw.(map[string]any)
+		path, _ := target["path"].(string)
+		if locator, ok := target["symbol_locator"].(map[string]any); ok && path == "" {
+			path, _ = locator["path"].(string)
+		}
+		switch {
+		case strings.TrimSpace(path) == "":
+			return mcpapi.Envelope(requestID, nil, "failed", "workspace_required", fmt.Sprintf("targets[%d] names no path; workspace_id is required for handle and range reads", index), map[string]any{})
+		case !filepath.IsAbs(path):
+			return relativePathRefusal(requestID, "read", path)
+		}
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			result := mcpapi.Envelope(requestID, nil, "failed", "invalid_target", fmt.Sprintf("targets[%d] %s is a directory; read it as the single target to list it", index, path), map[string]any{"path": path})
+			result["next"] = []any{map[string]any{"tool": "read", "action": "list_the_directory_as_a_single_target", "target": map[string]any{"path": path}}}
+			return result
+		}
+		files = append(files, path)
+	}
+	opened := h.open(ctx, requestID, map[string]any{"kind": "documents", "files": files}, false)
+	if failure := adoptOpenedDocuments(requestID, opened, arguments); failure != nil {
+		return failure
+	}
+	result := h.Execute(ctx, requestID, "read", arguments)
+	result = mcpapi.AddWarnings(result, fmt.Sprintf("Implicitly opened an exact documents workspace over the %d named files; reuse the returned workspace_id and revision for guarded edits.", len(files)))
+	if data, ok := result["data"].(map[string]any); ok {
+		data["implicit_workspace"] = true
+	}
+	return result
+}
+
+// adoptOpenedDocuments writes an implicitly opened documents workspace into
+// the arguments, or returns the reply that says why it could not be opened.
+func adoptOpenedDocuments(requestID string, opened map[string]any, arguments map[string]any) map[string]any {
+	if opened["outcome"] != "ok" {
+		return opened
+	}
+	identity, _ := opened["workspace"].(workspacecore.Identity)
+	if strings.TrimSpace(string(identity.ID)) == "" {
+		return mcpapi.Envelope(requestID, nil, "failed", "workspace_open_failed", "implicit document workspace did not return an ID", map[string]any{})
+	}
+	arguments["workspace_id"] = string(identity.ID)
+	return nil
+}
+
+// readImplicitDirectory serves a read of a directory named by absolute path
+// and no workspace. A documents workspace holds files, not directories, so
+// the directory is listed through the project workspace of the Git working
+// tree that holds it, exactly as if the call had named that root: the
+// caller named the directory absolutely, so there is one meaning, and a
+// listing only reads. A directory outside any working tree is refused with
+// the call that lists it.
+func (h *Handlers) readImplicitDirectory(ctx context.Context, requestID string, arguments map[string]any, path string) map[string]any {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return mcpapi.Failure(requestID, nil, "read_failed", err)
+	}
+	top := workspacecore.GitTopLevel(resolved)
+	if top == "" {
+		result := mcpapi.Envelope(requestID, nil, "failed", "invalid_target", fmt.Sprintf("%s is a directory outside any Git working tree; open it as a project workspace to list it", path), map[string]any{"path": path})
+		result["next"] = []any{map[string]any{"tool": "read", "action": "list_it_as_the_root_of_a_project_workspace", "root": resolved, "target": map[string]any{"path": "."}}}
+		return result
+	}
+	relative, err := filepath.Rel(top, resolved)
+	if err != nil {
+		return mcpapi.Failure(requestID, nil, "read_failed", err)
+	}
+	target, _ := arguments["target"].(map[string]any)
+	target["path"] = filepath.ToSlash(relative)
+	arguments["root"] = top
+	result := h.Execute(ctx, requestID, "read", arguments)
+	return mcpapi.AddWarnings(result, fmt.Sprintf("%s is a directory, so it was listed through the repository that holds it, %s; reuse the returned workspace_id", path, top))
 }

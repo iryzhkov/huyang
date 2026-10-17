@@ -18,6 +18,25 @@ import (
 
 const maxGitOutput = 2 << 20
 
+// GitTopLevel is the top of the Git working tree that holds dir, or empty
+// when dir is in none. A .git file counts, so a linked worktree resolves to
+// itself rather than to the repository it was added from. It only looks
+// for the marker and runs no Git command.
+func GitTopLevel(dir string) string {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	for current := filepath.Clean(dir); ; current = filepath.Dir(current) {
+		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
+			return current
+		}
+		if parent := filepath.Dir(current); parent == current {
+			return ""
+		}
+	}
+}
+
 type CommitHandle string
 type CommitSummary struct {
 	Handle           CommitHandle `json:"handle"`

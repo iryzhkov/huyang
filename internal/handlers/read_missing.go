@@ -3,6 +3,8 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -22,6 +24,9 @@ const maxPathCandidates = 5
 // the name path of a symbol read, so a suggestion names the same declaration
 // in the candidate file. Every other failure is passed through as read_failed.
 func readFailure(requestID string, workspace *workspacecore.Workspace, err error, symbol string) map[string]any {
+	if result := symlinkReadFailure(requestID, workspace, err); result != nil {
+		return result
+	}
 	var missing *workspacecore.DocumentNotFoundError
 	if workspacecore.ErrorCode(err) != workspacecore.CodeDocumentNotFound || !errors.As(err, &missing) {
 		return mcpapi.Failure(requestID, workspace, "read_failed", err)
@@ -72,6 +77,46 @@ func readFailure(requestID string, workspace *workspacecore.Workspace, err error
 		next = append(next, step)
 	}
 	result["next"] = next
+	return result
+}
+
+// symlinkReadFailure keeps the refusal of a read through a symbolic link -
+// one that leaves the workspace root, or a path that is itself a link - and
+// names where the link leads, because that file can still be read: as its
+// own exact document when it lies outside the root, which opens nothing but
+// that one file, or by its own name when it lies inside. The guard is not
+// relaxed; the caller is told the one read it does allow. A dangling link or
+// one that leads to anything but a regular file gets the plain refusal.
+func symlinkReadFailure(requestID string, workspace *workspacecore.Workspace, err error) map[string]any {
+	var escape *workspacecore.SymlinkEscapeError
+	var notText *workspacecore.NotRegularTextError
+	var linked string
+	switch {
+	case errors.As(err, &escape):
+		linked = escape.Document
+	case errors.As(err, &notText) && notText.Kind == workspacecore.ObjectSymlink:
+		linked = notText.Absolute
+	default:
+		return nil
+	}
+	resolved, resolveErr := filepath.EvalSymlinks(linked)
+	if resolveErr != nil {
+		return nil
+	}
+	if info, statErr := os.Stat(resolved); statErr != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	result := mcpapi.Envelope(requestID, workspace, "failed", "read_failed", err.Error(), map[string]any{"resolved_path": resolved})
+	root := workspace.Identity().Root
+	if relative, relErr := filepath.Rel(root, resolved); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		result["summary"] = fmt.Sprintf("%v; the link leads to %s in this workspace, so read that path", result["summary"], filepath.ToSlash(relative))
+		result["next"] = []any{map[string]any{"tool": "read", "action": "read_the_link_target_by_its_own_path", "path": filepath.ToSlash(relative)}}
+		return result
+	}
+	result["summary"] = fmt.Sprintf("%v; the link leads to %s, which can be read as its own document without workspace_id or root", result["summary"], resolved)
+	result["next"] = []any{map[string]any{
+		"tool": "read", "action": "read_the_resolved_path_without_workspace_id_or_root", "target": map[string]any{"path": resolved},
+	}}
 	return result
 }
 

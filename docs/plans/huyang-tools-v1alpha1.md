@@ -1502,3 +1502,65 @@ descriptor states this.
 
 The contract as amended here is frozen from the end of S20c. The S21 baseline and the
 semantic-evidence plan apply to this amended surface.
+
+## v1alpha1 amendment 3 (client friction, 2026-10-17)
+
+From the local-model friction investigation (`docs/friction/2026-10-17-m2-client-friction.md`).
+Every change is compatible in the sense of the S20b re-freeze: inputs that were refused are
+accepted with a warning, results gain optional fields, and the frozen catalog schemas are
+unchanged. No mutation precondition was weakened and no mutation is ever given a workspace
+the caller did not name.
+
+### Adapter hello
+
+The private adapter-to-service hello gains an optional `Cwd`, the directory the client
+started `huyang mcp` in. The adapter now also names itself `adapter-<random>` when the
+client exports no session id, and announces the same session and directory on every
+reconnect. This is not part of the MCP surface; an older adapter simply sends neither.
+
+### Behaviour changes
+
+- A relative `root` is resolved against the announced directory, following symbolic links
+  before `..`, when that directory and the result both lie in a Git working tree, with the
+  warning `root "<root>" was resolved against your working directory to <abs>; send absolute
+  roots`. Resolution runs after argument validation and before dispatch, so the replay key
+  is built over the adopted `workspace_id`: `"."`, the absolute root and the ID are one key.
+- The read-only tools `workspace_open`, `workspace_inspect`, `search`, `symbol_find`,
+  `navigate`, `read`, `diagnostics`, `evidence_get`, `code_actions`, `revision_diff` and
+  `language_server_status` take the announced directory's working tree as `root` when a call
+  names neither `workspace_id` nor `root` nor any absolute path, and only when the directory
+  is that tree's top level; the warning names the root. `edit_apply`, `change_plan`,
+  `verify_run` and the debugger are never defaulted. HTTP connections announce no directory
+  and are never defaulted.
+- `read` of a directory answers `ok` with a bounded listing: `data.kind: "directory"`,
+  `entries` (`path`, `kind` `file` or `directory`, and `files` for a directory),
+  `entry_count`, `listed_count`, `truncated` and `coverage` when incomplete, bounded at
+  200 entries. It was `read_failed`. A directory target in `targets` is listed in place
+  and its `entries` line carries `kind` and `entry_count`.
+- `search` with no `query` and a `paths` scope answers `ok` with `data.files`, `returned`
+  and `total`, bounded by `limit`, and a warning that it listed rather than searched; it
+  shares the directory read's listing. Without `paths` it is still `search_failed`, now
+  with two `next` steps.
+- A `start_line` past the last line answers `ok` with empty `content`, `line_count`,
+  `past_end: true`, `start_line`, and a warning naming the last line; `lines` carries the
+  same count, as on every source read. It was `invalid_line_range`; a reversed window still
+  is. A prepared-revision read behaves the same, with `end_line` the document's last line.
+  In `targets`, the target's data carries the same fields and its warning is prefixed with
+  its path.
+- A read through a symbolic link that leaves the root, or of a path that is itself a link,
+  is still `read_failed`; when the link leads to a regular file the reply adds
+  `data.resolved_path` and a `next` step: outside the root, a read of that absolute path
+  with no workspace, which opens it as its own exact document; inside, a read of the
+  target's workspace path.
+- `read` with `targets` that all name absolute paths and no workspace opens one exact
+  documents workspace over them, as a single `target` did. It was `workspace_required`. A
+  relative path in such a batch is refused with `resend_with_root`, a directory with a step
+  that lists it as a single target. A single absolute directory target with no workspace is
+  listed through the project workspace of the working tree that holds it.
+- A relative path with no workspace is refused with `next: [{tool, action:
+  resend_with_root, argument: root}]`.
+- Argument tolerance, each with a warning: read options nested inside `target` are
+  hoisted, a string `target` is `target.path`, search's `include` joins `path` and
+  `path_prefix` as an alias of `paths`, and an integral search `limit` above the maximum is
+  clamped. A string that does not parse as JSON where an object or array is expected is
+  refused with the syntax error's byte offset and none of the caller's text.

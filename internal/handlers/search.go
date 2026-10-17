@@ -88,6 +88,9 @@ func refineSearch(requestID string, workspace *workspacecore.Workspace, parent s
 
 func searchSource(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
 	query, _ := arguments["query"].(string)
+	if query == "" {
+		return searchWithoutQuery(requestID, workspace, arguments)
+	}
 	mode := workspacecore.SearchMode("literal")
 	if requested, _ := arguments["mode"].(string); requested != "" {
 		mode = workspacecore.SearchMode(requested)
@@ -164,6 +167,52 @@ func searchSource(requestID string, workspace *workspacecore.Workspace, argument
 		envelope = mcpapi.AddWarnings(envelope, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", result.Scope))
 	}
 	return mcpapi.AddWarnings(envelope, contextWarning)
+}
+
+// searchWithoutQuery answers a search that names paths but no query with
+// the files under those paths, bounded by limit: a scope with nothing to
+// look for in it is a request to see what the scope holds, and the listing
+// is the one a directory read gives. Without paths there is nothing to
+// list, and the refusal names both repairs.
+func searchWithoutQuery(requestID string, workspace *workspacecore.Workspace, arguments map[string]any) map[string]any {
+	scope := argStrings(arguments["paths"])
+	if len(scope) == 0 {
+		result := mcpapi.Envelope(requestID, workspace, "failed", "search_failed", "search query is required; send query, or paths with no query to list the files under them", map[string]any{})
+		result["next"] = []any{
+			map[string]any{"tool": "search", "action": "resend_with_a_query", "argument": "query"},
+			map[string]any{"tool": "search", "action": "list_files_under_paths", "argument": "paths"},
+		}
+		return result
+	}
+	limit := argInt(arguments, "limit", 50)
+	listing, err := listWorkspacePaths(workspace, "", scope, limit)
+	if err != nil {
+		return mcpapi.Failure(requestID, workspace, "search_failed", err)
+	}
+	files := make([]string, 0, len(listing.Entries))
+	for _, entry := range listing.Entries {
+		files = append(files, entry.Path)
+	}
+	data := map[string]any{"files": files, "returned": len(files), "total": listing.Total}
+	if !listing.Coverage.Complete {
+		data["coverage"] = listing.Coverage
+	}
+	summary := fmt.Sprintf("%d files under paths %q", listing.Total, scope)
+	if listing.Total == 1 {
+		summary = fmt.Sprintf("1 file under paths %q", scope)
+	}
+	if !listing.Coverage.Complete {
+		summary += "; listing coverage incomplete"
+	}
+	result := mcpapi.Envelope(requestID, workspace, "ok", "", summary, data)
+	result = mcpapi.AddWarnings(result, "query was empty, so the files under paths are listed instead of searched; send query to search their text")
+	if listing.truncated() {
+		result = mcpapi.AddWarnings(result, fmt.Sprintf("response limited to %d of %d files; raise limit or narrow paths", len(files), listing.Total))
+	}
+	if listing.Total == 0 && listing.Coverage.Complete {
+		result = mcpapi.AddWarnings(result, fmt.Sprintf("paths %q matched no file in the workspace; a pattern is a path substring or a glob over the path or base name", scope))
+	}
+	return result
 }
 
 // attachRequestedContext attaches the context_lines a search asked for. More

@@ -16,6 +16,22 @@ only when you want its answer: the top-level overview, the verification commands
 whether `verify_run` may execute them (about 500 tokens). `idempotency_key` is optional on
 every mutating call; pass one only when you intend to retry the same call.
 
+Send `root` as an absolute path. Two things are inferred from the directory your client
+started the `huyang mcp` adapter in, and each is announced in `warnings` with the absolute
+root it chose:
+
+- A relative `root` (`"."`) is resolved against that directory, when it lies in a Git
+  working tree, for every tool including edits.
+- A read-only call (`read`, `search`, `symbol_find`, `navigate`, `workspace_inspect`,
+  `diagnostics`, ...) that names no workspace at all reads the repository your client was
+  started in, but only when it was started at that repository's top level. Started in a
+  subdirectory, outside any repository (Codex starts its servers in the home directory),
+  or over HTTP, nothing is inferred and the call is refused with `resend_with_root`.
+
+An edit, a plan, `verify_run` or the debugger is never given a default workspace: name it
+with `root` or `workspace_id`. An explicit `root` or `workspace_id` always wins over the
+default.
+
 The first reply a session gets for a workspace carries a `guide` array: the handful of
 rules from this page that decide what a session costs. It is sent once, on whatever call
 first reached the workspace, and never repeated for it.
@@ -75,7 +91,35 @@ A config file, a shell script, a note or a lone source file needs no `workspace_
 absolute `path` and no `workspace_id` open an exact one-document workspace on the spot,
 run the same guards and diagnostics, and return the workspace id for further edits of that
 file. `create_file` creates missing parent directories. Only `replace_range` needs an
-existing workspace, because its handle comes from one.
+existing workspace, because its handle comes from one. `read {targets: [{path}, {path}]}`
+with absolute paths and no workspace opens one exact documents workspace over just the
+named files, as a single target does.
+
+## Directories, listings and recovery
+
+- `read` of a directory answers a bounded listing instead of a refusal: `data.kind:
+  directory`, `entries` with each child's `path` and `kind` (`file`, or `directory` with
+  the number of `files` below it), `entry_count`, `listed_count`, and `truncated` past
+  200 entries. It lists what search would read: `.gitignore`d files are absent and
+  nothing past a symlink that leaves the root is followed. `target: {path: "."}` lists the
+  root. A directory named by absolute path with no workspace is listed through the
+  repository that holds it. A directory target inside `targets` is listed in place.
+- `search {paths: [...]}` with no `query` lists the files under `paths` (bounded by
+  `limit`) under `data.files`, with a warning saying it listed rather than searched. It is
+  the same listing as a directory read, scoped by pattern rather than by directory.
+- A `start_line` past the end of a file is an empty window, not a refusal: `content` is
+  empty, `line_count` (and `lines`, as on every read) is the document's line count,
+  `past_end` is true, and a warning names the last line to start from.
+- A path through a symlink that leaves the workspace is still refused, but `next` names
+  where the link leads: read that absolute path with no `workspace_id` or `root` and it is
+  opened as its own exact document. A link that leads elsewhere inside the workspace names
+  the target's own path.
+- A relative path with no workspace is refused with `next: resend_with_root`.
+- Common slips are read with a warning instead of refused: read options nested inside
+  `target` are moved to the top level, a bare string `target` is `target.path`, search's
+  `path`, `path_prefix` and `include` are `paths`, and a search `limit` above the maximum
+  is reduced to it. A string that should have been an object but is not valid JSON is refused
+  with the byte offset of the syntax error.
 
 ## Forward MCP results once
 

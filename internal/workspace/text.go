@@ -551,8 +551,65 @@ func (w *Workspace) Paths() ([]string, Coverage, error) {
 	return paths, coverage, nil
 }
 
+// ScopedPaths lists the workspace's documents inside a path scope as
+// workspace-relative paths, with the coverage of that scope alone. The scope
+// is applied before the file cap, as search applies it, so a listing of one
+// directory in a tree larger than the cap still lists that directory.
+func (w *Workspace) ScopedPaths(patterns []string) ([]string, Coverage, error) {
+	files, coverage, err := w.collectScopedFiles(patterns)
+	if err != nil {
+		return nil, coverage, err
+	}
+	paths := make([]string, len(files))
+	for index, name := range files {
+		paths[index] = displayPath(w.identity.Root, name)
+	}
+	return paths, coverage, nil
+}
+
+// DirectoryPaths lists the workspace's documents below one directory as
+// workspace-relative paths, with the coverage of that directory alone. The
+// directory is an exact path prefix applied before the file cap: a
+// substring scope would let a/pkg/ spend the cap on the way to pkg/, so a
+// listing of pkg could come back empty. "" or "." is the whole workspace.
+func (w *Workspace) DirectoryPaths(directory string) ([]string, Coverage, error) {
+	directory = strings.Trim(filepath.ToSlash(filepath.Clean(directory)), "/")
+	if directory == "." {
+		directory = ""
+	}
+	files, coverage, err := w.collectInScope(pathScope{directory: directory})
+	if err != nil {
+		return nil, coverage, err
+	}
+	paths := make([]string, len(files))
+	for index, name := range files {
+		paths[index] = displayPath(w.identity.Root, name)
+	}
+	return paths, coverage, nil
+}
+
 func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 	return w.collectScopedFiles(nil)
+}
+
+// pathScope selects the documents a listing covers: patterns as
+// MatchesPathScope reads them, and directory, when set, an exact
+// workspace-relative directory whose files alone are inside. Both are
+// applied before the file cap.
+type pathScope struct {
+	patterns  []string
+	directory string
+}
+
+func (s pathScope) empty() bool { return len(s.patterns) == 0 && s.directory == "" }
+
+// matches reports whether a workspace-relative, slash-separated path is
+// inside the scope.
+func (s pathScope) matches(relative string) bool {
+	if s.directory != "" && !strings.HasPrefix(relative, s.directory+"/") {
+		return false
+	}
+	return len(s.patterns) == 0 || MatchesPathScope(relative, s.patterns)
 }
 
 // collectScopedFiles lists the documents inside a path scope, in path order.
@@ -561,36 +618,40 @@ func (w *Workspace) collectFiles() ([]string, Coverage, error) {
 // tree larger than the cap still lists that file and says it is complete. The
 // coverage describes the scope alone; a file outside it is not a gap.
 func (w *Workspace) collectScopedFiles(patterns []string) ([]string, Coverage, error) {
+	return w.collectInScope(pathScope{patterns: patterns})
+}
+
+func (w *Workspace) collectInScope(scope pathScope) ([]string, Coverage, error) {
 	coverage := Coverage{Complete: true, Semantic: w.semanticCoverage()}
 	if w.identity.Kind == KindDocuments {
-		files := w.collectAllowlisted(patterns, &coverage)
-		return files, scopeCoverage(coverage, patterns), nil
+		files := w.collectAllowlisted(scope, &coverage)
+		return files, scopeCoverage(coverage, scope), nil
 	}
 	// The inventory honours .gitignore through the sanitized Git runner so
 	// ambient GIT_DIR, GIT_CONFIG_* injection and core.fsmonitor hooks never
 	// reach the native text path. A truncated listing is not trusted; the
 	// bounded walk below takes over instead.
 	if output, truncated, err := runGitAt(w.identity.Root, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err == nil && !truncated {
-		files := w.collectListedFiles(output, patterns, &coverage)
-		return files, scopeCoverage(coverage, patterns), nil
+		files := w.collectListedFiles(output, scope, &coverage)
+		return files, scopeCoverage(coverage, scope), nil
 	}
-	files, err := w.walkFiles(patterns, &coverage)
-	return files, scopeCoverage(coverage, patterns), err
+	files, err := w.walkFiles(scope, &coverage)
+	return files, scopeCoverage(coverage, scope), err
 }
 
 // scopeCoverage drops the skipped entries a scope excludes. A walk notes an
 // unreadable directory or a depth limit before it can know whether anything
 // inside the scope lies below it; an entry whose path is outside the scope is
 // not a gap in a search that was told not to look there.
-func scopeCoverage(coverage Coverage, patterns []string) Coverage {
-	if len(patterns) == 0 {
+func scopeCoverage(coverage Coverage, scope pathScope) Coverage {
+	if scope.empty() {
 		return coverage
 	}
 	scoped := coverage
 	scoped.Skipped, scoped.SkippedCount = nil, 0
 	for _, skipped := range coverage.Skipped {
 		path, _, found := strings.Cut(skipped, ": ")
-		if found && !MatchesPathScope(path, patterns) {
+		if found && !scope.matches(filepath.ToSlash(path)) {
 			continue
 		}
 		scoped.Skipped = append(scoped.Skipped, skipped)
@@ -605,7 +666,7 @@ func scopeCoverage(coverage Coverage, patterns []string) Coverage {
 
 // collectAllowlisted returns the allowlisted documents in path order, keeping a missing
 // document (it may be created) and skipping one that cannot be stat'ed.
-func (w *Workspace) collectAllowlisted(patterns []string, coverage *Coverage) []string {
+func (w *Workspace) collectAllowlisted(scope pathScope, coverage *Coverage) []string {
 	w.mu.Lock()
 	candidates := make([]string, 0, len(w.allowlist))
 	for name := range w.allowlist {
@@ -613,10 +674,10 @@ func (w *Workspace) collectAllowlisted(patterns []string, coverage *Coverage) []
 	}
 	w.mu.Unlock()
 	sort.Strings(candidates)
-	if len(patterns) > 0 {
+	if !scope.empty() {
 		scoped := candidates[:0]
 		for _, name := range candidates {
-			if MatchesPathScope(displayPath(w.identity.Root, name), patterns) {
+			if scope.matches(displayPath(w.identity.Root, name)) {
 				scoped = append(scoped, name)
 			}
 		}
@@ -646,7 +707,7 @@ func (w *Workspace) collectAllowlisted(patterns []string, coverage *Coverage) []
 
 // collectListedFiles turns a NUL-separated git ls-files listing into bounded absolute
 // paths, keeping only those inside the scope.
-func (w *Workspace) collectListedFiles(output string, patterns []string, coverage *Coverage) []string {
+func (w *Workspace) collectListedFiles(output string, scope pathScope, coverage *Coverage) []string {
 	var files []string
 	previous := ""
 	for _, relative := range strings.Split(output, "\x00") {
@@ -656,7 +717,7 @@ func (w *Workspace) collectListedFiles(output string, patterns []string, coverag
 			continue
 		}
 		previous = relative
-		if len(patterns) > 0 && !MatchesPathScope(relative, patterns) {
+		if !scope.empty() && !scope.matches(relative) {
 			continue
 		}
 		coverage.FilesConsidered++
@@ -678,7 +739,7 @@ func (w *Workspace) collectListedFiles(output string, patterns []string, coverag
 }
 
 // walkFiles is the bounded filesystem walk used when Git cannot list the tree.
-func (w *Workspace) walkFiles(patterns []string, coverage *Coverage) ([]string, error) {
+func (w *Workspace) walkFiles(scope pathScope, coverage *Coverage) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(w.identity.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -703,7 +764,7 @@ func (w *Workspace) walkFiles(patterns []string, coverage *Coverage) ([]string, 
 			}
 			return nil
 		}
-		if len(patterns) > 0 && !MatchesPathScope(filepath.ToSlash(rel), patterns) {
+		if !scope.empty() && !scope.matches(filepath.ToSlash(rel)) {
 			return nil
 		}
 		coverage.FilesConsidered++
@@ -747,7 +808,7 @@ func (w *Workspace) Read(path string) (TextRead, error) {
 		return TextRead{}, Coded(CodeDocumentNotFound, &DocumentNotFoundError{Path: displayPath(w.identity.Root, absolute)})
 	}
 	if snapshot.Disk.Kind != ObjectRegularText {
-		return TextRead{}, fmt.Errorf("%s is %s, not regular text", absolute, snapshot.Disk.Kind)
+		return TextRead{}, &NotRegularTextError{Path: displayPath(w.identity.Root, absolute), Absolute: absolute, Kind: snapshot.Disk.Kind}
 	}
 	if snapshot.Disk.Size > w.limits.MaxBytes {
 		return TextRead{}, fmt.Errorf("%s exceeds the %d-byte read limit", absolute, w.limits.MaxBytes)

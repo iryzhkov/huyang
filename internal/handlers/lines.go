@@ -105,6 +105,26 @@ func capLines(content []byte, max int) ([]byte, bool) {
 	return content[:end], true
 }
 
+// startPastEndError is a window that starts after the document's last line.
+// A read answers it with an empty window rather than a refusal: the caller
+// was paging forward, or guessed at a length, and the line count it needs
+// is the whole of the answer.
+type startPastEndError struct {
+	start, total int
+}
+
+func (e *startPastEndError) Error() string {
+	return fmt.Sprintf("start_line %d exceeds document line count %d", e.start, e.total)
+}
+
+// warning says why the window is empty and where the document ends.
+func (e *startPastEndError) warning() string {
+	if e.total == 0 {
+		return fmt.Sprintf("start_line %d is past the end of an empty document; nothing was read", e.start)
+	}
+	return fmt.Sprintf("start_line %d is past the last line, %d; nothing was read, so start at or before line %d", e.start, e.total, e.total)
+}
+
 // boundedLines returns the requested line window. A zero start and end mean
 // the whole document; a zero end alone means the single start line. The
 // returned bounds are the actual lines delivered after clamping the end.
@@ -123,7 +143,7 @@ func boundedLines(content []byte, startLine, endLine int) ([]byte, int, int, err
 	}
 	total := lineCount(content)
 	if startLine > total {
-		return nil, 0, 0, fmt.Errorf("start_line %d exceeds document line count %d", startLine, total)
+		return nil, 0, 0, &startPastEndError{start: startLine, total: total}
 	}
 	if endLine > total {
 		endLine = total
