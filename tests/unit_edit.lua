@@ -356,17 +356,29 @@ do
     local saved_attach = vim.lsp.buf_attach_client
     local pull_coroutine
     local pull_items, responses = {}, 0
+    local next_request, callbacks, registered = 0, {}, nil
     vim.lsp.util.buf_versions[buf] = 4
     local fake = {id=9002,name="pull_test",config={filetypes={"python"}},
         handlers={["textDocument/publishDiagnostics"]=function() end},
         supports_method=function(_,method) return method=="textDocument/diagnostic" end,
         request=function(_,_,_,callback)
+            next_request = next_request + 1
+            local id = next_request
+            callbacks[id] = callback
             vim.defer_fn(function()
+                if not callbacks[id] then return end
+                callbacks[id] = nil
                 responses = responses + 1
                 callback(nil,{kind="full",items=vim.deepcopy(pull_items)})
             end,40)
-            return true,1
-        end}
+            return true,id
+        end,
+        cancel_request=function(_,id) callbacks[id] = nil end}
+    registered=fake
+    vim.lsp.get_client_by_id = function(id)
+        if id == fake.id then return registered end
+        return saved_client(id)
+    end
     -- Only Huyang's diagnostic request sees this protocol stub. Native LSP
     -- on_lines and VimLeavePre callbacks need the real client registry.
     vim.lsp.get_clients=function(filter)
@@ -400,10 +412,10 @@ do
         result and #result.batches==1 and result.batches[1].complete==false,result)
     vim.wait(70)
     local late=edit.late_evidence().batches
-    check("a late clean pull carries current version proof and transaction",
+    check("a late empty pull retains request attribution without producer proof",
         #late==1 and late[1].kind=="lsp_pull" and late[1].reason=="late_pull"
-        and late[1].document_version==4 and late[1].expected_version==4
-        and late[1].transaction_id=="edit_pull" and late[1].complete==true,late)
+        and late[1].document_version==nil and late[1].expected_version==4
+        and late[1].transaction_id=="edit_pull" and late[1].complete==false,late)
     timed_pull()
     vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 2"})
     vim.wait(70)
@@ -422,9 +434,15 @@ do
         { "disk write", function() vim.fn.writefile({"value = 400"},path) end },
         { "plan invalidation", function() edit.mark_diagnostic_change(buf) end },
         { "version change", function() vim.lsp.util.buf_versions[buf] = 5 end },
+        { "client replacement", function() registered = {} end },
+        { "client detach", function() fake.attached_buffers[buf] = nil end },
+        { "buffer rename", function() vim.api.nvim_buf_set_name(buf,path .. ".renamed") end },
     }
     for _, positive in ipairs({false,true}) do
         for _, change in ipairs(changes) do
+            registered=fake
+            fake.attached_buffers={[buf]=true}
+            vim.api.nvim_buf_set_name(buf,path)
             vim.api.nvim_buf_set_lines(buf,0,-1,false,{"value = 1"})
             vim.bo[buf].modified = false
             vim.fn.writefile({"value = 1"},path)
@@ -444,8 +462,11 @@ do
                 #edit.late_evidence().batches==0)
         end
     end
-    -- A queued clean response can cease to be complete after its callback.
-    -- Keep it pending until any currently open progress ends.
+    -- Progress completion is not a producer document-version stamp, even
+    -- when a full response has arrived and its request bytes remain current.
+    vim.api.nvim_buf_set_name(buf,path)
+    fake.attached_buffers={[buf]=true}
+    registered=fake
     vim.lsp.get_client_by_id = function(id)
         if id == fake.id then return fake end
         return saved_client(id)
@@ -463,12 +484,190 @@ do
     vim.api.nvim_exec_autocmds("LspProgress", { data = { client_id = fake.id,
         params = { token = "pull", value = { kind = "end" } } } })
     local complete = edit.late_evidence().batches[1]
-    check("a queued pull completes after progress ends without another response",
-        complete and complete.complete and not complete.progress_pending,complete)
-    check("a complete queued pull is delivered once",#edit.late_evidence().batches==0)
+    check("progress end cannot promote the previously delivered empty pull",
+        complete==nil,complete)
+    check("an unchanged provisional pull is not delivered again",#edit.late_evidence().batches==0)
+    edit.mark_diagnostic_change(buf)
     vim.lsp.get_client_by_id=saved_client
     vim.lsp.get_clients=saved_clients
     vim.lsp.buf_attach_client=saved_attach
+    vim.api.nvim_buf_delete(buf,{force=true})
+    vim.fn.delete(path)
+end
+
+-- A pull lane coalesces wakeups, bounds requests/state, and retires its own
+-- requests on expiry or cancellation without changing evidence confidence.
+do
+    local watcher = require("huyang.diagnostic_pull")
+    local saved_client = vim.lsp.get_client_by_id
+    local clients = {}
+    vim.lsp.get_client_by_id=function(id) return clients[id] or saved_client(id) end
+    local calls, cancelled, received, callback = 0, 0, 0, nil
+    local fake = { id=9011, name="bounded_pull_test",
+        request=function(_,_,_,reply)
+            calls=calls+1
+            callback=reply
+            return true,calls
+        end,
+        cancel_request=function() cancelled=cancelled+1 end }
+    clients[fake.id]=fake
+    local args = {client=fake,bufnr=1,document="bounded-pull",params={},
+        current=function() return true end,
+        receive=function() received=received+1 end}
+    watcher.start(args)
+    for _=1,10 do watcher.wake(fake.id) end
+    vim.wait(5)
+    check("wakeups do not duplicate an owned in-flight pull",calls==1,calls)
+    callback(nil,{kind="full",items={}})
+    vim.wait(20,function() return calls==2 end,1)
+    check("one deferred fetch follows producer events during a request",calls==2,calls)
+    callback(nil,{kind="full",items={}})
+    for _=1,20 do
+        watcher.wake(fake.id)
+        vim.wait(2)
+        if calls>received then callback(nil,{kind="full",items={}}) end
+    end
+    check("a pull lane has a finite request budget",calls==16 and received==16,{calls,received})
+    watcher.cancel_document(args.document)
+
+    calls,cancelled=0,0
+    local documents={}
+    for i=1,65 do
+        local document="bounded-pull-" .. i
+        documents[#documents+1]=document
+        watcher.start({client=fake,bufnr=1,document=document,params={},
+            current=function() return true end,receive=function() end})
+    end
+    check("the watcher cap cancels the oldest retained owned request",calls==65 and cancelled==1,
+        {calls,cancelled})
+    for _,document in ipairs(documents) do watcher.cancel_document(document) end
+    check("cancellation retires every retained owned request",cancelled==65,cancelled)
+    local saved_timer, expiry, timer_closed = vim.uv.new_timer, nil, false
+    vim.uv.new_timer=function()
+        return {
+            start=function(_,_,_,expire) expiry=expire end,
+            stop=function() end,
+            close=function() timer_closed=true end,
+        }
+    end
+    watcher.start(args)
+    vim.uv.new_timer=saved_timer
+    local before_expiry, before_received=cancelled,received
+    expiry()
+    vim.wait(20,function() return timer_closed end,1)
+    callback(nil,{kind="full",items={}})
+    check("deadline cancels the owned request and ignores its later response",
+        timer_closed and cancelled==before_expiry+1 and received==before_received,
+        {cancelled,received})
+    vim.lsp.get_client_by_id=saved_client
+end
+
+-- Full pull bodies can change their opaque ID before analysis begins.
+-- Producer events fetch new facts, but only a stamped push can prove absence.
+do
+    local path = vim.fn.tempname() .. ".py"
+    vim.fn.writefile({ "value = 1" }, path)
+    local buf = core.load_buf(path)
+    local saved_clients, saved_client = vim.lsp.get_clients, vim.lsp.get_client_by_id
+    local saved_attach = vim.lsp.buf_attach_client
+    local pull_coroutine, requests, refreshes = nil, 0, 0
+    local diagnostic = { range={start={line=0,character=0},["end"]={line=0,character=1}},
+        severity=1,message="delayed assignment error" }
+    local response = { kind="full", resultId="before", items={diagnostic} }
+    local fake = { id=9010, name="causal_pull_test", config={filetypes={"python"}},
+        handlers={
+            ["textDocument/publishDiagnostics"]=function() end,
+            ["workspace/diagnostic/refresh"]=function() refreshes=refreshes+1; return "native refresh" end,
+        },
+        supports_method=function(_,method) return method=="textDocument/diagnostic" end,
+        request=function(_,_,_,callback)
+            requests=requests+1
+            callback(nil,vim.deepcopy(response))
+            return true,requests
+        end }
+    vim.lsp.get_client_by_id=function(id)
+        if id==fake.id then return fake end
+        return saved_client(id)
+    end
+    vim.lsp.get_clients=function(filter)
+        if pull_coroutine and coroutine.running()==pull_coroutine then
+            if not filter or filter.bufnr==buf then return {fake} end
+            return {}
+        end
+        return saved_clients(filter)
+    end
+    vim.lsp.buf_attach_client=function(target,id)
+        if id==fake.id then return true end
+        return saved_attach(target,id)
+    end
+    local function pull()
+        local result
+        local co=coroutine.create(function()
+            result=edit.diagnostic_evidence({files={path},wait_ms=50,
+                transaction_id="edit_causal_pull",revision="wsrev_causal_pull"})
+        end)
+        pull_coroutine=co
+        local ok,detail=coroutine.resume(co)
+        check("causal pull request starts",ok,detail)
+        vim.wait(200,function() return coroutine.status(co)=="dead" end,1)
+        pull_coroutine=nil
+        return result and result.batches[1]
+    end
+    vim.lsp.util.buf_versions[buf]=8
+    local before=pull()
+    check("positive full pull does not invent producer version proof",
+        before and not before.complete and before.document_version==nil and #before.findings==1,before)
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.util.buf_versions[buf]=9
+    response={kind="full",resultId="advanced-before-progress",items={}}
+    local empty=pull()
+    check("advanced opaque ID before progress does not certify clean",
+        empty and empty.result_id=="advanced-before-progress" and not empty.complete
+            and empty.document_version==nil and empty.expected_version==9,empty)
+    local function progress(kind)
+        vim.api.nvim_exec_autocmds("LspProgress",{data={client_id=fake.id,
+            params={token="analysis",value={kind=kind}}}})
+    end
+    progress("begin")
+    response={kind="full",resultId="analyzed",items={diagnostic}}
+    local expected_requests=requests+1
+    progress("end")
+    vim.wait(100,function() return requests==expected_requests end,1)
+    local late=edit.late_evidence().batches
+    check("producer progress fetches and delivers the delayed finding provisionally",
+        #late==1 and not late[1].complete and late[1].document_version==nil
+            and late[1].expected_version==9 and late[1].transaction_id=="edit_causal_pull"
+            and late[1].findings[1].message=="delayed assignment error",late)
+    vim.wait(10)
+    check("repeated pull payload is delivered once",#edit.late_evidence().batches==0)
+    response={kind="full",resultId="different-findings",items={{
+        range=diagnostic.range,severity=1,message="another delayed error",
+    }}}
+    local native=fake.handlers["workspace/diagnostic/refresh"](nil,nil,{client_id=fake.id})
+    expected_requests=requests+1
+    vim.wait(100,function() return requests==expected_requests end,1)
+    local refreshed=edit.late_evidence().batches
+    check("native refresh handler is preserved and fetches another provisional body",
+        native=="native refresh" and refreshes==1 and #refreshed==1
+            and not refreshed[1].complete and refreshed[1].document_version==nil
+            and refreshed[1].findings[1].message=="another delayed error",refreshed)
+    fake.handlers["textDocument/publishDiagnostics"](nil,
+        {uri=vim.uri_from_bufnr(buf),version=9,diagnostics={}}, {})
+    local transient=edit.late_evidence().batches[1]
+    check("a versioned empty push still needs quiet after provisional pulls",
+        transient and transient.kind=="lsp_push" and not transient.complete,transient)
+    vim.wait(170)
+    local clean=edit.late_evidence().batches[1]
+    check("a quiet current empty push remains authoritative after provisional pulls",
+        clean and clean.kind=="lsp_push" and clean.complete and clean.document_version==9,clean)
+    local stopped=requests
+    vim.wait(10)
+    edit.late_evidence()
+    vim.wait(10)
+    check("a versioned push cancels the owned pull lane",requests==stopped,requests)
+    edit.mark_diagnostic_change(buf)
+    vim.lsp.get_clients, vim.lsp.get_client_by_id = saved_clients, saved_client
+    vim.lsp.buf_attach_client = saved_attach
     vim.api.nvim_buf_delete(buf,{force=true})
     vim.fn.delete(path)
 end

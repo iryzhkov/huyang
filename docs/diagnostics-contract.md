@@ -40,7 +40,25 @@ LSP version and disk currency at collection. Any currently open producer progres
 vetoes late completion. Observations are coalesced by producer/document before
 ledger insertion; an intermediate empty set cannot resolve a superseding positive
 observation.
-Unversioned positives are provisional and unattributed; unversioned emptiness
+Ordinary `textDocument/diagnostic` responses have no producer document version.
+Both positive and empty full bodies remain provisional: the request's expected
+version, a changed opaque result ID, quiet and progress completion do not prove
+that the producer analyzed that document version. Request/postimage guards retain
+useful positive findings and their pending transaction, but no pull body can
+resolve omitted findings or turn older empty coverage into authoritative proof.
+A pull-only producer may therefore remain pending even when the document is clean.
+Versioned current pushes retain the completeness rule above.
+
+A bounded pull watcher preserves the native refresh handler and fetches again on
+producer progress completion, diagnostic refresh or later evidence collection.
+Each producer/document has one owned request in flight, with at most 16 requests,
+30 seconds of retention and 64 watchers per provider process. These limits only
+bound fetching and memory; their expiry never proves absence. Buffer, client
+identity/attachment, version, disk and pending transaction changes cancel stale
+work, and late observations are revalidated before delivery. Repeated payloads do
+not reannounce findings.
+
+Unversioned push positives are provisional and unattributed; unversioned emptiness
 cannot prove resolution. Rust uses `rust_diagnostics_pending` when semantic proof
 is incomplete and delivers late findings via `diagnostic_updates` on later calls.
 
