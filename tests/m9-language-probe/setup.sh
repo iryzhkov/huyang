@@ -3,6 +3,14 @@
 # build Huyang, start services, or run the probe. Invoke with: bash .../setup.sh PREFIX
 set -euo pipefail
 umask 077
+bootstrap_python=$(command -v python3)
+script_dir=$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")
+# No writes, including Python bytecode, before the source-owned HOME/namespace guard.
+"$bootstrap_python" -I -B "$script_dir/safety.py" --fresh-prefix "${1:?usage: setup.sh JOB_LOCAL_PREFIX}"
+bootstrap_python_version=$("$bootstrap_python" -I -B --version)
+bootstrap_python_modules=$("$bootstrap_python" -I -B -c 'import venv,ensurepip; print("venv_stdlib="+venv.__file__); print("ensurepip_bundled_pip="+ensurepip.version())')
+bootstrap_git=$(command -v git)
+bootstrap_git_version=$("$bootstrap_git" --version)
 prefix=$(realpath -m -- "${1:?usage: setup.sh JOB_LOCAL_PREFIX}")
 [ "$prefix" != / ] || { echo "refusing root prefix" >&2; exit 1; }
 case "$prefix/" in /tmp/*) echo "prefix must be an on-disk job-local directory" >&2; exit 1;; esac
@@ -25,7 +33,7 @@ unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_INDEX UV_DEFAULT_INDEX PIP_EXTRA_INDEX_
 cd "$prefix"
 # Bootstrap prerequisites are recorded rather than silently installed on the
 # host. Python3 needs stdlib venv+ensurepip; Go must satisfy this repository.
-for command in curl tar sha256sum python3 go strace git sh bash readlink uname dirname realpath; do
+for command in curl tar xz awk chmod sha256sum python3 go strace git sh bash readlink uname dirname realpath; do
     command -v "$command" >/dev/null || { echo "missing job prerequisite $command" >&2; exit 1; }
 done
 nvim_version=0.12.5
@@ -66,7 +74,8 @@ printf '{"name":"m9-probe-tools","private":true}\n' > npm/package.json
     --before="$resolution_cutoff" "pyright@$pyright_version"
 ln -sfn "$prefix/npm/node_modules/.bin/pyright-langserver" "$prefix/bin/pyright-langserver"
 # Bootstrap uv is installed into an isolated venv; never into the host Python.
-python3 -I -m venv "$prefix/bootstrap"
+"$bootstrap_python" -I -B -m venv "$prefix/bootstrap"
+bootstrap_pip_version=$("$prefix/bootstrap/bin/python" -I -B -m pip --version)
 "$prefix/bootstrap/bin/python" -I -m pip --isolated install --index-url https://pypi.org/simple --cache-dir "$prefix/cache/pip" "uv==$uv_version"
 ln -sfn "$prefix/bootstrap/bin/uv" "$prefix/bin/uv"
 "$prefix/bin/uv" --no-config python install --no-bin "$python_version"
@@ -84,11 +93,16 @@ done
 {
     printf 'nvim=%s\nlspconfig=%s\nnode=%s\nuv=%s\npoetry=%s\npython=%s\ngopls=%s\npyright=%s\nresolution_cutoff=%s\n' \
         "$nvim_version" "$lsp_commit" "$node_version" "$uv_version" "$poetry_version" "$python_version" "$gopls_version" "$pyright_version" "$resolution_cutoff"
-    python3 --version
+    printf 'bootstrap_python_path=%s\nbootstrap_python=%s\n%s\nbootstrap_pip=%s\nbootstrap_git_path=%s\nbootstrap_git=%s\n' \
+        "$bootstrap_python" "$bootstrap_python_version" "$bootstrap_python_modules" "$bootstrap_pip_version" "$bootstrap_git" "$bootstrap_git_version"
+    "$prefix/bin/python" --version
     go version
     "$prefix/bin/strace" --version
     "$prefix/poetry-tool/bin/python" -I -m pip freeze 2>/dev/null || \
         "$prefix/bin/uv" --no-config pip freeze --python "$prefix/poetry-tool/bin/python"
 } > "$prefix/manifest.txt"
 find "$prefix/downloads" -maxdepth 1 -type f -exec sha256sum {} + > "$prefix/download-sha256.txt"
+# Shared managed Python is read-only during acceptance; the probe also enforces
+# full before/after tool hashes, so chmod alone is not the immutability proof.
+chmod -R a-w "$prefix/python"
 echo "Provisioned $prefix; this did not build or run Huyang."

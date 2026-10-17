@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,8 +15,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -33,6 +36,7 @@ func TestPythonEnvironmentAcceptance(t *testing.T) {
 	if os.Getenv("HUYANG_FRICTION") != "0" {
 		t.Fatal("HUYANG_FRICTION=0 is required")
 	}
+	m9ScratchHome(t) // Before any writes or subprocesses, including preflight.
 	tools := m9RequiredDir(t, "HUYANG_M9_TOOLS")
 	out := m9RequiredDir(t, "HUYANG_M9_RUN")
 	binary := os.Getenv("HUYANG_M9_BINARY")
@@ -49,6 +53,26 @@ func TestPythonEnvironmentAcceptance(t *testing.T) {
 	if !filepath.IsAbs(tmp) || tmpErr != nil || strings.HasPrefix(tmpReal+"/", "/tmp/") {
 		t.Fatal("set an existing on-disk TMPDIR outside /tmp, including through symlinks")
 	}
+	scratch := filepath.Dir(out)
+	if scratch == os.Getenv("HOME") || !m9Within(os.Getenv("HOME"), scratch) || !m9Within(scratch, tools) || !m9Within(scratch, tmpReal) {
+		t.Fatal("tools and TMPDIR must be under the private run parent, distinct from HOME")
+	}
+	m9PrivateDir(t, scratch)
+	m9PrivateDir(t, out)
+	m9PrivateDir(t, tmpReal)
+	beforeHome := m9HomeMetadata(t, scratch)
+	beforeTools := m9ToolHashes(t, tools, realBinary)
+	m9JSON(t, filepath.Join(out, "before-home-metadata.json"), beforeHome)
+	m9JSON(t, filepath.Join(out, "before-tool-hashes.json"), beforeTools)
+	t.Cleanup(func() {
+		afterTools := m9ToolHashes(t, tools, realBinary)
+		afterHome := m9HomeMetadata(t, scratch)
+		m9JSON(t, filepath.Join(out, "after-tool-hashes.json"), afterTools)
+		m9JSON(t, filepath.Join(out, "after-home-metadata.json"), afterHome)
+		if !maps.Equal(beforeTools, afterTools) || !maps.Equal(beforeHome, afterHome) {
+			t.Error("immutable tools or scratch HOME outside the allowed run parent changed")
+		}
+	})
 	for _, name := range []string{"python", "python3", "uv", "poetry", "nvim", "node", "pyright-langserver", "gopls", "strace", "git", "sh", "bash", "readlink", "uname", "dirname", "realpath"} {
 		m9Executable(t, filepath.Join(tools, "bin", name))
 	}
@@ -61,10 +85,15 @@ func TestPythonEnvironmentAcceptance(t *testing.T) {
 	}
 	// Only selected variables go to subprocesses: no credentials, user MCP
 	// endpoints, Python paths, user package configs, or inherited venv.
+	preflightTmp := filepath.Join(out, "preflight-tmp")
+	if err := os.MkdirAll(preflightTmp, 0700); err != nil {
+		t.Fatal(err)
+	}
 	baseEnv := []string{"HOME=" + os.Getenv("HOME"), "LANG=C.UTF-8", "HUYANG_FRICTION=0",
 		"XDG_CONFIG_HOME=" + filepath.Join(out, "preflight-config"), "XDG_CACHE_HOME=" + filepath.Join(out, "preflight-cache"),
 		"XDG_DATA_HOME=" + filepath.Join(out, "preflight-data"), "POETRY_CONFIG_DIR=" + filepath.Join(out, "preflight-poetry-config"),
-		"POETRY_KEYRING_ENABLED=false", "NETRC=/dev/null",
+		"POETRY_KEYRING_ENABLED=false", "NETRC=/dev/null", "PYTHONDONTWRITEBYTECODE=1",
+		"TMPDIR=" + preflightTmp, "XDG_STATE_HOME=" + filepath.Join(out, "preflight-state"),
 		"POETRY_CACHE_DIR=" + filepath.Join(out, "preflight-poetry-cache"), "M9_COMMAND_LOG=" + filepath.Join(out, "preflight-commands.log")}
 	pins := map[string][]string{
 		"python": {"--version"}, "uv": {"--version"}, "poetry": {"--version"},
@@ -143,8 +172,12 @@ type m9Probe struct {
 	lastEditAt                               time.Time
 	quietChecks                              int
 	progressVetoes                           int
+	pullVetoes                               int
+	pullVetoChecks                           int
 	evidenceSeen                             map[string]bool
+	evidenceBatches                          map[string]map[string]any
 	before                                   map[string]string
+	beforeEnvironment                        map[string]string
 }
 
 func m9RequiredDir(t *testing.T, name string) string {
@@ -193,7 +226,18 @@ func m9Exec(t *testing.T, parent context.Context, cwd string, env []string, comm
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = cwd, env, time.Second
-	output, err := cmd.CombinedOutput()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return unix.Kill(-cmd.Process.Pid, unix.SIGKILL) }
+	// Capture descendants before cancellation can detach them from the leader.
+	var outputBuffer bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &outputBuffer, &outputBuffer
+	err := cmd.Start()
+	if err == nil {
+		stop := m9TrackTree(cmd)
+		err = cmd.Wait()
+		stop(t)
+	}
+	output := outputBuffer.Bytes()
 	for _, entry := range env {
 		if path, ok := strings.CutPrefix(entry, "M9_COMMAND_LOG="); ok {
 			log, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -241,7 +285,7 @@ func (p *m9Probe) fixture() {
 		}
 	}
 	p.env = []string{
-		"HOME=" + os.Getenv("HOME"), "LANG=C.UTF-8", "PATH=" + bin, "TMPDIR=" + os.Getenv("TMPDIR"),
+		"HOME=" + os.Getenv("HOME"), "LANG=C.UTF-8", "PATH=" + bin, "TMPDIR=" + filepath.Join(p.dir, "tmp"),
 		"M9_COMMAND_LOG=" + filepath.Join(p.dir, "fixture-commands.log"),
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0",
 		"HUYANG_FRICTION=0", "HUYANG_RUNTIME_PATH=" + p.repo,
@@ -257,7 +301,7 @@ func (p *m9Probe) fixture() {
 		"M9_TRACE=" + filepath.Join(p.dir, "lsp.jsonl"), "M9_LSPCONFIG=" + filepath.Join(p.tools, "nvim-lspconfig"),
 		"M9_PYRIGHT=" + filepath.Join(bin, "pyright-langserver"),
 	}
-	for _, name := range []string{"config", "data", "cache", "xdg-state", "poetry-config", "poetry-cache", "poetry-data", "run"} {
+	for _, name := range []string{"config", "data", "cache", "xdg-state", "poetry-config", "poetry-cache", "poetry-data", "run", "tmp"} {
 		if err := os.MkdirAll(filepath.Join(p.dir, name), 0700); err != nil {
 			p.t.Fatal(err)
 		}
@@ -320,7 +364,8 @@ func (p *m9Probe) fixture() {
 	p.before = m9Hashes(p.t, p.root)
 	m9JSON(p.t, filepath.Join(p.dir, "before-hashes.json"), p.before)
 	if p.selected != "" {
-		m9JSON(p.t, filepath.Join(p.dir, "before-environment-hashes.json"), m9Hashes(p.t, filepath.Dir(filepath.Dir(p.selected))))
+		p.beforeEnvironment = m9Hashes(p.t, filepath.Dir(filepath.Dir(p.selected)))
+		m9JSON(p.t, filepath.Join(p.dir, "before-environment-hashes.json"), p.beforeEnvironment)
 	}
 }
 
@@ -350,8 +395,8 @@ end})
 vim.api.nvim_create_autocmd("LspProgress", {callback = function(ev)
     trace({kind="progress", data=ev.data})
 end})
--- Observe actual server publications before Huyang's own wrapper consumes
--- them. No diagnostic, version, progress event, timing or result is changed.
+-- Huyang's per-client wrapper records the publication before calling this
+-- inner observer. No diagnostic, version, timing or handler result is changed.
 local publish = vim.lsp.handlers["textDocument/publishDiagnostics"]
 vim.lsp.handlers["textDocument/publishDiagnostics"] = function(err, params, ctx, config)
     trace({kind="publish", params=params, client_id=ctx.client_id})
@@ -368,7 +413,7 @@ func (p *m9Probe) start() {
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	command := exec.CommandContext(p.ctx, filepath.Join(p.tools, "bin", "strace"), "-ff", "-e", "trace=execve", "-s", "2048", "-o", filepath.Join(p.dir, "exec"), p.binary, "serve", "--socket", socket, "--state-dir", filepath.Join(p.dir, "state"))
+	command := exec.CommandContext(p.ctx, filepath.Join(p.tools, "bin", "strace"), "--kill-on-exit", "-ff", "-e", "trace=execve,execveat", "-s", "2048", "-o", filepath.Join(p.dir, "exec"), p.binary, "serve", "--socket", socket, "--state-dir", filepath.Join(p.dir, "state"))
 	command.Env, command.Stdout, command.Stderr, command.WaitDelay = p.env, log, log, time.Second
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error {
@@ -380,17 +425,18 @@ func (p *m9Probe) start() {
 	if err := command.Start(); err != nil {
 		p.t.Fatal(err)
 	}
+	stop := m9TrackTree(command)
 	done := make(chan struct{})
 	go func() { _ = command.Wait(); close(done) }()
 	p.t.Cleanup(func() {
-		_ = unix.Kill(-command.Process.Pid, unix.SIGTERM)
+		stop(p.t) // Waits for group AND tracked descendants, even if strace exited.
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
-			_ = unix.Kill(-command.Process.Pid, unix.SIGKILL)
-			<-done
+		case <-time.After(2 * time.Second):
+			p.t.Error("strace leader was not reaped after tree termination")
 		}
 		_ = log.Close()
+		p.assertManagerTrace() // Trace is final only after the entire tree is gone.
 	})
 	for {
 		if _, err := os.Stat(socket); err == nil {
@@ -417,6 +463,8 @@ func (p *m9Probe) start() {
 func (p *m9Probe) connect(socket, style string) *probeMCP {
 	cmd := exec.CommandContext(p.ctx, p.binary, "mcp", "--socket", socket, "--profile", "experimental", "--reply-style", style)
 	cmd.Env, cmd.WaitDelay = p.env, time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return unix.Kill(-cmd.Process.Pid, unix.SIGKILL) }
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		p.t.Fatal(err)
@@ -433,12 +481,17 @@ func (p *m9Probe) connect(socket, style string) *probeMCP {
 	if err := cmd.Start(); err != nil {
 		p.t.Fatal(err)
 	}
+	stop := m9TrackTree(cmd)
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
 	p.t.Cleanup(func() {
 		_ = in.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		stop(p.t)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			p.t.Error("adapter leader was not reaped")
 		}
-		_ = cmd.Wait()
 		_ = log.Close()
 	})
 	scanner := bufio.NewScanner(out)
@@ -571,6 +624,9 @@ func (p *m9Probe) edit(old, new string) map[string]any {
 	if len(m9Text(data["document_revision"])) == 0 && len(m9Object(data["document_revisions"])) == 0 {
 		p.t.Fatal("edit omitted document guard")
 	}
+	if len(probeSlice(m9Object(reply["evidence"])["ids"])) > 0 {
+		p.inspectEvidence(reply)
+	}
 	return reply
 }
 
@@ -579,6 +635,7 @@ func (p *m9Probe) run() {
 	p.ctx = ctx
 	defer cancel()
 	p.evidenceSeen = map[string]bool{}
+	p.evidenceBatches = map[string]map[string]any{}
 	if err := os.MkdirAll(p.dir, 0700); err != nil {
 		p.t.Fatal(err)
 	}
@@ -598,10 +655,17 @@ func (p *m9Probe) run() {
 		}
 		after := m9Hashes(p.t, p.root)
 		m9JSON(p.t, filepath.Join(p.dir, "after-hashes.json"), after)
-		if p.selected != "" {
-			m9JSON(p.t, filepath.Join(p.dir, "after-environment-hashes.json"), m9Hashes(p.t, filepath.Dir(filepath.Dir(p.selected))))
+		if p.before != nil && !maps.Equal(p.before, after) {
+			p.t.Error("canonical fixture differs after process-tree termination")
 		}
-		m9JSON(p.t, filepath.Join(p.dir, "coverage.json"), map[string]any{"case": p.spec.name, "known_expected": p.spec.known, "unknown_expected": p.spec.unknown, "selected_expected": p.selected, "natural_late_publication_observed": p.lateSeen, "later_call_updates_observed": p.updatesSeen, "complete_empty_push_quiet_checks": p.quietChecks, "progress_pending_batches_observed": p.progressVetoes, "passed": !p.t.Failed(),
+		if p.selected != "" {
+			afterEnvironment := m9Hashes(p.t, filepath.Dir(filepath.Dir(p.selected)))
+			m9JSON(p.t, filepath.Join(p.dir, "after-environment-hashes.json"), afterEnvironment)
+			if p.beforeEnvironment != nil && !maps.Equal(p.beforeEnvironment, afterEnvironment) {
+				p.t.Error("selected environment changed during discovery/provider execution")
+			}
+		}
+		m9JSON(p.t, filepath.Join(p.dir, "coverage.json"), map[string]any{"case": p.spec.name, "known_expected": p.spec.known, "unknown_expected": p.spec.unknown, "selected_expected": p.selected, "natural_late_publication_observed": p.lateSeen, "later_call_updates_observed": p.updatesSeen, "complete_empty_push_quiet_checks": p.quietChecks, "progress_pending_batches_observed": p.progressVetoes, "unproven_pull_batches_observed": p.pullVetoes, "pull_veto_dimension_checks": p.pullVetoChecks, "passed": !p.t.Failed(),
 			"limits": []string{"No forced producer delay or synthetic progress: timing-path coverage is reported, not assumed.", "Pyright may execute the chosen interpreter. Explicit project config is selection ownership, not dependency verification."}})
 	})
 	p.fixture()
@@ -670,9 +734,9 @@ func (p *m9Probe) run() {
 		p.edit("value: int = \"bad\"", "value: int = 1")
 		p.inspectEvidence(p.collectClean())
 	}
-	p.interpreterAndExecTrace()
-	// Restore only our intentional source edits; before/after hashes expose
-	// any environment/config mutation caused by real discovery or providers.
+	p.interpreterSelection()
+	// Restore only intentional source edits. Cleanup runs after process-tree
+	// termination and enforces the final fixture/environment hash comparisons.
 	m9Write(p.t, filepath.Join(p.root, "main.py"), string(original))
 	if !maps.Equal(p.before, m9Hashes(p.t, p.root)) {
 		p.t.Error("canonical fixture changed beyond intentional main.py edits")
@@ -731,7 +795,7 @@ func (p *m9Probe) sandbox() {
 	}
 	staged := p.call("diagnostics", map[string]any{"revision": revision, "full": true})
 	encoded, _ := json.Marshal(staged)
-	if !strings.Contains(string(encoded), "reportAssignmentType") && !strings.Contains(string(encoded), "provisional") {
+	if !strings.Contains(string(encoded), "reportAssignmentType") && m9Report(staged)["confidence"] != "provisional" && staged["outcome"] != "provisional" {
 		p.t.Fatal("sandbox lost real type error without disclosing provisional coverage")
 	}
 	if !p.spec.relativeConfig && (strings.Contains(string(encoded), "reportMissingImports") || strings.Contains(string(encoded), "python_environment_unresolved")) {
@@ -742,7 +806,7 @@ func (p *m9Probe) sandbox() {
 	// sandbox-relative explicit-config outcome) are retained in lsp.jsonl.
 }
 
-func (p *m9Probe) interpreterAndExecTrace() {
+func (p *m9Probe) interpreterSelection() {
 	body, err := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
 	if err != nil {
 		p.t.Fatal(err)
@@ -797,6 +861,9 @@ func (p *m9Probe) interpreterAndExecTrace() {
 	if p.spec.reason != "" && !strings.Contains(string(statusBody), p.spec.reason) {
 		p.t.Fatalf("status omitted discovery reason %s: %s", p.spec.reason, statusBody)
 	}
+}
+
+func (p *m9Probe) assertManagerTrace() {
 	files, err := filepath.Glob(filepath.Join(p.dir, "exec.*"))
 	if err != nil || len(files) == 0 {
 		p.t.Fatal("missing actual execve trace")
@@ -819,35 +886,38 @@ func (p *m9Probe) interpreterAndExecTrace() {
 		if expect && count == 0 {
 			p.t.Fatalf("real %s fallback was not executed", manager)
 		}
-		if !expect && count != 0 {
-			p.t.Fatalf("unexpected %s query, including untrusted/local precedence: %d execs", manager, count)
+		if !expect && m9ManagerExec(traces, manager) {
+			p.t.Fatalf("unexpected %s execution (any path or Python module spelling); see exec.*", manager)
 		}
 	}
 }
 
 func (p *m9Probe) inspectEvidence(reply map[string]any) {
 	found := false
+	var pullVetoIDs []string
 	for _, raw := range probeSlice(m9Object(reply["evidence"])["ids"]) {
 		id := m9Text(raw)
 		if id == "" {
 			continue
 		}
 		found = true
-		if p.evidenceSeen[id] {
-			continue
-		}
-		p.evidenceSeen[id] = true
-		evidence := p.call("evidence_get", map[string]any{"evidence_id": id})
-		record := m9Object(m9Object(evidence["data"])["evidence"])
-		batch := m9Object(record["payload"])
-		if text, ok := record["payload"].(string); ok {
-			_ = json.Unmarshal([]byte(text), &batch)
+		batch := p.evidenceBatches[id]
+		fresh := !p.evidenceSeen[id]
+		if fresh {
+			p.evidenceSeen[id] = true
+			evidence := p.call("evidence_get", map[string]any{"evidence_id": id})
+			record := m9Object(m9Object(evidence["data"])["evidence"])
+			batch = m9Object(record["payload"])
+			if text, ok := record["payload"].(string); ok {
+				_ = json.Unmarshal([]byte(text), &batch)
+			}
+			p.evidenceBatches[id] = batch
 		}
 		kind := m9Text(batch["kind"])
 		if kind != "lsp_push" && kind != "lsp_pull" {
 			continue
 		}
-		if batch["progress_pending"] == true {
+		if fresh && batch["progress_pending"] == true {
 			p.progressVetoes++
 		}
 		trace, _ := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
@@ -864,11 +934,17 @@ func (p *m9Probe) inspectEvidence(reply map[string]any) {
 				p.lateSeen = true
 			}
 		}
+		if kind == "lsp_pull" && !m9EffectiveProof(batch) {
+			pullVetoIDs = append(pullVetoIDs, id)
+			if fresh {
+				p.pullVetoes++
+			}
+		}
 		if batch["complete"] == true {
 			version, vok := batch["document_version"].(float64)
 			expected, eok := batch["expected_version"].(float64)
-			if !vok || !eok || version < expected || batch["progress_pending"] == true {
-				p.t.Fatalf("false complete version/progress evidence: %+v", batch)
+			if kind == "lsp_push" && (!vok || !eok || version < expected || batch["progress_pending"] == true) {
+				p.t.Fatalf("false complete push version/progress evidence: %+v", batch)
 			}
 			if batch["reason"] == "python_environment_unresolved" {
 				p.t.Fatal("grouped evidence claimed complete")
@@ -877,9 +953,16 @@ func (p *m9Probe) inspectEvidence(reply map[string]any) {
 			// and positive pushes do not need an empty-publication quiet wait.
 			if kind == "lsp_push" && len(probeSlice(batch["findings"])) == 0 {
 				p.assertQuiet(batch)
-				p.quietChecks++
+				if fresh {
+					p.quietChecks++
+				}
 			}
 		}
+	}
+	// Evaluate after all cited batches have been recovered, so a current valid
+	// batch may supersede an older vetoed pull in the same coverage dimension.
+	for _, id := range pullVetoIDs {
+		p.assertPullVeto(reply, id)
 	}
 	if !found {
 		p.t.Fatal("real diagnostic report omitted recoverable evidence IDs")
@@ -918,39 +1001,383 @@ func (p *m9Probe) assertQuiet(batch map[string]any) {
 	}
 }
 
+// Hash only owned fixture/tool trees. Symlinks are recorded, never followed.
+// Stream regular files with explicit entry/byte bounds, including mode changes.
 func m9Hashes(t *testing.T, root string) map[string]string {
 	t.Helper()
 	result := map[string]string{}
+	var total int64
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if entry.Name() == ".git" && entry.IsDir() {
+			return filepath.SkipDir
+		}
+		if len(result) >= 100000 {
+			return fmt.Errorf("hash entry bound exceeded: %s", root)
+		}
 		rel, _ := filepath.Rel(root, path)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		prefix := info.Mode().String() + ":"
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
-				return filepath.SkipDir
-			}
+			result[rel] = prefix
 			return nil
 		}
-		var body []byte
+		h := sha256.New()
 		if entry.Type()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {
 				return err
 			}
-			body = []byte("symlink:" + target)
+			_, _ = io.WriteString(h, target)
 		} else {
-			body, err = os.ReadFile(path)
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("non-regular immutable file: %s", path)
+			}
+			total += info.Size()
+			if info.Size() > 512<<20 || total > 4<<30 {
+				return fmt.Errorf("hash byte bound exceeded: %s", root)
+			}
+			f, err := os.Open(path)
 			if err != nil {
 				return err
 			}
+			n, copyErr := io.Copy(h, io.LimitReader(f, info.Size()+1))
+			closeErr := f.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if n != info.Size() {
+				return fmt.Errorf("file changed while hashing: %s", path)
+			}
 		}
-		sum := sha256.Sum256(body)
-		result[rel] = hex.EncodeToString(sum[:])
+		result[rel] = prefix + hex.EncodeToString(h.Sum(nil))
 		return nil
 	})
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("immutable snapshot failed: %v", err)
 	}
 	return result
+}
+
+// Include the actual executable behind each tool symlink, including the
+// read-only host shell/Git/strace prerequisites; never traverse host trees.
+func m9ToolHashes(t *testing.T, tools, binary string) map[string]string {
+	result := m9Hashes(t, tools)
+	for _, name := range []string{"python", "python3", "uv", "poetry", "nvim", "node", "pyright-langserver", "gopls", "strace", "git", "sh", "bash", "readlink", "uname", "dirname", "realpath"} {
+		path, err := filepath.EvalSymlinks(filepath.Join(tools, "bin", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result["resolved-executable:"+name+":"+path] = m9Hashes(t, path)["."]
+	}
+	result["private-huyang:"+binary] = m9Hashes(t, binary)["."]
+	return result
+}
+
+func m9Within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Both source entrypoints enforce this, even without the documented wrapper.
+func m9ScratchHome(t *testing.T) {
+	t.Helper()
+	home := os.Getenv("HOME")
+	expected := os.Getenv("HUYANG_M9_EXPECTED_HOME")
+	if expected == "" {
+		expected = "/home/job"
+	}
+	real, err := filepath.EvalSymlinks(home)
+	if err != nil || !filepath.IsAbs(home) || home != expected || real != home ||
+		real == "/" || real == "/root" || strings.HasPrefix(real+"/", "/root/") ||
+		(strings.HasPrefix(real+"/", "/home/") && real != "/home/job" && !strings.HasPrefix(real, "/home/job/")) ||
+		strings.HasPrefix(real+"/", "/tmp/") {
+		t.Fatal("HOME must be canonical job scratch (/home/job or explicit HUYANG_M9_EXPECTED_HOME), never a real home")
+	}
+	mapping, err := os.ReadFile("/proc/self/uid_map")
+	fields := strings.Fields(string(mapping))
+	if err != nil || len(fields) < 3 || (len(fields) == 3 && fields[0] == "0" && fields[1] == "0" && fields[2] == "4294967295") {
+		t.Fatal("a non-initial UID namespace is required before any probe writes")
+	}
+	info, err := os.Stat(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || stat.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0022 != 0 {
+		t.Fatal("scratch HOME must be owned by this UID and not writable by other users")
+	}
+}
+
+func m9PrivateDir(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || stat.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0077 != 0 {
+		t.Fatalf("private directory must be owned and mode 0700: %s", path)
+	}
+}
+
+// Metadata only: no HOME file contents, credentials or unrelated host trees.
+// The run parent is the sole allowed mutable subtree; tools there are hashed
+// separately. A fallback writer elsewhere in scratch HOME fails the run.
+func m9HomeMetadata(t *testing.T, allowed string) map[string]string {
+	t.Helper()
+	home := os.Getenv("HOME")
+	result := map[string]string{}
+	err := filepath.WalkDir(home, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == allowed {
+			return filepath.SkipDir
+		}
+		if len(result) >= 20000 {
+			return fmt.Errorf("scratch HOME inventory exceeds 20000 entries")
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(home, path)
+		// Parent directory mtimes can change when the allowed root is created;
+		// it already exists at both snapshots. Do not read symlink targets.
+		result[rel] = fmt.Sprintf("%s:%d:%d", info.Mode(), info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scratch HOME inventory failed: %v", err)
+	}
+	return result
+}
+
+func m9ManagerExec(trace, manager string) bool {
+	// Decode every quoted strace string (paths AND argv), accepting any path
+	// spelling and execveat. Checking all strings is deliberately conservative.
+	quoted := regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
+	for _, line := range strings.Split(trace, "\n") {
+		if !strings.Contains(line, "execve(") && !strings.Contains(line, "execveat(") {
+			continue
+		}
+		var previous string
+		for _, encoded := range quoted.FindAllString(line, -1) {
+			value, err := strconv.Unquote(encoded)
+			if err != nil {
+				continue
+			}
+			if filepath.Base(value) == manager || strings.HasSuffix(value, "/"+manager+"/__main__.py") ||
+				value == "-m"+manager || strings.HasPrefix(value, "-m"+manager+".") ||
+				(previous == "-m" && (value == manager || strings.HasPrefix(value, manager+"."))) {
+				return true
+			}
+			previous = value
+		}
+	}
+	return false
+}
+
+// Pure regressions for the safety checks; no subprocesses or filesystem writes.
+func TestM9ManagerTraceSpellings(t *testing.T) {
+	for _, trace := range []string{
+		`execve("/case/bin/poetry", ["poetry"], 0x0) = 0`,
+		`execve("/tools/bin/poetry", ["poetry"], 0x0) = 0`,
+		`execveat(3, "poetry", ["poetry"], 0x0, 0) = 0`,
+		`execve("/bin/python", ["python", "-m", "poetry"], 0x0) = 0`,
+		`execve("/bin/python", ["python", "-mpoetry"], 0x0) = 0`,
+		`execve("/bin/python", ["python", "/tool/poetry/__main__.py"], 0x0) = 0`,
+	} {
+		if !m9ManagerExec(trace, "poetry") {
+			t.Errorf("missed manager execution: %s", trace)
+		}
+	}
+	if !m9ManagerExec(`execveat(AT_FDCWD, "/case/bin/uv", ["uv"], 0x0, 0) = 0`, "uv") {
+		t.Error("missed uv execveat")
+	}
+	if m9ManagerExec(`execve("/bin/python", ["python", "-c", "print('poetry')"], 0x0) = 0`, "poetry") {
+		t.Error("ordinary Python statement treated as manager execution")
+	}
+}
+
+func TestM9EffectivePullProof(t *testing.T) {
+	valid := map[string]any{"complete": true, "selected": true, "document_version": float64(4), "expected_version": float64(4)}
+	if !m9EffectiveProof(valid) {
+		t.Fatal("current complete pull rejected")
+	}
+	for _, change := range []map[string]any{
+		{"document_version": nil}, {"expected_version": nil}, {"document_version": float64(3)},
+		{"progress_pending": true}, {"timed_out": true}, {"complete": false},
+		{"selected": false}, {"reason": "python_environment_unresolved"},
+	} {
+		batch := maps.Clone(valid)
+		maps.Copy(batch, change)
+		if m9EffectiveProof(batch) {
+			t.Errorf("unproven raw pull accepted: %+v", batch)
+		}
+	}
+}
+
+func m9EffectiveProof(batch map[string]any) bool {
+	version, vok := batch["document_version"].(float64)
+	expected, eok := batch["expected_version"].(float64)
+	return batch["complete"] == true && vok && eok && version >= expected &&
+		batch["selected"] == true && batch["progress_pending"] != true &&
+		batch["timed_out"] != true && batch["reason"] != "python_environment_unresolved"
+}
+
+func (p *m9Probe) assertPullVeto(reply map[string]any, vetoID string) {
+	// Evidence can include superseded batches. Judge the dimensions which
+	// actually cite this batch; a separate current proven batch may supersede it.
+	report := m9Report(reply)
+	for _, raw := range m9Object(report["coverage"]) {
+		dimension := m9Object(raw)
+		citesVeto, proven := false, false
+		for _, rawID := range probeSlice(dimension["evidence_ids"]) {
+			id := m9Text(rawID)
+			citesVeto = citesVeto || id == vetoID
+			candidate, veto := p.evidenceBatches[id], p.evidenceBatches[vetoID]
+			candidateAt, candidateErr := time.Parse(time.RFC3339Nano, m9Text(candidate["observed_at"]))
+			vetoAt, vetoErr := time.Parse(time.RFC3339Nano, m9Text(veto["observed_at"]))
+			proven = proven || (m9EffectiveProof(candidate) && candidateErr == nil && vetoErr == nil &&
+				!candidateAt.Before(vetoAt) && candidate["document_revision"] == veto["document_revision"] && candidate["document"] == veto["document"])
+		}
+		if citesVeto && !proven {
+			p.pullVetoChecks++
+		}
+		if citesVeto && !proven && (dimension["confidence"] == "authoritative" || report["confidence"] == "authoritative") {
+			p.t.Fatalf("unproven pull promoted to authoritative diagnostics: %+v", reply)
+		}
+	}
+}
+
+type m9Process struct {
+	pid, ppid, group int
+	start            string
+}
+
+// /proc stat contains process identity only, never environments, cmdlines or keys.
+func m9Processes() (map[int]m9Process, error) {
+	result := map[int]m9Process{}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		if err != nil {
+			continue
+		} // A concurrent exit is normal.
+		end := strings.LastIndexByte(string(body), ')')
+		if end < 0 {
+			continue
+		}
+		fields := strings.Fields(string(body[end+1:]))
+		if len(fields) < 20 {
+			continue
+		}
+		ppid, _ := strconv.Atoi(fields[1])
+		group, _ := strconv.Atoi(fields[2])
+		result[pid] = m9Process{pid: pid, ppid: ppid, group: group, start: fields[19]}
+	}
+	return result, nil
+}
+
+// Retain identities across tracer exits; track separate provider process groups.
+// Fixture commands own a group too. strace additionally uses --kill-on-exit so
+// its tracees cannot survive an abrupt tracer exit between /proc observations.
+func m9TrackTree(cmd *exec.Cmd) func(*testing.T) {
+	leader := cmd.Process.Pid
+	owned := map[int]m9Process{}
+	var mu sync.Mutex
+	var scanErr error
+	scan := func() map[int]m9Process {
+		all, err := m9Processes()
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			scanErr = err
+		}
+		if proc, ok := all[leader]; ok {
+			if old, tracked := owned[leader]; !tracked || old.start == proc.start {
+				owned[leader] = proc
+			}
+		}
+		for changed := true; changed; {
+			changed = false
+			for pid, proc := range all {
+				parent, tracked := owned[proc.ppid]
+				if live, ok := all[proc.ppid]; tracked && ok && parent.start == live.start {
+					if _, found := owned[pid]; !found {
+						owned[pid] = proc
+						changed = true
+					}
+				}
+			}
+		}
+		live := map[int]m9Process{}
+		for pid, old := range owned {
+			if proc, ok := all[pid]; ok && proc.start == old.start {
+				live[pid] = proc
+			}
+		}
+		return live
+	}
+	_ = scan()
+	finish, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-finish:
+				return
+			case <-ticker.C:
+				_ = scan()
+			}
+		}
+	}()
+	return func(t *testing.T) {
+		t.Helper()
+		defer func() { close(finish); <-stopped }()
+		deadline, killAt := time.Now().Add(6*time.Second), time.Now().Add(3*time.Second)
+		for {
+			live := scan()
+			groupErr := unix.Kill(-leader, 0)
+			mu.Lock()
+			observationErr := scanErr
+			mu.Unlock()
+			if len(live) == 0 && groupErr == unix.ESRCH && observationErr == nil {
+				return
+			}
+			signal := unix.SIGTERM
+			if !time.Now().Before(killAt) {
+				signal = unix.SIGKILL
+			}
+			_ = unix.Kill(-leader, signal)
+			for pid := range live {
+				_ = unix.Kill(pid, signal)
+			}
+			if !time.Now().Before(deadline) {
+				t.Errorf("process tree/group persists after TERM/KILL: leader=%d live=%v group_error=%v proc_error=%v", leader, live, groupErr, observationErr)
+				return
+			}
+			// Condition polling with a deadline, not a warmup sleep.
+			_, _ = unix.Poll(nil, 20)
+		}
+	}
 }
