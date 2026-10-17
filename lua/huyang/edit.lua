@@ -20,6 +20,7 @@ local closure = require("huyang.closure")
 local cap = require("huyang.cap")
 local limits = require("huyang.limits")
 local pull_watch = require("huyang.diagnostic_pull")
+local diagnostic_observer = require("huyang.diagnostic_observer")
 
 -- Neovim 0.12 moved the diff to vim.text.diff and deprecated vim.diff; one
 -- name for it here keeps the rest of the file indifferent to the version.
@@ -894,6 +895,7 @@ local function queue_late(batch, pending, client)
     late_sequence = late_sequence + 1
     late_observations[key] = { pending = pending, client = client, at = vim.uv.now(),
         sequence = late_sequence, batch = batch }
+    diagnostic_observer.enqueue(batch, late_sequence)
     local keys = vim.tbl_keys(late_observations)
     table.sort(keys, function(a, b) return late_observations[a].sequence < late_observations[b].sequence end)
     for i = 1, #keys - LATE_BATCHES_MAX do late_observations[keys[i]] = nil end
@@ -943,7 +945,12 @@ function M.late_evidence()
                 and publication_complete(batch.document_version, pending.expected,
                     batch.findings, observation.at, batch.producer, 0)
             if observation.delivered ~= batch.complete then
-                out[#out + 1] = require("huyang.python_environment").normalize_batch(vim.deepcopy(batch))
+                local normalized = require("huyang.python_environment").normalize_batch(vim.deepcopy(batch))
+                out[#out + 1] = normalized
+                if diagnostic_observer.enabled() then
+                    diagnostic_observer.emission("late_emission", batch, normalized,
+                        observation.sequence, require("huyang.rpc").context())
+                end
                 observation.delivered = batch.complete
                 if batch.complete or observation.superseded then late_observations[key] = nil end
             end
@@ -1365,7 +1372,7 @@ function M.diagnostic_evidence(args)
                     local function pull_batch(pulled)
                         local items = {}
                         for _, d in ipairs(pulled and pulled.items or {}) do items[#items + 1] = finding(d) end
-                        return {
+                        local batch = {
                             kind = "lsp_pull", provider_id = client.name .. "#" .. client.id,
                             producer = client.name, producer_version = version_string(client),
                             document = path, document_revision = revision,
@@ -1377,6 +1384,8 @@ function M.diagnostic_evidence(args)
                             progress_pending = progress_since({ client.name }, barrier_started),
                             findings = items,
                         }
+                        diagnostic_observer.construct(batch)
+                        return batch
                     end
                     local waiting, last_response = true, nil
                     local timer = vim.uv.new_timer()
@@ -1457,7 +1466,12 @@ function M.diagnostic_evidence(args)
     end
     -- The completion carries the batches structurally as well, so the Go
     -- side can read evidence without parsing the value.
-    for _, batch in ipairs(batches) do require("huyang.python_environment").normalize_batch(batch) end
+    for _, batch in ipairs(batches) do
+        require("huyang.python_environment").normalize_batch(batch)
+        if diagnostic_observer.enabled() then
+            diagnostic_observer.emission("immediate_emission", batch, batch, nil, require("huyang.rpc").context())
+        end
+    end
     require("huyang.rpc").report_evidence(batches)
     return { batches = batches }
 end

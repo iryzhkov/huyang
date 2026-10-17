@@ -184,6 +184,11 @@ type m9Probe struct {
 	postFix                                  *m9PostFix
 	postFixReplies                           []map[string]any
 	postFixCoverage                          map[string]any
+	historicalEnd                            time.Time
+	historicalCut                            []byte
+	historicalFirstCall                      int
+	historicalInspected                      int
+	historicalCalls                          []m9HistoricalCall
 }
 
 func m9RequiredDir(t *testing.T, name string) string {
@@ -524,6 +529,34 @@ local function trace(event)
     local f = assert(io.open(vim.env.M9_TRACE, "a"))
     f:write(vim.json.encode(event), "\n")
     f:close()
+    return trace_sequence
+end
+local observer = require("huyang.diagnostic_observer")
+local collection_id, active_collection = 0, nil
+observer.install(function(event)
+    event.kind, event.collection_id = "diagnostic_observation", active_collection
+    trace(event)
+end)
+trace({kind="observer_ready"})
+local notify = vim.rpcnotify
+vim.rpcnotify = function(channel, method, ...)
+    if method == "huyang/result" then
+        local args = {...}
+        if type(args[2]) == "table" then observer.transport(args[1], args[2]) end
+    end
+    return notify(channel, method, ...)
+end
+local edit = require("huyang.edit")
+local late_evidence = edit.late_evidence
+edit.late_evidence = function(...)
+    collection_id = collection_id + 1
+    local previous = active_collection
+    active_collection = collection_id
+    trace({kind="collection_begin", collection_id=active_collection})
+    local result = late_evidence(...)
+    trace({kind="collection_end", collection_id=active_collection, observer_status=observer.status()})
+    active_collection = previous
+    return result
 end
 local publish = vim.lsp.handlers["textDocument/publishDiagnostics"] or vim.lsp.diagnostic.on_publish_diagnostics
 local function observe_publish(err, params, ctx, config)
@@ -562,10 +595,11 @@ local function observe_client(client)
         local inner = handler or self.handlers[method] or vim.lsp.handlers[method]
         if inner then
             handler = function(err, result, ctx, config)
-                trace({kind="pull", request_id=id, params=result, request_params=params,
+                local callback_seq = trace({kind="pull", request_id=id, params=result, request_params=params,
                     client_id=self.id, callback_client_id=ctx and ctx.client_id, err=err,
                     snapshot=snapshot(self, bufnr, params)})
-                return inner(err, result, ctx, config)
+                return observer.with_raw({request_id=id, callback_seq=callback_seq,
+                    process_id=vim.fn.getpid(), client_id=self.id}, inner, err, result, ctx, config)
             end
         end
         local sent, rpc_id = request(self, method, params, handler, bufnr)
@@ -728,7 +762,22 @@ func (p *m9Probe) call(name string, args map[string]any) map[string]any {
 			args["since"] = fmt.Sprintf("diagcur_%d", p.acknowledgedCursor)
 		}
 	}
+	var historicalBefore int
+	if p.postFix != nil {
+		body, err := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		historicalBefore = len(body)
+	}
 	reply := p.wire.call(p.t, name, args)
+	if p.postFix != nil {
+		body, err := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		p.historicalCalls = append(p.historicalCalls, m9HistoricalCall{Name: name, Reply: reply, Before: historicalBefore, After: len(body)})
+	}
 	if name == "diagnostics" && reply["code"] == nil && m9Report(reply) != nil {
 		switch reply["outcome"] {
 		case "ok", "provisional", "unavailable":
@@ -1187,9 +1236,8 @@ func m9PostFixLedger(reply map[string]any, fixed *m9PostFix, pure bool) (map[str
 	return resolved, nil
 }
 
-func (p *m9Probe) collectPostFix() {
+func (p *m9Probe) collectPostFixTerminal() {
 	p.t.Helper()
-	armedEpoch, armed := 0, false
 	inspected := 0
 	for p.ctx.Err() == nil {
 		reply := p.call("diagnostics", map[string]any{"full": true})
@@ -1229,7 +1277,7 @@ func (p *m9Probe) collectPostFix() {
 		if state.UnversionedPush {
 			p.t.Fatal("unversioned/mixed push transport is outside the strict pure-pull fallback")
 		}
-		// Receipt-bound transaction IDs come only from recovered producer evidence.
+		// Recovered producer evidence must agree with the fixing receipt transaction.
 		for _, batch := range p.evidenceBatches {
 			if batch["provider_id"] != state.Provider || batch["document_revision"] != p.postFix.Revision ||
 				(batch["document"] != p.postFix.Path && batch["document"] != "main.py") || batch["selected"] != true {
@@ -1274,7 +1322,6 @@ func (p *m9Probe) collectPostFix() {
 		}
 		if state.Pending || len(qualifying) == 0 {
 			p.postFixCoverage["evidence_gate_limitation"] = "No current selected receipt/transaction-bound batch matches a real identified raw response; nil/error/timeout/non-full conversions cannot qualify."
-			armed = false
 			p.event()
 			continue
 		}
@@ -1301,23 +1348,8 @@ func (p *m9Probe) collectPostFix() {
 				p.postFixCoverage["reached_gate"] = "authoritative_clean"
 				return
 			}
-			armed = false
-		} else if state.Candidate != nil {
-			p.postFixCoverage["qualifying_request_id"] = state.Candidate.Request["request_id"]
-			p.postFixCoverage["qualifying_request_trace_sequence"] = state.Candidate.Request["trace_seq"]
-			p.postFixCoverage["qualifying_response_trace_sequence"] = state.Candidate.Response["trace_seq"]
-			p.postFixCoverage["request_local_identity"] = state.Candidate.Request["snapshot"]
-			p.postFixCoverage["callback_local_identity"] = state.Candidate.Response["snapshot"]
-			if armed && armedEpoch == state.Epoch {
-				// This final report follows an event observation and replays the
-				// final trace. Silence/repetition is never promoted to clean proof.
-				p.postFixCoverage["outcome"] = "clean_unproven"
-				p.postFixCoverage["reached_gate"] = "post_fix_empty_pull_observed"
-				p.postFixCoverage["retained_finding_ids"] = p.postFix.IDs
-				p.postFixCoverage["no_resolution"] = true
-				return
-			}
-			armedEpoch, armed = state.Epoch, true
+		} else {
+			p.t.Fatal("authoritative lane lost its observed stamped producer path")
 		}
 		p.event()
 	}
@@ -1386,8 +1418,28 @@ func (p *m9Probe) run() {
 				p.t.Error("selected environment changed during discovery/provider execution")
 			}
 		}
+		if len(p.historicalCut) != 0 {
+			cut, err := os.ReadFile(filepath.Join(p.dir, "historical-trace-cut.jsonl"))
+			if err != nil || !bytes.Equal(cut, p.historicalCut) {
+				p.t.Error("missing/truncated historical cut artifact")
+			}
+			if _, err := os.Stat(filepath.Join(p.dir, "historical-observation-plan.json")); err != nil {
+				p.t.Error("missing predeclared historical observation plan")
+			}
+			full, err := os.ReadFile(filepath.Join(p.dir, "lsp.jsonl"))
+			if err != nil || !bytes.HasPrefix(full, p.historicalCut) {
+				p.t.Error("final raw trace lost/truncated the declared historical cut")
+			} else {
+				sum := sha256.Sum256(full)
+				p.postFixCoverage["complete_raw_trace_sha256"] = hex.EncodeToString(sum[:])
+				p.postFixCoverage["complete_raw_trace_bytes"] = len(full)
+			}
+		}
 		if p.spec.known && p.t.Failed() {
 			p.postFixCoverage["outcome"] = "failed"
+		}
+		if len(p.historicalCut) != 0 {
+			m9JSON(p.t, filepath.Join(p.dir, "historical-observation.json"), p.postFixCoverage)
 		}
 		m9JSON(p.t, filepath.Join(p.dir, "coverage.json"), map[string]any{"case": p.spec.name, "known_expected": p.spec.known, "unknown_expected": p.spec.unknown, "selected_expected": p.selected, "natural_late_publication_observed": p.lateSeen, "later_call_updates_observed": p.updatesSeen, "complete_empty_push_quiet_checks": p.quietChecks, "progress_pending_batches_observed": p.progressVetoes, "unproven_pull_batches_observed": p.pullVetoes, "pull_veto_dimension_checks": p.pullVetoChecks, "passed": !p.t.Failed(), "post_fix": p.postFixCoverage,
 			"limits": []string{"No forced producer delay or synthetic progress: timing-path coverage is reported, not assumed.", "Pyright may execute the chosen interpreter. Explicit project config is selection ownership, not dependency verification."}})
@@ -1492,10 +1544,20 @@ func (p *m9Probe) run() {
 		if len(p.postFix.IDs) == 0 {
 			p.t.Fatal("post-fix gate cannot bypass the natural type-finding gate")
 		}
+		p.historicalFirstCall = p.sequence + 1
+		p.historicalEnd = time.Now().Add(5 * time.Second)
+		p.postFixCoverage["observation_plan"] = map[string]any{"sampling_ms": 5000, "declared_before_fix": true,
+			"sampling_end": p.historicalEnd.UTC().Format(time.RFC3339Nano), "boundary": "final full report and evidence recovery, followed by complete newline-terminated trace byte cut",
+			"limit": "Sampling is a measurement allocation; time, quiet and deadlines never prove analysis or resolution."}
+		m9JSON(p.t, filepath.Join(p.dir, "historical-observation-plan.json"), p.postFixCoverage["observation_plan"])
 		p.postFixCoverage["reached_gate"] = "fix_dispatch"
 		p.postFixCoverage["original_finding_ids"] = p.postFix.IDs
 		fix := p.edit("value: int = \"bad\"", "value: int = 1")
 		data := m9Object(fix["data"])
+		if m9Text(fix["request_id"]) == "" {
+			p.t.Fatal("fix receipt omitted transaction request identity")
+		}
+		p.postFix.Transaction = "edit_" + m9Text(fix["request_id"])
 		p.postFix.Revision = m9Text(data["document_revision"])
 		if p.postFix.Revision == "" {
 			p.postFix.Revision = m9Text(m9Object(data["document_revisions"])["main.py"])

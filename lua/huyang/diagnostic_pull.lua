@@ -1,6 +1,7 @@
 -- Pull responses carry no producer document version. This module only fetches
 -- observations; callers decide what the payload can prove.
 local M = {}
+local observer = require("huyang.diagnostic_observer")
 local watches = {}
 local MAX_WATCHES, MAX_ATTEMPTS, WATCH_MS = 64, 16, 30000
 
@@ -70,7 +71,8 @@ pump = function(watch)
             if generation ~= watch.generation or not watch.inflight then return end
             watch.inflight, watch.request_id = false, nil
             if not current(watch) then close(watch); return end
-            watch.receive(not lsp_err and result or nil)
+            observer.receive({ client_id = watch.client.id, document = watch.document,
+                generation = generation }, not lsp_err and result or nil, watch.receive)
             -- A refresh/progress event during the request may describe newer
             -- work than its response. Fetch again, without inferring completion.
             if watch.again then schedule(watch) end

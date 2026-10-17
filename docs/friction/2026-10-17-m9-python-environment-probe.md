@@ -137,51 +137,61 @@ recorded in `fixture-commands.log`. Poetry also receives the resolved base execu
 the selected venv path itself stays unresolved for the symlinked-interpreter case.
 
 Known-environment cases fix the type error after the positive/environment gates.
-Post-fix acceptance now has two distinct outcomes under the ACCEPT_DESIGN memo
-`/home/igor/.cache/huyang-friction/m9-pull-acceptance-policy-review.md`:
+Igor adopted the recommended historical observation/non-resolution contract on
+2026-10-17T21:59Z: **"Follow the rec for the decision"**. The adoption is recorded in
+Jocasta plan revision164/checkpoint53 and replaces only condition3 of the earlier
+accepted pull policy. The direct instruction is authoritative; the original inbox
+record can remain parked. No historical failure is reclassified.
 
-- `authoritative_clean` requires an observed producer-stamped push, complete selected
-  current receipt-bound evidence, the existing progress/150 ms empty-push quiet
-  guards, an authoritative full report with no current/stale bodies, and observed
-  legitimate resolution of every saved pre-fix type-finding ID.
-- `clean_unproven` means only a successful full empty pull was observed for a request
-  made against the fixed local document. It requires strictly pure pull transport
-  for that canonical document/client; an unversioned push or ambiguous transport
-  fails explicitly, and any stamped push requires the authoritative path. Every
-  intermediate/final report remains provisional, original type-finding IDs remain
-  current/stale, and no resolved body, notice, delta or diagnostic update is allowed.
-  This outcome validates environment selection, natural finding delivery and honest
-  pending behavior. It does not establish clean resolution or finished analysis.
+- `authoritative_clean` retains the observed producer-stamped push, complete current
+  receipt-bound evidence, progress/150 ms empty-push quiet rules, authoritative full
+  report, zero current/stale bodies and legitimate resolution of every saved ID.
+- `historical_post_fix_observation_pending` records a genuine fixed-postimage full
+  empty pull, its original accepted receive/construction/queue/emission/transport
+  identity, uniquely linked selected incomplete Go evidence, and verified
+  non-resolution across the complete declared history. Every intermediate/final
+  report stays provisional and retains original current/stale IDs. Later positives
+  must reach selected evidence and actual finding bodies or the case fails.
 
-Observation-only telemetry correlates dispatch, accepted transport request and
-callback by request ID, actual client/process, exact canonical URI/path, local LSP
-version, changedtick, buffer hash and synchronized disk hash. Dispatch and callback
-must both match the successful fix postimage. Selected incomplete Huyang evidence
-must match the fix receipt document revision/transaction and request version; it
-must have no producer document_version. Local metadata and opaque resultId never
-supply producer authority. Errors, cancellation, timeout, unchanged/non-full,
-nil/malformed results, missing/non-array items, sandbox/other-client responses and
-pre-fix in-flight responses cannot qualify. A real nonempty resultId must also match
-selected pull evidence, solely as response identity alongside the receipt/version
-and callback observation. An anonymous full response cannot distinguish that evidence
-from nil/error/timeout/non-full conversions and fails the evidence gate explicitly;
-it never acquires authority. No response or producer field is rewritten.
+The latter deliberately loses the old settled-terminal observation coverage.
+It always records `analysis_completion_proven=false`,
+`clean_resolution_proven=false` and `old_terminal_gate_qualified=false`.
+Actual open tokens/inflight requests are reported independently; epistemic pending
+does not invent active work. Later progress supersedes terminal-current claims
+without erasing the original historical fact. Later identical callbacks remain
+separate; they cannot take over an earlier evidence ID/time.
 
-The trace replays real progress tokens independently by client, including existing
-work before the fix. Later progress or a contradictory/nonempty callback invalidates
-an empty candidate; known work end requires a fresh request after that end. A
-candidate is rechecked after another bounded event observation and full report.
-Pending work or an outstanding request prevents termination. There is no warmup
-sleep, first-empty pass, invented progress cycle, or deadline-to-success conversion.
-Finite observation cannot exclude future progress, and the outcome remains unproven.
+The small dormant Lua observer holds only weak sidecar identities and sends detached
+snapshots to an explicitly installed test observer. Producer bodies, diagnostic
+schema, result IDs, observed_at, versions, authority and scheduling do not change.
+Errors in telemetry preserve production delivery and make probe qualification fail.
+Raw client/process/request identity, synchronized local hashes/version/changedtick,
+receipt DocRev/transaction, actual accepted receive, actual queue sequence,
+normalization and real provider notification are checked separately.
 
-`coverage.json.post_fix` records outcome separately from passed, reached gate,
-fixed document revision/transaction, raw request/callback or push trace identifiers,
-qualifying selected evidence IDs, observed producer proof, local snapshots, retained
-or resolved IDs, no-resolution result, final trace hash/sequence and known-progress
-limits. Failed/unreached gates and unknown/configured-missing cases remain distinct.
-The 15-case matrix, native startup capabilities, fixtures, environment/offline/frozen
-input and restoration/cleanup guards are unchanged.
+The complete emitted payload must have exactly one possible original origin and
+transport inside the first MCP call citing the immutable selected evidence ID.
+The comparison excludes only documented Go-owned additions (pre-edit revision,
+state_seq and observed_at); none is analysis proof. Repeated identical emissions
+from distinct origins or uncertain call boundaries fail. Full response/result ID
+equality and time adjacency alone cannot qualify. Errors, cancellation, timeout,
+unchanged/non-full, anonymous, malformed, wrong-document/process and pre-fix
+responses cannot supply the observation. Any actual stamped push selects its
+existing authority lane; failed/mixed push proof cannot hide behind the pull result.
+
+Before fixing, the probe declares a five-second sampling allocation and a final
+full-report/evidence-recovery procedure within the unchanged 120-second case limit.
+It never stops at the first empty. The final newline-terminated trace cut includes
+all finalization-triggered events, validates contiguous sequences per process, and
+records byte counts/hashes, every report hash, latest payload, all superseding
+sequences, actual tokens/inflight and final ledger bodies. Missing, truncated or
+interrupted evidence is unqualified. Time/quiet/retry count never supplies proof.
+
+See [the detailed observation contract](2026-10-17-m9-historical-observation.md)
+for the causal edge, excluded-field source references, artifact cut and root checks.
+All fifteen cases, natural positive delivery, environment rules, acknowledgments,
+fixtures, hashes/metadata, sandbox and cleanup remain required. Fresh independent
+other-provider review and a fresh complete fifteen-case run are still outstanding.
 
 Raw-complete push evidence must prove the document
 version and absence of pending progress. A raw-complete pull is allowed to lack that
@@ -326,7 +336,7 @@ clean go build -o "$scratch/bin/huyang" ./cmd/huyang
 set +e
 clean env HUYANG_M9_PYTHON_PROBE=1 HUYANG_M9_TOOLS="$tools" \
   HUYANG_M9_RUN="$run" HUYANG_M9_BINARY="$scratch/bin/huyang" \
-  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof|TestM9PostFixCorrelation|TestM9PostFixTransientProgress|TestM9PostFixTransportAndEvidence|TestM9PostFixFindingRetention)$' -count=1 -v -timeout 40m \
+  go test ./cmd/huyang -run '^(TestPythonEnvironmentAcceptance|TestM9ManagerTraceSpellings|TestM9EffectivePullProof|TestM9PostFixCorrelation|TestM9PostFixTransientProgress|TestM9PostFixTransportAndEvidence|TestM9PostFixFindingRetention|TestM9Historical.*)$' -count=1 -v -timeout 40m \
   >"$scratch/python-probe-go-test.log" 2>&1
 test_exit=$?
 set -e
@@ -351,7 +361,9 @@ run top level and two-digit case directories, and accepts these regular owned fi
   `tool-*` manifest/lock files, before/after tool hashes and HOME metadata.
 - Case: `lsp.jsonl`, `wire-*.jsonl`, numbered tool-reply JSON, `exec.<pid>`,
   `coverage.json`, `*hashes*.json`, `fixture-commands.log`, `service.log`,
-  `plain-*.txt`, and `raw-publication-summary.json`.
+  `plain-*.txt`, `raw-publication-summary.json`, and exactly
+  `historical-observation-plan.json`, `historical-trace-cut.jsonl`,
+  `historical-observation.json`.
 - The explicitly named Go-test log and a generated `collection.json` with every
   collected file's size/SHA-256, missing top evidence, coverage presence and test exit.
 

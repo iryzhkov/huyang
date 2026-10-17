@@ -22,6 +22,64 @@ local function check(name, ok, detail)
     io.stdout:flush()
 end
 
+-- The optional observer cannot change delivery, errors, or source tables.
+do
+    local observer = require("huyang.diagnostic_observer")
+    local result = {kind="full",items={{message="producer body"}}}
+    observer.install(nil)
+    local a,b,c = observer.receive({},result,function(value)
+        check("disabled observer preserves exact result object",value==result)
+        return "same",nil,17
+    end)
+    check("disabled observer preserves all return slots",a=="same" and b==nil and c==17)
+    local thrown = {}
+    local ok,detail = pcall(observer.receive,{},result,function() error(thrown) end)
+    check("disabled observer preserves thrown error object",not ok and detail==thrown)
+
+    local records = {}
+    observer.install(function(event)
+        records[#records+1]=vim.deepcopy(event)
+        if event.result then event.result.items[1].message="observer rewrite" end
+        if event.batch then event.batch.findings[1].message="observer rewrite" end
+        if event.identity and event.identity.origin and event.identity.origin.raw then
+            event.identity.origin.raw.request_id="observer rewrite"
+        end
+    end)
+    local batch = {kind="lsp_pull",findings={{message="queued body"}},complete=false}
+    observer.with_raw({request_id="actual"},function()
+        observer.receive({generation=3},result,function(value)
+            observer.construct(batch)
+            observer.enqueue(batch,41)
+            local normalized=vim.deepcopy(batch)
+            observer.emission("late_emission",batch,normalized,41,{request_id="collection"})
+            observer.transport(45,{ok=true,result={batches={normalized}}})
+            return value
+        end)
+    end)
+    check("observer snapshots cannot rewrite producer or queue",
+        result.items[1].message=="producer body" and batch.findings[1].message=="queued body"
+            and batch.result_id==nil and batch.origin_id==nil and batch.queue_sequence==nil)
+    check("sidecar preserves accepted construction enqueue emission identity",
+        #records==5 and records[1].stage=="accepted_receive"
+            and records[2].identity.batch_id==records[3].identity.batch_id
+            and records[3].identity.batch_id==records[4].identity.batch_id
+            and records[4].identity.origin.raw.request_id=="actual"
+            and records[4].queue_sequence==41 and records[5].provider_rpc_id==45
+            and records[5].identity.batch_id==records[4].identity.batch_id)
+    observer.receive({},result,function() end)
+    check("missing native callback context stays unattributed",
+        records[#records].stage=="accepted_receive" and records[#records].origin.raw==nil)
+
+    observer.install(function() error("intentional observer failure") end)
+    local calls=0
+    local returned=observer.receive({},result,function(value) calls=calls+1; return value end)
+    check("observer failure leaves production receive intact",
+        calls==1 and returned==result and #observer.status().errors>0)
+    ok,detail=pcall(observer.with_raw,{},function() error(thrown) end)
+    check("enabled observer preserves thrown production error object",not ok and detail==thrown)
+    observer.install(nil)
+end
+
 -- Missing-import grouping preserves canonical evidence and applies to late
 -- observations without changing the raw publication's completion guards.
 do
@@ -849,6 +907,16 @@ do
     local buf = core.load_buf(path)
     local saved_clients, saved_client = vim.lsp.get_clients, vim.lsp.get_client_by_id
     local saved_attach = vim.lsp.buf_attach_client
+    local observer = require("huyang.diagnostic_observer")
+    local seam_events = {}
+    observer.install(function(event) seam_events[#seam_events+1]=event end)
+    local function accepted_count()
+        local count=0
+        for _,event in ipairs(seam_events) do
+            if event.stage=="accepted_receive" then count=count+1 end
+        end
+        return count
+    end
     local pull_coroutine, requests, refreshes = nil, 0, 0
     local pending, callbacks, emit_cancel = {}, {}, true
     local diagnostic = {range={start={line=0,character=0},["end"]={line=0,character=1}},
@@ -945,7 +1013,9 @@ do
         native=="native asynchronous refresh" and refreshes==1 and replacement==cancelled_id+1
             and pending[cancelled_id]==nil and pending[replacement]~=nil,
         {requests=requests,refreshes=refreshes})
+    local accepted_before_cancel=accepted_count()
     callbacks[cancelled_id](nil,{kind="full",items={diagnostic}})
+    check("discarded cancelled callback gets no accepted-origin grant",accepted_count()==accepted_before_cancel)
     require("huyang.diagnostic_pull").wake(fake.id)
     vim.wait(5)
     check("stale cancelled callback cannot clear the replacement in flight",
@@ -1073,7 +1143,9 @@ do
         local callback=pending[requests]
         pending[requests],fake.requests[requests]=nil,nil
         check("identity refresh has an owned live request",callback~=nil,requests)
-        if callback then callback(lsp_err,result) end
+        if callback then
+            observer.with_raw({request_id="unit:" .. requests,client_id=fake.id},callback,lsp_err,result)
+        end
     end
     identity_reply({kind="full",resultId="12",items={}})
     local changed_identity=edit.late_evidence().batches
@@ -1087,7 +1159,20 @@ do
             and changed_identity[1].document_version==nil and not changed_identity[1].complete
             and changed_identity[1].selected and changed_identity[1].dimension=="edited_documents"
             and #changed_identity[1].findings==0,changed_identity)
+    local represented
+    for _,event in ipairs(seam_events) do
+        if event.stage=="late_emission" and event.batch.result_id=="12" then represented=event end
+    end
+    local before_duplicate=#seam_events
     identity_reply({kind="full",resultId="12",items={}})
+    local duplicate_enqueues=0
+    for i=before_duplicate+1,#seam_events do
+        if seam_events[i].stage=="enqueued" then duplicate_enqueues=duplicate_enqueues+1 end
+    end
+    check("actual dedup retains original enqueue and emission origin",
+        represented and represented.identity.origin.raw.request_id~=nil
+            and represented.identity.queue_sequence==represented.queue_sequence
+            and duplicate_enqueues==0)
     check("repeated empty result twelve is delivered exactly once",
         #edit.late_evidence().batches==0)
     identity_reply({kind="unchanged",resultId="13"})
@@ -1101,6 +1186,21 @@ do
         #edit.late_evidence().batches==0)
 
     edit.mark_diagnostic_change(buf)
+    local emitted_with_queue=0
+    for _,event in ipairs(seam_events) do
+        if event.stage=="late_emission" and event.batch.kind=="lsp_pull" then
+            local found=false
+            for _,queued in ipairs(seam_events) do
+                if queued.stage=="enqueued" and queued.identity
+                    and queued.identity.batch_id==event.identity.batch_id
+                    and queued.queue_sequence==event.queue_sequence then found=true end
+            end
+            check("actual late emission has its observed enqueue",found,event)
+            emitted_with_queue=emitted_with_queue+1
+        end
+    end
+    check("actual asynchronous seam exercised late queue delivery",emitted_with_queue>0)
+    observer.install(nil)
     vim.lsp.get_clients,vim.lsp.get_client_by_id=saved_clients,saved_client
     vim.lsp.buf_attach_client=saved_attach
     vim.api.nvim_buf_delete(buf,{force=true})
