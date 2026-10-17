@@ -316,7 +316,9 @@ Keep both transport representations for compatible consumers and deduplicate for
   `check` targets, `go.mod`, or a Python project's own pytest and ruff run through its
   `.venv`, `uv run` or `poetry run`. An untrusted root runs nothing and the reply says
   so; `huyang trust <root>` on the machine grants it.
-- Diagnostic evidence requires the document version, completeness, a 150 ms quiet
+- The rules in this and the next few items are stated in full in
+  [the diagnostic evidence contract](diagnostics-contract.md).
+  Diagnostic evidence requires the document version, completeness, a 150 ms quiet
   period for empty pushes, and no work-done progress for that edit. Late pushes
   and pulls recheck the buffer, version and disk at collection; any currently open
   producer progress vetoes completion. Superseded observations are coalesced before

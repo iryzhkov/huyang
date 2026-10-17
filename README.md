@@ -30,7 +30,8 @@ operation (read a file, read a region by name, change a line you know, replace a
 located by content, rename a local identifier, add a file, coordinate edits and test) with
 the measured token cost of each, from the benchmark under
 [bench/agent-efficiency](bench/agent-efficiency/README.md). Read it before wiring Huyang into
-an agent's instructions.
+an agent's instructions. What the diagnostic evidence behind edit verdicts and the
+`diagnostics` tool guarantees is in [docs/diagnostics-contract.md](docs/diagnostics-contract.md).
 
 ## Tools
 
