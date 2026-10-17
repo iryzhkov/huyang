@@ -1378,9 +1378,18 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 			case "unknown-payload-field":
 				evidence["ev_origin"]["invented"] = true
 			case "repeated-transport":
-				marker := events[len(events)-1]
-				events[len(events)-1] = maps.Clone(events[len(events)-2])
-				events = append(events, marker)
+				if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err != nil {
+					t.Fatalf("repeated-transport baseline is not qualified: %v", err)
+				}
+				// The same emitted table travels twice, each in a valid invocation
+				// with the unchanged wire RPC ID and its own healthy end marker.
+				transport := maps.Clone(events[len(events)-2])
+				marker := maps.Clone(events[len(events)-1])
+				transport["transport_invocation"], transport["transport_index"] = float64(2), float64(1)
+				marker["transport_invocation"] = float64(2)
+				transport["unix_us"] = marker["unix_us"].(float64) + 1
+				marker["unix_us"] = transport["unix_us"].(float64) + 1
+				events = append(events, transport, marker)
 				for n, event := range events {
 					event["trace_seq"] = float64(n + 1)
 				}
@@ -1388,6 +1397,8 @@ func TestM9HistoricalTransportCallBoundaryAndMetadata(t *testing.T) {
 			}
 			if _, err := m9HistoricalResult(events, fixed, evidence, replies, calls); err == nil {
 				t.Fatal("missing/ambiguous causal transport-to-selected edge qualified")
+			} else if name == "repeated-transport" && err.Error() != "transport lacks unique actual emitted-table identity" {
+				t.Fatalf("repeated transport missed the unique emitted-table guard: %v", err)
 			}
 		})
 	}
