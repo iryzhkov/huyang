@@ -8,6 +8,7 @@ from workflow import Workflow
 
 WITNESS = """import * as sdk from "@opencode/plugin";
 import { appendFileSync } from "node:fs";
+import { installReadiness } from "../acceptance-support/opencode_readiness.mjs";
 const log = (entry) => appendFileSync(process.env.ACCEPTANCE_WITNESS, JSON.stringify(entry) + "\\n");
 export default {
   id: "acceptance.read-only-witness",
@@ -17,7 +18,10 @@ export default {
       log({kind:"context",sessionID:event.sessionID,providerID:event.model?.providerID,
         modelID:event.model?.id,tools:Object.keys(event.tools).sort()});
     });
-    return () => r.dispose();
+    const disposeReadiness = await installReadiness(ctx, log);
+    return async () => {
+      try { await disposeReadiness(); } finally { await r.dispose(); }
+    };
   }
 };
 """
@@ -30,6 +34,11 @@ def configure(case, plugin, recorder, port, plugin_sha256):
     plugin_bytes = Path(plugin).read_bytes()
     require(digest(plugin_bytes) == plugin_sha256, "plugin changed after its runner preflight pin")
     (plugins / "huyang-profiles.js").write_bytes(plugin_bytes)
+    # Support modules live outside native plugin discovery, but inside the retained case.
+    support = configdir / "acceptance-support"
+    support.mkdir()
+    (support / "opencode_readiness.mjs").write_bytes(
+        Path(__file__).with_name("opencode_readiness.mjs").read_bytes())
     (plugins / "zz-acceptance-witness.js").write_text(WITNESS)
     (configdir / "package.json").write_text('{"private":true,"type":"module","dependencies":{"@opencode/plugin":"2.0.30"}}\n')
     providers = {}
@@ -203,8 +212,8 @@ async def exercise(binary, env, owner, make_fixture, native_binary, native_sha25
             sessions.append(created["sessionId"])
         a, b = sessions
         require(a != b, "ACP returned one session for both creations")
-        # Native registration/catalog loading is asynchronous; start inference only
-        # after the real loader has returned both tools/list replies. No MCP calls here.
+        # Additional wire observation only: these replies precede native publication.
+        # The read-only witness prompt hook gates each native pre-snapshot admission.
         await asyncio.wait_for(owner.catalogs_ready({"full", "lean"}), 30)
 
         async def prompt(session, nonce, profile, provider, probe=False):
@@ -241,6 +250,15 @@ async def exercise(binary, env, owner, make_fixture, native_binary, native_sha25
         witness = [json.loads(line) for line in witness_path.read_text().splitlines()]
         require(any(e.get("kind") == "setup" and e.get("version") == "2.0.30" and e.get("sdkLoaded")
                     for e in witness), "pinned V2 plugin SDK not loaded by native loader")
+        require(any(e.get("kind") == "readiness-installed" for e in witness),
+                "native registry readiness hook was not installed")
+        require(not any(e.get("kind") in {"readiness-failure", "readiness-installation-failure"}
+                        for e in witness), "native registry readiness failed")
+        ready = [e for e in witness if e.get("kind") == "readiness-ready"]
+        require(len(ready) == 7 and len({e.get("messageID") for e in ready}) == 7,
+                "each of the seven actual prompts must have distinct native readiness proof")
+        require([sum(e.get("sessionID") == session for e in ready) for session in sessions] == [3, 4],
+                "native readiness proof is missing or attributed to another session")
         contexts = [e for e in witness if e.get("kind") == "context"]
         for session in sessions:
             require({e.get("providerID") for e in contexts if e.get("sessionID") == session}
@@ -255,6 +273,10 @@ async def exercise(binary, env, owner, make_fixture, native_binary, native_sha25
         try:
             await acp.close()
         finally:
+            # Preserve failure observations even when a prompt rejects before the final checks.
+            witness_path = owner.case / "plugin-witness.jsonl"
+            if witness_path.is_file():
+                witness = [json.loads(line) for line in witness_path.read_text().splitlines()]
             write_json(owner.case / "acp-ipc-final.json", final_capture)
             owner.acp_ipc_captures = (initial_capture, final_capture)
             write_json(owner.case / "acp-report.json", {"sessions": sessions, "notifications": acp.notifications,
