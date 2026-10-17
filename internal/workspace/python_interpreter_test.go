@@ -22,13 +22,27 @@ func pythonFixtureFile(t *testing.T, root, name string, mode os.FileMode) string
 	return path
 }
 
+func pythonTrustFixture(t *testing.T, roots ...string) string {
+	t.Helper()
+	config := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(config, []byte("[trust]\nroots = []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range roots {
+		if _, _, err := TrustRoot(config, root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return config
+}
+
 func TestProjectPythonPrecedence(t *testing.T) {
 	root := t.TempDir()
 	pythonFixtureFile(t, root, "uv.lock", 0644)
 	pythonFixtureFile(t, root, "poetry.lock", 0644)
 	active := t.TempDir()
 	activePython := pythonFixtureFile(t, active, "bin/python", 0755)
-	discovery := pythonDiscovery{active: active,
+	discovery := pythonDiscovery{active: active, userConfig: pythonTrustFixture(t),
 		lookPath: func(string) (string, error) { t.Fatal("local discovery ran a manager"); return "", nil },
 		run: func(context.Context, string, string, ...string) (string, error) {
 			t.Fatal("executed a manager")
@@ -57,13 +71,22 @@ func TestProjectPythonManagerQueries(t *testing.T) {
 			root, tools := t.TempDir(), t.TempDir()
 			pythonFixtureFile(t, root, manager+".lock", 0644)
 			command := pythonFixtureFile(t, tools, manager, 0755)
-			python := pythonFixtureFile(t, tools, "env/bin/python", 0755)
-			wantArgs := []string{"python", "find", "--no-python-downloads"}
+			base := pythonFixtureFile(t, tools, "base/bin/python", 0755)
+			python := filepath.Join(tools, "env", "bin", "python")
+			pythonFixtureFile(t, tools, "env/pyvenv.cfg", 0644)
+			if err := os.MkdirAll(filepath.Dir(python), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(base, python); err != nil {
+				t.Fatal(err)
+			}
+			wantArgs := []string{"--offline", "python", "find", "--no-python-downloads"}
 			if manager == "poetry" {
 				wantArgs = []string{"--no-plugins", "env", "info", "--executable"}
 			}
 			queried := false
 			discovery := pythonDiscovery{
+				userConfig: pythonTrustFixture(t, root),
 				lookPath: func(name string) (string, error) {
 					if name != manager {
 						t.Fatalf("manager = %s", name)
@@ -116,6 +139,7 @@ func TestProjectPythonManagerFailures(t *testing.T) {
 			}
 			ran := false
 			discovery := pythonDiscovery{
+				userConfig: pythonTrustFixture(t, root),
 				lookPath: func(name string) (string, error) {
 					if name != "uv" {
 						t.Fatalf("lockfile precedence changed: %s", name)

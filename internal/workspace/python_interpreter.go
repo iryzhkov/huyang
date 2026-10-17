@@ -24,14 +24,16 @@ type ProjectPython struct {
 }
 
 type pythonDiscovery struct {
-	lookPath func(string) (string, error)
-	run      func(context.Context, string, string, ...string) (string, error)
-	active   string
+	lookPath   func(string) (string, error)
+	run        func(context.Context, string, string, ...string) (string, error)
+	active     string
+	userConfig string // empty selects the same user policy as the pipeline
 }
 
 // ResolveProjectPython reuses the pipeline's local-venv/lockfile selection.
-// Discovery never executes Python, project scripts, a shell, or a package runner.
-// Manager queries only locate an existing interpreter; they do not sync/install.
+// Local/configured selection reads files only. Manager queries require the
+// canonical root to be trusted: uv/Poetry may execute candidate interpreters
+// while locating an environment. Huyang never syncs or installs dependencies.
 func ResolveProjectPython(ctx context.Context, root string) ProjectPython {
 	return resolveProjectPython(ctx, root, pythonDiscovery{
 		lookPath: exec.LookPath, run: queryPythonManager, active: os.Getenv("VIRTUAL_ENV"),
@@ -66,6 +68,9 @@ func resolveProjectPython(ctx context.Context, root string, discovery pythonDisc
 		return ProjectPython{Reason: "project_interpreter_not_found"}
 	}
 	manager := environment.runner[0]
+	if !pythonManagerRootTrusted(root, discovery.userConfig) {
+		return ProjectPython{Source: manager, Reason: "environment_manager_untrusted"}
+	}
 	command, err := discovery.lookPath(manager)
 	if err != nil || !filepath.IsAbs(command) {
 		return ProjectPython{Source: manager, Reason: "environment_manager_unavailable"}
@@ -76,7 +81,7 @@ func resolveProjectPython(ctx context.Context, root string, discovery pythonDisc
 	if err != nil || pathWithin(root, realCommand) {
 		return ProjectPython{Source: manager, Reason: "environment_manager_unavailable"}
 	}
-	args := []string{"python", "find", "--no-python-downloads"}
+	args := []string{"--offline", "python", "find", "--no-python-downloads"}
 	if manager == "poetry" {
 		args = []string{"--no-plugins", "env", "info", "--executable"}
 	}
@@ -90,7 +95,42 @@ func resolveProjectPython(ctx context.Context, root string, discovery pythonDisc
 	if strings.ContainsAny(python, "\r\n") || !filepath.IsAbs(python) || !executablePython(python) {
 		return ProjectPython{Source: manager, Reason: "environment_manager_invalid_interpreter"}
 	}
+	if !pythonVirtualenv(python) {
+		return ProjectPython{Source: manager, Reason: "environment_manager_not_project_environment"}
+	}
 	return ProjectPython{Interpreter: filepath.Clean(python), Source: manager}
+}
+
+// Match M5 pipeline trust: resolve both sides, allow an explicitly trusted
+// root or its descendants, and fail closed on policy/root resolution errors.
+// root is the canonical environment root, never the preparation sandbox.
+func pythonManagerRootTrusted(root, userConfig string) bool {
+	roots, err := TrustedRoots(userConfig)
+	if err != nil {
+		return false
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	for _, trusted := range roots {
+		resolved, err := filepath.EvalSymlinks(trusted)
+		if err == nil && (resolvedRoot == resolved || insidePath(resolved, resolvedRoot)) {
+			return true
+		}
+	}
+	return false
+}
+
+// Inspect the selected environment path, not the resolved Python binary:
+// venv/bin/python commonly symlinks to a base interpreter outside that venv.
+func pythonVirtualenv(python string) bool {
+	bin := filepath.Dir(filepath.Clean(python))
+	if filepath.Base(bin) != "bin" {
+		return false
+	}
+	marker, err := os.Stat(filepath.Join(filepath.Dir(bin), "pyvenv.cfg"))
+	return err == nil && marker.Mode().IsRegular()
 }
 
 func executablePython(path string) bool {
@@ -131,7 +171,8 @@ func projectConfiguresPython(root string) bool {
 }
 
 // Limit manager output and never surface its stderr (which may contain local
-// configuration). No interpreter or project code is executed to validate it.
+// configuration). The caller requires canonical-root trust before reaching
+// this subprocess: a manager can inspect repository config and run interpreters.
 func queryPythonManager(ctx context.Context, root, command string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = root

@@ -42,6 +42,17 @@ do
             },
         }
     end
+    for _, source in ipairs({ "uv", "poetry" }) do
+        python.configure({ interpreter = "", source = source, reason = "environment_manager_not_project_environment" })
+        local rejected = python.normalize_batch(batch())
+        check(source .. " base-interpreter rejection keeps import evidence provisional",
+            rejected.complete == false and rejected.reason == "python_environment_unresolved"
+                and #rejected.findings == 2 and rejected.findings[1].message == "real type error"
+                and rejected.findings[2].code == "python_environment_unresolved"
+                and rejected.document_version == 5 and rejected.expected_version == 5
+                and rejected.progress_pending)
+    end
+    python.configure({})
     local grouped = python.normalize_batch(batch())
     check("unknown interpreter groups missing imports into one warning",
         #grouped.findings == 2 and grouped.findings[1].message == "real type error"

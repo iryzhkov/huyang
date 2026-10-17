@@ -393,11 +393,15 @@ Keep both transport representations for compatible consumers and deduplicate for
   its later findings arrive through `diagnostic_updates` on subsequent tool replies.
 - Pyright and basedpyright preserve explicit `python.pythonPath` and project
   `venv`/`venvPath` settings. Otherwise the interpreter comes from the pipeline's
-  `.venv`, `venv`, `env` selection, then executable `VIRTUAL_ENV`, then metadata
-  from uv (preferred when both lockfiles exist) or Poetry. Discovery uses the canonical
+  `.venv`, `venv`, `env` selection, then executable `VIRTUAL_ENV`, then queries
+  to uv (preferred when both lockfiles exist) or Poetry. Discovery uses the canonical
   workspace root even for a preparation sandbox, never the daemon working directory.
-  Metadata queries have a two-second bound and do not sync/install dependencies or
-  run project scripts. A failed query leaves the environment unresolved.
+  Manager queries require that canonical root to match the M5 user-policy trust roots;
+  policy read/parse/root-resolution failures deny execution. Queries have a two-second
+  bound and request no downloads, dependency sync or installation. Managers can execute
+  candidate interpreters, so untrusted roots use filesystem/configuration selection only.
+  Manager output must name an executable in a virtualenv with `pyvenv.cfg` beside `bin`;
+  base interpreters and failed queries leave the environment unresolved.
   Without a known interpreter, `reportMissingImports` becomes one stable
   `python_environment_unresolved` warning per document/producer. Other findings remain,
   coverage stays provisional, and a missing-import omission cannot resolve prior findings.

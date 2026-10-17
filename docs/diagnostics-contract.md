@@ -58,12 +58,30 @@ explicit failure, not permission to substitute an unrelated interpreter.
 Provider bootstrap configures the interpreter before the first source buffer loads, including
 on generation restart. The canonical workspace root supplies environment metadata even when
 source bytes live in a preparation sandbox. The pipeline's command detection remains read-only and does not execute
-these queries. Language support discovery may issue `uv python find --no-python-downloads`
-or `poetry --no-plugins env info --executable`, with that root as cwd and a two-second
-deadline. It never uses `uv run`, `poetry run`, Python snippets, project scripts, a shell,
-dependency sync, or installation for discovery. A manager executable resolving inside the
-project is refused. Failed/missing managers, multiline output, relative paths, and absent or
-non-executable interpreters remain unresolved. Manager stderr is not published.
+these queries. Language support discovery may issue
+`uv --offline python find --no-python-downloads` or
+`poetry --no-plugins env info --executable`, with that root as cwd and a two-second
+deadline, only when the canonical environment root is trusted by the M5 user policy.
+The gate reads `TrustedRoots`, resolves symlinks on both sides and uses the pipeline's
+root-or-descendant matching. Missing trust, policy read/parse errors or root resolution
+failures deny execution with `environment_manager_untrusted`. A sandbox cannot grant
+trust to an untrusted canonical root. Local venv, `VIRTUAL_ENV` and explicit-setting
+selection remain filesystem/configuration-only and do not require command trust.
+
+These manager queries read project-controlled configuration and may execute candidate
+interpreters internally. They are not metadata-only or safe to run in an untrusted root.
+Huyang does not directly launch Python snippets, project scripts, a shell, `uv run`
+or `poetry run`, and requests no downloads, dependency sync or installation.
+A manager executable resolving inside the project is refused. Manager stderr is not published.
+
+Manager output is accepted only if it names an absolute executable in a `bin` directory
+whose parent contains a regular `pyvenv.cfg` file. The marker is checked against the
+selected path, without resolving the Python binary: a valid virtualenv interpreter may
+symlink to a base interpreter outside the venv. External Poetry venvs are allowed.
+System/uv-managed base interpreters without that marker remain unresolved with
+`environment_manager_not_project_environment`, so unsynced projects cannot acquire
+full import authority from a base interpreter. Other failed/missing managers, multiline
+output, relative paths, and absent or non-executable interpreters also remain unresolved.
 
 When no interpreter is known to the attached client, only `reportMissingImports` findings
 from Pyright/basedpyright are collapsed into one stable warning per producer/document.
