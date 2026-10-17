@@ -160,6 +160,7 @@ generations alongside the first primary request for all seven prompts.
 No extra outbound destination is introduced by the waiter.
 
 Native unknown terminal IPC remains a separate FAIL with no waiver. Reply
-mapping/fatal-workflow bookkeeping belongs to the other worker. Pending M9
-Python policy decision 8596 is unrelated. This source change makes no runtime,
-review, CI, deployment or overall M8 acceptance claim.
+mapping/fatal-workflow bookkeeping belongs to the other worker. Igor adopted
+M9 Python policy decision 8596 in this execution thread on 2026-10-17; that
+separate contract does not qualify native clients. This source change makes no
+runtime, CI, deployment or overall M8 acceptance claim.
