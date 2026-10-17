@@ -489,73 +489,6 @@
     "name": "diagnostics"
   },
   {
-    "description": "List revision-bound quick fixes or refactors without applying them.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "root": {
-          "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
-          "type": "string"
-        },
-        "target": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "handle": {
-                  "description": "Opaque revision-bound handle.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "handle"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "symbol_locator": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "name_path": {
-                      "description": "Declaration name path.",
-                      "type": "string"
-                    },
-                    "path": {
-                      "description": "File path.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "name_path"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "symbol_locator"
-              ],
-              "type": "object"
-            }
-          ],
-          "type": "object"
-        },
-        "workspace_id": {
-          "description": "Workspace ID from workspace_open; or omit it and pass root.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "target"
-      ],
-      "type": "object"
-    },
-    "name": "code_actions"
-  },
-  {
     "description": "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -\u003e new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces the bytes of a handle returned by search or symbol_find. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -733,7 +666,7 @@
     "name": "edit_apply"
   },
   {
-    "description": "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.",
+    "description": "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title; a title the server does not offer is refused with the titles it does), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -1146,14 +1079,13 @@
     "name": "language_server_status"
   },
   {
-    "description": "Explicitly install or restart a workspace language server through the owned Neovim provider.",
+    "description": "Restart the owned Neovim provider and verify that its language servers attach again. Huyang does not install language servers or parsers: install them outside it (Mason in your Neovim setup, or the system package manager), then restart so the provider picks them up.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
         "action": {
           "enum": [
-            "install",
             "restart"
           ],
           "type": "string"
@@ -1162,19 +1094,8 @@
           "description": "Optional stable key for safe retries; generated when omitted.",
           "type": "string"
         },
-        "language": {
-          "description": "Filetype or extension, required for install.",
-          "type": "string"
-        },
-        "parser": {
-          "type": "boolean"
-        },
         "root": {
           "description": "Project root; opens or reuses its workspace when workspace_id is omitted.",
-          "type": "string"
-        },
-        "server": {
-          "description": "Optional Mason package or lspconfig name; none installs only the parser.",
           "type": "string"
         },
         "workspace_id": {

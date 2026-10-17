@@ -182,31 +182,15 @@ func TestAnalysisRespectsCapsAndCancellation(t *testing.T) {
 	}
 }
 
-// A canonical revision and a prepared revision are different keys, so one can
-// never be served for the other however similar the tree is.
-func TestCanonicalAndPreparedSnapshotsNeverShareAnEntry(t *testing.T) {
-	store := newAnalysisStore()
+// A canonical revision and a prepared revision are different keys, so a
+// snapshot of one can never be mistaken for the other however similar the
+// tree is.
+func TestCanonicalAndPreparedSnapshotsHaveDifferentIdentities(t *testing.T) {
 	canonical := analysisKey()
 	prepared := analysisKey()
 	prepared.Revision = "prep_9f1"
 	if canonical.ID() == prepared.ID() {
 		t.Fatal("a prepared revision shares the canonical snapshot identity")
-	}
-	store.put(AnalysisSnapshot{ID: canonical.ID(), Key: canonical})
-	if _, found := store.get(prepared.ID()); found {
-		t.Fatal("the prepared revision was served the canonical snapshot")
-	}
-	// The store is bounded, and the oldest entry goes first.
-	for index := 0; index < maxAnalysisSnapshots+4; index++ {
-		key := analysisKey()
-		key.Revision = "wsrev_" + string(rune('a'+index))
-		store.put(AnalysisSnapshot{ID: key.ID(), Key: key})
-	}
-	if len(store.entries) > maxAnalysisSnapshots {
-		t.Fatalf("the snapshot store is unbounded: %d entries", len(store.entries))
-	}
-	if _, found := store.get(canonical.ID()); found {
-		t.Fatal("the oldest snapshot was not evicted")
 	}
 }
 

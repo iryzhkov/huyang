@@ -61,7 +61,7 @@ var ProfileOrder = []Profile{ProfileFull, ProfileOrient, ProfileEdit}
 var modernProfileNames = map[Profile][]string{
 	ProfileFull: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics",
-		"code_actions", "edit_apply", "change_plan", "revision_diff", "evidence_get",
+		"edit_apply", "change_plan", "revision_diff", "evidence_get",
 		"language_server_status", "language_server_setup",
 	},
 	ProfileOrient: {
@@ -69,7 +69,7 @@ var modernProfileNames = map[Profile][]string{
 	},
 	ProfileEdit: {
 		"workspace_open", "workspace_inspect", "search", "symbol_find", "navigate", "read", "diagnostics", "evidence_get",
-		"code_actions", "edit_apply", "change_plan", "revision_diff",
+		"edit_apply", "change_plan", "revision_diff",
 	},
 }
 
@@ -128,10 +128,10 @@ func invariantsSchema() map[string]any {
 	return map[string]any{
 		"type":        "array",
 		"maxItems":    16,
-		"description": "What the result must satisfy, checked against the prepared revision before anything is applied. A required invariant that is violated or that nobody could evaluate keeps the plan out of READY and has no accept flag; an advisory one leaves the plan PROVISIONAL. Editing the plan drops every proof. api_compatible reads each affected file's exported surface before and after (Go and TypeScript); path_unreachable can refute reachability from one remaining reference but cannot yet prove it, so it answers violated or unknown.",
+		"description": "What the result must satisfy, checked against the prepared revision before anything is applied. A required invariant that is violated or that nobody could evaluate keeps the plan out of READY and has no accept flag; an advisory one leaves the plan PROVISIONAL. Editing the plan drops every proof. api_compatible reads each affected file's exported surface before and after (Go and TypeScript).",
 		"items": schemaObject(map[string]any{
 			"id":          stringSchema("Stable identifier, so the answer can be matched to the assertion. Assigned when omitted."),
-			"kind":        enumSchema("no_new_diagnostics", "tests_pass", "no_references", "symbol_exists", "symbol_absent", "api_compatible", "path_unreachable"),
+			"kind":        enumSchema("no_new_diagnostics", "tests_pass", "no_references", "symbol_exists", "symbol_absent", "api_compatible"),
 			"enforcement": enumSchema("required", "advisory"),
 			"scope": schemaObject(map[string]any{
 				"paths":    map[string]any{"type": "array", "items": stringSchema("Workspace-relative path."), "description": "Narrows a diagnostic assertion to these files; every staged file when omitted."},
@@ -293,7 +293,6 @@ func changePlanSchema(stateful map[string]any, operationKinds []string) map[stri
 func buildModernTools() []ToolDescriptor {
 	tools := orientationTools()
 	tools = append(tools, editTools()...)
-	tools = append(tools, executionGraphTool(), pathExplainTool())
 	for index := range tools {
 		tools[index].InputSchema = withDialect(tools[index].InputSchema)
 	}
@@ -387,17 +386,13 @@ func orientationTools() []ToolDescriptor {
 
 // editTools are the mutating and verification tools of the edit profile.
 func editTools() []ToolDescriptor {
-	readTarget := map[string]any{"workspace_id": workspaceIDProperty(), "root": rootProperty(), "target": targetSchema()}
 	stateful := statefulProperties()
 	operationKinds := []string{"replace_symbol", "delete_symbol", "insert_before", "insert_after", "replace_range", "create_file", "move_file", "copy_file", "delete_file", "rename_symbol", "safe_delete_symbol", "inline_symbol", "replace_matches", "apply_code_action"}
 	return []ToolDescriptor{
-		{Class: ClassCanonicalWrite, Name: "language_server_setup", Description: "Explicitly install or restart a workspace language server through the owned Neovim provider.", Destructive: true, InputSchema: schemaObject(map[string]any{
+		{Class: ClassCanonicalWrite, Name: "language_server_setup", Description: "Restart the owned Neovim provider and verify that its language servers attach again. Huyang does not install language servers or parsers: install them outside it (Mason in your Neovim setup, or the system package manager), then restart so the provider picks them up.", Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": stateful["workspace_id"], "root": stateful["root"], "idempotency_key": stateful["idempotency_key"],
-			"action": enumSchema("install", "restart"), "language": stringSchema("Filetype or extension, required for install."),
-			"server": stringSchema("Optional Mason package or lspconfig name; none installs only the parser."),
-			"parser": map[string]any{"type": "boolean"},
+			"action": enumSchema("restart"),
 		}, "action")},
-		{Class: ClassProviderRead, Name: "code_actions", Description: "List revision-bound quick fixes or refactors without applying them.", ReadOnly: true, Idempotent: true, InputSchema: schemaObject(readTarget, "target"), ExperimentalProperties: preparedSelectorProperties()},
 		{Class: ClassCanonicalWrite, Name: "edit_apply", Description: "Apply one guarded edit, or a list of them with operations, and get back the new revision and the diagnostics it caused. kind=replace_literal replaces exact text you already know (old -> new, optional path, expected_count defaults to 1) in one call with no prior search; kind=create_file writes a new file and refuses an existing path unless replace=true names its revision_id; kind=move_file, copy_file (from may be an absolute path outside the workspace) and delete_file (needs revision_id or expected_sha256) change files without their content passing through you, keep the bytes exact, never touch the Git index, and answer with each path's tracked state and the git command to run next; kind=replace_range replaces the bytes of a handle returned by search or symbol_find. operations is a sequence, not a transaction: applied in order, a refusal stops it and earlier operations stay; for atomic or verified multi-file changes use change_plan. Name the workspace by workspace_id or by root; for a single file outside any repository give an absolute path and neither. verbose=true adds the patch and the full change record.", Destructive: true, InputSchema: schemaObject(map[string]any{
 			"workspace_id": workspaceIDProperty(), "root": rootProperty(), "idempotency_key": stateful["idempotency_key"],
 			"preview_only": map[string]any{"type": "boolean", "description": "Compute the diff without changing canonical bytes."},
@@ -406,7 +401,7 @@ func editTools() []ToolDescriptor {
 			"operation":    editOperationSchema(true),
 			"operations":   map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "description": "Several operations (every kind but replace_range) applied in order in one call, each located against the bytes the previous ones left; one formatter pass, one receipt, one diagnostics refresh. A refusal stops the list, earlier operations stay applied and the reply says how many. Each item takes the fields of operation above, which describes them.", "items": undescribed(editOperationSchema(false))},
 		})},
-		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title from code_actions), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds), ExperimentalProperties: map[string]any{
+		{Class: ClassSandboxWrite, Name: "change_plan", Description: "Stage several operations that must land atomically (edits, new, moved or deleted files, symbol renames, code actions) and commit them only after the sandbox pipeline ran: action=prepare with operations inline, then action=apply with the returned plan_id, plan_revision and prepared_revision. kind=replace_matches replaces every hit of a search result set (target.handle is the set_ handle, content the replacement). Four kinds ask the language server what it would change and stage its answer as exact ranges: kind=rename_symbol (content is the new name), kind=apply_code_action (content is the action title; a title the server does not offer is refused with the titles it does), kind=inline_symbol, and kind=safe_delete_symbol, which refuses and lists the call sites when anything outside the declaration still refers to it. For one edit use edit_apply instead: it is one call.", Destructive: true, InputSchema: changePlanSchema(stateful, operationKinds), ExperimentalProperties: map[string]any{
 			"view":       enumSchema("plan", "impact", "semantic"),
 			"invariants": invariantsSchema(),
 		}},
@@ -547,7 +542,7 @@ func ValidateRegistry() error {
 			return fmt.Errorf("tool %s declares no scheduler class", descriptor.Name)
 		}
 	}
-	expected := map[Profile]int{ProfileFull: 14, ProfileOrient: 8, ProfileEdit: 12}
+	expected := map[Profile]int{ProfileFull: 13, ProfileOrient: 8, ProfileEdit: 11}
 	for _, profile := range ProfileOrder {
 		if len(Catalog(profile)) != expected[profile] {
 			return fmt.Errorf("profile %s has %d tools, want %d", profile, len(Catalog(profile)), expected[profile])

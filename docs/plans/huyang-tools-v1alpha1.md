@@ -23,9 +23,10 @@ when debugging is enabled. Several differ only by navigation relation or edit ta
 their individual schemas are useful compatibility contracts but too much simultaneous
 choice for the new default.
 
-The complete modern coding catalog is 15 tools: 13 shared orientation/editing tools and two
+The complete modern coding catalog is 13 tools: 11 shared orientation/editing tools and two
 language-server administration tools added after the S00 freeze. It was 19 until the four
-debugging tools were removed on 2026-10-17. `full` carries all 15; `huyang mcp` defaults to
+debugging tools, `verify_run` and `code_actions` were removed on 2026-10-17. `full` carries
+all 13; `huyang mcp` defaults to
 `edit`, and a fixed `orient` profile reduces context further when an orchestrator already
 knows the session's job. Profiles filter presentation only; they are not permissions or
 separate implementations. A large-change plan is part of editing, not a separate mode.
@@ -62,7 +63,6 @@ separate implementations. A large-change plan is part of editing, not a separate
 | `navigate` | LSP/semantic relationships selected by `relation=definition|type_definition|implementation|references|incoming_calls|outgoing_calls|hover`. |
 | `read` | Read canonical/prepared source, outline or read-only history by file/range/handle, including commit handles. |
 | `diagnostics` | Inspect normalized parser/LSP diagnostics and their confidence/provenance for a revision or transaction. |
-| `code_actions` | List revision-bound quick fixes/refactors. It never applies one. |
 
 ### Mutation and verification
 
@@ -73,7 +73,8 @@ separate implementations. A large-change plan is part of editing, not a separate
 | `revision_diff` | Explain canonical changes between two revisions or why a mutation precondition is stale. |
 | `evidence_get` | Page detailed diffs, diagnostics, command output or provenance by evidence ID. |
 
-This is 12 tools (13 until `verify_run` was removed; see the [change log](#change-log)).
+This is 11 tools (13 until `verify_run` and `code_actions` were removed; see the
+[change log](#change-log)).
 Builds and tests run in the agent's shell; `change_plan` prepare still runs a trusted
 root's configured format gate, check and tests against the staged sandbox bytes.
 `workspace_inspect` replaces separate tree/map/status/capabilities tools;
@@ -89,12 +90,13 @@ from the model-facing roster. The adapter releases its lease on clean disconnect
 
 - `orient`: `workspace_open`, `workspace_inspect`, `search`, `symbol_find`, `navigate`,
   `read`, `diagnostics`, `evidence_get`.
-- `edit`: the orientation foundation plus `code_actions`, `edit_apply`, `change_plan`
-  and `revision_diff`.
-- `full`: all 14 tools. It is the only frozen profile that carries
+- `edit`: the orientation foundation plus `edit_apply`, `change_plan` and
+  `revision_diff`.
+- `full`: all 13 tools. It is the only frozen profile that carries
   `language_server_status` and `language_server_setup`.
-- `experimental`: `full` plus the tools and arguments still being designed. It is opt-in
-  by name and is not a contract.
+- `experimental`: `full` plus the arguments still being designed. It carries no tools of
+  its own since `execution_graph` and `path_explain` were removed. It is opt-in by name
+  and is not a contract.
 
 The `debug` and `debugger` profiles were removed with the debugger on 2026-10-17. The
 `huyang mcp` default is `edit`.
@@ -116,12 +118,15 @@ coding capability.
 
 - **Language servers in the `full` profile:** `language_server_status` probes the owned
   Neovim provider and reports, per language in the workspace, the parser and language-server
-  attachment state and the install options available; `language_server_setup` installs or
-  restarts a language server or parser through the provider with an explicit `action`,
-  `language`, optional `server` and `parser`. Both were added after the S00 freeze (see the
-  amendment). They are the one administration surface in the catalog, because an agent that
-  finds semantic coverage missing needs a way to repair it that is visible, keyed by
-  idempotency key and never triggered by an ordinary read or edit.
+  attachment state and the Mason packages that could serve a language that has none;
+  `language_server_setup` restarts the provider (`action=restart`, the only action) and
+  verifies that the servers attached before attach again. Both were added after the S00
+  freeze (see the amendment). They are the one administration surface in the catalog,
+  because an agent that finds semantic coverage missing needs a way to repair it that is
+  visible, keyed by idempotency key and never triggered by an ordinary read or edit.
+  Installing a server or parser is not part of it: that happens outside Huyang, with Mason
+  or nvim-treesitter in the user's Neovim setup or with the system package manager, and a
+  restart picks the result up.
 - **Debug (removed 2026-10-17):** `debug_session`, `debug_breakpoints`, `debug_control` and
   `debug_inspect` were in `full` and `debug`. No agent called them in the 30 days before
   their removal; see the [change log](#change-log).
@@ -487,7 +492,7 @@ structured fields; requested context/detail is retrieved through `read` or `evid
 | Apply a known bounded text rule | `edit_apply(replace_matches, query + expected counts)` | inspect returned evidence |
 | Multi-file refactor, operations known | `change_plan(action=prepare, inline=...)` | inspect details if needed → apply |
 | Interactive multi-file plan | `change_plan(action=create)` | edit → preview/prepare → inspect/revise → apply |
-| Fix a diagnostic | `code_actions` | add `apply_code_action` to a transaction or use `edit_apply` |
+| Fix a diagnostic | `change_plan(apply_code_action)` with the action's title | `edit_apply` |
 | Explain a stale refusal | `revision_diff` | reread/repreview; no automatic rebase |
 | Run tests/checks without editing | the agent's shell | none; Huyang runs no command outside a preparation |
 
@@ -507,18 +512,16 @@ inspect and discard; CONFLICTED offers inspect, revision diff and discard; PROVI
 offers the missing verification stage and discard. Invalid transitions return current
 state and valid next actions rather than a generic error.
 
-## Code actions before and after edits
+## Code actions
 
-`code_actions` is a read-only default tool and is available before any Huyang edit. It
-accepts a file position, semantic/range handle, diagnostic ID or prepared transaction
-location. This covers both diagnostic quick fixes and source/refactor actions that do not
-require an existing diagnostic.
-
-Each returned action is revision-bound and includes its title, kind, originating diagnostic
-when any, action handle, and the write set known from LSP resolve/preview. Listing an action
-never mutates. Apply it through `edit_apply(operation=apply_code_action)` for one small
-action or add it to a plan. Actions with an unknown write set prepare only in a sandbox; the
-resulting complete diff must become declared plan operations before apply.
+A code action is a `change_plan` operation, `apply_code_action`, whose `content` is the
+action's title and whose target is the text it applies to. The server's answer is staged as
+exact ranges like any other operation, so it previews, verifies and rolls back with the
+plan. A title the server does not offer at the target is refused with the titles it does
+offer there, and `diagnostics` on a prepared revision lists the titles on offer for each
+finding under `quick_fixes`. The read-only `code_actions` listing tool was removed on
+2026-10-17 (see the [change log](#change-log)). An action that is a server command rather
+than an edit cannot be staged and is refused.
 
 A provider-advertised source/fix-all action is one action only when resolve binds its exact
 scope and workspace edit to the revision. Huyang does not manufacture a synthetic fix-all by
@@ -722,7 +725,7 @@ that choice without making the model route every request manually:
 - Navigation, rename and a single code-action application route to one primary provider per
   capability. Diagnostics and verification may aggregate an explicitly configured set. Every
   item and coverage claim records its provider ID; conflicting results remain separate.
-- `navigate`, `diagnostics` and `code_actions` accept an optional provider or
+- `navigate` and `diagnostics` accept an optional provider or
   analysis-profile override when meaningful. The normal call omits it. Overrides name
   discovered/configured provider IDs, never arbitrary executable commands.
 - Fallback order is part of the visible profile. Huyang may follow that declared order after
@@ -1218,10 +1221,6 @@ its kind needs under `scope`:
   not, and neither is reformatting one. A file no adapter reads, one that does not parse, and
   an export form the scanner does not know all count as gaps: they make the answer unknown,
   and never turn a break that was found into a pass.
-- `path_unreachable` - nothing can still reach the declaration in `scope.symbol`. This one
-  can be refuted and not yet proved. One remaining reference is a path, so it answers
-  violated; agreeing needs a complete static execution graph, which this service does not
-  build, so the other answer is unknown and says exactly that.
 
 Every invariant is `pending` until a prepare evaluates it, and then `proven`, `violated` or
 `unknown`, beside the prepared revision it was evaluated against, the coverage of that
@@ -1312,7 +1311,7 @@ corrupt the baseline every diagnostic delta and the `no_new_diagnostics` invaria
 
 ### Prepared revisions as somewhere to look (experimental)
 
-`read`, `navigate`, `diagnostics` and `code_actions` accept a revision selector in the
+`read`, `navigate` and `diagnostics` accept a revision selector in the
 experimental catalog: `revision` naming a prepared revision, or `plan_id` with an optional
 `plan_revision`. An empty selector, `current`, or the canonical revision itself all mean the
 workspace as it stands.
@@ -1614,3 +1613,44 @@ State directories from earlier builds may hold `test-history/`; it is no longer 
 is removed with a forgotten workspace's other state. Amendment 3's list of tools that are
 never defaulted keeps `edit_apply` and `change_plan`; its mention of `verify_run` no longer
 applies, and a relative `root` is resolved for those two only.
+
+### 2026-10-17: code_actions, language-server install and execution tools removed (amendment 6)
+
+Removed from the frozen profiles:
+
+- The tool `code_actions`, from `full` and `edit`. It was called once in the 30 days
+  before. A client with a cached catalog that still calls it gets the unknown-tool refusal.
+  A code action is staged through `change_plan` with an `apply_code_action` operation whose
+  `content` is the action's title; a title the server does not offer is refused with the
+  titles it does, and `diagnostics` on a prepared revision lists them under `quick_fixes`.
+  The `apply_code_action` operation, the provider's `code_actions` capability and
+  `quick_fixes` are unchanged.
+- The `install` action of `language_server_setup`, and its `language`, `server` and
+  `parser` arguments. `action` now accepts only `restart`, so an install request is refused
+  as invalid arguments. Huyang no longer installs language servers or Tree-sitter parsers:
+  install them outside it, with Mason or nvim-treesitter in the Neovim setup or with the
+  system package manager, then restart the provider. The provider still enables a server
+  Mason has installed, or one on `PATH` an lspconfig config describes, each time it starts.
+  `language_server_status` keeps `install_options` (the Mason packages that serve a
+  language that has none) as a pointer for that out-of-band install, and its `next` entry
+  for a missing language is now a `restart` whose `prerequisite` says how to install. The
+  kernel's `lsp_not_configured` and `lsp_not_startable` reasons say the same.
+
+Removed from the experimental profile:
+
+- The tools `execution_graph` and `path_explain`, the static execution graph, path ranking
+  and closed-Go proof behind them, their prepared-revision routing and the `psrc_` source
+  handles they returned.
+- The `path_unreachable` invariant kind. A plan record written earlier that still declares
+  one decodes, and its invariant answers `unknown` because nothing evaluates it; a new
+  declaration of the kind is refused as an unknown kind.
+
+Unchanged: `navigate`, `diagnostics`, `language_server_status`, `language_server_setup
+{action: restart}`, provider capabilities and the `change_plan` prepare sandbox gate.
+Amendment 3's read-only default workspace list loses `code_actions` and is otherwise
+unchanged.
+
+Counts: 13 tools in `full`, 8 in `orient`, 11 in `edit`; the experimental profile is `full`
+plus experimental arguments. The catalog fixtures are regenerated, `catalog-experimental.json`
+loses the two tools and the invariant kind, and `contract-schema.json` moves to
+`fixture_version` `huyang.tools/v1alpha1-m6`. `docs/execution-contract.md` is deleted.

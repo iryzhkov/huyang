@@ -40,7 +40,7 @@ type clientConnection struct {
 // names the root would arrive after it had.
 var defaultWorkspaceTools = map[string]bool{
 	"workspace_open": true, "workspace_inspect": true, "search": true, "symbol_find": true,
-	"navigate": true, "read": true, "diagnostics": true, "evidence_get": true, "code_actions": true,
+	"navigate": true, "read": true, "diagnostics": true, "evidence_get": true,
 	"revision_diff": true, "language_server_status": true,
 }
 

@@ -45,14 +45,13 @@ type SemanticLocator struct {
 }
 
 type HandleRecord struct {
-	PreparedRevision string          `json:"prepared_revision,omitempty"`
-	Handle           HandleID        `json:"handle"`
-	WorkspaceID      ID              `json:"workspace_id"`
-	Epoch            uint64          `json:"epoch"`
-	Kind             HandleKind      `json:"kind"`
-	Display          string          `json:"display"`
-	ExpiresAt        time.Time       `json:"expires_at"`
-	Locator          SemanticLocator `json:"locator"`
+	Handle      HandleID        `json:"handle"`
+	WorkspaceID ID              `json:"workspace_id"`
+	Epoch       uint64          `json:"epoch"`
+	Kind        HandleKind      `json:"kind"`
+	Display     string          `json:"display"`
+	ExpiresAt   time.Time       `json:"expires_at"`
+	Locator     SemanticLocator `json:"locator"`
 }
 
 type ResolutionStatus string
@@ -547,9 +546,6 @@ func (w *Workspace) ResolveHandle(id HandleID) (HandleResolution, error) {
 			return HandleResolution{Status: ResolutionConflicted, Code: conflict.Code, Handle: id}, nil
 		}
 		return HandleResolution{}, err
-	}
-	if record.PreparedRevision != "" {
-		return HandleResolution{}, Codedf("handle_revision_mismatch", "prepared execution handles require their prepared revision")
 	}
 	if record.Kind == HandleSymbol {
 		return w.resolveSymbol(record)

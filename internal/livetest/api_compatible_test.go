@@ -115,38 +115,3 @@ func barrelHandle(t *testing.T, session sessionHandle, workspaceID string) strin
 	}
 	return handle
 }
-
-// Reachability can be refuted by one remaining reference and cannot yet be
-// proved: the proof needs a static execution graph this service does not
-// build, and the answer says so instead of guessing.
-func TestReachabilityIsRefutedButNotProved(t *testing.T) {
-	instance := startWithLanguageServers(t)
-	session := instance.connect("experimental")
-	root := fixture(t, "go")
-	opened := call(t, session, "workspace_open", map[string]any{"kind": "project", "root": root})
-	workspaceID := workspaceIdentity(t, opened)
-
-	prepared := prepareWithInvariants(t, session, workspaceID, "reachability",
-		[]any{map[string]any{
-			"op_id": "touch-unused", "kind": "insert_before",
-			"content": "// touched\n",
-			"target":  map[string]any{"symbol_locator": map[string]any{"path": "ledger.go", "name_path": "Unused"}},
-		}},
-		[]any{
-			map[string]any{"id": "called", "kind": "path_unreachable", "enforcement": "advisory",
-				"scope": map[string]any{"symbol": map[string]any{"path": "ledger.go", "name_path": "Total"}}},
-			map[string]any{"id": "orphan", "kind": "path_unreachable", "enforcement": "advisory",
-				"scope": map[string]any{"symbol": map[string]any{"path": "ledger.go", "name_path": "Unused"}}},
-		})
-
-	_, _, invariants := preparedPlan(t, prepared)
-	for id, invariant := range invariants {
-		t.Logf("%s: %v - %v", id, invariant["status"], invariant["detail"])
-	}
-	if status := invariants["called"]["status"]; status != "violated" {
-		t.Fatalf("a declaration with callers was not reported reachable: %#v", invariants["called"])
-	}
-	if status := invariants["orphan"]["status"]; status != "unknown" {
-		t.Fatalf("unreachability was claimed without a graph to prove it: %#v", invariants["orphan"])
-	}
-}

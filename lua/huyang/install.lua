@@ -1,11 +1,12 @@
--- What a workspace can and cannot do, and how to fix that: the language
--- support probe workspace_open reports, and install_language (tree-sitter
--- parser plus Mason server for one filetype).
+-- What a workspace can and cannot do: the language support probe
+-- workspace_open and language_server_status report. Huyang installs no
+-- parsers or servers; they come from the user's Neovim setup (Mason,
+-- nvim-treesitter) or the system, and the probe enables what it finds.
 
 local M = {}
 
 local core = require("huyang.core")
-local err, await, sleep, load_buf = core.err, core.await, core.sleep, core.load_buf
+local err, sleep, load_buf = core.err, core.sleep, core.load_buf
 local project_files, better_sample, has_parser = core.project_files, core.better_sample, core.has_parser
 local enabled_lsp_configs_for, DATA_FILETYPES = core.enabled_lsp_configs_for, core.DATA_FILETYPES
 
@@ -187,8 +188,8 @@ local function ensure_java_home()
     return home
 end
 
--- A provider restart creates a fresh Neovim process, so vim.lsp.enable calls
--- made by language_server_setup are gone. Mason's installed-package state is
+-- A provider restart creates a fresh Neovim process, so earlier vim.lsp.enable
+-- calls are gone. Mason's installed-package state is
 -- durable; re-enable installed servers before probing workspace buffers.
 local ensure_ruby_lsp_bundler
 
@@ -463,9 +464,9 @@ local function workspace_support(args)
 			end
 			local restored_servers = enable_installed_servers(ft)
 			-- No Mason package and no enabled config: a server installed on the
-			-- machine (gopls on PATH, pyright from the distro) is enabled the
-			-- way language_server_setup would enable it, so the first edit does
-			-- not answer lsp_not_configured for a language the machine serves.
+			-- machine (gopls on PATH, pyright from the distro) is enabled here,
+			-- so the first edit does not answer lsp_not_configured for a
+			-- language the machine serves.
 			local system_enabled
 			if #enabled_lsp_configs_for(ft) == 0 and not DATA_FILETYPES[ft] and system_server then
 				local okn, sysname, syscmd = pcall(system_server, ft, PREFERRED_SERVER and PREFERRED_SERVER[ft])
@@ -551,7 +552,9 @@ local function workspace_support(args)
     if #blind > 0 then
         notes[#notes + 1] = ("no parser and no language server for %s: symbol, navigation and "
                 .. "diagnostic tools will not work on those files; grep and read_file will. "
-                .. "language_server_setup(action=install, language=...) can add both")
+                .. "Install a parser and a server outside Huyang (nvim-treesitter and Mason in "
+                .. "your Neovim setup, or the system package manager), then call "
+                .. "language_server_setup action=restart")
             :format(table.concat(blind, ", "))
     end
     -- A JS/TS project whose dependencies are not installed makes the language
@@ -567,19 +570,8 @@ local function workspace_support(args)
     return { languages = out, note = #notes > 0 and table.concat(notes, " ") or nil }
 end
 
--- install_language: add a treesitter parser (nvim-treesitter) and a language
--- server (Mason) for one filetype to the running instance, so the symbol and
--- navigation tools start working on files open_workspace flagged as blind.
--- Both installs are optional pieces of the user's setup; each step reports
--- what it did or why it could not.
-local INSTALL_PARSER_MS = 5 * 60 * 1000
-
-local INSTALL_SERVER_MS = 8 * 60 * 1000
-
-local INSTALL_ATTACH_MS = 8000
-
--- Preferred language server per filetype where Mason offers several; the
--- lspconfig name, mapped to a Mason package through mason-lspconfig.
+-- Preferred language server per filetype where several are on the machine:
+-- the lspconfig name workspace_support enables when no config is enabled yet.
 PREFERRED_SERVER = {
     c = "clangd", cpp = "clangd", objc = "clangd", objcpp = "clangd",
     go = "gopls", gomod = "gopls",
@@ -607,145 +599,6 @@ PREFERRED_SERVER = {
     nix = "nil_ls",
     vim = "vimls",
 }
-
-local function install_parser(ft, lang)
-    if has_parser(ft) then
-        return { language = lang, status = "already installed" }
-    end
-    local okts, ts = pcall(require, "nvim-treesitter")
-    if not okts or type(ts.install) ~= "function" then
-        return { language = lang, status = "skipped",
-            note = "nvim-treesitter is not on the runtimepath; install the parser by hand" }
-    end
-    local available = {}
-    pcall(function()
-        for _, l in ipairs(ts.get_available()) do available[l] = true end
-    end)
-    if next(available) and not available[lang] then
-        return { language = lang, status = "unsupported",
-            note = "nvim-treesitter has no parser named " .. lang }
-    end
-    local task
-    local okstart, start_err = pcall(function() task = ts.install({ lang }) end)
-    if not okstart or type(task) ~= "table" or type(task.await) ~= "function" then
-        return { language = lang, status = "failed",
-            note = "could not start the install: " .. tostring(start_err or task) }
-    end
-    local timer = vim.uv.new_timer()
-    local aerr, done = await(function(resume)
-        timer:start(INSTALL_PARSER_MS, 0, vim.schedule_wrap(function()
-            resume("timed out")
-        end))
-        task:await(function(e, r) resume(e, r) end)
-    end)
-    timer:stop()
-    timer:close()
-    if aerr then
-        return { language = lang, status = "failed", note = tostring(aerr) }
-    end
-    -- Neovim caches "no such parser"; a fresh add() picks the new .so up.
-    pcall(vim.treesitter.language.add, lang)
-    if has_parser(ft) then
-        return { language = lang, status = "installed" }
-    end
-    return { language = lang, status = "failed",
-        note = done == false and "nvim-treesitter reported the install as failed"
-            or "install finished but the parser still does not load" }
-end
-
--- vim.lsp.get_log_path is deprecated from 0.11 in favour of
--- vim.lsp.log.get_filename; take whichever this Neovim has.
-local function lsp_log_path()
-    if vim.lsp.log and vim.lsp.log.get_filename then
-        return vim.lsp.log.get_filename()
-    end
-    ---@diagnostic disable-next-line: deprecated
-    return vim.lsp.get_log_path()
-end
-
-local function attached_client(root, ft)
-    local files = vim.fn.systemlist({ "git", "-C", root,
-        "ls-files", "--cached", "--others", "--exclude-standard" })
-    if vim.v.shell_error ~= 0 then
-        files = vim.tbl_map(function(f) return f:sub(#root + 2) end,
-            vim.fn.globpath(root, "**/*", true, true))
-    end
-    local sample
-    for _, rel in ipairs(files) do
-        if vim.filetype.match({ filename = rel }) == ft then
-            sample = rel
-            break
-        end
-    end
-    if not sample then
-        return nil, "no " .. ft .. " file in the workspace to try"
-    end
-    -- Server configs explain a refusal to start through vim.notify
-    -- ("cargo not found"); collect those so the reply says why.
-    local notices, orig_notify, orig_once = {}, vim.notify, vim.notify_once
-    local function collect(msg, level)
-        if type(msg) == "string" and (level or 0) >= vim.log.levels.WARN then
-            notices[#notices + 1] = msg:gsub("%s+", " ")
-        end
-    end
-    ---@diagnostic disable-next-line: duplicate-set-field
-    vim.notify = function(msg, level, opts)
-        collect(msg, level)
-        return orig_notify(msg, level, opts)
-    end
-    ---@diagnostic disable-next-line: duplicate-set-field
-    vim.notify_once = function(msg, level, opts)
-        collect(msg, level)
-        return orig_once(msg, level, opts)
-    end
-    -- Everything between the swap and the restore runs under pcall, so an
-    -- error (or a bad sample file) cannot leave vim.notify hijacked for the
-    -- rest of the session; the error is re-raised once the originals are
-    -- back. The wait yields the coroutine, and LuaJIT allows that inside
-    -- pcall.
-    local okb, bufnr = pcall(load_buf, root .. "/" .. sample)
-    local client
-    local okw, werr = pcall(function()
-        if not okb then return end
-        -- The sample may have been loaded before the server existed (the
-        -- open_workspace probe does that); explicitly replay FileType so
-        -- vim.lsp.enable's autocmd gets a second chance even when the option is unchanged.
-        if #vim.lsp.get_clients({ bufnr = bufnr }) == 0 then
-            pcall(function()
-                vim.bo[bufnr].filetype = ft
-                vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr, modeline = false })
-            end)
-        end
-        local deadline = vim.uv.now() + INSTALL_ATTACH_MS
-        while vim.uv.now() < deadline do
-            local clients = vim.lsp.get_clients({ bufnr = bufnr })
-            if #clients > 0 then
-                client = clients[1].name
-                break
-            end
-            sleep(200)
-        end
-    end)
-    vim.notify, vim.notify_once = orig_notify, orig_once
-    if not okw then
-        error(werr, 0)
-    end
-    if client then
-        return client
-    end
-    if not okb then
-        return nil, "could not load " .. sample
-    end
-    local why = "no client attached to " .. sample .. " within "
-        .. (INSTALL_ATTACH_MS / 1000) .. "s"
-    if #notices > 0 then
-        why = why .. ": " .. table.concat(notices, "; ")
-    else
-        why = why .. "; the server's config may need a toolchain on PATH "
-            .. "(rust_analyzer wants cargo, jdtls a JDK); see " .. lsp_log_path()
-    end
-    return nil, why
-end
 
 -- Mason's ruby-lsp package relies on Bundler at runtime but does not install
 -- it on Ruby distributions that omit the default Bundler gem. Keep the
@@ -836,8 +689,8 @@ system_server = function(ft, wanted)
 end
 
 -- Enable a server that is already on the machine, pointing its config at
--- the command that actually exists, and report whether it attached.
-enable_system_server = function(ft, name, cmd, root, why)
+-- the command that actually exists.
+enable_system_server = function(ft, name, cmd)
     local out = { lspconfig = name, cmd = cmd, status = "on the system" }
     local okcfg = pcall(function()
         local current = (vim.lsp.config[name] or {}).cmd
@@ -856,276 +709,12 @@ enable_system_server = function(ft, name, cmd, root, why)
         return out
     end
     pcall(vim.lsp.enable, name)
-    out.note = ("%s; %s is installed on this machine and was enabled")
-        :format(why or ("Mason has no server for " .. ft), cmd)
-    if type(root) == "string" and root ~= "" then
-        local client, cwhy = attached_client(root, ft)
-        if client then
-            out.attached = client
-        else
-            out.attached = false
-            out.note = out.note .. ", but " .. cwhy
-        end
-    end
+    out.note = ("Mason has no server for %s; %s is installed on this machine and was enabled")
+        :format(ft, cmd)
     return out
 end
 
-local function server_prerequisite(package)
-    if package == "rust-analyzer" then
-        local cargo = vim.fn.exepath("cargo")
-        if cargo == "" then
-            return nil, "rust-analyzer requires Cargo, but cargo is absent from the embedded Neovim PATH; "
-                .. "install Rust or add its bin directory to the Huyang user service PATH, then restart the provider"
-        end
-        local result = vim.system({ cargo, "--version" }, { text = true }):wait(3000)
-        if not result then
-            return nil, ("rust-analyzer requires a working Cargo toolchain, but `%s --version` did not finish within 3s; "
-                .. "fix the Huyang user service PATH, then restart the provider"):format(cargo)
-        end
-        if result.code ~= 0 then
-			-- A service manager PATH commonly exposes a broken version-manager
-			-- shim before rustup's real user installation. Prefer the usable
-			-- local toolchain when it exists, and make it visible to the server.
-			local fallback = vim.fn.expand("~/.cargo/bin/cargo")
-			if fallback ~= cargo and vim.uv.fs_stat(fallback) then
-				local fallback_result = vim.system({ fallback, "--version" }, { text = true }):wait(3000)
-				if fallback_result and fallback_result.code == 0 then
-					ensure_mason_bin_on_path(vim.fs.dirname(fallback))
-					return true
-				end
-			end
-            local detail = vim.trim((result.stderr or "") .. " " .. (result.stdout or "")):gsub("%s+", " ")
-            if #detail > 240 then detail = detail:sub(1, 237) .. "..." end
-            return nil, ("rust-analyzer requires a working Cargo toolchain, but `%s --version` exited %s%s; "
-                .. "make cargo usable in the Huyang user service PATH "
-                .. "(for mise, run `mise use -g rust@stable`), then restart the provider")
-                :format(cargo, tostring(result.code), detail ~= "" and (": " .. detail) or "")
-        end
-        return true
-    end
-    if package ~= "csharp-language-server" then return true end
-    local dotnet = vim.fn.exepath("dotnet")
-    if dotnet == "" then
-        return nil, "csharp-language-server requires the .NET SDK; install an SDK so `dotnet --list-sdks` is non-empty, then retry"
-    end
-    local result = vim.system({ dotnet, "--list-sdks" }, { text = true }):wait(3000)
-    if not result or result.code ~= 0 or vim.trim(result.stdout or "") == "" then
-        return nil, "csharp-language-server requires the .NET SDK, but only the runtime is available; install an SDK so `dotnet --list-sdks` is non-empty, then retry"
-    end
-    return true
-end
-
-local function install_server(ft, wanted, root)
-    ensure_mason_bin_on_path()
-    local okreg, registry = pcall(require, "mason-registry")
-    local okml, mlsp = pcall(require, "mason-lspconfig")
-    if not okreg or not okml then
-        return { status = "skipped",
-            note = "mason.nvim and mason-lspconfig.nvim are needed to install servers; "
-                .. "install one by hand and enable it with vim.lsp.enable()" }
-    end
-    local maps = mlsp.get_mappings()
-    -- Resolve the wanted server: an explicit name may be a Mason package or
-    -- an lspconfig name; otherwise the preferred server for the filetype,
-    -- else whatever Mason offers for it.
-    local candidates = {}
-    pcall(function()
-        candidates = mlsp.get_available_servers({ filetype = ft })
-    end)
-    table.sort(candidates)
-    local unique_candidates = {}
-    for _, candidate in ipairs(candidates) do
-        if unique_candidates[#unique_candidates] ~= candidate then
-            unique_candidates[#unique_candidates + 1] = candidate
-        end
-    end
-    candidates = unique_candidates
-    local lspname, package
-    if wanted and wanted ~= "" then
-        if maps.package_to_lspconfig[wanted] then
-            package, lspname = wanted, maps.package_to_lspconfig[wanted]
-        elseif maps.lspconfig_to_package[wanted] then
-            lspname, package = wanted, maps.lspconfig_to_package[wanted]
-        else
-            local sysname, syscmd = system_server(ft, wanted)
-            if sysname then
-                return enable_system_server(ft, sysname, syscmd, root)
-            end
-            return {
-                status = "unknown",
-                note = ("Mason has no package or server named %s; servers for %s: %s")
-                    :format(wanted, ft, #candidates > 0 and table.concat(candidates, ", ") or "none")
-            }
-        end
-    else
-        lspname = PREFERRED_SERVER[ft]
-        if not lspname or not maps.lspconfig_to_package[lspname] then
-            -- An already enabled config for this filetype wins over a fresh pick.
-            for _, name in ipairs(enabled_lsp_configs_for(ft)) do
-                if maps.lspconfig_to_package[name] then
-                    lspname = name
-                    break
-                end
-            end
-        end
-        if not lspname or not maps.lspconfig_to_package[lspname] then
-            lspname = candidates[1]
-        end
-        if not lspname then
-            local sysname, syscmd = system_server(ft)
-            if sysname then
-                return enable_system_server(ft, sysname, syscmd, root)
-            end
-            return {
-                status = "unsupported",
-                note = "Mason offers no language server for filetype " .. ft
-            }
-        end
-        package = maps.lspconfig_to_package[lspname]
-    end
-    local out = { package = package, lspconfig = lspname }
-    if #candidates > 1 then
-        out.alternatives = vim.tbl_filter(function(c) return c ~= lspname end, candidates)
-    end
-    local ready, prerequisite = server_prerequisite(package)
-    if not ready then
-        out.status = "prerequisite missing"
-        out.attached = false
-        out.note = prerequisite
-        return out
-    end
-    -- Mason lists a package it cannot always supply: qmlls has no build for
-    -- every platform, and an install that fails leaves the language with no
-    -- server at all. When the machine already carries one, enabling it is a
-    -- better answer than reporting the failure and stopping there.
-    local function or_system(failed)
-        local sysname, syscmd = system_server(ft, lspname)
-        if not sysname then
-            return failed
-        end
-        local res = enable_system_server(ft, sysname, syscmd, root,
-            ("Mason could not install a server for %s (%s)"):format(ft, failed.note))
-        res.mason_package = failed.package
-        return res
-    end
-    local pkg
-    local okp = pcall(function() pkg = registry.get_package(package) end)
-    if not okp or not pkg then
-        out.status = "unknown"
-        out.note = "Mason registry has no package " .. package
-        return or_system(out)
-    end
-    if pkg:is_installed() then
-        out.status = "already installed"
-    else
-        await(function(resume)
-            pcall(registry.refresh, function() resume() end)
-        end)
-        local timer = vim.uv.new_timer()
-        local timed_out = await(function(resume)
-            timer:start(INSTALL_SERVER_MS, 0, vim.schedule_wrap(function()
-                resume(true)
-            end))
-            local okh, herr = pcall(function()
-                pkg:install():once("closed", vim.schedule_wrap(function() resume(false) end))
-            end)
-            if not okh then
-                out.start_error = tostring(herr)
-                resume(false)
-            end
-        end)
-        timer:stop()
-        timer:close()
-        if timed_out then
-            out.status = "failed"
-            out.note = "install did not finish within " .. (INSTALL_SERVER_MS / 60000) .. " minutes"
-            return or_system(out)
-        end
-        if not pkg:is_installed() then
-            out.status = "failed"
-            out.note = (out.start_error or "Mason reported the install as failed")
-                .. "; see :MasonLog (" .. vim.fn.stdpath("log") .. "/mason.log)"
-            out.start_error = nil
-            return or_system(out)
-        end
-        out.status = "installed"
-    end
-    -- mason-lspconfig enables freshly installed servers itself when its
-    -- automatic_enable is on; doing it here too is idempotent and covers
-    -- the "already installed but never enabled" case.
-    if lspname == "jdtls" then
-        local java_home, why = ensure_java_home()
-        if not java_home then
-            out.status = "prerequisite missing"
-            out.attached = false
-            out.note = why
-            return out
-        end
-        out.java_home = java_home
-    elseif lspname == "ruby_lsp" then
-        local bundler_ready, why = ensure_ruby_lsp_bundler(pkg)
-        if not bundler_ready then
-            out.status = "prerequisite missing"
-            out.attached = false
-            out.note = why
-            return out
-        end
-        out.runtime_dependency = "bundler"
-    end
-    local enabled, enable_err = pcall(vim.lsp.enable, lspname)
-    if not enabled then
-        out.attached = false
-        out.note = "could not enable " .. lspname .. ": " .. tostring(enable_err)
-        return out
-    end
-    local cmd = vim.tbl_get(vim.lsp.config, lspname, "cmd")
-    if type(cmd) == "table" and type(cmd[1]) == "string" then
-        local executable = vim.fn.exepath(cmd[1])
-        if executable == "" then
-            out.attached = false
-            out.note = cmd[1] .. " is not executable from this Neovim (Huyang prepended Mason's bin directory before enabling it)"
-            return out
-        end
-        out.executable = executable
-    end
-    if type(root) == "string" and root ~= "" then
-        local client, why = attached_client(root, ft)
-        if client then
-            out.attached = client
-        else
-            out.attached = false
-            out.note = why
-        end
-    end
-    return out
-end
-
-local function install_language(args)
-    local ft = args.language
-    if type(ft) ~= "string" or ft == "" then
-        err("missing required argument: language")
-    end
-    ft = ft:lower()
-    -- Accept a file extension or a treesitter name too ("ts", "cpp", "c++").
-    ft = vim.filetype.match({ filename = "x." .. ft }) or ft
-    local lang = vim.treesitter.language.get_lang(ft) or ft
-    local result = { language = ft }
-    if args.parser ~= false then
-        result.parser = install_parser(ft, lang)
-    else
-        result.parser = { status = "skipped" }
-    end
-    if args.server ~= "none" then
-        result.server = install_server(ft, args.server, args.root)
-    else
-        result.server = { status = "skipped" }
-    end
-    result.note = "installed pieces live in Neovim's data directory and survive restarts; "
-        .. "add them to the editor config's ensure_installed lists to keep them on a fresh machine"
-    return result
-end
 M.workspace_support = workspace_support
-M.install_language = install_language
 M._project_python_interpreter = project_python_interpreter
 M._configure_python_interpreter = configure_python_interpreter
 M._starting_server = starting_server
@@ -1136,9 +725,7 @@ M._eager_filetypes = eager_filetypes
 M._requested_filetypes = requested_filetypes
 M._running_clients = running_clients
 M._any_startable = any_startable
-M._server_prerequisite = server_prerequisite
 M._ensure_mason_bin_on_path = ensure_mason_bin_on_path
-M._attached_client = attached_client
 M._configure_jdtls_sandbox_safety = configure_jdtls_sandbox_safety
 M._pin_jdtls_workspace_root = pin_jdtls_workspace_root
 

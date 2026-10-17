@@ -104,10 +104,6 @@ func (p *stubProvider) Call(_ context.Context, request provider.Request) (provid
 			})
 		}
 		return provider.Result{Value: map[string]any{"batches": batches}}, nil
-	case "install_language":
-		return provider.Result{Value: map[string]any{"server": map[string]any{
-			"status": "failed", "note": "Mason install failed; inspect :MasonLog and retry",
-		}}}, nil
 	case "find_symbol":
 		if p.findSymbol != nil {
 			return provider.Result{Value: p.findSymbol}, nil

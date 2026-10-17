@@ -736,8 +736,9 @@ local function get_client(bufnr, method, timeout_ms)
             local ft = vim.bo[bufnr].filetype
             local configs = enabled_lsp_configs_for(ft)
             if #configs == 0 then
-                err("lsp_not_configured: no LSP config is enabled for filetype %s; call language_server_setup install with language=%s",
-                    ft, ft)
+                err("lsp_not_configured: no LSP config is enabled for filetype %s; install a server for it "
+                    .. "outside Huyang (Mason in your Neovim setup, or the system package manager), "
+                    .. "then call language_server_setup action=restart", ft)
             end
             local startable = {}
             local missing = {}
@@ -752,8 +753,10 @@ local function get_client(bufnr, method, timeout_ms)
                 end
             end
             if #startable == 0 then
-                err("lsp_not_startable: enabled LSP config(s) for filetype %s have unavailable commands: %s; call language_server_setup install with language=%s",
-                    ft, table.concat(missing, ", "), ft)
+                err("lsp_not_startable: enabled LSP config(s) for filetype %s have unavailable commands: %s; "
+                    .. "install them outside Huyang (Mason in your Neovim setup, or the system package "
+                    .. "manager), then call language_server_setup action=restart",
+                    ft, table.concat(missing, ", "))
             end
         end
         if vim.uv.now() >= deadline then
