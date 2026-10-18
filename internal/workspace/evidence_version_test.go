@@ -24,7 +24,7 @@ func TestDiagnosticPublicationVersionProof(t *testing.T) {
 	}
 }
 
-func TestLegacyProducerCoverageMigratesToDocumentProof(t *testing.T) {
+func TestLegacyProducerCoverageRetainsUnknownStreamProof(t *testing.T) {
 	w, state := evidenceWorkspace(t)
 	v := int64(2)
 	batch := DiagnosticBatch{Kind: EvidencePush, ProviderID: "test#1", Producer: "test", Document: "main.go", Complete: true, Selected: true, DocumentVersion: &v, ExpectedVersion: &v}
@@ -40,11 +40,10 @@ func TestLegacyProducerCoverageMigratesToDocumentProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reopened.state.ProviderDimensions["edited_documents\x00test#1"]; ok {
-		t.Fatal("legacy producer dimension retained")
-	}
-	if got := reopened.state.ProviderDimensions["edited_documents\x00test#1\x00main.go"].Confidence; got != ConfidenceAuthoritative {
-		t.Fatalf("migrated confidence=%s", got)
+	// The old key cannot identify all historical streams. Bounded retained
+	// payloads are not migration proof, even when the latest one is a push.
+	if got := reopened.state.ProviderDimensions["edited_documents\x00test#1"].Confidence; got != ConfidenceProvisional {
+		t.Fatalf("legacy confidence=%s", got)
 	}
 }
 

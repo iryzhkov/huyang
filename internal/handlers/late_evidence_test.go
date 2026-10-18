@@ -116,12 +116,13 @@ func TestDiagnosticsCollectsLateEvidenceFromARunningProvider(t *testing.T) {
 func TestProvisionalSummaryNamesTheReason(t *testing.T) {
 	files := []workspacecore.PlanStageFile{{Path: "main.py", AfterExists: true}}
 	cases := map[string]string{
-		"lsp_not_configured":           "no language server is configured for main.py",
-		"lsp_not_startable":            "is not installed",
-		"lsp_starting":                 "still starting",
-		"lsp_attach_deadline_exceeded": "within the wait",
-		"something_else":               "remain incomplete (something_else)",
-		"rust_diagnostics_pending":     "Rust diagnostics pending",
+		"python_environment_unresolved": "Python environment not resolved for main.py",
+		"lsp_not_configured":            "no language server is configured for main.py",
+		"lsp_not_startable":             "is not installed",
+		"lsp_starting":                  "still starting",
+		"lsp_attach_deadline_exceeded":  "within the wait",
+		"something_else":                "remain incomplete (something_else)",
+		"rust_diagnostics_pending":      "Rust diagnostics pending",
 	}
 	for reason, want := range cases {
 		got := provisionalSummary(workspacecore.DiagnosticReport{ProvisionalReasons: []string{reason}}, files)

@@ -197,33 +197,7 @@ local ensure_ruby_lsp_bundler
 -- the preferred server per filetype and the system-installed server lookup.
 local PREFERRED_SERVER, system_server, enable_system_server
 
--- The interpreter a Python project's own environment provides: a venv
--- directory under the root, else the one VIRTUAL_ENV names. pyright resolves
--- imports against it, so a package installed by uv or poetry is seen and a
--- test module's `import pytest` stops reading as unresolved.
-local function project_python_interpreter(root)
-    for _, venv in ipairs({ ".venv", "venv", "env" }) do
-        local python = root .. "/" .. venv .. "/bin/python"
-        if vim.fn.executable(python) == 1 then return python end
-    end
-    local active = vim.env.VIRTUAL_ENV
-    if type(active) == "string" and active ~= "" and vim.fn.executable(active .. "/bin/python") == 1 then
-        return active .. "/bin/python"
-    end
-    return nil
-end
-
--- Point pyright and basedpyright at the project's interpreter before their
--- first buffer attaches; a server already running keeps its settings until
--- the provider restarts, which language_server_status says.
-local function configure_python_interpreter(root)
-    local python = project_python_interpreter(root)
-    if not python then return nil end
-    for _, name in ipairs({ "pyright", "basedpyright" }) do
-        pcall(vim.lsp.config, name, { settings = { python = { pythonPath = python } } })
-    end
-    return python
-end
+local python_environment = require("huyang.python_environment")
 
 -- A started client that has not finished initializing yet: the server is
 -- on its way, which is neither attached nor absent.
@@ -456,7 +430,7 @@ local function workspace_support(args)
 				end
 				pcall(vim.lsp.config, "ts_ls", { root_dir = root, init_options = init_options })
 			elseif ft == "python" then
-				interpreter = configure_python_interpreter(root)
+				interpreter = python_environment.interpreter()
 			elseif ft == "ruby" then
 				pcall(vim.lsp.config, "ruby_lsp", { root_dir = root })
 			elseif ft == "java" then
@@ -515,6 +489,7 @@ local function workspace_support(args)
                 install_options = install_options,
                 prerequisite = prerequisite,
                 interpreter = interpreter,
+                environment_reason = ft == "python" and python_environment.reason() or nil,
                 enabled_from_system = system_enabled,
             }
             -- attach says where the server is: attached, still starting
@@ -715,8 +690,6 @@ enable_system_server = function(ft, name, cmd)
 end
 
 M.workspace_support = workspace_support
-M._project_python_interpreter = project_python_interpreter
-M._configure_python_interpreter = configure_python_interpreter
 M._starting_server = starting_server
 M._ensure_ruby_lsp_bundler = ensure_ruby_lsp_bundler
 M._enable_installed_servers = enable_installed_servers

@@ -11,12 +11,14 @@ import (
 )
 
 type OpenConfig struct {
-	Root               string
-	InitFile           string
-	RuntimePath        string
-	AfterEpoch         uint64
-	MaxLanguageServers int
-	PinLanguageServers bool
+	// PythonEnvironmentRoot is canonical when Root is a preparation sandbox.
+	PythonEnvironmentRoot string
+	Root                  string
+	InitFile              string
+	RuntimePath           string
+	AfterEpoch            uint64
+	MaxLanguageServers    int
+	PinLanguageServers    bool
 }
 
 type Factory interface {
@@ -34,7 +36,7 @@ func (f ConfiguredFactory) Open(config OpenConfig) (provider.Provider, error) {
 	switch f.Backend {
 	case "", "embed":
 		return embedprovider.Open(embedprovider.Config{
-			Root: config.Root, InitFile: config.InitFile,
+			Root: config.Root, InitFile: config.InitFile, PythonEnvironmentRoot: config.PythonEnvironmentRoot,
 			RuntimePath: config.RuntimePath, AfterEpoch: config.AfterEpoch,
 			MaxLanguageServers: config.MaxLanguageServers, PinLanguageServers: config.PinLanguageServers,
 		})

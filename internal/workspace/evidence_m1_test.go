@@ -28,8 +28,8 @@ func TestDiagnosticStateUpgradePersistsVersionAndRejectsDowngrade(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := upgraded.state.ProviderDimensions["edited_documents\x00test#1\x00"+path]; !ok {
-		t.Fatal("document migration missing")
+	if got := upgraded.state.ProviderDimensions["edited_documents\x00test#1"].Confidence; got != ConfidenceProvisional {
+		t.Fatalf("unsplittable legacy coverage claimed proof: %s", got)
 	}
 	bytes, err := os.ReadFile(upgraded.path)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestDiagnosticStateUpgradePersistsVersionAndRejectsDowngrade(t *testing.T) 
 	if err := json.Unmarshal(bytes, &persisted); err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Version != 2 || !strings.Contains(string(bytes), "persisting") {
+	if persisted.Version != diagnosticStateVersion || !strings.Contains(string(bytes), "persisting") {
 		t.Fatal("upgrade not persisted")
 	}
 	// The old loader's exact guard is Version != 1; the persisted header must
@@ -117,5 +117,53 @@ func TestRustIncompleteEvidenceExplicitlyPending(t *testing.T) {
 	b.Complete = true
 	if c, r := confidenceFor(b); c != ConfidenceAuthoritative || len(r) != 0 {
 		t.Fatalf("complete Rust evidence remained pending: %s %v", c, r)
+	}
+}
+
+func TestDiagnosticExactPreEditProofSurvivesLaneInvalidation(t *testing.T) {
+	for _, name := range []string{"exact_push", "other_stream", "provisional_preimage", "wrong_preimage", "wrong_producer_version"} {
+		t.Run(name, func(t *testing.T) {
+			store, err := newDiagnosticStore("", "baseline")
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof := DiagnosticBatch{Kind: EvidencePush, ProviderID: "test#1", Producer: "test",
+				Document: "main.go", DocumentRevision: "before", Complete: true, Selected: true,
+				DocumentVersion: diagnosticVersion(3), ExpectedVersion: diagnosticVersion(3)}
+			switch name {
+			case "other_stream":
+				proof.Kind = EvidencePull
+			case "provisional_preimage":
+				proof.Complete = false
+			}
+			if _, err := store.record(proof); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.documentChanged([]string{"main.go"}, "after", proof.ObservedAt); err != nil {
+				t.Fatal(err)
+			}
+			key := "edited_documents\x00test#1\x00main.go\x00" + string(proof.Kind)
+			if lane := store.state.ProviderDimensions[key]; lane.Confidence != ConfidenceProvisional {
+				t.Fatalf("postimage did not invalidate current lane coverage: %+v", lane)
+			}
+			post := proof
+			post.Kind, post.Complete = EvidencePush, true
+			post.DocumentRevision, post.PreEditDocumentRevision = "after", "before"
+			post.DocumentVersion, post.ExpectedVersion = diagnosticVersion(4), diagnosticVersion(4)
+			post.Findings = []DiagnosticFinding{finding("postimage error")}
+			switch name {
+			case "wrong_preimage":
+				post.PreEditDocumentRevision = "external"
+			case "wrong_producer_version":
+				post.ProducerVersion = "replacement"
+			}
+			report, err := store.record(post)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.New) != 1 || report.New[0].BaselineMissing != (name != "exact_push") {
+				t.Fatalf("exact historical payload proof misclassified: %+v", report)
+			}
+		})
 	}
 }

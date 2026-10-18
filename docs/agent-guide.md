@@ -391,6 +391,22 @@ Keep both transport representations for compatible consumers and deduplicate for
   entering the ledger. Unversioned positive findings remain provisional;
   unversioned emptiness cannot resolve a finding. Rust may explicitly report `rust_diagnostics_pending`;
   its later findings arrive through `diagnostic_updates` on subsequent tool replies.
+- Pyright and basedpyright preserve explicit `python.pythonPath` and project
+  `venv`/`venvPath` settings. Otherwise the interpreter comes from the pipeline's
+  `.venv`, `venv`, `env` selection, then executable `VIRTUAL_ENV`, then queries
+  to uv (preferred when both lockfiles exist) or Poetry. Discovery uses the canonical
+  workspace root even for a preparation sandbox, never the daemon working directory.
+  Manager queries require that canonical root to match the M5 user-policy trust roots;
+  policy read/parse/root-resolution failures deny execution. Queries have a two-second
+  bound and request no downloads, dependency sync or installation. Managers can execute
+  candidate interpreters, so untrusted roots use filesystem/configuration selection only.
+  Manager output must name an executable in a virtualenv with `pyvenv.cfg` beside `bin`;
+  base interpreters and failed queries leave the environment unresolved.
+  Without a known interpreter, `reportMissingImports` becomes one stable
+  `python_environment_unresolved` warning per document/producer. Other findings remain,
+  coverage stays provisional, and a missing-import omission cannot resolve prior findings.
+  The warning also arrives through late `diagnostic_updates`. After changing the environment,
+  restart the provider with `language_server_setup {action: "restart"}`.
 - A pre-edit snapshot seeds or refreshes findings without resolving omissions.
   First-observed preexisting findings and stale refreshes produce `persisting`
   notices with bodies through `diagnostic_updates`; already-current repeats are silent.

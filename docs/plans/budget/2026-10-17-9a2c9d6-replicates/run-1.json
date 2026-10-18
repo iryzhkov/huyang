@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-17",
+  "sha": "9a2c9d6",
+  "rounds": 20,
+  "provider": "nvim",
+  "diagnostics_outcome": "ok",
+  "cold_rss_kb": 16292,
+  "post_rss_kb": 23004,
+  "provider_rss_kb": 26876,
+  "state_bytes": 21855,
+  "registry_bytes": 255,
+  "receipts_bytes": 21435,
+  "plans_bytes": 0,
+  "journals_bytes": 0,
+  "diag_bytes": 165,
+  "go_lines": 41099,
+  "go_test_lines": 34041,
+  "lua_lines": 16284,
+  "largest_go_file": 1495,
+  "long_functions": 0,
+  "long_function_threshold": 80,
+  "tools_bytes": {
+    "full": 20848,
+    "orient": 9856,
+    "edit": 20848
+  },
+  "json_read_bytes": 465,
+  "plain_read_bytes": 168,
+  "plain_search_bytes": 53,
+  "plain_open_bytes": 1062,
+  "plain_preview_bytes": 136
+}

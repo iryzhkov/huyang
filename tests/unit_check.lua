@@ -19,32 +19,36 @@ local function check(name, ok, detail)
     io.stdout:flush()
 end
 
--- The Python interpreter comes from the project's venv, then VIRTUAL_ENV,
--- and pyright is pointed at it before it starts.
+-- Discovery comes from Go's shared pipeline selector. User settings remain
+-- authoritative, and no Lua-side environment commands are permitted.
 do
-    local root = vim.fn.tempname()
-    vim.fn.mkdir(root .. "/.venv/bin", "p")
-    local original_env = vim.env.VIRTUAL_ENV
-    vim.env.VIRTUAL_ENV = nil
-    check("no interpreter without a venv", install._project_python_interpreter(root) == nil)
-    vim.fn.writefile({ "#!/bin/sh" }, root .. "/.venv/bin/python")
-    vim.fn.setfperm(root .. "/.venv/bin/python", "rwxr-xr-x")
-    check("the project venv interpreter is found",
-        install._project_python_interpreter(root) == root .. "/.venv/bin/python")
-    local configured = install._configure_python_interpreter(root)
-    local settings = (vim.lsp.config.pyright or {}).settings or {}
-    check("pyright is pointed at the project interpreter",
-        configured == root .. "/.venv/bin/python" and settings.python and settings.python.pythonPath == configured,
-        settings)
-    local other = vim.fn.tempname()
-    vim.fn.mkdir(other .. "/bin", "p")
-    vim.fn.writefile({ "#!/bin/sh" }, other .. "/bin/python")
-    vim.fn.setfperm(other .. "/bin/python", "rwxr-xr-x")
-    vim.env.VIRTUAL_ENV = other
-    check("VIRTUAL_ENV is the fallback", install._project_python_interpreter(vim.fn.tempname()) == other .. "/bin/python")
-    vim.env.VIRTUAL_ENV = original_env
-    vim.fn.delete(root, "rf")
-    vim.fn.delete(other, "rf")
+    local python = require("huyang.python_environment")
+    local original_config, original_system = vim.lsp.config, vim.system
+    local config = setmetatable({
+        pyright = { settings = { python = { pythonPath = "/user/python" }, pyright = { disableOrganizeImports = true } } },
+        basedpyright = { settings = { basedpyright = { analysis = { typeCheckingMode = "basic" } } } },
+    }, { __call = function(self, name, patch)
+        self[name] = vim.tbl_deep_extend("force", self[name] or {}, patch)
+    end })
+    vim.lsp.config = config
+    vim.system = function() error("Lua discovery must never execute a process") end
+    python.configure({ interpreter = "/project/.venv/bin/python", source = ".venv" })
+    check("an explicit pythonPath wins", config.pyright.settings.python.pythonPath == "/user/python")
+    check("basedpyright gets the detected interpreter",
+        config.basedpyright.settings.python.pythonPath == "/project/.venv/bin/python")
+    check("other settings survive interpreter configuration",
+        config.pyright.settings.pyright.disableOrganizeImports
+            and config.basedpyright.settings.basedpyright.analysis.typeCheckingMode == "basic")
+    config.basedpyright.settings.python.pythonPath = "/later/user/python"
+    python.configure({ interpreter = "/other/python" })
+    check("a later user setting also wins", config.basedpyright.settings.python.pythonPath == "/later/user/python")
+    python.configure({ configured = true, source = "project_config" })
+    check("project configuration does not force an automatic interpreter", config.pyright.settings.python.pythonPath == "/user/python")
+    vim.lsp.config = setmetatable({}, { __call = function() error("configuration refused") end })
+    python.configure({ interpreter = "/project/python" })
+    check("configuration failure remains explicit", python.reason() == "interpreter_configuration_failed")
+    python.configure({})
+    vim.lsp.config, vim.system = original_config, original_system
 end
 
 -- A started client that has not initialized is reported as starting.

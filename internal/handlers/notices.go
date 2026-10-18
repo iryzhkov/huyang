@@ -291,6 +291,13 @@ func diagnosticCursorSequence(cursor string) uint64 {
 	return sequence
 }
 
+// RecordDiagnosticAcknowledgment advances only the acknowledging client's
+// compact delivery cursor. The caller must first validate and successfully
+// execute diagnostics(since); use that explicit cursor, never a newer head.
+func (h *Handlers) RecordDiagnosticAcknowledgment(ctx context.Context, workspace *workspacecore.Workspace, cursor string) {
+	h.notices.record(workspace.Identity().ID, clientIdentity(ctx), diagnosticCursorSequence(cursor))
+}
+
 // AttachDiagnosticUpdates adds the diagnostic notices this client has not
 // yet seen, collapsed to the last state of each finding and capped at
 // MaxDiagnosticUpdates newest entries with a truncation marker; the field is

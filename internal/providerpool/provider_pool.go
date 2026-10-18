@@ -92,8 +92,8 @@ func (p *Pool) slotFor(id workspacecore.ID) *providerSlot {
 // runtime and the configured headless init file. Every provider the pool
 // spawns, canonical, sandbox or verification, goes through this
 // constructor.
-func (p *Pool) Open(root string) (provider.Provider, error) {
-	return p.openOwned(root, 0, true)
+func (p *Pool) Open(root string, pythonEnvironmentRoot ...string) (provider.Provider, error) {
+	return p.openOwned(root, 0, true, pythonEnvironmentRoot...)
 }
 
 func (p *Pool) openAfter(root string, epoch uint64) (provider.Provider, error) {

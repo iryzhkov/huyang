@@ -99,9 +99,8 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 			TimedOut: true, Selected: true, Staged: staged, Dimension: "edited_documents",
 		})
 	}
-	// A pull may supersede a push for the same producer/document. Select
-	// the strongest observation before recording, so an intermediate empty
-	// batch cannot resolve findings that a current pull still reports.
+	// Push and pull are independent lanes. Coalesce superseded observations
+	// only within their declared stream, preserving provisional positives.
 	batches := selectDiagnosticBatches(payload.Batches)
 	batches = appendUncoveredDiagnosticBatches(batches, paths, string(descriptor.ID), descriptor.Backend)
 	preEdit := map[string]string{}
@@ -116,18 +115,7 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		batch.Staged = staged
 		batch.TransactionID = transactionID
 		batch.DocumentRevision = revision
-		if documentRevisions != nil {
-			batch.DocumentRevision = documentRevisions[filepath.Clean(batch.Document)]
-		}
-		if relative, relErr := filepath.Rel(descriptor.Root, batch.Document); relErr == nil {
-			batch.Document = filepath.Join(workspace.Identity().Root, relative)
-		}
-		batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
-		if !staged && documentRevisions == nil {
-			if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
-				batch.DocumentRevision = string(snapshot.Revision)
-			}
-		}
+		bindDiagnosticBatchDocument(workspace, &batch, descriptor.Root, documentRevisions, preEdit, staged)
 		observed, recordErr := workspace.RecordDiagnosticEvidence(batch)
 		if recordErr != nil {
 			return workspacecore.DiagnosticReport{}, recordErr
@@ -135,6 +123,22 @@ func recordDiagnostics(ctx context.Context, workspace *workspacecore.Workspace, 
 		mergeDiagnosticReport(&report, observed, staged)
 	}
 	return report, nil
+}
+
+// bindDiagnosticBatchDocument binds provider paths to exact workspace revisions.
+func bindDiagnosticBatchDocument(workspace *workspacecore.Workspace, batch *workspacecore.DiagnosticBatch, providerRoot string, documentRevisions, preEdit map[string]string, staged bool) {
+	if documentRevisions != nil {
+		batch.DocumentRevision = documentRevisions[filepath.Clean(batch.Document)]
+	}
+	if relative, relErr := filepath.Rel(providerRoot, batch.Document); relErr == nil {
+		batch.Document = filepath.Join(workspace.Identity().Root, relative)
+	}
+	batch.PreEditDocumentRevision = preEdit[filepath.Clean(batch.Document)]
+	if !staged && documentRevisions == nil {
+		if snapshot, err := workspace.Snapshot(batch.Document, workspacecore.ProviderLayer{}); err == nil {
+			batch.DocumentRevision = string(snapshot.Revision)
+		}
+	}
 }
 
 func appendUncoveredDiagnosticBatches(batches []workspacecore.DiagnosticBatch, paths []string, providerID, producer string) []workspacecore.DiagnosticBatch {
@@ -156,31 +160,22 @@ func publicationProven(batch workspacecore.DiagnosticBatch) bool {
 		*batch.DocumentVersion >= *batch.ExpectedVersion && !batch.ProgressPending && !batch.TimedOut
 }
 
-func selectDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspacecore.DiagnosticBatch {
-	var selected []workspacecore.DiagnosticBatch
-	index := map[string]int{}
-	for _, batch := range batches {
-		key := batch.ProviderID + "\x00" + batch.Document
-		if i, ok := index[key]; ok {
-			if publicationProven(batch) || !publicationProven(selected[i]) {
-				selected[i] = batch
-			}
-		} else {
-			index[key] = len(selected)
-			selected = append(selected, batch)
-		}
-	}
-	return selected
+func diagnosticLaneKey(batch workspacecore.DiagnosticBatch) string {
+	return batch.ProviderID + "\x00" + batch.Document + "\x00" + string(batch.Kind)
 }
 
-// Late payloads are ordered observations, not competing proof sources. Keep
-// only the newest observation per document/producer, even if it weakens proof:
-// a superseded complete empty set must never resolve a later positive set.
+func selectDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspacecore.DiagnosticBatch {
+	return coalesceLateDiagnosticBatches(batches)
+}
+
+// Coalesce only within one stream, retaining undelivered positives when a
+// later provisional body cannot prove their omission. Keep their original
+// publication metadata rather than stamping them with the latest version.
 func coalesceLateDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []workspacecore.DiagnosticBatch {
 	var out []workspacecore.DiagnosticBatch
 	index := map[string]int{}
 	for _, batch := range batches {
-		key := batch.ProviderID + "\x00" + batch.Document
+		key := diagnosticLaneKey(batch)
 		if i, ok := index[key]; ok {
 			prior := out[i]
 			if prior.ExpectedVersion != nil && batch.ExpectedVersion != nil && *batch.ExpectedVersion < *prior.ExpectedVersion {
@@ -189,13 +184,38 @@ func coalesceLateDiagnosticBatches(batches []workspacecore.DiagnosticBatch) []wo
 			if prior.DocumentVersion != nil && batch.DocumentVersion != nil && *batch.DocumentVersion < *prior.DocumentVersion {
 				continue
 			}
-			out[i] = batch
+			if len(prior.Findings) > 0 && !publicationProven(batch) {
+				// Superseded bodies retain positive facts, not omission proof.
+				out[i].Complete = false
+				index[key] = len(out)
+				out = append(out, batch)
+			} else {
+				out[i] = batch
+			}
 		} else {
 			index[key] = len(out)
 			out = append(out, batch)
 		}
 	}
 	return out
+}
+
+// A fingerprint is shared across streams. Merge its latest body once without
+// turning the second stream's observation into another new finding.
+func mergeDiagnosticItems(items, observed []workspacecore.DiagnosticItem) []workspacecore.DiagnosticItem {
+	index := make(map[string]int, len(items))
+	for i, item := range items {
+		index[item.ID] = i
+	}
+	for _, item := range observed {
+		if i, ok := index[item.ID]; ok {
+			items[i] = item
+		} else {
+			index[item.ID] = len(items)
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed workspacecore.DiagnosticReport, staged bool) {
@@ -214,8 +234,10 @@ func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed work
 	if rank(observed.Confidence) < rank(report.Confidence) {
 		report.Confidence = observed.Confidence
 	}
-	report.New = append(report.New, observed.New...)
-	report.Current = append(report.Current, observed.Current...)
+	report.New = mergeDiagnosticItems(report.New, observed.New)
+	priorCurrent := len(report.Current)
+	report.Current = mergeDiagnosticItems(report.Current, observed.Current)
+	duplicateCurrent := priorCurrent + len(observed.Current) - len(report.Current)
 	report.Resolved = append(report.Resolved, observed.Resolved...)
 	report.EvidenceIDs = append(report.EvidenceIDs, observed.EvidenceIDs...)
 	for _, reason := range observed.ProvisionalReasons {
@@ -234,7 +256,7 @@ func mergeDiagnosticReport(report *workspacecore.DiagnosticReport, observed work
 	if staged {
 		// Staged reports count only their own document. Canonical reports
 		// already carry workspace totals and must not be summed.
-		report.CurrentCount += observed.CurrentCount
+		report.CurrentCount += observed.CurrentCount - duplicateCurrent
 		report.StaleCount += observed.StaleCount
 		report.Stale = append(report.Stale, observed.Stale...)
 	} else {

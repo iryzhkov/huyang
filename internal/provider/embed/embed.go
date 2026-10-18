@@ -17,6 +17,7 @@ import (
 
 	"github.com/iryzhkov/huyang/internal/procguard"
 	"github.com/iryzhkov/huyang/internal/provider"
+	workspacecore "github.com/iryzhkov/huyang/internal/workspace"
 
 	"github.com/neovim/go-client/nvim"
 )
@@ -67,11 +68,13 @@ var knownCapabilities = []provider.Capability{
 
 // Config controls creation of an owned embedded provider.
 type Config struct {
-	Root        string
-	InitFile    string
-	RuntimePath string
-	Executable  string
-	Trace       func(executable string, args []string)
+	// PythonEnvironmentRoot retains the canonical environment in safe-copy sandboxes.
+	PythonEnvironmentRoot string
+	Root                  string
+	InitFile              string
+	RuntimePath           string
+	Executable            string
+	Trace                 func(executable string, args []string)
 	// CancelGrace overrides how long a cancelled call waits for the kernel
 	// to acknowledge before the generation is replaced. Zero means the
 	// default.
@@ -637,6 +640,19 @@ func (b *Backend) runBootstrap(g *generation) bootstrapOutcome {
 	// as gopls then omit them, leaving no proof that a push describes our edit.
 	if err := g.nvim.ExecLua(`vim.lsp.config("*", { capabilities = { textDocument = { publishDiagnostics = { versionSupport = true } } } })`, nil); err != nil {
 		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "enabling diagnostic publication versions: "+err.Error(), err)}
+	}
+	// Configure Python before any tool can load its first source buffer.
+	// Background workspace warming alone can lose a race with the first edit.
+	environmentRoot := b.config.PythonEnvironmentRoot
+	if environmentRoot == "" {
+		environmentRoot = b.config.Root
+	}
+	python := workspacecore.ResolveProjectPython(context.Background(), environmentRoot)
+	if err := g.nvim.ExecLua(`require("huyang.python_environment").configure(...)`, nil, map[string]any{
+		"interpreter": python.Interpreter, "source": python.Source,
+		"reason": python.Reason, "configured": python.Configured,
+	}); err != nil {
+		return bootstrapOutcome{failure: bootstrapFailure(g, provider.FailureBootstrap, "configuring Python environment: "+err.Error(), err)}
 	}
 	var handshake map[string]any
 	if err := g.nvim.ExecLua(`return require("huyang.rpc").handshake()`, &handshake); err != nil {
