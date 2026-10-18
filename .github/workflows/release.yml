@@ -1,0 +1,96 @@
+name: Huyang release artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['huyang-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a versioned release tag whose commit is on main
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          sh scripts/check-release "$VERSION" "$COMMIT"
+
+  package:
+    needs: provenance
+    runs-on: ubuntu-24.04
+    env:
+      HUYANG_FRICTION: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Isolate build and test state
+        run: |
+          scratch="$RUNNER_TEMP/.cache/chaldea-scratch/agent-tooling"
+          mkdir -p "$scratch/home" "$scratch/tmp"
+          echo "HOME=$scratch/home" >> "$GITHUB_ENV"
+          echo "HUYANG_RELEASE_TEST_HOME=$scratch/home" >> "$GITHUB_ENV"
+          echo "TMPDIR=$scratch/tmp" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$scratch/home/.config" >> "$GITHUB_ENV"
+          echo "XDG_DATA_HOME=$scratch/home/.local/share" >> "$GITHUB_ENV"
+          echo "XDG_STATE_HOME=$scratch/home/.local/state" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$scratch/home/.cache" >> "$GITHUB_ENV"
+      - name: Install Neovim 0.11.5 for installed runtime smoke test
+        run: |
+          test "$HOME" = "$HUYANG_RELEASE_TEST_HOME"
+          curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.5/nvim-linux-x86_64.tar.gz -o "$TMPDIR/nvim.tar.gz"
+          echo "b2f91117be5b5ea39edd7297156dc2a4a8df4add6c95a90809a8df19e7ab6f52  $TMPDIR/nvim.tar.gz" | sha256sum -c -
+          tar -xzf "$TMPDIR/nvim.tar.gz" -C "$TMPDIR"
+          echo "$TMPDIR/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Test release guard, inventory, reproducibility and installed service
+        run: |
+          test "$HOME" = "$HUYANG_RELEASE_TEST_HOME"
+          python3 -B tests/test_release.py
+      - name: Build candidate artifacts
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('huyang-{0}', github.sha) }}
+        run: |
+          test "$HOME" = "$HUYANG_RELEASE_TEST_HOME"
+          python3 -B scripts/package-release.py "$VERSION" "$TMPDIR/release" > "$TMPDIR/release-sha256.txt"
+          cat "$TMPDIR/release-sha256.txt"
+          mv "$TMPDIR/release-sha256.txt" "$TMPDIR/release/SHA256SUMS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: huyang-linux
+          path: ${{ runner.temp }}/.cache/chaldea-scratch/agent-tooling/tmp/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/huyang-v')
+    needs: [provenance, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: huyang-linux
+          path: release
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "$VERSION" --verify-tag --target "$COMMIT" --title "$VERSION" --notes "Linux x64 and arm64. Each archive contains bin/huyang, the complete Lua kernel and manifest.json with file SHA-256s. Neovim API 13+ and project language tools are external prerequisites. Pin the archive SHA-256 before installation." release/huyang-linux-x64.tar.gz release/huyang-linux-arm64.tar.gz release/SHA256SUMS
