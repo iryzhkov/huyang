@@ -142,6 +142,48 @@ schemas. `-catalog-fixture-dir DIR` writes artifacts for guarded import; see
 
 The sole shipped executable is `bin/huyang`.
 
+## Release archives
+
+The release workflow publishes only `huyang-vX.Y.Z` tags whose commit is reachable
+from `origin/main`. It checks that the tag, requested commit and checked-out HEAD
+agree, accepting both lightweight and annotated tags. Pull requests and main pushes
+build and test candidate artifacts without publishing a release.
+
+Each release has `huyang-linux-x64.tar.gz` and `huyang-linux-arm64.tar.gz`.
+Both contain regular files only, with these paths relative to the install root:
+
+- `bin/huyang`: a static Linux Go executable (amd64 for x64, arm64 for arm64).
+- All files under `lua/`, including the complete `lua/huyang` kernel.
+- `LICENSE`, `README.md`, and `contrib/systemd/huyang.service`.
+- `manifest.json`: `{"version":"huyang-vX.Y.Z","architecture":"x64","files":{"bin/huyang":"<sha256>",...}}`.
+  Arm64 uses `"architecture":"arm64"`. The file map hashes every payload file,
+  excluding the manifest itself. There are no directory entries or links.
+
+Pin and verify each archive's SHA-256 separately before extraction. `SHA256SUMS`
+is published alongside the archives; the manifest does not authenticate its own archive.
+Keep `bin/` and `lua/` together when installing or upgrading.
+
+The only repository files loaded by the production service are the Lua runtime.
+Go code and its dependencies compile into the executable; catalog/schema fixtures
+under `docs/` are test inputs. User Neovim init files, plugins, Tree-sitter parsers,
+language servers and formatters are external. The semantic provider requires Neovim
+API level 13+ (0.11+), with its matching Neovim runtime. Project tooling must also be
+available to the user service; Huyang's archive installs none of it.
+
+To build without Git metadata, use Go 1.27+ and Python 3.11+:
+
+```sh
+python3 -B scripts/package-release.py huyang-vX.Y.Z /path/to/output
+```
+
+The command cross-compiles both architectures and prints their archive SHA-256s.
+Archives are deterministic for identical source and toolchain. The packaging tests
+also run the extracted x64 daemon and MCP adapter outside the source tree, exercising
+automatic runtime discovery and kernel bootstrap with Neovim and a clean init.
+Run `python3 -B tests/test_release.py` inside task scratch with `HOME` equal to
+`HUYANG_RELEASE_TEST_HOME`, and `TMPDIR` under the same
+`~/.cache/chaldea-scratch/agent-tooling/` directory; the tests assert this before writing.
+
 ## Run the service
 
 Start the long-lived service:
@@ -346,12 +388,12 @@ copied to another user.
 
 ### Upgrading a deployed service
 
-The install location is a Git checkout of this repository, not a bare binary. The service
-loads the Lua kernel from `lua/` next to the executable's parent directory (see
-`shippedRuntimePath` in `internal/bridge/provider_factory.go`), so copying only
-`bin/huyang` leaves a stale kernel and the provider fails with
+Install the complete release archive, or use a Git checkout and build in place. The
+service loads the Lua kernel from `lua/` next to the executable's parent directory (see
+`ShippedRuntimePath` in `internal/providerpool/provider_factory.go`), so copying only
+`bin/huyang` leaves a stale kernel and can fail with
 `provider_incompatible: kernel protocol version 1 is outside the accepted range 2-2`.
-Update the checkout and rebuild in place:
+For a checkout, update and rebuild in place:
 
 ```sh
 git -C ~/.local/share/huyang fetch <remote> feature/huyang

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Run with full history and a freshly fetched origin/main before publishing.
+set -eu
+version=${1:?release tag required}
+commit=${2:?release commit required}
+if ! printf '%s\n' "$version" | grep -Eq '^huyang-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "Release tag must be huyang-vX.Y.Z" >&2
+  exit 1
+fi
+tagged=$(git rev-parse --verify --end-of-options "refs/tags/$version^{commit}")
+candidate=$(git rev-parse --verify --end-of-options "$commit^{commit}")
+head=$(git rev-parse --verify HEAD)
+if [ "$tagged" != "$candidate" ] || [ "$head" != "$candidate" ]; then
+  echo "Release tag, requested commit and checked-out HEAD must agree" >&2
+  exit 1
+fi
+if ! git merge-base --is-ancestor "$candidate" refs/remotes/origin/main; then
+  echo "Release $version is not reachable from origin/main; merge it before tagging" >&2
+  exit 1
+fi
